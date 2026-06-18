@@ -703,8 +703,8 @@ export class AnalysisEngine {
                         const sortedObs = [...efficacy].sort((a, b) => (parseFloat(a.daa) || 0) - (parseFloat(b.daa) || 0));
                         let audpcVal = 0;
                         for (let i = 0; i < sortedObs.length - 1; i++) {
-                            const y1 = parseFloat(sortedObs[i].diseaseSeverity ?? sortedObs[i].cover ?? 0);
-                            const y2 = parseFloat(sortedObs[i + 1].diseaseSeverity ?? sortedObs[i + 1].cover ?? 0);
+                            const y1 = parseFloat(getObservationPrimaryValue(this.category, sortedObs[i]) ?? 0);
+                            const y2 = parseFloat(getObservationPrimaryValue(this.category, sortedObs[i + 1]) ?? 0);
                             const t1 = parseFloat(sortedObs[i].daa || 0);
                             const t2 = parseFloat(sortedObs[i + 1].daa || 0);
                             audpcVal += ((y1 + y2) / 2) * (t2 - t1);
@@ -723,13 +723,13 @@ export class AnalysisEngine {
                         const rate = parseFloat(trial.Dosage || 1);
                         if (rate <= 0) return null;
                         const utcReps = this.getReplications(this.utcName || '');
-                        const utcBaseMeans = utcReps.map(ur => {
-                            const urEff = safeJsonParse(ur.EfficacyDataJSON, []);
-                            const baseObs = urEff.find(e => Number(e.daa) === 0);
-                            return baseObs ? parseFloat(baseObs[primaryField] ?? baseObs.pestCount ?? 0) : null;
-                        }).filter(v => Number.isFinite(v));
-                        const utcMean = utcBaseMeans.length ? utcBaseMeans.reduce((a, b) => a + b, 0) / utcBaseMeans.length : 0;
-                        return Number.isFinite(utcMean) ? (yieldVal - utcMean) / rate : null;
+                        const utcYields = utcReps.map(ur => {
+                            const eff = safeJsonParse(ur.EfficacyDataJSON, []);
+                            const y = parseFloat(ur.Yield || ur.YieldValue || (eff.length ? (eff[eff.length - 1].yield || eff[eff.length - 1].yieldValue) : 0));
+                            return Number.isFinite(y) ? y : null;
+                        }).filter(v => v !== null);
+                        const utcMeanYield = utcYields.length ? utcYields.reduce((a, b) => a + b, 0) / utcYields.length : 0;
+                        return Number.isFinite(utcMeanYield) ? (yieldVal - utcMeanYield) / rate : null;
                     }
 
                     if (metric === 'cover' || metric === primaryField) {
