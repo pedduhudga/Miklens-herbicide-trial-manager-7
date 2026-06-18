@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback, useDeferredValue } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppState } from '../hooks/useAppState.jsx';
 import { useAuth } from '../hooks/useAuth.js';
 import TopBar from '../components/TopBar.jsx';
@@ -78,8 +79,6 @@ const emptyForm = (category = 'herbicide') => {
   });
   return base;
 };
-
-import { useLocation, useNavigate } from 'react-router-dom';
 
 const fuzzyMatch = (text, query) => {
   if (!text) return false;
