@@ -7498,7 +7498,11 @@ If none are present, write "None".`;
         imageUrl={photoAnalyzerUrl}
         loading={photoAnalyzerLoading}
         results={photoAnalyzerResults}
-        onApplyValue={(val) => setObsForm(prev => ({ ...prev, weedCover: val }))}
+        onApplyValue={(val) => {
+          const primaryField = getPrimaryObservationField(activeCategory);
+          setObsForm(prev => ({ ...prev, [primaryField]: val }));
+        }}
+        activeCategory={activeCategory}
       />
 
       <AppSharingModal

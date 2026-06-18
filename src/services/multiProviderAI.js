@@ -640,29 +640,66 @@ export async function identifyWeedFromPhoto(imageDataUrl, category = 'herbicide'
   }
 
   const isHerbicide = category === 'herbicide';
-  const targetName = isHerbicide ? 'weed' : 'target/symptom/pest/disease';
-
-  const promptText = `Analyze this agricultural plot photo and identify ALL visible ${targetName} species (including broadleaves, grasses, sedges, etc.).
-You MUST search the entire image frame thoroughly. Do NOT just identify the single most prominent weed. If there are other weeds or grasses surrounding the main patch, you MUST detect, identify, and draw bounding boxes around them as well.
-In agricultural trials, multiple different types of weeds are typically present simultaneously (e.g. a broadleaf weed mixed with grasses). You must draw separate bounding boxes for each category/species:
+  let targetName = 'weed';
+  let categoryInstructions = '';
+  
+  if (category === 'fungicide') {
+    targetName = 'fungal pathogen/disease';
+    categoryInstructions = `
+SPECIAL FOCUS: Identify early/late blight, powdery mildew, rusts, or leaf spots. Estimate pathogen/lesion coverage on leaves.
+For each disease symptom found:
+1. Identify the pathogen species (e.g. Phytophthora infestans, Alternaria solani).
+2. Draw a bounding box around the affected leaf or crop canopy patch showing the lesions.
+3. Every single disease/symptom patch you detect must have a bounding box. Do not leave any major symptomatic area unbounded.`;
+  } else if (category === 'pesticide' || category === 'insecticide') {
+    targetName = 'pest damage/insect pest';
+    categoryInstructions = `
+SPECIAL FOCUS: Identify caterpillars, aphids, whiteflies, thrips, spider mites, or their physical feeding damage/lesions.
+For each pest/damage indicator found:
+1. Identify the pest species or damage type (e.g. Bemisia tabaci, Liriomyza trifolii).
+2. Draw a bounding box around the insect cluster or damaged leaves/stems.
+3. Every major insect cluster or feeding site must have a bounding box.`;
+  } else if (category === 'nutrition') {
+    targetName = 'nutrient deficiency symptom';
+    categoryInstructions = `
+SPECIAL FOCUS: Identify chlorosis, necrosis, leaf tip burn, vein yellowing, or nutrient deficiency stress (nitrogen, iron, potassium, etc.).
+For each nutritional symptom found:
+1. Identify the deficiency type (e.g. Nitrogen Deficiency, Iron Deficiency).
+2. Draw a bounding box around the leaves or canopy area expressing the deficiency.
+3. Every major symptomatic leaf or canopy area must have a bounding box.`;
+  } else if (category === 'biostimulant') {
+    targetName = 'vigor/growth indicator';
+    categoryInstructions = `
+SPECIAL FOCUS: Identify canopy expansion, shoot density, root development, or wilting recovery indicators.
+For each growth/vigor indicator found:
+1. Identify the indicator type (e.g. Canopy Expansion, Vigor Indicator).
+2. Draw a bounding box around the healthy/expanding vegetative areas showing biostimulation.`;
+  } else {
+    categoryInstructions = `
+SPECIAL FOCUS: Identify weed species (broadleaves, grasses, sedges).
 1. Identify the prominent broadleaf weed patch (e.g. Richardia brasiliensis or Spergula arvensis) and draw its bounding box.
 2. Identify the surrounding grass weeds (e.g. Barnyard Grass, Crabgrass, or general Grasses) and draw separate bounding boxes enclosing those grassy areas.
 3. Every single weed species you detect must have a bounding box. Do not leave any major weed area unbounded.
-4. If a species grows in a dense group or overlaps (like dense grass patches), draw a single large bounding box enclosing that entire patch/stand.
+4. If a species grows in a dense group or overlaps (like dense grass patches), draw a single large bounding box enclosing that entire patch/stand.`;
+  }
+
+  const promptText = `Analyze this agricultural plot photo and identify ALL visible ${targetName} species or symptoms.
+You MUST search the entire image frame thoroughly. Do NOT just identify the single most prominent symptom/organism. If there are other targets surrounding the main patch, you MUST detect, identify, and draw bounding boxes around them as well.
+${categoryInstructions}
 
 Coordinates MUST be in normalized 0-1000 format [ymin, xmin, ymax, xmax] (where 0,0 is top-left of the image and 1000,1000 is bottom-right).
 
 Return a JSON array containing the detected entities.
 Each item in the array MUST have this format:
 {
-  "name": "Scientific name of the ${targetName}",
+  "name": "Scientific/Standardized name of the ${targetName}",
   "commonName": "Common name of the ${targetName}",
-  "cover": 25, // estimated percentage cover of this ${targetName} patch/species in the frame (1-100)
-  "growthStage": "Vegetative/Seedling/Flowering/Mature/Infected/etc.",
-  "box_2d": [ymin, xmin, ymax, xmax], // Bounding box coordinates enclosing the plant or patch
+  "cover": 25, // estimated percentage cover/severity of this ${targetName} patch/species in the frame (1-100)
+  "growthStage": "Vegetative/Seedling/Flowering/Mature/Symptomatic/Stressed/etc.",
+  "box_2d": [ymin, xmin, ymax, xmax], // Bounding box coordinates enclosing the plant, lesions, or patch
   "confidence": 0.85 // confidence level (0.0 to 1.0)
 }
-Example output (always returns an array of ALL detected weeds):
+Example output:
 [
   {"name": "Richardia brasiliensis", "commonName": "Tropical Mexican Clover", "cover": 35, "growthStage": "Flowering", "box_2d": [250, 260, 530, 440], "confidence": 0.9},
   {"name": "Echinochloa crus-galli", "commonName": "Barnyard Grass", "cover": 40, "growthStage": "Vegetative", "box_2d": [290, 210, 800, 520], "confidence": 0.85}
