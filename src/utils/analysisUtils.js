@@ -894,13 +894,13 @@ export class AnalysisEngine {
                         let utcBaseMean = 0;
                         const trtBaseMeans = {};
 
-                        if (this.category === 'pesticide' && (metric === 'cover' || metric === primaryField)) {
+                        if ((this.category === 'pesticide' || this.category === 'herbicide' || this.category === 'fungicide') && (metric === 'cover' || metric === primaryField)) {
                             // Find 0 DAA or earliest baseline values
                             const utcReps = this.getReplications(this.utcName);
                             const utcBaseVals = utcReps.map(ur => {
                                 const eff = safeJsonParse(ur.EfficacyDataJSON, []);
                                 const baseObs = eff.find(e => parseFloat(e.daa) === 0);
-                                return baseObs ? parseFloat(baseObs[primaryField] ?? baseObs.pestCount ?? 0) : null;
+                                return baseObs ? parseFloat(baseObs[primaryField] ?? baseObs.pestCount ?? baseObs.weedCover ?? baseObs.diseaseSeverity ?? 0) : null;
                             }).filter(v => v !== null);
 
                             if (utcBaseVals.length > 0) {
@@ -911,7 +911,7 @@ export class AnalysisEngine {
                                         const trtBaseVals = trtReps.map(tr => {
                                             const eff = safeJsonParse(tr.EfficacyDataJSON, []);
                                             const baseObs = eff.find(e => parseFloat(e.daa) === 0);
-                                            return baseObs ? parseFloat(baseObs[primaryField] ?? baseObs.pestCount ?? 0) : null;
+                                            return baseObs ? parseFloat(baseObs[primaryField] ?? baseObs.pestCount ?? baseObs.weedCover ?? baseObs.diseaseSeverity ?? 0) : null;
                                         }).filter(v => v !== null);
                                         if (trtBaseVals.length > 0) {
                                             trtBaseMeans[trt] = trtBaseVals.reduce((a, b) => a + b, 0) / trtBaseVals.length;

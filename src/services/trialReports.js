@@ -7,7 +7,7 @@ import autoTable from 'jspdf-autotable';
 import pptxgen from 'pptxgenjs';
 import { formatPhotoDate, formatDate, formatDateTime } from '../utils/dateUtils.js';
 import { getCategoryConfig, calculateEfficacy, getPrimaryObservationField, getObservationPrimaryValue } from '../utils/categoryConfig.js';
-import { performANOVA, performTukeyHSD } from '../utils/statsUtils.js';
+import { performANOVA, performTukeyHSD, performTwoWayANOVA } from '../utils/statsUtils.js';
 
 
 // ── COLORS ────────────────────────────────────────────────────────────────────
@@ -47,8 +47,19 @@ function getReportConfig(trial) {
     primaryMetricKey,
     primaryMetricUnit,
     primaryField,
-    primaryObsLabel,
   };
+}
+
+function calculateStatus(categoryId, pVal, baseVal = 0) {
+  const isPositive = (categoryId === 'nutrition' || categoryId === 'biostimulant');
+  if (isPositive) {
+    return pVal >= 80 ? 'Excellent' : pVal >= 60 ? 'Good' : pVal >= 40 ? 'Fair' : 'Poor';
+  } else if (categoryId === 'pesticide') {
+    const pctReduction = (baseVal > 0) ? ((baseVal - pVal) / baseVal) * 100 : 0;
+    return pctReduction >= 90 ? 'Excellent' : pctReduction >= 70 ? 'Good' : pctReduction >= 40 ? 'Fair' : 'Poor';
+  } else {
+    return pVal <= 10 ? 'Excellent' : pVal <= 30 ? 'Good' : pVal <= 60 ? 'Fair' : 'Poor';
+  }
 }
 
 function getBackupProjects() {
@@ -110,8 +121,8 @@ export function getAllTrialDataFields(trial, options = {}) {
   
   // Format yield unit appropriately based on Category
   if (data.yieldValue !== '—') {
-    const unit = categoryId === 'herbicide' ? 't/ha' : 'kg/ha';
-    if (!String(data.yieldValue).toLowerCase().includes('ha')) {
+    const unit = trial.YieldUnit || trial.yieldUnit || (categoryId === 'herbicide' ? 't/ha' : 'kg/ha');
+    if (!String(data.yieldValue).toLowerCase().includes('ha') && !String(data.yieldValue).toLowerCase().includes('kg') && !String(data.yieldValue).toLowerCase().includes('t')) {
       data.yieldValue = `${data.yieldValue} ${unit}`;
     }
   }
@@ -203,10 +214,10 @@ export function getTimelineData(efficacy, categoryId = 'herbicide', trial = null
     });
     
     // 5. Status
-    const rating = pVal <= 10 ? 'Excellent' : pVal <= 30 ? 'Good' : pVal <= 60 ? 'Fair' : 'Poor';
-    const isPositive = (categoryId === 'nutrition' || categoryId === 'biostimulant');
-    const ratingPositive = pVal >= 80 ? 'Excellent' : pVal >= 60 ? 'Good' : pVal >= 40 ? 'Fair' : 'Poor';
-    const status = isPositive ? ratingPositive : rating;
+    const sortedObs = [...efficacy].sort((a, b) => (a.daa ?? 0) - (b.daa ?? 0));
+    const baseObs = sortedObs.find(obs => (obs.daa ?? 0) === 0) || sortedObs[0];
+    const baseVal = baseObs ? (getObservationPrimaryValue(categoryId, baseObs) ?? 0) : 0;
+    const status = calculateStatus(categoryId, pVal, baseVal);
     row.push(status);
     
     // 6. Weather columns
@@ -349,9 +360,9 @@ function calcWCE(efficacy, categoryId = 'herbicide', trial = null) {
     
     let val = 0;
     if (isPositiveMetric) {
-      val = first > 0 ? ((last - first) / first) * 100 : 0;
+      val = first > 0 ? ((last - first) / first) * 100 : (last - first);
     } else {
-      val = first > 0 ? ((first - last) / first) * 100 : 0;
+      val = first > 0 ? ((first - last) / first) * 100 : (first - last);
     }
     return {
       species: species,
@@ -389,7 +400,11 @@ function coverSummary(efficacy, trial) {
     const min = Math.min(...valList.length ? valList : [100]);
     const minD = s.find(o => Number(getObservationPrimaryValue(categoryId, o) ?? 100) === min)?.daa ?? 0;
     const dur = (s[s.length - 1].daa ?? 0) - (s[0].daa ?? 0);
-    return `Aggregate disease/pest severity declined from ${first}${metricUnit} at baseline to a minimum of ${min}${metricUnit} at DAA ${minD}, and measured ${last}${metricUnit} at DAA ${s[s.length - 1].daa ?? 0}${cropStr}${yieldStr}. The ${dur}-day observation window indicates ${last <= min + 5 ? 'sustained suppression' : 'early knockdown with partial recovery'} following application.`;
+    let noun = 'disease/pest severity';
+    if (categoryId === 'herbicide') noun = 'weed cover';
+    else if (categoryId === 'fungicide') noun = 'disease severity';
+    else if (categoryId === 'pesticide') noun = 'pest population';
+    return `Aggregate ${noun} declined from ${first}${metricUnit} at baseline to a minimum of ${min}${metricUnit} at DAA ${minD}, and measured ${last}${metricUnit} at DAA ${s[s.length - 1].daa ?? 0}${cropStr}${yieldStr}. The ${dur}-day observation window indicates ${last <= min + 5 ? 'sustained suppression' : 'early knockdown with partial recovery'} following application.`;
   }
 }
 function methodologySentence(trial, trialDate) {
@@ -410,18 +425,19 @@ function timelineRows(efficacy, categoryId = 'herbicide', trial = null) {
   const primaryField = getPrimaryObservationField(categoryId);
   const targetValue = trial ? (trial[config.targetField] || trial.WeedSpecies || 'Total') : 'Total';
 
+  const sortedObs = [...efficacy].sort((a, b) => (a.daa ?? 0) - (b.daa ?? 0));
+  const baseObs = sortedObs.find(obs => (obs.daa ?? 0) === 0) || sortedObs[0];
+  const baseVal = baseObs ? (getObservationPrimaryValue(categoryId, baseObs) ?? 0) : 0;
+
   return efficacy.map(o => {
     if (categoryId === 'herbicide') {
       const c = getObservationPrimaryValue(categoryId, o) ?? 0;
-      const status = c <= 10 ? 'Excellent' : c <= 30 ? 'Good' : c <= 60 ? 'Fair' : 'Poor';
+      const status = calculateStatus(categoryId, c, baseVal);
       const species = (o.weedDetails || []).map(w => w.species).filter(Boolean).join(', ') || 'Total';
       return [String(o.daa ?? '—'), species, `${c}%`, status, o.notes || '—'];
     } else {
       const val = Number(getObservationPrimaryValue(categoryId, o) ?? 0);
-      const rating = val <= 10 ? 'Excellent' : val <= 30 ? 'Good' : val <= 60 ? 'Fair' : 'Poor';
-      const isPositive = (categoryId === 'nutrition' || categoryId === 'biostimulant');
-      const ratingPositive = val >= 80 ? 'Excellent' : val >= 60 ? 'Good' : val >= 40 ? 'Fair' : 'Poor';
-      const status = isPositive ? ratingPositive : rating;
+      const status = calculateStatus(categoryId, val, baseVal);
       
       // Let's dynamically include other non-empty fields that have values in this observation
       const extraDetails = [];
@@ -606,13 +622,23 @@ function anovaTable(doc, stats, y, ph, trial) {
   // Stage 2: ANOVA (only if Replications >= 3)
   const maxN = Math.max(...descRows.map(r => r.n), 0);
   if (maxN >= 3 && descRows.length >= 2) {
-    const design = trial.Design || 'RCBD';
-    const anova = performANOVA(projectTrials, { metric: primaryField, design });
+    const trialDesign = trial.TrialDesign || trial.Design || 'RCBD';
+    let anova;
+    let designName = trialDesign;
+    if (trialDesign === 'Factorial' || trialDesign === 'Split-Plot') {
+      anova = performTwoWayANOVA(projectTrials, { metric: primaryField });
+      if (anova.error) anova = performANOVA(projectTrials, { metric: primaryField, design: 'RCBD' });
+      else designName = trialDesign === 'Split-Plot' ? 'Split-Plot (Two-Way)' : 'Factorial Two-Way';
+    } else {
+      const design = /CRD/i.test(trialDesign) ? 'CRD' : 'RCBD';
+      anova = performANOVA(projectTrials, { metric: primaryField, design });
+      designName = design;
+    }
     
     if (anova && !anova.error && anova.anovaTable) {
       if (y + 20 > ph - 20) { doc.addPage(); y = 20; }
       doc.setFont(undefined, 'bold'); doc.setFontSize(10);
-      doc.text(`Stage 2: Analysis of Variance (ANOVA - ${design})`, 14, y);
+      doc.text(`Stage 2: Analysis of Variance (ANOVA - ${designName})`, 14, y);
       y += 5;
 
       const nf = (v, d = 2) => Number.isFinite(v) ? Number(v).toFixed(d) : '—';
@@ -636,16 +662,30 @@ function anovaTable(doc, stats, y, ph, trial) {
         theme: 'grid',
         styles: { fontSize: 8.5 }
       });
-      y = (doc.lastAutoTable?.finalY ?? y) + 10;
+      y = (doc.lastAutoTable?.finalY ?? y) + 5;
 
-      // Stage 3: Multiple Comparison Tests (only if ANOVA pValue < 0.05)
-      if (anova.pValue < 0.05) {
+      // Calculate Coefficient of Variation (CV%)
+      const errIdx = anova.anovaTable.source.indexOf('Error');
+      const msError = errIdx !== -1 ? anova.anovaTable.ms[errIdx] : (anova.anovaTable.source.includes('Blocks') ? anova.anovaTable.ms[2] : anova.anovaTable.ms[1]);
+      const grandMean = anova.grandMean;
+      const cv = (grandMean > 0 && msError >= 0) ? (Math.sqrt(msError) / grandMean) * 100 : null;
+
+      if (cv !== null) {
+        doc.setFont(undefined, 'normal'); doc.setFontSize(8.5);
+        doc.text(`Coefficient of Variation (CV%): ${cv.toFixed(2)}%`, 14, y);
+        y += 5;
+      }
+      y += 5;
+
+      // Stage 3: Multiple Comparison Tests (only if ANOVA pValue < 0.05 or any factor has significant effect in two-way/split-plot)
+      const hasSignificantEffect = anova.isTwoWay ? (anova.factorA?.p < 0.05 || anova.factorB?.p < 0.05 || anova.interaction?.p < 0.05) : (anova.pValue < 0.05);
+      if (hasSignificantEffect) {
         if (y + 20 > ph - 20) { doc.addPage(); y = 20; }
         doc.setFont(undefined, 'bold'); doc.setFontSize(10);
         doc.text('Stage 3: Multiple Comparisons (Tukey HSD Letter Groupings)', 14, y);
         y += 5;
 
-        const tukey = performTukeyHSD(projectTrials, { metric: primaryField });
+        const tukey = performTukeyHSD(projectTrials, { metric: primaryField, anova });
         if (tukey && tukey.groups) {
           const groupRows = descRows.map(r => {
             const letter = tukey.groups[r.treatment] || 'a';
@@ -1269,6 +1309,7 @@ export function exportMultipleTrialsToCSV(trials) {
     'Trial ID', 'Category', 'Formulation', 'Investigator', 'Date', 'Location', 'Dosage',
     'Crop', 'Yield', 'Application Timing', 'Growth Stage', 'BBCH Code', 'App Method', 'Spray Vol (L/ha)', 'Nozzle',
     'Soil pH', 'Soil Clay %', 'Soil Sand %', 'Soil OC', 'Soil Texture', 'Soil N (ppm)', 'Soil P (ppm)', 'Soil K (ppm)', 'Soil CEC', 'Soil Moisture %',
+    'Trial Design', 'Replication / Block ID',
     'Target Label', 'Target Value', 'Overall Result', 'Trial Status',
     'DAA', 'Obs Date'
   ];
@@ -1298,20 +1339,22 @@ export function exportMultipleTrialsToCSV(trials) {
       dataFields.applicationMethod, dataFields.sprayVolume, dataFields.nozzle,
       dataFields.soil?.ph || '', dataFields.soil?.clay || '', dataFields.soil?.sand || '', dataFields.soil?.organicCarbon || '', dataFields.soil?.texture || '',
       dataFields.soil?.nitrogen || '', dataFields.soil?.phosphorus || '', dataFields.soil?.potassium || '', dataFields.soil?.cec || '', dataFields.soil?.moisture || '',
+      trial.TrialDesign || trial.Design || 'RCBD', trial.Replication || trial.BlockID || 'R1',
       trialConfig.targetLabel, trialConfig.targetValue, trial.Result || 'Pending', isCompletedStr
     ];
 
     if (efficacy.length) {
+      const sortedObs = [...efficacy].sort((a, b) => (a.daa ?? 0) - (b.daa ?? 0));
+      const baseObs = sortedObs.find(obs => (obs.daa ?? 0) === 0) || sortedObs[0];
+      const baseVal = baseObs ? (getObservationPrimaryValue(trialConfig.cat, baseObs) ?? 0) : 0;
+
       efficacy.forEach(obs => {
         const obsDate = obs.date || '';
         const daa = obs.daa ?? '';
 
         // Let's determine rating / status
         const pVal = getObservationPrimaryValue(trialConfig.cat, obs) ?? 0;
-        const rating = pVal <= 10 ? 'Excellent' : pVal <= 30 ? 'Good' : pVal <= 60 ? 'Fair' : 'Poor';
-        const isPositive = (trialConfig.cat === 'nutrition' || trialConfig.cat === 'biostimulant');
-        const ratingPositive = pVal >= 80 ? 'Excellent' : pVal >= 60 ? 'Good' : pVal >= 40 ? 'Fair' : 'Poor';
-        const status = isPositive ? ratingPositive : rating;
+        const status = calculateStatus(trialConfig.cat, pVal, baseVal);
 
         const temp = obs.weatherTemp ?? obs.temperature_2m ?? '';
         const hum = obs.weatherHumidity ?? obs.relative_humidity_2m ?? '';
@@ -1413,7 +1456,8 @@ export function exportAllTrialsCSV(trials, projects = []) {
 //  EXPORT 6 — exportJson  (raw JSON backup)
 // ═════════════════════════════════════════════════════════════════════════════
 export function exportJson(trial) {
-  const data = { ...trial, _exportedAt: new Date().toISOString(), _app: 'Herbicide Trial Manager' };
+  const categoryLabel = trial.Category ? (trial.Category.charAt(0).toUpperCase() + trial.Category.slice(1)) : 'Herbicide';
+  const data = { ...trial, _exportedAt: new Date().toISOString(), _app: `Miklens ${categoryLabel} Trial Manager` };
   dlBlob(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }),
     `Trial_${safeName(trial.FormulationName)}_${trial.Date || 'nodate'}.json`);
   toast('JSON exported', 'success');
@@ -1952,7 +1996,7 @@ export async function generateMasterComprehensivePdf(project, subTrials, options
 
   const yields = subTrials.map(st => parseFloat(st.YieldValue || st.Yield || 0)).filter(y => y > 0);
   const avgYield = yields.length ? (yields.reduce((a, b) => a + b, 0) / yields.length).toFixed(2) : null;
-  const yieldUnit = categoryId === 'herbicide' ? 't/ha' : 'kg/ha';
+  const yieldUnit = subTrials[0]?.YieldUnit || subTrials[0]?.yieldUnit || (categoryId === 'herbicide' ? 't/ha' : 'kg/ha');
   doc.text(`Avg Yield: ${avgYield ? `${avgYield} ${yieldUnit}` : 'N/A'}`, lx, y);
   doc.text(`Spray Volume: ${project.SprayVolume ? `${project.SprayVolume} L/ha` : 'N/A'}`, rx, y);
   y += 8;
@@ -1967,7 +2011,8 @@ export async function generateMasterComprehensivePdf(project, subTrials, options
   }
 
   y += 4;
-  y = secHeading(doc, '1. Sub-Trials Summary', y, ph, 14, primaryColor);
+  let sectionCounter = 1;
+  y = secHeading(doc, `${sectionCounter++}. Sub-Trials Summary`, y, ph, 14, primaryColor);
 
   // Table showing all sub-trials
   const subTrialRows = subTrials.map(st => {
@@ -1991,7 +2036,7 @@ export async function generateMasterComprehensivePdf(project, subTrials, options
 
   // AI Narrative Summary
   if (aiSummary) {
-    y = secHeading(doc, '2. Master AI Synthesis & Narrative', y, ph, 14, primaryColor);
+    y = secHeading(doc, `${sectionCounter++}. Master AI Synthesis & Narrative`, y, ph, 14, primaryColor);
     const narrativeLines = aiSummary.split('\n');
     for (const rawLine of narrativeLines) {
       const line = rawLine.trim();
@@ -2005,7 +2050,7 @@ export async function generateMasterComprehensivePdf(project, subTrials, options
   }
 
   if (analysis?.anova) {
-    y = secHeading(doc, '3. Statistical Analysis Summary', y, ph, 14, primaryColor);
+    y = secHeading(doc, `${sectionCounter++}. Statistical Analysis Summary`, y, ph, 14, primaryColor);
     const anova = analysis.anova;
     const method = analysis.analysisMethod || anova.design || 'ANOVA';
     doc.setFontSize(9);
@@ -2025,7 +2070,7 @@ export async function generateMasterComprehensivePdf(project, subTrials, options
   }
 
   // Consolidated comparative efficacy
-  y = secHeading(doc, `3. Comparative ${repConfig.primaryMetricLabel} (${repConfig.primaryMetricKey}%)`, y, ph, 14, primaryColor);
+  y = secHeading(doc, `${sectionCounter++}. Comparative ${repConfig.primaryMetricLabel} (${repConfig.primaryMetricKey}%)`, y, ph, 14, primaryColor);
   const wceRows = [];
   subTrials.forEach(st => {
     const eff = validateEfficacy(safeJsonParse(st.EfficacyDataJSON, []));
@@ -2346,6 +2391,7 @@ export function exportMasterCSV(project, subTrials) {
     'Master Project', 'Sub-Trial ID', 'Category', 'Formulation', 'Replication', 'Plot #', 
     'Location', 'Dosage', 'Crop', 'Yield', 'Application Timing', 'Growth Stage', 'BBCH Code', 'App Method', 'Spray Vol (L/ha)', 'Nozzle',
     'Soil pH', 'Soil Clay %', 'Soil Sand %', 'Soil OC', 'Soil Texture', 'Soil N (ppm)', 'Soil P (ppm)', 'Soil K (ppm)', 'Soil CEC', 'Soil Moisture %',
+    'Trial Design',
     'Target Label', 'Target Value', 'Overall Result', 'Trial Status',
     'DAA', 'Obs Date'
   ];
@@ -2374,20 +2420,22 @@ export function exportMasterCSV(project, subTrials) {
       dataFields.applicationMethod, dataFields.sprayVolume, dataFields.nozzle,
       dataFields.soil?.ph || '', dataFields.soil?.clay || '', dataFields.soil?.sand || '', dataFields.soil?.organicCarbon || '', dataFields.soil?.texture || '',
       dataFields.soil?.nitrogen || '', dataFields.soil?.phosphorus || '', dataFields.soil?.potassium || '', dataFields.soil?.cec || '', dataFields.soil?.moisture || '',
+      st.TrialDesign || st.Design || 'RCBD',
       trialConfig.targetLabel, trialConfig.targetValue, st.Result || 'Pending', isCompletedStr
     ];
 
     if (efficacy.length) {
+      const sortedObs = [...efficacy].sort((a, b) => (a.daa ?? 0) - (b.daa ?? 0));
+      const baseObs = sortedObs.find(obs => (obs.daa ?? 0) === 0) || sortedObs[0];
+      const baseVal = baseObs ? (getObservationPrimaryValue(trialConfig.cat, baseObs) ?? 0) : 0;
+
       efficacy.forEach(obs => {
         const obsDate = obs.date || '';
         const daa = obs.daa ?? '';
 
         // Let's determine rating / status
         const pVal = getObservationPrimaryValue(trialConfig.cat, obs) ?? 0;
-        const rating = pVal <= 10 ? 'Excellent' : pVal <= 30 ? 'Good' : pVal <= 60 ? 'Fair' : 'Poor';
-        const isPositive = (trialConfig.cat === 'nutrition' || trialConfig.cat === 'biostimulant');
-        const ratingPositive = pVal >= 80 ? 'Excellent' : pVal >= 60 ? 'Good' : pVal >= 40 ? 'Fair' : 'Poor';
-        const status = isPositive ? ratingPositive : rating;
+        const status = calculateStatus(trialConfig.cat, pVal, baseVal);
 
         const temp = obs.weatherTemp ?? obs.temperature_2m ?? '';
         const hum = obs.weatherHumidity ?? obs.relative_humidity_2m ?? '';

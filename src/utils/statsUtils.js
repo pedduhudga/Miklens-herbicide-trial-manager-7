@@ -105,7 +105,11 @@ export function performANOVA(trials, options = {}) {
   // Calculate means
   const grandSum = [];
   const treatmentMeans = {};
-  const blockMeans = {};
+  const blockRawValues = {};
+  
+  blockIds.forEach(block => {
+    blockRawValues[block] = [];
+  });
   
   treatmentNames.forEach(trt => {
     const trtValues = [];
@@ -114,10 +118,8 @@ export function performANOVA(trials, options = {}) {
       trtValues.push(...vals);
       grandSum.push(...vals);
       
-      if (!blockMeans[block]) blockMeans[block] = [];
       if (vals.length > 0) {
-        const blockMean = vals.reduce((a, b) => a + b, 0) / vals.length;
-        blockMeans[block].push(blockMean);
+        blockRawValues[block].push(...vals);
       }
     });
     
@@ -147,13 +149,13 @@ export function performANOVA(trials, options = {}) {
     ssTreatments += nTrt * Math.pow(treatmentMeans[trt] - grandMean, 2);
   });
   
-  // SSBlocks (only if RCBD)
+  // SSBlocks (only if RCBD) - calculated from raw block totals
   if (design !== 'CRD') {
     blockIds.forEach(block => {
-      const blockValues = blockMeans[block] || [];
-      if (blockValues.length > 0) {
-        const blockMean = blockValues.reduce((a, b) => a + b, 0) / blockValues.length;
-        ssBlocks += t * Math.pow(blockMean - grandMean, 2);
+      const vals = blockRawValues[block] || [];
+      if (vals.length > 0) {
+        const blockMean = vals.reduce((a, b) => a + b, 0) / vals.length;
+        ssBlocks += vals.length * Math.pow(blockMean - grandMean, 2);
       }
     });
   }
@@ -164,7 +166,7 @@ export function performANOVA(trials, options = {}) {
   // Degrees of freedom
   const dfTreatments = t - 1;
   const dfBlocks = design === 'CRD' ? 0 : b - 1;
-  const dfError = design === 'CRD' ? N - t : (t - 1) * (b - 1);
+  const dfError = design === 'CRD' ? N - t : Math.max(1, N - t - b + 1);
   const dfTotal = N - 1;
   
   // Mean Squares
@@ -174,9 +176,11 @@ export function performANOVA(trials, options = {}) {
   
   // F-statistic
   const fStatistic = msError > 0 ? msTreatments / msError : 0;
+  const fBlock = (design !== 'CRD' && msError > 0 && dfBlocks > 0) ? msBlocks / msError : 0;
   
-  // Approximate p-value using F-distribution
+  // Approximate p-values
   const pValue = approximatePValue(fStatistic, dfTreatments, dfError);
+  const pBlock = (design !== 'CRD' && dfBlocks > 0) ? approximatePValue(fBlock, dfBlocks, dfError) : null;
   
   return {
     anovaTable: {
@@ -184,8 +188,8 @@ export function performANOVA(trials, options = {}) {
       ss: design === 'CRD' ? [ssTreatments, ssError, ssTotal] : [ssTreatments, ssBlocks, ssError, ssTotal],
       df: design === 'CRD' ? [dfTreatments, dfError, dfTotal] : [dfTreatments, dfBlocks, dfError, dfTotal],
       ms: design === 'CRD' ? [msTreatments, msError, null] : [msTreatments, msBlocks, msError, null],
-      f: design === 'CRD' ? [fStatistic, null, null] : [fStatistic, null, null, null],
-      p: design === 'CRD' ? [pValue, null, null] : [pValue, null, null, null]
+      f: design === 'CRD' ? [fStatistic, null, null] : [fStatistic, fBlock, null, null],
+      p: design === 'CRD' ? [pValue, null, null] : [pValue, pBlock, null, null]
     },
     fStatistic,
     pValue,
@@ -200,19 +204,16 @@ export function performANOVA(trials, options = {}) {
   };
 }
 
-/**
- * Tukey's HSD (Honestly Significant Difference) Test
- * For pairwise comparisons after significant ANOVA (with Tukey-Kramer adjustment for unequal replications)
- */
 export function performTukeyHSD(trials, options = {}) {
-  const { metric = 'controlPct', alpha = 0.05 } = options;
+  const { metric = 'controlPct', alpha = 0.05, anova: precalculatedAnova = null } = options;
   
-  const anova = performANOVA(trials, options);
+  const anova = precalculatedAnova || performANOVA(trials, options);
   if (anova.error) return anova;
   
   const { treatmentMeans, anovaTable, trtRepCounts } = anova;
-  const msError = anovaTable.source.includes('Blocks') ? anovaTable.ms[2] : anovaTable.ms[1]; // Error MS
-  const dfError = anovaTable.source.includes('Blocks') ? anovaTable.df[2] : anovaTable.df[1];
+  const errIdx = anovaTable.source.indexOf('Error');
+  const msError = errIdx !== -1 ? anovaTable.ms[errIdx] : (anovaTable.source.includes('Blocks') ? anovaTable.ms[2] : anovaTable.ms[1]); // Error MS
+  const dfError = errIdx !== -1 ? anovaTable.df[errIdx] : (anovaTable.source.includes('Blocks') ? anovaTable.df[2] : anovaTable.df[1]);
   const n = anovaTable.df[0] + 1; // Number of treatments
   
   // Get critical q value from Studentized Range Distribution
