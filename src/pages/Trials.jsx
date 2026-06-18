@@ -43,6 +43,7 @@ import { AdvancedReportGenerator } from '../services/advancedReportGenerator.js'
 import { fetchWeather, fetchSoilData } from '../services/weather.js';
 import { EPPO_CODES, BBCH_STAGES, lookupEPPO } from '../utils/eppoBBCHData.js';
 import { exportToARM, importARMCSV } from '../services/armExporter.js';
+import { detectOutliers } from '../utils/statsUtils.js';
 import AppSharingModal from '../components/AppSharingModal.jsx';
 import SprayCalculatorModal from '../components/SprayCalculatorModal.jsx';
 import TrialDesignGuideModal from '../components/TrialDesignGuideModal.jsx';
@@ -1072,6 +1073,48 @@ export default function Trials({ onMenuClick }) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Weather fetch failed', type: 'info' } }));
     }
   }, [activeTrial]);
+
+  // ── Detect statistical outliers ────────────────────────────────────
+  const isObservationOutlier = useCallback((obs, daa) => {
+    if (!detailTrial?.ProjectID || daa === undefined || daa === null) return null;
+    const primaryObsField = getPrimaryObservationField(activeCategory);
+    
+    // Get all trials in the same project with the same treatment
+    const peers = trials.filter(t => 
+      t.ProjectID === detailTrial.ProjectID && 
+      (t.FormulationName === detailTrial.FormulationName || t.FormulationID === detailTrial.FormulationID)
+    );
+    if (peers.length < 3) return null; // Outlier detection needs at least 3 values
+    
+    const obsValues = [];
+    const obsPeerPairs = []; // keep track of which peer contributed which value
+    
+    peers.forEach(p => {
+      const eff = validateEfficacyData(safeJsonParse(p.EfficacyDataJSON, []), activeCategory);
+      const match = eff.find(o => o.daa === daa);
+      if (match) {
+        const val = parseFloat(match[primaryObsField]);
+        if (!isNaN(val)) {
+          obsValues.push(val);
+          obsPeerPairs.push({ trialId: p.ID, val });
+        }
+      }
+    });
+    
+    if (obsValues.length < 3) return null;
+    
+    const outliers = detectOutliers(obsValues, 1.5);
+    const currentValue = parseFloat(obs[primaryObsField]);
+    
+    // Check if the current value is flagged as an outlier
+    const outlierMatch = outliers.find(out => {
+      // Find the index in obsValues that corresponds to our current trial
+      const peerIndex = obsPeerPairs.findIndex(pair => pair.trialId === detailTrial.ID && pair.val === currentValue);
+      return peerIndex !== -1 && out.index === peerIndex;
+    });
+    
+    return outlierMatch || null;
+  }, [detailTrial, trials, activeCategory]);
 
   const identifyWeedFromPhoto = useCallback(async (imageDataUrl, openAnalyzer = false, photoIndex = null) => {
     if (openAnalyzer) {
@@ -5178,6 +5221,18 @@ If none are present, write "None".`;
                                   <span className="bg-slate-700 text-white font-bold px-2 py-1 rounded text-xs">DAA {obs.daa ?? 0}</span>
                                   <span className="text-xs text-slate-500">{obs.date ? formatPhotoDate(obs.date) : ''}</span>
                                   {efficacyRating && <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${ratingCls}`}>{efficacyRating}</span>}
+                                  {(() => {
+                                    const outlier = isObservationOutlier(obs, obs.daa);
+                                    if (!outlier) return null;
+                                    return (
+                                      <span 
+                                        className="text-[10px] px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200 font-bold flex items-center gap-1 cursor-help animate-pulse"
+                                        title={`Statistically anomalous value! Deviates significantly from the treatment average. (Z-Score: ${outlier.zScore.toFixed(2)})`}
+                                      >
+                                        ⚠️ Outlier (Z: {outlier.zScore.toFixed(1)})
+                                      </span>
+                                    );
+                                  })()}
                                   {obs.source === 'AI' && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 font-semibold">AI</span>}
                                   {obs.aiConfidence && <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${obs.aiConfidence === 'HIGH' ? 'bg-emerald-100 text-emerald-700' : obs.aiConfidence === 'MEDIUM' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>{obs.aiConfidence}</span>}
                                   {obs.competitionLevel && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 font-semibold">{obs.competitionLevel}</span>}

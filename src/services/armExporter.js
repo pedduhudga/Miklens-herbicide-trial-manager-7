@@ -68,6 +68,33 @@ export function exportToARM(trialOrTrials, category, project = null) {
           ].join(','));
         }
       });
+
+      // Export species/target breakdown details if present
+      if (Array.isArray(obs.weedDetails) && obs.weedDetails.length > 0) {
+        obs.weedDetails.forEach(wd => {
+          const spName = wd.species || wd.name || 'Unknown';
+          const coverVal = wd.cover ?? wd.value ?? '';
+          if (coverVal !== '') {
+            csvRows.push([
+              t.ID,
+              category,
+              `"${prjName.replace(/"/g, '""')}"`,
+              `"${trtName.replace(/"/g, '""')}"`,
+              `"${rate.replace(/"/g, '""')}"`,
+              `"${timing.replace(/"/g, '""')}"`,
+              plot,
+              rep,
+              `"${inv.replace(/"/g, '""')}"`,
+              `"${loc.replace(/"/g, '""')}"`,
+              dt.split('T')[0],
+              daa,
+              `"Weed/Target Breakdown: ${spName.replace(/"/g, '""')}"`,
+              coverVal,
+              `"${((wd.status || '') + (wd.notes ? ' - ' + wd.notes : '')).replace(/"/g, '""')}"`
+            ].join(','));
+          }
+        });
+      }
     });
   });
 
@@ -155,8 +182,22 @@ export function importARMCSV(csvText) {
     const val = parseFloat(row.VALUE);
 
     if (metricLabel && !isNaN(val)) {
-      // Map metric labels back to keys based on common categories
-      if (metricLabel.includes('Cover')) {
+      if (metricLabel.startsWith('Weed/Target Breakdown:')) {
+        const speciesName = metricLabel.replace('Weed/Target Breakdown:', '').trim();
+        let status = '';
+        let wdNotes = '';
+        if (row.NOTES) {
+          const parts = row.NOTES.split(' - ');
+          status = parts[0] || '';
+          wdNotes = parts.slice(1).join(' - ') || '';
+        }
+        obs.weedDetails.push({
+          species: speciesName,
+          cover: val,
+          status: status,
+          notes: wdNotes
+        });
+      } else if (metricLabel.includes('Cover')) {
         obs.weedCover = val;
       } else if (metricLabel.includes('Severity')) {
         obs.diseaseSeverity = val;

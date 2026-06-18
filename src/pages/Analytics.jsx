@@ -226,6 +226,84 @@ export default function Analytics({ onMenuClick }) {
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
   } : null;
 
+  const speciesTimelineChartConfig = useMemo(() => {
+    const speciesData = {}; // { speciesName: { daa: [values] } }
+    const daaSorted = new Set();
+
+    trials.forEach(t => {
+      const eff = safeJsonParse(t.EfficacyDataJSON, []);
+      eff.forEach(obs => {
+        const daa = obs.daa ?? 0;
+        daaSorted.add(daa);
+        (obs.weedDetails || []).forEach(wd => {
+          if (!wd.species || wd.species.toLowerCase() === 'total' || wd.species.toLowerCase() === 'unknown') return;
+          const val = parseFloat(wd.cover ?? wd.value);
+          if (isNaN(val)) return;
+
+          if (!speciesData[wd.species]) speciesData[wd.species] = {};
+          if (!speciesData[wd.species][daa]) speciesData[wd.species][daa] = [];
+          speciesData[wd.species][daa].push(val);
+        });
+      });
+    });
+
+    const daaList = [...daaSorted].sort((a, b) => a - b);
+    if (daaList.length === 0 || Object.keys(speciesData).length === 0) return null;
+
+    // Keep top 5 most common species
+    const topSpecies = Object.entries(speciesData)
+      .map(([name, daaMap]) => {
+        const count = Object.values(daaMap).reduce((sum, vals) => sum + vals.length, 0);
+        return { name, count, daaMap };
+      })
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+
+    const datasets = topSpecies.map((sp, idx) => {
+      const data = daaList.map(daa => {
+        const vals = sp.daaMap[daa];
+        if (!vals || !vals.length) return null;
+        return Math.round(vals.reduce((s, v) => s + v, 0) / vals.length * 10) / 10;
+      });
+
+      const color = CHART_COLORS[idx % CHART_COLORS.length];
+      return {
+        label: sp.name,
+        data,
+        borderColor: color,
+        backgroundColor: color + '20',
+        tension: 0.15,
+        fill: false,
+        spanGaps: true
+      };
+    });
+
+    return {
+      type: 'line',
+      data: {
+        labels: daaList.map(daa => `DAA ${daa}`),
+        datasets
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom' }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            max: 100,
+            title: { display: true, text: 'Cover / Severity (%)' }
+          },
+          x: {
+            title: { display: true, text: 'Days After Application' }
+          }
+        }
+      }
+    };
+  }, [trials]);
+
   const resultChartConfig = Object.values(resultDist).some(v => v > 0) ? {
     type: 'doughnut',
     data: {
@@ -273,9 +351,14 @@ export default function Analytics({ onMenuClick }) {
             config={resultChartConfig} height="300px" />
         </div>
 
-        <ChartCard id="weed-chart" title={`${catConfig.targetLabel} Frequency`}
-          description={`Most commonly targeted ${catConfig.targetLabel.toLowerCase()} across all trials`}
-          config={weedChartConfig} height="300px" />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+          <ChartCard id="weed-chart" title={`${catConfig.targetLabel} Frequency`}
+            description={`Most commonly targeted ${catConfig.targetLabel.toLowerCase()} across all trials`}
+            config={weedChartConfig} height="300px" />
+          <ChartCard id="species-timeline-chart" title={`${catConfig.targetLabel} Severity Trend over DAA`}
+            description={`Average cover/severity of top ${catConfig.targetLabel.toLowerCase()} species over time`}
+            config={speciesTimelineChartConfig} height="300px" />
+        </div>
 
         {/* Performance Radar */}
         {radarChartConfig && (
