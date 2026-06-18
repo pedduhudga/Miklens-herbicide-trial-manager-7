@@ -515,22 +515,6 @@ const TrialCard = memo(function TrialCard({
           {efficacyData.length > 0 && <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{efficacyData.length} obs</span>}
           {trial.YieldValue && <span className="text-xs bg-teal-50 text-teal-700 px-2 py-0.5 rounded-full font-semibold">{trial.YieldValue} t/ha</span>}
         </div>
-        {latestObsDetails && (
-          <div className="mt-3 p-3 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-600">
-            <div className="flex items-center justify-between mb-2">
-              <span className="font-semibold text-slate-700">Latest observation</span>
-              <span className="text-[10px] uppercase tracking-wide text-slate-400">DAA {latestObsDetails.daa || 'N/A'}</span>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {latestObsDetails.parts.map((part, idx) => (
-                <div key={idx} className="space-y-0.5">
-                  <div className="text-[10px] uppercase tracking-wide text-slate-400">{part.label}</div>
-                  <div className="font-semibold text-slate-700">{part.value}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
         <div className="mt-2 flex items-center justify-between" onClick={stopPropagation}>
           <div className="flex items-center gap-1.5">
             <span className={`w-2 h-2 rounded-full ${isLive ? 'bg-green-500' : 'bg-slate-400'}`} />
