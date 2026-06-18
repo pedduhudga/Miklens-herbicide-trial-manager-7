@@ -2142,7 +2142,7 @@ export default function Trials({ onMenuClick }) {
     const latestTrial = getAppState().trials.find(t => t.ID === trial.ID) || trial;
     const trialCat = latestTrial.Category || activeCategory;
     const catConfig = getCategoryConfig(trialCat);
-    const efficacyData = validateEfficacyData(safeJsonParse(latestTrial.EfficacyDataJSON, []));
+    const efficacyData = validateEfficacyData(safeJsonParse(latestTrial.EfficacyDataJSON, []), trialCat);
 
     const getNormalizedTargetName = (name) => {
       if (!name) return 'Unknown';
@@ -2540,7 +2540,7 @@ Rules:
 
     allTrials.forEach(trial => {
       const photos = safeJsonParse(trial.PhotoURLs, []);
-      const existingObs = validateEfficacyData(safeJsonParse(trial.EfficacyDataJSON, []));
+      const existingObs = validateEfficacyData(safeJsonParse(trial.EfficacyDataJSON, []), trial.Category || activeCategory);
       const existingDAAs = new Set(existingObs.map(o => o.daa));
       daaCoverageMap.set(trial.ID, existingDAAs);
 
@@ -2689,7 +2689,7 @@ Rules:
   // ── AI SUMMARY GENERATION ─────────────────────────────────────────
   const generateAISummary = async (trial = activeTrial) => {
     if (!trial) return;
-    const efficacyData = validateEfficacyData(safeJsonParse(trial.EfficacyDataJSON, []));
+    const efficacyData = validateEfficacyData(safeJsonParse(trial.EfficacyDataJSON, []), trial.Category || activeCategory);
     if (efficacyData.length < 2) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Need at least 2 observations to generate summary', type: 'warning' } }));
       return;
@@ -3317,7 +3317,7 @@ Rules:
   // DAA coverage analysis for photos/observations
   const daaCoverage = useMemo(() => {
     if (!activeTrial) return { allDAAs: [], obsDAAs: [], photoDAAs: [], hasGaps: false };
-    const obs = validateEfficacyData(safeJsonParse(activeTrial.EfficacyDataJSON, []));
+    const obs = validateEfficacyData(safeJsonParse(activeTrial.EfficacyDataJSON, []), activeTrial.Category || activeCategory);
     const photoDAAs = activeTrial.Date 
       ? detailPhotos.map(p => p.date ? calculateDAA(p.date, activeTrial.Date) : null).filter(val => val !== null)
       : [];
@@ -3448,7 +3448,7 @@ Rules:
     setAiLoading(true);
     setAiSummary('');
     try {
-      const efficacy = validateEfficacyData(safeJsonParse(detailTrial.EfficacyDataJSON, []));
+      const efficacy = validateEfficacyData(safeJsonParse(detailTrial.EfficacyDataJSON, []), detailTrial.Category || activeCategory);
       const sorted = [...efficacy].sort((a, b) => (a.daa ?? 0) - (b.daa ?? 0));
 
       const trialCat = detailTrial.Category || 'herbicide';
@@ -3656,7 +3656,7 @@ If none are present, write "None".`;
   // Automatically correct existing stale ratings (e.g. legacy/deleted observations not matching Result field) on trial selection
   useEffect(() => {
     if (!detailTrial) return;
-    const efficacy = validateEfficacyData(safeJsonParse(detailTrial.EfficacyDataJSON, []));
+    const efficacy = validateEfficacyData(safeJsonParse(detailTrial.EfficacyDataJSON, []), detailTrial.Category || activeCategory);
     const calculated = calculateResultRating(efficacy, detailTrial?.IsControl === true || detailTrial?.IsControl === 'true');
     if (calculated !== detailTrial.Result) {
       const updated = { ...detailTrial, Result: calculated };
@@ -3750,7 +3750,7 @@ If none are present, write "None".`;
   // Helper: check if AI narrative is stale before export
   const checkAiNarrativeBeforeExport = useCallback((trial, proceed) => {
     const saved = safeJsonParse(trial.AISummariesJSON, {});
-    const currentObsCount = validateEfficacyData(safeJsonParse(trial.EfficacyDataJSON, [])).length;
+    const currentObsCount = validateEfficacyData(safeJsonParse(trial.EfficacyDataJSON, []), trial.Category || activeCategory).length;
     const savedObsCount = saved.narrativeObsCount ?? null;
     const hasNarrative = !!saved.narrative;
     if (!hasNarrative) {
@@ -3807,7 +3807,7 @@ If none are present, write "None".`;
     }
     const geminiKeys = getAPIKeys('gemini');
     if (!geminiKeys.length) { window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Add a Gemini API key in Settings first', type: 'error' } })); return; }
-    const efficacy = validateEfficacyData(safeJsonParse(trial.EfficacyDataJSON, []));
+    const efficacy = validateEfficacyData(safeJsonParse(trial.EfficacyDataJSON, []), trial.Category || activeCategory);
     if (efficacy.length === 0) { window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'No observations to analyze. Log observations first.', type: 'error' } })); return; }
     setAiGenRunning(true);
     window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Generating AI efficacy report for ${trial.FormulationName}...`, type: 'info' } }));
@@ -3851,7 +3851,7 @@ If none are present, write "None".`;
 
     photos[photoEditModal.idx] = { ...oldPhoto, label: photoEditModal.label, date: formatPhotoDate(newDate) };
 
-    const efficacyData = validateEfficacyData(safeJsonParse(activeTrial.EfficacyDataJSON, []));
+    const efficacyData = validateEfficacyData(safeJsonParse(activeTrial.EfficacyDataJSON, []), activeTrial.Category || activeCategory);
     let efficacyChanged = false;
 
     if (oldDate && newDate && oldDate !== newDate) {
@@ -5984,7 +5984,7 @@ If none are present, write "None".`;
               {/* AI Summary Tab */}
               {detailTab === 'ai' && (() => {
                 const savedAi = safeJsonParse(detailTrial?.AISummariesJSON, {});
-                const currentObsCount = validateEfficacyData(safeJsonParse(detailTrial?.EfficacyDataJSON, [])).length;
+                const currentObsCount = validateEfficacyData(safeJsonParse(detailTrial?.EfficacyDataJSON, []), detailTrial?.Category || activeCategory).length;
                 const isStale = savedAi.narrative && savedAi.narrativeObsCount != null && currentObsCount > savedAi.narrativeObsCount;
                 return (
                   <div className="space-y-4">
@@ -7264,93 +7264,123 @@ If none are present, write "None".`;
       )}
 
       {/* ── PHOTO DATE PROMPT MODAL ── */}
-      {pendingPhotoAnalysis && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-violet-500" /> Photo details & setup
-              </h3>
-              <button onClick={() => setPendingPhotoAnalysis(null)} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4" /></button>
-            </div>
-            <p className="text-xs text-slate-500 font-semibold">"For best results, upload photos from different representative plants within this observation unit."</p>
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Photo Date</label>
-              <input type="datetime-local"
-                value={pendingPhotoAnalysis.date}
-                max={toDatetimeLocal(new Date())}
-                onChange={e => setPendingPhotoAnalysis(p => ({ ...p, date: e.target.value }))}
-                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Photo Tag / Focus Type</label>
-              <select
-                value={pendingPhotoAnalysis.tag || 'Whole Canopy'}
-                onChange={e => setPendingPhotoAnalysis(p => ({ ...p, tag: e.target.value }))}
-                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
-              >
-                <option value="Whole Canopy">Whole Canopy</option>
-                <option value="Leaf Close-up">Leaf Close-up</option>
-                {(() => {
-                  const targetTrialForPhoto = pendingPhotoAnalysis.targetTrial || activeTrial;
-                  const proj = projects.find(p => String(p.ID) === String(targetTrialForPhoto?.ProjectID));
-                  const isPotTrial = (targetTrialForPhoto?.TrialDesign === 'PotTrial') || (proj?.Design === 'PotTrial');
-                  
-                  if (!isPotTrial) {
-                    return null;
-                  }
-                  
-                  const potObsMode = proj?.PotObsMode || targetTrialForPhoto?.PotObsMode || 'row-wise';
-                  if (potObsMode === 'plant-wise') {
-                    return null;
-                  }
-                  
-                  let potCount = 3;
-                  if (potObsMode === 'column-wise' && proj) {
-                    const blocksCount = parseInt(proj.PotBlocks) || 3;
-                    potCount = Math.floor((parseInt(proj.PotRows) || 9) / blocksCount);
-                  } else if (potObsMode === 'row-wise' && proj) {
-                    potCount = parseInt(proj.PotCols) || 4;
-                  } else if (targetTrialForPhoto?.PotLabel) {
-                    const m = targetTrialForPhoto.PotLabel.match(/(\d+)\s*Pots?/i);
-                    if (m) potCount = parseInt(m[1], 10);
-                  }
-                  
-                  return Array.from({ length: potCount }).map((_, idx) => {
-                    const potLetter = String.fromCharCode(65 + idx); // A, B, C...
-                    return (
-                      <option key={idx} value={`Plant ${idx + 1}`}>
-                        Plant {idx + 1} (Pot {potLetter})
-                      </option>
-                    );
-                  });
-                })()}
-              </select>
-            </div>
-            {(() => {
-              const targetTrialForPhoto = pendingPhotoAnalysis.targetTrial || activeTrial;
-              return targetTrialForPhoto?.Date && pendingPhotoAnalysis.date ? (
+      {pendingPhotoAnalysis && (() => {
+        const targetTrialForPhoto = pendingPhotoAnalysis.targetTrial || activeTrial;
+        const proj = projects.find(p => String(p.ID) === String(targetTrialForPhoto?.ProjectID));
+        const isPotTrial = (targetTrialForPhoto?.TrialDesign === 'PotTrial') || (proj?.Design === 'PotTrial');
+        
+        const SCIENTIFIC_FOCUS_TAGS = [
+          { value: 'Whole Canopy (Standard)', label: 'Whole Canopy (Standard)', hint: 'Hold the camera parallel to the ground to avoid perspective bias for ground cover.' },
+          { value: 'Leaf Close-up (Top / Adaxial)', label: 'Leaf Close-up (Top / Adaxial)', hint: 'Ensure leaf is centered and in focus. Avoid casting shadows with your hand or device.' },
+          { value: 'Leaf Close-up (Underside / Abaxial)', label: 'Leaf Close-up (Underside / Abaxial)', hint: 'Turn the leaf over and shield it from direct sunlight to capture spores, eggs, or mites clearly.' },
+          { value: 'Leaf Close-up (New Growth)', label: 'Leaf Close-up (New Growth)', hint: 'Take a high-detail close-up of young leaves at the top of the plant to detect immobile deficiencies (Iron/Calcium).' },
+          { value: 'Leaf Close-up (Old Growth)', label: 'Leaf Close-up (Old Growth)', hint: 'Take a high-detail close-up of mature leaves near the bottom of the plant to detect mobile deficiencies (Nitrogen/Potassium).' },
+          { value: 'Stem / Meristem Close-up', label: 'Stem / Meristem Close-up', hint: 'Focus directly on stems, node junctions, or growing tips. Avoid hand shadows.' },
+          { value: 'Fruit / Produce Close-up', label: 'Fruit / Produce Close-up', hint: 'Ensure fruits/produce are centered and in focus. Avoid extreme glare.' }
+        ];
+
+        const defaultTag = isPotTrial ? 'Plant 1 (Pot A) - Whole Canopy (Standard)' : 'Whole Canopy (Standard)';
+        const currentTag = pendingPhotoAnalysis.tag || defaultTag;
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-violet-500" /> Photo details & setup
+                </h3>
+                <button onClick={() => setPendingPhotoAnalysis(null)} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4" /></button>
+              </div>
+              <p className="text-xs text-slate-500 font-semibold">"For best results, upload photos from different representative plants within this observation unit."</p>
+              
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Photo Date</label>
+                <input type="datetime-local"
+                  value={pendingPhotoAnalysis.date}
+                  max={toDatetimeLocal(new Date())}
+                  onChange={e => setPendingPhotoAnalysis(p => ({ ...p, date: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Photo Tag / Focus Type</label>
+                <select
+                  value={currentTag}
+                  onChange={e => setPendingPhotoAnalysis(p => ({ ...p, tag: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white text-slate-800 font-medium"
+                >
+                  {(() => {
+                    if (!isPotTrial) {
+                      return SCIENTIFIC_FOCUS_TAGS.map(f => (
+                        <option key={f.value} value={f.value}>{f.label}</option>
+                      ));
+                    }
+                    
+                    const potObsMode = proj?.PotObsMode || targetTrialForPhoto?.PotObsMode || 'row-wise';
+                    let potCount = 3;
+                    if (potObsMode === 'column-wise' && proj) {
+                      const blocksCount = parseInt(proj.PotBlocks) || 3;
+                      potCount = Math.floor((parseInt(proj.PotRows) || 9) / blocksCount);
+                    } else if (potObsMode === 'row-wise' && proj) {
+                      potCount = parseInt(proj.PotCols) || 4;
+                    } else if (targetTrialForPhoto?.PotLabel) {
+                      const m = targetTrialForPhoto.PotLabel.match(/(\d+)\s*Pots?/i);
+                      if (m) potCount = parseInt(m[1], 10);
+                    }
+                    
+                    const options = [];
+                    for (let idx = 0; idx < potCount; idx++) {
+                      const potLetter = String.fromCharCode(65 + idx); // A, B, C...
+                      SCIENTIFIC_FOCUS_TAGS.forEach(f => {
+                        const val = `Plant ${idx + 1} (Pot ${potLetter}) - ${f.value}`;
+                        options.push(
+                          <option key={val} value={val}>
+                            Plant {idx + 1} (Pot {potLetter}) - {f.label}
+                          </option>
+                        );
+                      });
+                    }
+                    return options;
+                  })()}
+                </select>
+              </div>
+
+              {(() => {
+                const matchingFocus = SCIENTIFIC_FOCUS_TAGS.find(f => currentTag.includes(f.value));
+                if (matchingFocus) {
+                  return (
+                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-800 space-y-1">
+                      <div className="font-bold text-blue-600 flex items-center gap-1">📸 Camera Capture Guide:</div>
+                      <div>{matchingFocus.hint}</div>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+
+              {targetTrialForPhoto?.Date && pendingPhotoAnalysis.date ? (
                 <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-xs text-emerald-800">
                   DAA: <strong>{Math.max(0, Math.round((new Date(pendingPhotoAnalysis.date) - new Date(targetTrialForPhoto.Date)) / 86400000))}</strong> days after application
                   {targetTrialForPhoto?.Lat && targetTrialForPhoto?.Lon && <span className="ml-2 text-emerald-600">• Weather will be auto-fetched</span>}
                 </div>
-              ) : null;
-            })()}
-            <div className="flex justify-end gap-3 pt-2 border-t">
-              <button onClick={() => setPendingPhotoAnalysis(null)} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg font-medium">Cancel</button>
-              <button
-                onClick={() => {
-                  const { dataUrl, date, targetTrial, tag } = pendingPhotoAnalysis;
-                  setPendingPhotoAnalysis(null);
-                  saveAndAnalyzePhoto(dataUrl, date, targetTrial, tag || 'Whole Canopy');
-                }}
-                className="px-5 py-2 rounded-lg text-sm font-semibold bg-violet-600 text-white hover:bg-violet-700 flex items-center gap-2">
-                <Sparkles className="w-3.5 h-3.5" /> Analyse Photo
-              </button>
+              ) : null}
+
+              <div className="flex justify-end gap-3 pt-2 border-t">
+                <button onClick={() => setPendingPhotoAnalysis(null)} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg font-medium">Cancel</button>
+                <button
+                  onClick={() => {
+                    const { dataUrl, date, targetTrial, tag } = pendingPhotoAnalysis;
+                    setPendingPhotoAnalysis(null);
+                    saveAndAnalyzePhoto(dataUrl, date, targetTrial, tag || defaultTag);
+                  }}
+                  className="px-5 py-2 rounded-lg text-sm font-semibold bg-violet-600 text-white hover:bg-violet-700 flex items-center gap-2">
+                  <Sparkles className="w-3.5 h-3.5" /> Analyse Photo
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ── BULK QR CARD PRINT MODAL ── */}
       {isBulkQrModalOpen && (

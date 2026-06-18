@@ -202,9 +202,25 @@ OUTPUT FORMAT - JSON ONLY (no extra text, no markdown wrapper around the JSON):
 
   const historyNote = context.historyPrompt ? `\n${context.historyPrompt}\n` : '';
   const photoTag = context.photoTag || 'Whole Canopy';
-  const tagInstruction = photoTag === 'Leaf Close-up'
-    ? '\nSPECIAL FOCUS: This is a LEAF CLOSE-UP photo. Please focus closely on leaf spot count, disease symptoms/severity, chlorosis, and necrosis. Do not estimate whole canopy coverage from this close-up.'
-    : `\nSPECIAL FOCUS: This is a CANOPY/PLANT photo (Tag: ${photoTag}). Please focus on overall plant vigor, canopy coverage (%), greenness, and overall plant structure.`;
+  let tagInstruction = '';
+  const cleanTag = photoTag.toLowerCase();
+  if (cleanTag.includes('abaxial') || cleanTag.includes('underside')) {
+    tagInstruction = '\nSPECIAL FOCUS: This is a LEAF CLOSE-UP (UNDERSIDE / ABAXIAL) photo. Please focus closely on the underside of the leaf, looking specifically for rust spores, insect eggs, mite colonies, whitefly feeding, or localized lesions. Do not estimate whole canopy coverage.';
+  } else if (cleanTag.includes('adaxial') || cleanTag.includes('top')) {
+    tagInstruction = '\nSPECIAL FOCUS: This is a LEAF CLOSE-UP (TOP / ADAXIAL) photo. Please focus closely on the upper surface of the leaf, analyzing leaf spot count, disease severity (chlorosis, necrosis), or leaf chewing damage. Do not estimate whole canopy coverage.';
+  } else if (cleanTag.includes('new growth')) {
+    tagInstruction = '\nSPECIAL FOCUS: This is a LEAF CLOSE-UP (NEW GROWTH) photo from the young/upper leaves. Please focus on symptoms of immobile nutrient deficiencies (such as Iron chlorosis, Calcium necrosis, or young leaf distortion) or sucking insect damage. Do not estimate whole canopy coverage.';
+  } else if (cleanTag.includes('old growth')) {
+    tagInstruction = '\nSPECIAL FOCUS: This is a LEAF CLOSE-UP (OLD GROWTH) photo from mature/lower leaves. Please focus on symptoms of mobile nutrient deficiencies (such as Nitrogen yellowing, Potassium leaf edge burning, or Magnesium interveinal chlorosis) or older leaf senescence. Do not estimate whole canopy coverage.';
+  } else if (cleanTag.includes('leaf close-up')) {
+    tagInstruction = '\nSPECIAL FOCUS: This is a LEAF CLOSE-UP photo. Focus closely on leaf spot count, chlorosis, necrosis, and localized damage. Do not estimate whole canopy coverage.';
+  } else if (cleanTag.includes('stem') || cleanTag.includes('meristem')) {
+    tagInstruction = '\nSPECIAL FOCUS: This is a STEM / MERISTEM CLOSE-UP photo. Focus closely on stem surfaces, node junctions, or the terminal growing tip, looking specifically for cankers, vascular lesions, thrips feeding, or terminal bud necrosis. Do not estimate whole canopy coverage.';
+  } else if (cleanTag.includes('fruit') || cleanTag.includes('produce')) {
+    tagInstruction = '\nSPECIAL FOCUS: This is a FRUIT / PRODUCE CLOSE-UP photo. Focus closely on fruit/produce quality, estimating count, maturity, rot/mold severity, size uniformity, sunscald, skin blemishes, or surface cracks.';
+  } else {
+    tagInstruction = `\nSPECIAL FOCUS: This is a CANOPY/PLANT photo (Tag: ${photoTag}). Please focus on overall plant vigor, canopy coverage (%), greenness, shoot density, and overall plant structure.`;
+  }
 
   // If a non-herbicide category is specified, use its custom AI prompt
   if (context.category && context.category !== 'herbicide') {
