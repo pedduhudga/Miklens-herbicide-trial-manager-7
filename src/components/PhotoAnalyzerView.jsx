@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { X, Sliders, Copy, Check, Leaf } from 'lucide-react';
 
 export default function PhotoAnalyzerView({
