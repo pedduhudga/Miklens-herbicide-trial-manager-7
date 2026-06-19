@@ -96,3 +96,31 @@ export function formatSignificance(pValue) {
     }
     return { symbol: 'NS', text: 'Not Significant', p: pValue };
 }
+
+export function getPlotAreaHectares(plotSize) {
+  let length = 10; // default meters
+  let width = 2;   // default meters
+  let unit = 'm';  // default meters
+
+  if (plotSize) {
+    if (typeof plotSize === 'object') {
+      length = parseFloat(plotSize.length || plotSize.Length || 10);
+      width = parseFloat(plotSize.width || plotSize.Width || 2);
+      unit = String(plotSize.unit || plotSize.Unit || 'm').toLowerCase();
+    } else if (typeof plotSize === 'string') {
+      const m = plotSize.match(/(\d+(?:\.\d+)?)\s*(m|ft|feet|meters)?\s*[xX×]\s*(\d+(?:\.\d+)?)\s*(m|ft|feet|meters)?/i);
+      if (m) {
+        length = parseFloat(m[1]);
+        width = parseFloat(m[3]);
+        const u = m[2] || m[4] || 'm';
+        unit = /ft|feet/i.test(u) ? 'ft' : 'm';
+      }
+    }
+  }
+
+  const areaSq = length * width;
+  if (unit === 'ft' || unit === 'feet') {
+    return areaSq / 107639.104; // sq ft to hectares
+  }
+  return areaSq / 10000; // sq meters to hectares
+}

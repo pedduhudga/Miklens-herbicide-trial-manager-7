@@ -8,6 +8,8 @@ import Chart from 'chart.js/auto';
 import jStat from 'jstat';
 import { getCategoryConfig } from '../utils/categoryConfig.js';
 import { getAPIKeys, generateTextWithAI } from './multiProviderAI.js';
+import { getPlotAreaHectares } from '../utils/helpers.js';
+import { performTypeIIIANOVA } from '../utils/statsUtils.js';
 
 // Local helper for safe JSON parsing
 function safeJsonParse(val, fallback = []) {
@@ -201,47 +203,116 @@ function calculateAnovaRCB(data, metricKey, category = 'nutrition') {
 
   const grandMean = values.reduce((a, b) => a + b, 0) / N;
   
+  // Check if design is balanced
+  const counts = {};
+  let isBalanced = true;
+  data.forEach(obs => {
+    const trt = parseInt(obs.treatmentNumber || obs.treatment || obs.Treatment || 1);
+    const rep = parseInt(obs.replication || obs.rep || obs.Replication || 1);
+    const key = `${trt}_${rep}`;
+    counts[key] = (counts[key] || 0) + 1;
+    if (counts[key] > 1) isBalanced = false;
+  });
+  if (Object.keys(counts).length !== t * b) {
+    isBalanced = false;
+  }
+
   // SSTotal
   let ssTotal = 0;
   values.forEach(y => { ssTotal += Math.pow(y - grandMean, 2); });
 
-  // SSTreatments
   let ssTreatments = 0;
-  Object.keys(trtGroups).forEach(trt => {
-    const trtVals = trtGroups[trt];
-    const trtMean = trtVals.reduce((a, b) => a + b, 0) / trtVals.length;
-    ssTreatments += trtVals.length * Math.pow(trtMean - grandMean, 2);
-  });
-
-  // SSBlocks (Replications)
   let ssBlocks = 0;
-  Object.keys(repGroups).forEach(rep => {
-    const repVals = repGroups[rep];
-    const repMean = repVals.reduce((a, b) => a + b, 0) / repVals.length;
-    ssBlocks += repVals.length * Math.pow(repMean - grandMean, 2);
-  });
+  let ssError = 0;
 
-  // SSError
-  const ssError = Math.max(0, ssTotal - ssTreatments - ssBlocks);
+  let dfTreatments = t - 1;
+  let dfBlocks = b - 1;
+  let dfError = dfTreatments * dfBlocks;
+  let dfTotal = N - 1;
 
-  // df
-  const dfTreatments = t - 1;
-  const dfBlocks = b - 1;
-  const dfError = dfTreatments * dfBlocks;
-  const dfTotal = N - 1;
+  let msTreatments = 0;
+  let msBlocks = 0;
+  let msError = 0;
 
-  // MS
-  const msTreatments = ssTreatments / dfTreatments;
-  const msBlocks = ssBlocks / dfBlocks;
-  const msError = ssError / dfError;
+  let fStatistic = 0;
+  let fBlock = 0;
 
-  // F
-  const fStatistic = msError > 0 ? msTreatments / msError : 0;
-  const fBlock = msError > 0 ? msBlocks / msError : 0;
+  let pValue = 1.0;
+  let pBlock = 1.0;
 
-  // p-values
-  const pValue = approximatePValue(fStatistic, dfTreatments, dfError);
-  const pBlock = approximatePValue(fBlock, dfBlocks, dfError);
+  let useTypeIII = false;
+  if (!isBalanced) {
+    const mockTrials = data.map(obs => ({
+      FormulationName: String(obs.treatmentNumber || obs.treatment || obs.Treatment || 1),
+      Replication: String(obs.replication || obs.rep || obs.Replication || 1),
+      EfficacyDataJSON: JSON.stringify([{
+        [metricKey]: parseFloat(obs[metricKey])
+      }])
+    }));
+    const typeIII = performTypeIIIANOVA(mockTrials, { metric: metricKey });
+    if (typeIII && !typeIII.error && typeIII.anovaTable) {
+      const table = typeIII.anovaTable;
+      ssTreatments = table.ss[0];
+      ssBlocks = table.ss[1];
+      ssError = table.ss[2];
+      
+      dfTreatments = table.df[0];
+      dfBlocks = table.df[1];
+      dfError = table.df[2];
+      dfTotal = table.df[3];
+      
+      msTreatments = table.ms[0];
+      msBlocks = table.ms[1];
+      msError = table.ms[2];
+      
+      fStatistic = table.f[0] || 0;
+      fBlock = table.f[1] || 0;
+      
+      pValue = table.p[0] ?? 1.0;
+      pBlock = table.p[1] ?? 1.0;
+      useTypeIII = true;
+    }
+  }
+
+  if (!useTypeIII) {
+    // SSTreatments
+    ssTreatments = 0;
+    Object.keys(trtGroups).forEach(trt => {
+      const trtVals = trtGroups[trt];
+      const trtMean = trtVals.reduce((a, b) => a + b, 0) / trtVals.length;
+      ssTreatments += trtVals.length * Math.pow(trtMean - grandMean, 2);
+    });
+
+    // SSBlocks (Replications)
+    ssBlocks = 0;
+    Object.keys(repGroups).forEach(rep => {
+      const repVals = repGroups[rep];
+      const repMean = repVals.reduce((a, b) => a + b, 0) / repVals.length;
+      ssBlocks += repVals.length * Math.pow(repMean - grandMean, 2);
+    });
+
+    // SSError
+    ssError = Math.max(0, ssTotal - ssTreatments - ssBlocks);
+
+    // df
+    dfTreatments = t - 1;
+    dfBlocks = b - 1;
+    dfError = dfTreatments * dfBlocks;
+    dfTotal = N - 1;
+
+    // MS
+    msTreatments = ssTreatments / dfTreatments;
+    msBlocks = ssBlocks / dfBlocks;
+    msError = ssError / dfError;
+
+    // F
+    fStatistic = msError > 0 ? msTreatments / msError : 0;
+    fBlock = msError > 0 ? msBlocks / msError : 0;
+
+    // p-values
+    pValue = approximatePValue(fStatistic, dfTreatments, dfError);
+    pBlock = approximatePValue(fBlock, dfBlocks, dfError);
+  }
 
   // Advanced post-hoc statistics: CV, SEM, LSD
   const tVal = (typeof jStat !== 'undefined') ? jStat.studentt.inv(1 - (0.05 / 2), dfError) : 2.05;
@@ -574,10 +645,21 @@ export class AdvancedReportGenerator {
 
     // C. Nutrient Use Efficiency (NUE) for Nutrition trials
     if (this.category === 'nutrition') {
+      const plotSize = this.trial.plotSize || this.trial.PlotSize || this.trial.plot_size || this.trial.Plot_Size;
+      const areaHa = getPlotAreaHectares(plotSize);
+
+      const getYieldInKgHa = (o) => {
+        const rawYield = parseFloat(o.yield || o.yieldKgPlot || 0);
+        if (areaHa > 0) {
+          return rawYield / areaHa;
+        }
+        return rawYield;
+      };
+
       const cObs = this.observations.filter(o => parseInt(o.treatmentNumber || o.treatment || 1) === 1);
       const tObs = this.observations.filter(o => parseInt(o.treatmentNumber || o.treatment || 1) === 2);
-      const cMeanYield = cObs.length ? cObs.reduce((a,b)=>a + parseFloat(b.yieldKgPlot || b.yield || 0), 0)/cObs.length : 0;
-      const tMeanYield = tObs.length ? tObs.reduce((a,b)=>a + parseFloat(b.yieldKgPlot || b.yield || 0), 0)/tObs.length : 0;
+      const cMeanYield = cObs.length ? cObs.reduce((a,b)=>a + getYieldInKgHa(b), 0)/cObs.length : 0;
+      const tMeanYield = tObs.length ? tObs.reduce((a,b)=>a + getYieldInKgHa(b), 0)/tObs.length : 0;
       const appliedRate = parseFloat(this.trial.Dosage || 1);
       const nueVal = calculateNUE(tMeanYield, cMeanYield, appliedRate);
       
