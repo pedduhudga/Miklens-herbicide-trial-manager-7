@@ -184,6 +184,7 @@ export default function Trials({ onMenuClick }) {
 
   // --- Detail modal ---
   const [activeTrial, setActiveTrial] = useState(null);
+  const detailTrial = activeTrial ? (trials.find(t => t.ID === activeTrial.ID) || activeTrial) : null;
   const [detailTab, setDetailTab] = useState('info');
   const [selectedPhotoForDetails, setSelectedPhotoForDetails] = useState(null);
 
@@ -1532,7 +1533,6 @@ export default function Trials({ onMenuClick }) {
   };
 
   // ── DETAIL TRIAL DERIVATIONS ──────────────────────────────────────
-  const detailTrial = activeTrial ? (trials.find(t => t.ID === activeTrial.ID) || activeTrial) : null;
   const detailEfficacy = detailTrial ? validateEfficacyData(safeJsonParse(detailTrial.EfficacyDataJSON, []), activeCategory) : [];
   const detailPhotos = detailTrial ? safeJsonParse(detailTrial.PhotoURLs, []) : [];
   const detailIsCompleted = detailTrial?.IsCompleted === true || detailTrial?.IsCompleted === 'true';
