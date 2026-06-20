@@ -937,45 +937,48 @@ function listTrialPhotosFromDrive(ss, parentFolderId, payload = {}, auth) {
         const potLabelLower = potLabel ? String(potLabel).toLowerCase() : '';
 
         const collector = [];
-        const imageMimePrefixes = ['image/'];
-        const imageExtensionRegex = /\.(jpg|jpeg|png|gif|webp|bmp|heic|heif|tif|tiff)$/i;
-
-        function deepSearchFiles(currentDir, depth) {
-            if (depth > 3 || collector.length >= 100) return;
-            
-            const files = currentDir.getFiles();
-            while (files.hasNext() && collector.length < 100) {
-                const file = files.next();
-                const name = String(file.getName() || '').toLowerCase();
-                const mime = String(file.getMimeType() || '').toLowerCase();
-                
-                const isImage = imageMimePrefixes.some(prefix => mime.indexOf(prefix) === 0) || imageExtensionRegex.test(name);
-                if (!isImage) continue;
-
-                // Match condition:
-                // 1. Must contain the trial ID or formulation name keyword
-                const matchesTrial = searchKeywords.some(kw => kw && name.indexOf(kw.toLowerCase()) !== -1);
-                // 2. If potLabel is specified, the filename must ALSO contain the potLabel keyword
-                const matchesPot = !potLabelLower || name.indexOf(potLabelLower) !== -1;
-
-                if (matchesTrial && matchesPot) {
-                    collector.push({
-                        id: file.getId(),
-                        name: file.getName(),
-                        mimeType: file.getMimeType(),
-                        createdTime: file.getDateCreated() ? file.getDateCreated().toISOString() : '',
-                        updatedTime: file.getLastUpdated() ? file.getLastUpdated().toISOString() : ''
-                    });
-                }
+        const queryParts = [];
+        
+        // Match standard image mime types and common image extensions
+        queryParts.push("(mimeType contains 'image/' or title contains '.jpg' or title contains '.jpeg' or title contains '.png' or title contains '.webp' or title contains '.heic')");
+        
+        // Match the trial ID or Formulation Name
+        const keywordQueries = [];
+        searchKeywords.forEach(kw => {
+            if (kw) {
+                const escapedKw = String(kw).replace(/'/g, "\\'");
+                keywordQueries.push("title contains '" + escapedKw + "'");
             }
-
-            const subDirs = currentDir.getFolders();
-            while (subDirs.hasNext() && collector.length < 100) {
-                deepSearchFiles(subDirs.next(), depth + 1);
-            }
+        });
+        if (keywordQueries.length > 0) {
+            queryParts.push("(" + keywordQueries.join(" or ") + ")");
+        }
+        
+        // Match the pot label (e.g. Pot A) if specified
+        const potLabel = payload.potLabel || payload.PotLabel || trial.PotLabel || '';
+        if (potLabel) {
+            const escapedPot = String(potLabel).replace(/'/g, "\\'");
+            queryParts.push("title contains '" + escapedPot + "'");
         }
 
-        deepSearchFiles(rootFolder, 1);
+        const queryString = queryParts.join(" and ");
+        
+        try {
+            const searchResults = rootFolder.searchFiles(queryString);
+            while (searchResults.hasNext() && collector.length < 100) {
+                const file = searchResults.next();
+                collector.push({
+                    id: file.getId(),
+                    name: file.getName(),
+                    mimeType: file.getMimeType(),
+                    createdTime: file.getDateCreated() ? file.getDateCreated().toISOString() : '',
+                    updatedTime: file.getLastUpdated() ? file.getLastUpdated().toISOString() : ''
+                });
+            }
+        } catch (searchErr) {
+            // Fallback: If search fails, log it
+        }
+
         if (collector.length > 0) {
             photos = collector;
             searchMessage += ' Found ' + photos.length + ' photo(s) via deep file search.';
