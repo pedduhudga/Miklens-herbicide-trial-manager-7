@@ -2526,6 +2526,80 @@ Rules:
     }
   };
 
+  const handleSyncPhotosFromDrive = async (targetTrial = null) => {
+    const trial = targetTrial || activeTrial;
+    if (!trial) return;
+
+    try {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Scanning Google Drive for missing photos...', type: 'info' } }));
+      
+      const result = await apiCall('listTrialPhotosFromDrive', {
+        trialId: trial.ID,
+        formulation: trial.FormulationName,
+        date: trial.Date
+      }, false);
+
+      if (result._errType || !result.success) {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Failed to scan Drive: ${result.message || 'Unknown error'}`, type: 'error' } }));
+        return;
+      }
+
+      if (!result.photos || result.photos.length === 0) {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'No photos found in Drive folder.', type: 'warning' } }));
+        return;
+      }
+
+      // Filter out files that might not be images
+      const images = result.photos.filter(f => /\.(jpg|jpeg|png|gif|webp|bmp|heic|heif|tif|tiff)$/i.test(f.name));
+      if (images.length === 0) {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'No image files found in Drive folder.', type: 'warning' } }));
+        return;
+      }
+
+      // Update PhotoURLs with found images
+      const photoURLs = safeJsonParse(trial.PhotoURLs, []);
+      const existingIds = new Set(photoURLs.map(p => p.driveId || p.fileId || p.driveFileId || getDriveFileId(p.url || p.src)));
+
+      let addedCount = 0;
+      images.forEach(img => {
+        if (!existingIds.has(img.id)) {
+          const webViewUrl = `https://drive.google.com/uc?export=view&id=${img.id}`;
+          photoURLs.push({
+            url: webViewUrl,
+            fileName: img.name,
+            date: img.createdTime ? img.createdTime.split('T')[0] : new Date().toISOString().split('T')[0],
+            label: `Imported: ${img.name}`,
+            importedFrom: 'Drive',
+            driveId: img.id,
+            tag: 'Field Observation',
+            aiStatus: 'pending'
+          });
+          addedCount++;
+        }
+      });
+
+      if (addedCount > 0) {
+        const updatedPhotoURLs = JSON.stringify(photoURLs);
+        const updatedTrial = { ...trial, PhotoURLs: updatedPhotoURLs };
+        
+        updateState({ trials: getAppState().trials.map(t => t.ID === updatedTrial.ID ? updatedTrial : t) });
+        if (activeTrial?.ID === updatedTrial.ID) setActiveTrial(updatedTrial);
+
+        await updateTrial({
+          ID: trial.ID,
+          PhotoURLs: updatedPhotoURLs
+        }, getAppState);
+
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Successfully imported ${addedCount} photo(s) from Drive!`, type: 'success' } }));
+      } else {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'All Google Drive photos are already synced.', type: 'info' } }));
+      }
+    } catch (err) {
+      console.error('Sync photos from Drive error:', err);
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Error syncing photos: ${err.message}`, type: 'error' } }));
+    }
+  };
+
   const handleAnalyzeAllPhotos = async (specificTrial = null) => {
     const targetTrial = (specificTrial && specificTrial.ID) ? specificTrial : activeTrial;
     if (!targetTrial) return;
@@ -5420,6 +5494,9 @@ If none are present, write "None".`;
                         </button>
                         <button onClick={() => { setCameraMode('general'); setIsCameraOpen(true); }} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                           <Camera className="w-3.5 h-3.5" />Camera
+                        </button>
+                        <button onClick={() => handleSyncPhotosFromDrive()} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 shadow-md">
+                          <RefreshCw className="w-3.5 h-3.5" />Sync Drive
                         </button>
                         <button onClick={() => setAiBatchModalOpen(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:from-purple-600 hover:to-pink-600 shadow-lg">
                           <Sparkles className="w-3.5 h-3.5" />AI Scan All

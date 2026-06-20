@@ -615,47 +615,7 @@ function ensureTrialFolder(ss, parentFolderId, trialPayload, auth) {
         if (!parentFolderId || !trialPayload) return null;
 
         const rootFolder = DriveApp.getFolderById(parentFolderId);
-
-        // Determine Project Name
-        let projectName = 'Ungrouped Projects';
-        let project = null;
-        const projectId = trialPayload.ProjectID || trialPayload.projectId || trialPayload.projectID;
-        if (projectId) {
-            try {
-                project = getRecordById(ss, sheetsConfig.projects, projectId);
-                if (project && project.Name) {
-                    projectName = project.Name;
-                }
-            } catch (e) {
-                Logger.log('ensureTrialFolder project lookup error: ' + e.message);
-            }
-        }
-
-        // Determine Trial Folder Name
-        const formulationName = trialPayload.FormulationName || trialPayload.formulationName || 'Unknown Formulation';
-        const rawDate = trialPayload.Date || trialPayload.date || new Date();
-        const dateObj = rawDate instanceof Date ? rawDate : new Date(rawDate);
-        const dateStr = isNaN(dateObj.getTime()) ? new Date().toISOString().split('T')[0] : dateObj.toISOString().split('T')[0];
-        const trialFolderName = (formulationName + ' (' + dateStr + ')').trim();
-
-        const rawCategory = trialPayload.Category || (project && project.Category) || 'herbicide';
-        const categoryLower = String(rawCategory).trim().toLowerCase();
-        const categoryName = categoryLower === 'herbicide' ? 'Herbicide' :
-                             categoryLower === 'fungicide' ? 'Fungicide' :
-                             categoryLower === 'pesticide' ? 'Pesticide' :
-                             categoryLower === 'nutrition' ? 'Nutrition' :
-                             categoryLower === 'biostimulant' ? 'Biostimulant' :
-                             categoryLower.charAt(0).toUpperCase() + categoryLower.slice(1);
-
-        const userName = String(
-            (auth && auth.Name) ||
-            (auth && auth.Username) ||
-            trialPayload.InvestigatorName ||
-            (project && project.Investigator) ||
-            'Default User'
-        ).trim() || 'Default User';
-
-        const folderPath = [categoryName, userName, projectName, trialFolderName];
+        const folderPath = getTrialFolderPath(ss, trialPayload, auth);
 
         let targetFolder = rootFolder;
         folderPath.forEach(name => {
@@ -767,7 +727,9 @@ function getTrialFolderPath(ss, trialPayload, auth) {
     const dateStr = isNaN(dateObj.getTime()) ? new Date().toISOString().split('T')[0] : dateObj.toISOString().split('T')[0];
     const dosage = trialPayload.Dosage || trialPayload.dosage || '';
     const dosageSuffix = dosage ? ' (' + dosage + ')' : '';
-    const trialFolderName = (formulationName + dosageSuffix + ' (' + dateStr + ')').trim();
+    const trialId = trialPayload.ID || trialPayload.id || '';
+    const idSuffix = trialId ? ' - ' + String(trialId).slice(-5) : '';
+    const trialFolderName = (formulationName + dosageSuffix + ' (' + dateStr + ')' + idSuffix).trim();
 
     const rawCategory = trialPayload.Category || (project && project.Category) || 'herbicide';
     const categoryLower = String(rawCategory).trim().toLowerCase();
