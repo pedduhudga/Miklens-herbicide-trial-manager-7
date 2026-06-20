@@ -3688,15 +3688,19 @@ If none are present, write "None".`;
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Download/Export permission is disabled for your account.', type: 'error' } }));
       return;
     }
-    const config = getCategoryConfig(activeCategory);
+    const currentProj = detailTrial ? projects.find(p => String(p.ID) === String(detailTrial.ProjectID)) : null;
+    const isPotTrial = currentProj?.Design === 'PotTrial';
+    const fields = isPotTrial
+      ? (currentProj.PotFields || ['Plant Height', 'Branches', 'Flowers', 'Fruit Count', 'Yield']).map(f => ({ key: f, label: f }))
+      : (getCategoryConfig(activeCategory).observationFields || []);
     const initialSelection = {};
-    (config.observationFields || []).forEach(f => {
+    fields.forEach(f => {
       initialSelection[f.key] = true;
     });
     setReportFieldSelection(initialSelection);
     setPendingReportExport(() => exportFn);
     setCustomiseReportModalOpen(true);
-  }, [activeCategory, canDownload]);
+  }, [activeCategory, canDownload, detailTrial, projects]);
 
   // ── EXPORT FUNCTIONS (delegated to trialReports.js service) ─────────
   const exportTxtReport     = useCallback((trial) => {
@@ -7539,20 +7543,27 @@ If none are present, write "None".`;
             Select the observation variables/columns you want to include in the generated report:
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-[50vh] overflow-y-auto pr-1">
-            {(getCategoryConfig(activeCategory).observationFields || []).map(f => (
-              <label key={f.key} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-slate-50 cursor-pointer transition">
-                <input
-                  type="checkbox"
-                  checked={reportFieldSelection[f.key] !== false}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setReportFieldSelection(prev => ({ ...prev, [f.key]: checked }));
-                  }}
-                  className="rounded border-slate-300 text-teal-600 focus:ring-teal-500"
-                />
-                <span className="text-sm font-medium text-slate-700">{f.label}</span>
-              </label>
-            ))}
+            {(() => {
+              const currentProj = detailTrial ? projects.find(p => String(p.ID) === String(detailTrial.ProjectID)) : null;
+              const isPotTrial = currentProj?.Design === 'PotTrial';
+              const fields = isPotTrial
+                ? (currentProj.PotFields || ['Plant Height', 'Branches', 'Flowers', 'Fruit Count', 'Yield']).map(f => ({ key: f, label: f }))
+                : (getCategoryConfig(activeCategory).observationFields || []);
+              return fields.map(f => (
+                <label key={f.key} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-slate-50 cursor-pointer transition">
+                  <input
+                    type="checkbox"
+                    checked={reportFieldSelection[f.key] !== false}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setReportFieldSelection(prev => ({ ...prev, [f.key]: checked }));
+                    }}
+                    className="rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                  />
+                  <span className="text-sm font-medium text-slate-700">{f.label}</span>
+                </label>
+              ));
+            })()}
           </div>
           <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
             <button
@@ -7564,8 +7575,11 @@ If none are present, write "None".`;
             <button
               onClick={() => {
                 if (pendingReportExport) {
+                  const currentProj = detailTrial ? projects.find(p => String(p.ID) === String(detailTrial.ProjectID)) : null;
+                  const isPotTrial = currentProj?.Design === 'PotTrial';
+                  const key = isPotTrial ? (currentProj.Category || activeCategory) : activeCategory;
                   if (!window.activeReportFields) window.activeReportFields = {};
-                  window.activeReportFields[activeCategory] = reportFieldSelection;
+                  window.activeReportFields[key] = reportFieldSelection;
                   pendingReportExport();
                 }
                 setCustomiseReportModalOpen(false);

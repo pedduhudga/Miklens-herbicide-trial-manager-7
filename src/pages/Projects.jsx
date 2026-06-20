@@ -1250,7 +1250,7 @@ export default function Projects({ onMenuClick }) {
     if (ctxYield) {
       const engine = new AnalysisEngine(activeProject.ID, state, getAppState);
       const yieldData = engine.getData('yield');
-      const hasYield = Object.values(yieldData).some(arr => arr.some(v => v > 0));
+      const hasYield = Object.values(yieldData).some(arr => arr.values && arr.values.some(v => v > 0));
 
       if (hasYield) {
         const container = document.getElementById('project-yield-container');
@@ -1258,7 +1258,7 @@ export default function Projects({ onMenuClick }) {
 
         const labels = engine.treatments;
         const means = labels.map(t => {
-          const vals = yieldData[t] || [];
+          const vals = yieldData[t]?.values || [];
           return vals.length > 0 ? (vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
         });
 
@@ -3235,9 +3235,11 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
   // ── Scientific Report ─────────────────────────────────────────────────────
   const triggerExportWithCustomisation = (exportFn) => {
     const projectCategory = activeProject?.Category || activeCategory;
-    const config = getCategoryConfig(projectCategory);
+    const fields = activeProject?.Design === 'PotTrial'
+      ? (activeProject.PotFields || ['Plant Height', 'Branches', 'Flowers', 'Fruit Count', 'Yield']).map(f => ({ key: f, label: f }))
+      : (getCategoryConfig(projectCategory).observationFields || []);
     const initialSelection = {};
-    (config.observationFields || []).forEach(f => {
+    fields.forEach(f => {
       initialSelection[f.key] = true;
     });
     setReportFieldSelection(initialSelection);
@@ -5658,20 +5660,26 @@ ${narrative ? `<h2>Agronomist Narrative</h2><p style="font-size:13px;line-height
             Select the observation variables/columns you want to include in the generated report:
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-[50vh] overflow-y-auto pr-1">
-            {(getCategoryConfig(activeProject?.Category || activeCategory).observationFields || []).map(f => (
-              <label key={f.key} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-slate-50 cursor-pointer transition">
-                <input
-                  type="checkbox"
-                  checked={reportFieldSelection[f.key] !== false}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setReportFieldSelection(prev => ({ ...prev, [f.key]: checked }));
-                  }}
-                  className="rounded border-slate-300 text-teal-600 focus:ring-teal-500"
-                />
-                <span className="text-sm font-medium text-slate-700">{f.label}</span>
-              </label>
-            ))}
+            {(() => {
+              const isPotTrial = activeProject?.Design === 'PotTrial';
+              const fields = isPotTrial
+                ? (activeProject.PotFields || ['Plant Height', 'Branches', 'Flowers', 'Fruit Count', 'Yield']).map(f => ({ key: f, label: f }))
+                : (getCategoryConfig(activeProject?.Category || activeCategory).observationFields || []);
+              return fields.map(f => (
+                <label key={f.key} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-slate-50 cursor-pointer transition">
+                  <input
+                    type="checkbox"
+                    checked={reportFieldSelection[f.key] !== false}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setReportFieldSelection(prev => ({ ...prev, [f.key]: checked }));
+                    }}
+                    className="rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                  />
+                  <span className="text-sm font-medium text-slate-700">{f.label}</span>
+                </label>
+              ));
+            })()}
           </div>
           <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
             <button

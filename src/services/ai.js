@@ -3715,7 +3715,7 @@ async function _callGeminiApiWithRetries_impl(apiCallFunction, getAppState, retr
 
                         const yieldData = engine.getData('yield');
                         console.log('4. Yield Data:', yieldData);
-                        const hasYield = Object.values(yieldData).some(arr => arr.some(v => v > 0));
+                        const hasYield = Object.values(yieldData).some(arr => arr.values && arr.values.some(v => v > 0));
                         console.log('   - Has Yield?', hasYield);
 
                         const primaryMetric = hasYield ? 'yield' : 'cover';
@@ -16863,12 +16863,12 @@ Style Guidelines:
                     tempDiv.appendChild(yieldCanvas);
 
                     const yieldData = engine.getData('yield');
-                    const hasYield = Object.values(yieldData).some(arr => arr.some(v => v > 0));
+                    const hasYield = Object.values(yieldData).some(arr => arr.values && arr.values.some(v => v > 0));
 
                     if (hasYield) {
                         const labels = engine.treatments;
                         const means = labels.map(t => {
-                            const vals = yieldData[t] || [];
+                            const vals = yieldData[t]?.values || [];
                             return vals.length > 0 ? jStat.mean(vals) : 0;
                         });
                         const yieldColors = labels.map((t, i) => colors[i % colors.length]);
