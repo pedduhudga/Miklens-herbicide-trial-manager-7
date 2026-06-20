@@ -799,14 +799,36 @@ function listTrialPhotosFromDrive(ss, parentFolderId, payload = {}, auth) {
 
     const rootFolder = DriveApp.getFolderById(parentFolderId);
     const folderPath = getTrialFolderPath(ss, trial, auth);
-    const trialFolder = findNestedFolder(rootFolder, folderPath);
+    let trialFolder = findNestedFolder(rootFolder, folderPath);
+
+    // Legacy Fallback 1: Try without ID suffix (FormulationName (Dosage) (YYYY-MM-DD))
+    if (!trialFolder) {
+        const dosage = trial.Dosage || trial.dosage || '';
+        const dosageSuffix = dosage ? ' (' + dosage + ')' : '';
+        const dateObj = trial.Date ? new Date(trial.Date) : new Date();
+        const dateStr = isNaN(dateObj.getTime()) ? new Date().toISOString().split('T')[0] : dateObj.toISOString().split('T')[0];
+        const formulationName = trial.FormulationName || 'Unknown Formulation';
+        const legacyFolderName1 = (formulationName + dosageSuffix + ' (' + dateStr + ')').trim();
+        const legacyPath1 = [...folderPath.slice(0, 3), legacyFolderName1];
+        trialFolder = findNestedFolder(rootFolder, legacyPath1);
+    }
+
+    // Legacy Fallback 2: Try without ID suffix and without dosage suffix (FormulationName (YYYY-MM-DD))
+    if (!trialFolder) {
+        const dateObj = trial.Date ? new Date(trial.Date) : new Date();
+        const dateStr = isNaN(dateObj.getTime()) ? new Date().toISOString().split('T')[0] : dateObj.toISOString().split('T')[0];
+        const formulationName = trial.FormulationName || 'Unknown Formulation';
+        const legacyFolderName2 = (formulationName + ' (' + dateStr + ')').trim();
+        const legacyPath2 = [...folderPath.slice(0, 3), legacyFolderName2];
+        trialFolder = findNestedFolder(rootFolder, legacyPath2);
+    }
 
     if (!trialFolder) {
         return {
             success: true,
             photos: [],
             folderPath: folderPath,
-            message: 'Trial folder not found in Drive.'
+            message: 'Trial folder not found in Drive (checked both new and legacy folder names).'
         };
     }
 
