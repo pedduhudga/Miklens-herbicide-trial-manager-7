@@ -864,40 +864,40 @@ function listTrialPhotosFromDrive(ss, parentFolderId, payload = {}, auth) {
             }
         }
         
-        // If still not found, scan subfolders recursively (up to 3 levels deep) to find the folder name
+        // Fast folder search fallback using indexed Drive search
         if (!trialFolder) {
-            function searchFolderRecursively(currentDir, targetNames, depth) {
-                if (depth > 3) return null;
-                for (let k = 0; k < targetNames.length; k++) {
-                    const match = currentDir.getFoldersByName(targetNames[k]);
-                    if (match.hasNext()) return match.next();
+            const folderQueries = [];
+            candidateNames.forEach(function(name) {
+                if (name) {
+                    const escapedName = String(name).replace(/'/g, "\\'");
+                    folderQueries.push("title = '" + escapedName + "'");
                 }
-                const subDirs = currentDir.getFolders();
-                while (subDirs.hasNext()) {
-                    const found = searchFolderRecursively(subDirs.next(), targetNames, depth + 1);
-                    if (found) return found;
+            });
+            if (folderQueries.length > 0) {
+                const folderQueryString = "mimeType = 'application/vnd.google-apps.folder' and (" + folderQueries.join(" or ") + ")";
+                try {
+                    const folderMatches = rootFolder.searchFolders(folderQueryString);
+                    if (folderMatches.hasNext()) {
+                        trialFolder = folderMatches.next();
+                    }
+                } catch (err) {
+                    // Ignore search folder error
                 }
-                return null;
             }
-            trialFolder = searchFolderRecursively(rootFolder, candidateNames, 1);
         }
 
-        // Broad Fallback: Look for ANY folder containing the formulation name (e.g., "NPK POWDER") anywhere inside the root folder
+        // Broad fallback: search for folders containing formulation name
         if (!trialFolder && formulationName && formulationName !== 'Unknown Formulation') {
-            function searchFolderContainsRecursively(currentDir, nameKeyword, depth) {
-                if (depth > 3) return null;
-                const subDirs = currentDir.getFolders();
-                while (subDirs.hasNext()) {
-                    const subDir = subDirs.next();
-                    if (subDir.getName().toLowerCase().indexOf(nameKeyword.toLowerCase()) !== -1) {
-                        return subDir;
-                    }
-                    const found = searchFolderContainsRecursively(subDir, nameKeyword, depth + 1);
-                    if (found) return found;
+            const escapedForm = String(formulationName).replace(/'/g, "\\'");
+            const folderQueryString = "mimeType = 'application/vnd.google-apps.folder' and title contains '" + escapedForm + "'";
+            try {
+                const folderMatches = rootFolder.searchFolders(folderQueryString);
+                if (folderMatches.hasNext()) {
+                    trialFolder = folderMatches.next();
                 }
-                return null;
+            } catch (err) {
+                // Ignore search folder contains error
             }
-            trialFolder = searchFolderContainsRecursively(rootFolder, formulationName, 1);
         }
     }
 
