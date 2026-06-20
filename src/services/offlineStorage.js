@@ -120,3 +120,69 @@ export async function clearOfflineCache() {
     console.error('Failed to clear offline cache:', err);
   }
 }
+
+function dataURLtoBlob(dataurl) {
+  const arr = dataurl.split(',');
+  const mime = arr[0].match(/:(.*?);/)[1];
+  const bstr = atob(arr[1]);
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while(n--) {
+    u8arr[n] = bstr.charCodeAt(n);
+  }
+  return new Blob([u8arr], { type: mime });
+}
+
+export async function saveSyncQueueOffline(queue) {
+  try {
+    const db = await getDB();
+    const transaction = db.transaction('syncQueue', 'readwrite');
+    const store = transaction.objectStore('syncQueue');
+    store.clear();
+    queue.forEach(item => {
+      const id = String(item.id || item.ID);
+      const itemCopy = { ...item, ID: id };
+      if (itemCopy.photo && typeof itemCopy.photo.fileData === 'string' && itemCopy.photo.fileData.startsWith('data:')) {
+        itemCopy.photo.fileData = dataURLtoBlob(itemCopy.photo.fileData);
+      }
+      store.put(itemCopy);
+    });
+    return new Promise((resolve, reject) => {
+      transaction.oncomplete = () => resolve(true);
+      transaction.onerror = () => reject(transaction.error);
+    });
+  } catch (err) {
+    console.error('Failed to save sync queue offline:', err);
+  }
+}
+
+export async function loadSyncQueueOffline() {
+  try {
+    const db = await getDB();
+    const transaction = db.transaction('syncQueue', 'readonly');
+    const store = transaction.objectStore('syncQueue');
+    const request = store.getAll();
+    return new Promise((resolve, reject) => {
+      request.onsuccess = async () => {
+        const results = request.result || [];
+        const queue = await Promise.all(results.map(async item => {
+          if (item.photo && item.photo.fileData instanceof Blob) {
+            const base64 = await new Promise((res, rej) => {
+              const reader = new FileReader();
+              reader.onloadend = () => res(reader.result);
+              reader.onerror = rej;
+              reader.readAsDataURL(item.photo.fileData);
+            });
+            item.photo.fileData = base64;
+          }
+          return item;
+        }));
+        resolve(queue);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  } catch (err) {
+    console.error('Failed to load sync queue offline:', err);
+    return [];
+  }
+}

@@ -1107,6 +1107,7 @@ export default function LargeScaleTrials({ onMenuClick }) {
     // Save all dynamic metrics fields directly into the observation
     if (aiData.metrics && typeof aiData.metrics === 'object') {
       Object.entries(aiData.metrics).forEach(([k, v]) => {
+        if (v === null || v === undefined || v === '') return;
         const num = parseFloat(v);
         if (!isNaN(num)) {
           newObs[k] = num;
@@ -1132,6 +1133,7 @@ export default function LargeScaleTrials({ onMenuClick }) {
       // Average all dynamic metrics
       if (aiData.metrics && typeof aiData.metrics === 'object') {
         Object.entries(aiData.metrics).forEach(([k, v]) => {
+          if (v === null || v === undefined || v === '') return;
           const num = parseFloat(v);
           if (!isNaN(num)) {
             const oldVal = parseFloat(existing[k]);

@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useAppState } from '../hooks/useAppState.jsx';
-import { performANOVA, performTukeyHSD, performDunnettTest, performDuncanMRT, performANCOVA, performMetaAnalysis, performTypeIIIANOVA } from '../utils/statsUtils.js';
+import { performANOVA, performTukeyHSD, performDunnettTest, performDuncanMRT, performANCOVA, performMetaAnalysis, performTypeIIIANOVA, performKruskalWallis } from '../utils/statsUtils.js';
 import { safeJsonParse } from '../utils/helpers.js';
 import { 
   BarChart3, Calculator, ChevronDown, Download, 
@@ -112,6 +112,9 @@ export default function Statistics() {
         case 'meta':
           const metaProjects = projects.filter(p => selectedMetaProjects.includes(p.ID));
           result = performMetaAnalysis(metaProjects, trials, options);
+          break;
+        case 'kruskal':
+          result = performKruskalWallis(projectTrials, options);
           break;
         case 'anova':
         default:
@@ -241,6 +244,7 @@ export default function Statistics() {
               <option value="duncan">Duncan's MRT (Step-wise Ranked)</option>
               <option value="dunnett">Dunnett's Test (vs Control)</option>
               <option value="ancova">ANCOVA (Covariate Adjustment)</option>
+              <option value="kruskal">Kruskal-Wallis (Non-Parametric)</option>
               <option value="meta">Combined Meta-Analysis (Multi-Project)</option>
             </select>
           </div>
@@ -393,6 +397,35 @@ export default function Statistics() {
             </div>
           )}
 
+          {results.assumptions && (
+            <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-3">
+              <h4 className="font-bold text-slate-800 flex items-center gap-2 text-sm">
+                <CheckCircle className="w-4.5 h-4.5 text-emerald-600" /> Statistical Assumption Verification
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                <div className={`p-3 rounded-lg border ${results.assumptions.normalityPassed ? 'bg-emerald-50/50 border-emerald-100' : 'bg-rose-50/50 border-rose-100'}`}>
+                  <span className="font-semibold block mb-1">Residual Normality (Jarque-Bera)</span>
+                  <p className="text-slate-600">Status: <strong className={results.assumptions.normalityPassed ? 'text-emerald-700' : 'text-rose-700'}>{results.assumptions.normalityPassed ? 'Passed' : 'Failed'}</strong> (p = {results.assumptions.normalityP?.toFixed(4)})</p>
+                </div>
+                <div className={`p-3 rounded-lg border ${results.assumptions.variancePassed ? 'bg-emerald-50/50 border-emerald-100' : 'bg-rose-50/50 border-rose-100'}`}>
+                  <span className="font-semibold block mb-1">Variance Homogeneity (Levene's Test)</span>
+                  <p className="text-slate-600">Status: <strong className={results.assumptions.variancePassed ? 'text-emerald-700' : 'text-rose-700'}>{results.assumptions.variancePassed ? 'Passed' : 'Failed'}</strong> (p = {results.assumptions.varianceP?.toFixed(4)})</p>
+                </div>
+              </div>
+              {results.assumptions.recommendation && (
+                <div className="bg-amber-50 border border-amber-200 text-amber-800 p-3 rounded-lg text-xs font-medium flex flex-wrap items-center justify-between gap-2">
+                  <span>{results.assumptions.recommendation}</span>
+                  <button 
+                    onClick={() => { setTest('kruskal'); setResults(null); }}
+                    className="bg-amber-600 hover:bg-amber-700 text-white font-bold py-1 px-2.5 rounded transition text-[10px]"
+                  >
+                    Switch to Kruskal-Wallis
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Summary Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className={`p-4 rounded-xl border-2 ${results.significant ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
@@ -408,7 +441,7 @@ export default function Statistics() {
                 {results.significant ? 'Significant' : 'Not Significant'}
               </p>
               <p className="text-sm text-slate-500 mt-1">
-                F = {results.fStatistic?.toFixed(3)}, p = {results.pValue?.toFixed(4)}
+                {test === 'kruskal' ? `H = ${results.statistic?.toFixed(3)}` : `F = ${results.fStatistic?.toFixed(3)}`}, p = {results.pValue?.toFixed(4)}
               </p>
             </div>
 
@@ -421,7 +454,7 @@ export default function Statistics() {
                 {results.treatmentMeans ? Object.keys(results.treatmentMeans).length : 0}
               </p>
               <p className="text-sm text-slate-500 mt-1">
-                {test === 'meta' ? 'Multi-location analysis' : `${results.blocks?.length || 0} replications per treatment`}
+                {test === 'meta' ? 'Multi-location analysis' : test === 'kruskal' ? `Sample sizes: ${results.counts ? Object.entries(results.counts).map(([k,v])=>`${k}:${v}`).join(', ') : 'N/A'}` : `${results.blocks?.length || 0} replications per treatment`}
               </p>
             </div>
 

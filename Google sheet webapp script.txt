@@ -254,6 +254,10 @@ function executeAction(action, payload, auth) {
             const parentFolderId = resolveEffectiveFolderId(ss, auth, p.folderId || payload.folderId);
             return uploadPhotoToDrive(parentFolderId, p);
         },
+        'uploadPhotoChunk': (p) => {
+            const parentFolderId = resolveEffectiveFolderId(ss, auth, p.folderId || payload.folderId);
+            return uploadPhotoChunk(parentFolderId, p);
+        },
                 'getImageBase64': (p) => getImageBase64(p),
         // Projects
         'addProject': (p) => addRecord(ss, sheetsConfig.projects, p, auth),
@@ -2191,4 +2195,90 @@ function safeJsonParse(jsonString) {
 function testFolderAccess() {
   const folder = DriveApp.getFolderById("14UTh_QWhCRoaQ0JvfKeg7LZvOGZRF_rT");
   Logger.log(folder.getName());
+}
+
+function uploadPhotoChunk(parentFolderId, payload) {
+    if (!parentFolderId) throw new Error("Parent Folder ID missing.");
+    const { chunkIndex, totalChunks, uploadSessionId, fileData, fileName, mimeType, folderPath } = payload;
+    
+    const rootFolder = DriveApp.getFolderById(parentFolderId);
+    let tempFolder;
+    const tempFolderName = "temp_uploads_" + uploadSessionId;
+    const subfolders = rootFolder.getFoldersByName(tempFolderName);
+    if (subfolders.hasNext()) {
+        tempFolder = subfolders.next();
+    } else {
+        tempFolder = rootFolder.createFolder(tempFolderName);
+    }
+    
+    const validBase64 = fileData.includes('base64,') ? fileData.split('base64,')[1] : fileData;
+    const chunkBlob = Utilities.newBlob(Utilities.base64Decode(validBase64), 'application/octet-stream', 'chunk_' + chunkIndex);
+    tempFolder.createFile(chunkBlob);
+    
+    const files = tempFolder.getFiles();
+    let fileCount = 0;
+    while (files.hasNext()) {
+        files.next();
+        fileCount++;
+    }
+    
+    if (fileCount === totalChunks) {
+        var chunks = [];
+        for (var i = 0; i < totalChunks; i++) {
+            var chunkFiles = tempFolder.getFilesByName('chunk_' + i);
+            if (!chunkFiles.hasNext()) {
+                throw new Error("Missing chunk " + i);
+            }
+            var chunkFile = chunkFiles.next();
+            chunks.push(chunkFile.getBlob().getBytes());
+        }
+        
+        var base64String = chunks.map(function(c) {
+            return Utilities.base64Encode(c);
+        }).join('');
+        
+        let targetFolder = rootFolder;
+        if (folderPath && Array.isArray(folderPath)) {
+            folderPath.forEach(name => {
+                if (!name) return;
+                const sub = targetFolder.getFoldersByName(name);
+                if (sub.hasNext()) {
+                    targetFolder = sub.next();
+                } else {
+                    targetFolder = targetFolder.createFolder(name);
+                }
+            });
+        }
+        
+        const finalBlob = Utilities.newBlob(Utilities.base64Decode(base64String), mimeType, fileName);
+        const finalFile = targetFolder.createFile(finalBlob);
+        
+        // Clean up temp folder
+        tempFolder.getFiles().forEach(function(f) {
+            try { DriveApp.removeFile(f); } catch (e) { tempFolder.removeFile(f); }
+        });
+        try { DriveApp.removeFolder(tempFolder); } catch (e) { rootFolder.removeFolder(tempFolder); }
+        
+        let publicShared = true;
+        try {
+            finalFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+        } catch (shareErr) {
+            publicShared = false;
+        }
+        
+        return {
+            url: publicShared
+                ? `https://drive.google.com/uc?export=view&id=${finalFile.getId()}`
+                : `https://drive.google.com/file/d/${finalFile.getId()}/view`,
+            id: finalFile.getId(),
+            name: fileName,
+            completed: true
+        };
+    }
+    
+    return {
+        success: true,
+        completed: false,
+        chunkIndex: chunkIndex
+    };
 }

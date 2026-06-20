@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useReducer, useEffect, useCallback, useRef } from 'react';
 import { initFirebase, isFirebaseReady } from '../services/firebase.js';
-import { saveOfflineData, loadOfflineData, saveOfflinePhoto, loadOfflinePhoto } from '../services/offlineStorage.js';
+import { saveOfflineData, loadOfflineData, saveOfflinePhoto, loadOfflinePhoto, saveSyncQueueOffline, loadSyncQueueOffline } from '../services/offlineStorage.js';
 
 function safeJsonParse(val, fallback = []) {
   if (!val) return fallback;
@@ -137,10 +137,12 @@ function appReducer(state, action) {
       return { ...state, activeCategory: action.payload };
     }
     case 'SET_SYNC_QUEUE':
+      saveSyncQueueOffline(action.payload);
       localStorage.setItem('syncQueue', JSON.stringify(action.payload));
       return { ...state, syncQueue: action.payload };
     case 'ADD_SYNC_ITEM': {
       const newQueue = [...state.syncQueue, action.payload];
+      saveSyncQueueOffline(newQueue);
       localStorage.setItem('syncQueue', JSON.stringify(newQueue));
       return { ...state, syncQueue: newQueue };
     }
@@ -199,10 +201,16 @@ export function AppStateProvider({ children }) {
         }
       }
 
-      const savedSyncQueue = localStorage.getItem('syncQueue');
-      if (savedSyncQueue) {
-        dispatch({ type: 'SET_STATE', payload: { syncQueue: JSON.parse(savedSyncQueue) } });
-      }
+      loadSyncQueueOffline().then(savedSyncQueue => {
+        if (savedSyncQueue && savedSyncQueue.length > 0) {
+          dispatch({ type: 'SET_STATE', payload: { syncQueue: savedSyncQueue } });
+        } else {
+          const savedSyncQueueLS = localStorage.getItem('syncQueue');
+          if (savedSyncQueueLS) {
+            dispatch({ type: 'SET_STATE', payload: { syncQueue: JSON.parse(savedSyncQueueLS) } });
+          }
+        }
+      }).catch(err => console.error('Failed to load sync queue from IndexedDB:', err));
 
       const savedAuth = localStorage.getItem('appAuth');
       if (savedAuth) {

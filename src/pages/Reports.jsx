@@ -186,17 +186,13 @@ export default function Reports({ onMenuClick }) {
 
      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Generating Custom Report...', type: 'info' } }));
 
-     // Mocking integration for now, the real exportUtils function will handle doc generation
      try {
        const templateConfig = templateBlocks.map(b => b.id);
        console.log("Generating report with blocks:", templateConfig, "for Project ID:", selectedProjectId);
-       // In a full implementation:
-       // await exportScientificReportAsDOC({ projectId: selectedProjectId, trials: selectedTrialIds }, state, { templateConfig });
-
-       setTimeout(() => {
-          window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Custom Report Generated Successfully!', type: 'success' } }));
-       }, 1500);
+       await exportScientificReportAsDOC({ projectId: selectedProjectId, trials: selectedTrialIds }, state, { templateConfig });
+       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Custom Report Generated Successfully!', type: 'success' } }));
      } catch(e) {
+       console.error("Custom Report Error:", e);
        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Error generating report.', type: 'error' } }));
      }
   };

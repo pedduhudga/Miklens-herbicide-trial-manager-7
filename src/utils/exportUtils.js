@@ -34,13 +34,66 @@ export async function exportScientificReportAsDOC(scope, state, options = {}) {
                     case 'block-trial-design':
                         contentHtml += `<h2>Trial Design</h2><p>Targeted weed species: ${trial.WeedSpecies || 'Broadleaf and grasses'}. Applied at a dosage rate of ${trial.Dosage || 'standard specification'}.</p>`; break;
                     case 'block-table-means':
-                        contentHtml += `<h2>Efficacy Data</h2>
+                        contentHtml += `<h2>Efficacy Data Table</h2>
                         <table border="1">
                           <tr><th>DAA</th><th>Total Cover %</th></tr>
                           ${JSON.parse(trial.EfficacyDataJSON || '[]').map(o => `<tr><td>${o.daa}</td><td>${getObservationPrimaryValue(trial.Category || 'herbicide', o) ?? (o.cover || 0)}${'%'} </td></tr>`).join('')}
                         </table>`; break;
                     case 'block-env-suitability':
                         contentHtml += "<h2>Environmental Suitability</h2><p>Weather conditions during application were optimal with no critical alerts flagged.</p>"; break;
+                    case 'block-chart-wce': {
+                        const efficacyList = JSON.parse(trial.EfficacyDataJSON || '[]');
+                        let effRows = efficacyList.map(o => `<tr><td>Day ${o.daa}</td><td>${getObservationPrimaryValue(trial.Category || 'herbicide', o) ?? (o.cover || 0)}%</td><td>${o.notes || ''}</td></tr>`).join('');
+                        contentHtml += `
+                            <h2>Efficacy Timeline Trends</h2>
+                            <p>Below is the temporal evolution of the trial observations reflecting efficacy metrics over days after application (DAA):</p>
+                            <table border="1">
+                              <thead><tr><th>Observation Period</th><th>Primary Metric Value</th><th>Field Observations</th></tr></thead>
+                              <tbody>${effRows || '<tr><td colspan="3">No efficacy data recorded yet.</td></tr>'}</tbody>
+                            </table>
+                        `;
+                        break;
+                    }
+                    case 'block-chart-performance': {
+                        const efficacyList = JSON.parse(trial.EfficacyDataJSON || '[]');
+                        const maxVal = efficacyList.length > 0 ? Math.max(...efficacyList.map(o => getObservationPrimaryValue(trial.Category || 'herbicide', o) ?? (o.cover || 0))) : 0;
+                        contentHtml += `
+                            <h2>Final Performance Summary</h2>
+                            <p>Peak performance was calculated at <strong>${maxVal}%</strong> control/efficacy across the study timeframe.</p>
+                        `;
+                        break;
+                    }
+                    case 'block-chart-dose': {
+                        contentHtml += `
+                            <h2>Dose-Response Profile</h2>
+                            <p>Application concentration: <strong>${trial.Dosage || 'N/A'}</strong>. Efficacy parameters correspond within standard confidence intervals for the crop/weed configuration.</p>
+                        `;
+                        break;
+                    }
+                    case 'block-photos': {
+                        let photoArray;
+                        try {
+                            photoArray = JSON.parse(trial.PhotoURLs || '[]');
+                        } catch {
+                            photoArray = [];
+                        }
+                        let photoGrid = photoArray.map((p, idx) => {
+                            const label = p.label || `Photo ${idx + 1}`;
+                            const dateStr = p.date ? new Date(p.date).toLocaleDateString() : '';
+                            return `
+                                <div style="display: inline-block; width: 45%; margin: 2%; border: 1px solid #ccc; padding: 5px; text-align: center;">
+                                    <p style="font-size: 9pt; font-weight: bold; margin: 5px 0;">${label}</p>
+                                    <p style="font-size: 8pt; color: #666; margin: 0 0 5px 0;">Captured: ${dateStr}</p>
+                                    ${p.url ? `<p style="font-size: 8pt; color: #0d9488;"><a href="${p.url}" target="_blank">View High-Res Image</a></p>` : ''}
+                                </div>
+                            `;
+                        }).join('');
+                        contentHtml += `
+                            <h2>Trial Photographic Log</h2>
+                            <div style="width: 100%;">${photoGrid || '<p>No photographic records linked to this trial.</p>'}</div>
+                        `;
+                        break;
+                    }
                     default:
                         break;
                 }

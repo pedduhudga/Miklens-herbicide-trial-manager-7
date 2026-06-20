@@ -182,6 +182,35 @@ export function performANOVA(trials, options = {}) {
   const pValue = approximatePValue(fStatistic, dfTreatments, dfError);
   const pBlock = (design !== 'CRD' && dfBlocks > 0) ? approximatePValue(fBlock, dfBlocks, dfError) : null;
   
+  const residuals = [];
+  treatmentNames.forEach(trt => {
+    blockIds.forEach(block => {
+      const vals = treatments[trt][block] || [];
+      if (vals.length > 0) {
+        const mean = treatmentMeans[trt];
+        vals.forEach(v => {
+          residuals.push(v - mean);
+        });
+      }
+    });
+  });
+
+  const normalityResult = checkNormality(residuals);
+  
+  const groupsForLevene = {};
+  treatmentNames.forEach(trt => {
+    groupsForLevene[trt] = Object.values(treatments[trt]).flat();
+  });
+  const leveneResult = checkLeveneTest(groupsForLevene);
+
+  let recommendation = null;
+  if (!normalityResult.normalityPassed || !leveneResult.variancePassed) {
+    recommendation = "Warning: ANOVA assumptions violated. ";
+    if (!normalityResult.normalityPassed) recommendation += "Residuals are not normally distributed (p < 0.05). ";
+    if (!leveneResult.variancePassed) recommendation += "Variances are not homogeneous (Levene's test p < 0.05). ";
+    recommendation += "Consider running the Kruskal-Wallis non-parametric test.";
+  }
+
   return {
     anovaTable: {
       source: design === 'CRD' ? ['Treatments', 'Error', 'Total'] : ['Treatments', 'Blocks', 'Error', 'Total'],
@@ -200,7 +229,14 @@ export function performANOVA(trials, options = {}) {
     blocks: design === 'CRD' ? [] : blockIds,
     trtRepCounts,
     balanceWarning,
-    design
+    design,
+    assumptions: {
+      normalityPassed: normalityResult.normalityPassed,
+      normalityP: normalityResult.pValue,
+      variancePassed: leveneResult.variancePassed,
+      varianceP: leveneResult.pValue,
+      recommendation
+    }
   };
 }
 
@@ -1370,6 +1406,26 @@ export function performTypeIIIANOVA(trials, options = {}) {
     treatmentMeans[trt] = vals.reduce((a, b) => a + b, 0) / (vals.length || 1);
   });
 
+  const residuals = [];
+  data.forEach(d => {
+    residuals.push(d.value - treatmentMeans[d.trt]);
+  });
+  const normalityResult = checkNormality(residuals);
+  
+  const groupsForLevene = {};
+  trts.forEach(trt => {
+    groupsForLevene[trt] = data.filter(d => d.trt === trt).map(d => d.value);
+  });
+  const leveneResult = checkLeveneTest(groupsForLevene);
+
+  let recommendation = null;
+  if (!normalityResult.normalityPassed || !leveneResult.variancePassed) {
+    recommendation = "Warning: ANOVA assumptions violated. ";
+    if (!normalityResult.normalityPassed) recommendation += "Residuals are not normally distributed (p < 0.05). ";
+    if (!leveneResult.variancePassed) recommendation += "Variances are not homogeneous (Levene's test p < 0.05). ";
+    recommendation += "Consider running the Kruskal-Wallis non-parametric test.";
+  }
+
   return {
     anovaTable: {
       source: ['Treatments', 'Blocks', 'Error', 'Total'],
@@ -1386,7 +1442,199 @@ export function performTypeIIIANOVA(trials, options = {}) {
     grandMean,
     treatments: trts,
     blocks: blocks,
-    isTypeIII: true
+    isTypeIII: true,
+    assumptions: {
+      normalityPassed: normalityResult.normalityPassed,
+      normalityP: normalityResult.pValue,
+      variancePassed: leveneResult.variancePassed,
+      varianceP: leveneResult.pValue,
+      recommendation
+    }
+  };
+}
+
+export function checkNormality(residuals) {
+  const n = residuals.length;
+  if (n < 4) return { normalityPassed: true, pValue: 1.0, score: 0 };
+  const mean = residuals.reduce((a, b) => a + b, 0) / n;
+  const variance = residuals.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / (n - 1);
+  const stdDev = Math.sqrt(variance);
+  if (stdDev === 0) return { normalityPassed: true, pValue: 1.0, score: 0 };
+
+  const m3 = residuals.reduce((sum, v) => sum + Math.pow(v - mean, 3), 0) / n;
+  const m4 = residuals.reduce((sum, v) => sum + Math.pow(v - mean, 4), 0) / n;
+
+  const skewness = m3 / Math.pow(stdDev, 3);
+  const kurtosis = (m4 / Math.pow(stdDev, 4)) - 3;
+
+  // Jarque-Bera test statistic
+  const jb = (n / 6) * (Math.pow(skewness, 2) + Math.pow(kurtosis, 2) / 4);
+  // JB follows Chi-Square(2). p-value approximation: exp(-jb / 2)
+  const pVal = Math.exp(-jb / 2);
+  
+  return {
+    normalityPassed: pVal >= 0.05,
+    pValue: pVal,
+    skewness,
+    kurtosis,
+    statistic: jb
+  };
+}
+
+export function checkLeveneTest(groups) {
+  const trtKeys = Object.keys(groups);
+  const k = trtKeys.length;
+  if (k < 2) return { variancePassed: true, pValue: 1.0 };
+
+  const absoluteDeviations = {};
+  const allDeviations = [];
+  
+  trtKeys.forEach(trt => {
+    const vals = groups[trt];
+    const mean = vals.reduce((a, b) => a + b, 0) / (vals.length || 1);
+    absoluteDeviations[trt] = vals.map(v => Math.abs(v - mean));
+    allDeviations.push(...absoluteDeviations[trt]);
+  });
+
+  const N = allDeviations.length;
+  if (N - k <= 0) return { variancePassed: true, pValue: 1.0 };
+
+  const grandMeanDev = allDeviations.reduce((a, b) => a + b, 0) / N;
+
+  let ssTreatments = 0;
+  trtKeys.forEach(trt => {
+    const devs = absoluteDeviations[trt];
+    const meanDev = devs.reduce((a, b) => a + b, 0) / (devs.length || 1);
+    ssTreatments += devs.length * Math.pow(meanDev - grandMeanDev, 2);
+  });
+
+  let ssTotal = 0;
+  allDeviations.forEach(d => {
+    ssTotal += Math.pow(d - grandMeanDev, 2);
+  });
+
+  const ssError = Math.max(0, ssTotal - ssTreatments);
+
+  const dfTreatments = k - 1;
+  const dfError = N - k;
+
+  const msTreatments = ssTreatments / dfTreatments;
+  const msError = ssError / dfError;
+
+  const fStatistic = msError > 0 ? msTreatments / msError : 0;
+  const pValue = approximatePValue(fStatistic, dfTreatments, dfError);
+
+  return {
+    variancePassed: pValue >= 0.05,
+    pValue,
+    fStatistic
+  };
+}
+
+export function performKruskalWallis(trials, options = {}) {
+  const { metric = 'controlPct', daa = null } = options;
+  
+  const groups = {};
+  trials.forEach(trial => {
+    const trt = trial.FormulationName || 'Unknown';
+    const efficacy = safeJsonParse(trial.EfficacyDataJSON, []);
+    const observations = daa 
+      ? efficacy.filter(e => e.daa === daa || e.daysAfterApplication === daa)
+      : efficacy;
+    
+    if (observations.length > 0) {
+      const latest = observations[observations.length - 1];
+      const category = trial.Category || 'herbicide';
+      let value = latest[metric] ?? latest[metric === 'yield' ? 'yieldKgPlot' : metric] ?? latest.controlPct ?? latest.wce ?? getObservationPrimaryValue(category, latest) ?? latest.diseaseSeverity ?? latest.pestCount ?? latest.yieldKgPlot ?? latest.overallVigor;
+      if (metric === 'yield' && (value === null || value === undefined || value === '')) {
+        value = trial.Yield ?? trial.YieldValue;
+      }
+      if (value !== null && value !== undefined && !isNaN(value)) {
+        if (!groups[trt]) groups[trt] = [];
+        groups[trt].push({ value: parseFloat(value), trt });
+      }
+    }
+  });
+
+  const trtKeys = Object.keys(groups);
+  const k = trtKeys.length;
+  if (k < 2) {
+    return { error: 'Need at least 2 treatments for Kruskal-Wallis test' };
+  }
+
+  const allItems = [];
+  trtKeys.forEach(trt => {
+    groups[trt].forEach(item => allItems.push(item));
+  });
+
+  allItems.sort((a, b) => a.value - b.value);
+
+  let i = 0;
+  const N = allItems.length;
+  const ranks = new Array(N);
+  let tieSum = 0;
+
+  while (i < N) {
+    let j = i + 1;
+    while (j < N && allItems[j].value === allItems[i].value) {
+      j++;
+    }
+    const rankSum = ((i + 1) + j) * (j - i) / 2;
+    const avgRank = rankSum / (j - i);
+    for (let m = i; m < j; m++) {
+      ranks[m] = avgRank;
+    }
+    if (j - i > 1) {
+      const t = j - i;
+      tieSum += (Math.pow(t, 3) - t);
+    }
+    i = j;
+  }
+
+  for (let m = 0; m < N; m++) {
+    allItems[m].rank = ranks[m];
+  }
+
+  const rankSums = {};
+  const counts = {};
+  trtKeys.forEach(trt => {
+    rankSums[trt] = 0;
+    counts[trt] = groups[trt].length;
+  });
+
+  allItems.forEach(item => {
+    rankSums[item.trt] += item.rank;
+  });
+
+  let sumSqR = 0;
+  trtKeys.forEach(trt => {
+    sumSqR += Math.pow(rankSums[trt], 2) / counts[trt];
+  });
+
+  let H = (12 / (N * (N + 1))) * sumSqR - 3 * (N + 1);
+
+  const C = 1 - (tieSum / (Math.pow(N, 3) - N));
+  if (C > 0 && C < 1) {
+    H /= C;
+  }
+
+  const df = k - 1;
+  const pValue = approximatePValue(H / df, df, 999999);
+
+  const treatmentMeans = {};
+  trtKeys.forEach(trt => {
+    const vals = groups[trt].map(g => g.value);
+    treatmentMeans[trt] = vals.reduce((a, b) => a + b, 0) / (vals.length || 1);
+  });
+
+  return {
+    statistic: H,
+    df,
+    pValue,
+    significant: pValue < 0.05,
+    treatmentMeans,
+    test: 'Kruskal-Wallis',
+    counts
   };
 }
 
@@ -1401,6 +1649,9 @@ if (typeof window !== 'undefined') {
   window.performANCOVA = performANCOVA;
   window.performMetaAnalysis = performMetaAnalysis;
   window.performTypeIIIANOVA = performTypeIIIANOVA;
+  window.checkNormality = checkNormality;
+  window.checkLeveneTest = checkLeveneTest;
+  window.performKruskalWallis = performKruskalWallis;
 }
 
 export default {
@@ -1413,6 +1664,9 @@ export default {
   detectOutliers,
   performANCOVA,
   performMetaAnalysis,
-  performTypeIIIANOVA
+  performTypeIIIANOVA,
+  checkNormality,
+  checkLeveneTest,
+  performKruskalWallis
 };
 

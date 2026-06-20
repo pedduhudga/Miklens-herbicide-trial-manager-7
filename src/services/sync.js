@@ -24,6 +24,86 @@ function isDrivePermissionError(msg) {
         m.includes('execute as: me');
 }
 
+function dataURLtoBlob(dataurl) {
+    const arr = dataurl.split(',');
+    const mime = arr[0].match(/:(.*?);/)[1];
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new Blob([u8arr], { type: mime });
+}
+
+async function uploadPhotoChunked(item, folderPath, getAppState) {
+    const fileData = item.photo.fileData;
+    const mimeType = item.photo.mimeType;
+    const fileName = item.photo.fileName;
+    
+    let blob = fileData;
+    if (typeof fileData === 'string' && fileData.startsWith('data:')) {
+        blob = dataURLtoBlob(fileData);
+    }
+    
+    const chunkSize = 1024 * 1024; // 1MB chunk size
+    const totalChunks = Math.ceil(blob.size / chunkSize);
+    const uploadSessionId = item.id || `session_${Date.now()}`;
+    
+    let startChunk = item.lastUploadedChunk !== undefined ? item.lastUploadedChunk + 1 : 0;
+    
+    console.log(`[HighTechSync] Chunked upload: Total chunks = ${totalChunks}, resuming from chunk ${startChunk + 1}`);
+    
+    let result = null;
+    for (let i = startChunk; i < totalChunks; i++) {
+        const start = i * chunkSize;
+        const end = Math.min(start + chunkSize, blob.size);
+        const chunkSlice = blob.slice(start, end);
+        
+        const chunkBase64 = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(chunkSlice);
+        });
+        
+        console.log(`[HighTechSync] Uploading chunk ${i + 1}/${totalChunks}...`);
+        
+        const uploadPromise = apiCall('uploadPhotoChunk', {
+            chunkIndex: i,
+            totalChunks: totalChunks,
+            uploadSessionId: uploadSessionId,
+            fileData: chunkBase64,
+            fileName: fileName,
+            mimeType: mimeType,
+            folderPath: folderPath
+        }, false, getAppState);
+        
+        result = await Promise.race([
+            uploadPromise,
+            new Promise((_, reject) =>
+                setTimeout(() => reject(new Error(`Chunk upload timeout at chunk ${i + 1}`)), 45000)
+            )
+        ]);
+        
+        if (result && result._errType) {
+            throw new Error(`Server Error on chunk ${i + 1}: ${result.message}`);
+        }
+        
+        // Save state progress
+        item.lastUploadedChunk = i;
+        if (window.updateState && getAppState) {
+            const currentQueue = getAppState().syncQueue;
+            const updatedQueue = currentQueue.map(q => q.id === item.id ? { ...q, lastUploadedChunk: i } : q);
+            window.updateState({ syncQueue: updatedQueue });
+            const { saveSyncQueueOffline } = await import('./offlineStorage.js');
+            await saveSyncQueueOffline(updatedQueue);
+        }
+    }
+    
+    return result;
+}
+
 export async function processSyncQueue(getAppState, updateAppState, showToast, renderSyncStatus) {
                 const state = getAppState();
                 if (_isSyncProcessing || state.syncQueue.length === 0) return;
@@ -259,24 +339,31 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                         // ADD TIMEOUT SAFETY: Prevent hanging on Google Drive API (timeout after 45s)
                         let result = null;
                         try {
-                            const uploadPromise = apiCall('uploadPhoto', {
-                                trialId: item.trialId,
-                                fileData: item.photo.fileData,
-                                mimeType: item.photo.mimeType,
-                                fileName: item.photo.fileName,
-                                isWeed: isWeed,
-                                label: item.photo.label,
-                                date: item.photo.date,
-                                folderPath: folderPath
-                            }, false, getAppState);
+                            const fileData = item.photo.fileData;
+                            const isLargeFile = (typeof fileData === 'string' && fileData.length * 0.75 > 2 * 1024 * 1024) || (fileData instanceof Blob && fileData.size > 2 * 1024 * 1024);
+                            
+                            if (isLargeFile) {
+                                result = await uploadPhotoChunked(item, folderPath, getAppState);
+                            } else {
+                                const uploadPromise = apiCall('uploadPhoto', {
+                                    trialId: item.trialId,
+                                    fileData: item.photo.fileData,
+                                    mimeType: item.photo.mimeType,
+                                    fileName: item.photo.fileName,
+                                    isWeed: isWeed,
+                                    label: item.photo.label,
+                                    date: item.photo.date,
+                                    folderPath: folderPath
+                                }, false, getAppState);
 
-                            // Timeout after 45 seconds
-                            result = await Promise.race([
-                                uploadPromise,
-                                new Promise((_, reject) =>
-                                    setTimeout(() => reject(new Error('Upload timeout after 45s - connection too slow. Will retry.')), 45000)
-                                )
-                            ]);
+                                // Timeout after 45 seconds
+                                result = await Promise.race([
+                                    uploadPromise,
+                                    new Promise((_, reject) =>
+                                        setTimeout(() => reject(new Error('Upload timeout after 45s - connection too slow. Will retry.')), 45000)
+                                    )
+                                ]);
+                            }
                         } catch (timeoutErr) {
                             if (String(timeoutErr.message).includes('timeout')) {
                                 console.error('[HighTechSync] [ERROR] Upload timeout detected:', timeoutErr.message);

@@ -2296,6 +2296,7 @@ export default function Trials({ onMenuClick }) {
     // Save all dynamic metrics fields directly into the observation
     if (aiData.metrics && typeof aiData.metrics === 'object') {
       Object.entries(aiData.metrics).forEach(([k, v]) => {
+        if (v === null || v === undefined || v === '') return;
         const num = parseFloat(v);
         if (!isNaN(num)) {
           newObs[k] = num;
@@ -2325,6 +2326,7 @@ export default function Trials({ onMenuClick }) {
       // Average all dynamic metrics
       if (aiData.metrics && typeof aiData.metrics === 'object') {
         Object.entries(aiData.metrics).forEach(([k, v]) => {
+          if (v === null || v === undefined || v === '') return;
           const num = parseFloat(v);
           if (!isNaN(num)) {
             const oldVal = parseFloat(existing[k]);
@@ -7585,6 +7587,42 @@ If none are present, write "None".`;
         onApplyValue={(val) => {
           const primaryField = getPrimaryObservationField(activeCategory);
           setObsForm(prev => ({ ...prev, [primaryField]: val }));
+        }}
+        onSave={async (updatedBounds) => {
+          setPhotoAnalyzerResults(updatedBounds);
+          setWeedIdResult(updatedBounds);
+          
+          if (!activeTrial) return;
+          const photos = safeJsonParse(activeTrial.PhotoURLs, []);
+          const targetIdx = photos.findIndex(p => {
+            const pSrc = typeof p === 'string' ? p : (p.fileData || p.url);
+            return pSrc === photoAnalyzerUrl;
+          });
+          
+          if (targetIdx !== -1) {
+            const updatedPhotos = photos.map((p, idx) => {
+              if (idx === targetIdx) {
+                if (typeof p === 'string') {
+                  const isDrive = p.includes('drive.google.com');
+                  return {
+                    [isDrive ? 'url' : 'fileData']: p,
+                    bounds: updatedBounds
+                  };
+                } else {
+                  return { ...p, bounds: updatedBounds };
+                }
+              }
+              return p;
+            });
+            const updatedTrial = { ...activeTrial, PhotoURLs: JSON.stringify(updatedPhotos) };
+            updateState({ trials: trials.map(t => t.ID === updatedTrial.ID ? updatedTrial : t) });
+            setActiveTrial(updatedTrial);
+            try {
+              await updateTrial({ ID: updatedTrial.ID, PhotoURLs: updatedTrial.PhotoURLs }, getAppState);
+            } catch (dbErr) {
+              console.error('Failed to save cached bounds:', dbErr);
+            }
+          }
         }}
         activeCategory={activeCategory}
       />
