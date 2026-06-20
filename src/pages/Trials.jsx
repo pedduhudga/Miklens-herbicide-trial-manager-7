@@ -2575,6 +2575,13 @@ Rules:
         return;
       }
 
+      // Sort discovered images by name or createdTime to ensure consistent chronological order
+      images.sort((a, b) => {
+        const nameA = String(a.name || '');
+        const nameB = String(b.name || '');
+        return nameA.localeCompare(nameB);
+      });
+
       // Update PhotoURLs with found images
       const existingIds = new Set(photoURLs.map(p => p.driveId || p.fileId || p.driveFileId || getDriveFileId(p.url || p.src)));
 
@@ -2585,6 +2592,14 @@ Rules:
         if (!str) return '';
         return String(str).toLowerCase().replace(/[^a-z0-9]/g, '');
       };
+
+      // Collect indices of broken/unavailable photos to heal sequentially
+      const brokenPhotoIndices = [];
+      photoURLs.forEach((p, idx) => {
+        if (isPhotoBroken(p)) {
+          brokenPhotoIndices.push(idx);
+        }
+      });
 
       images.forEach(img => {
         if (existingIds.has(img.id)) return;
@@ -2610,12 +2625,9 @@ Rules:
         
         // Extract clean pot name/label by stripping date and times
         let strippedLabel = cleanLabel;
-        // strip date patterns like DD-MM-YYYY or YYYY-MM-DD
         strippedLabel = strippedLabel.replace(/\d{2}[-_]\d{2}[-_]\d{4}/g, '');
         strippedLabel = strippedLabel.replace(/\d{4}[-_]\d{2}[-_]\d{2}/g, '');
-        // strip time patterns like 05_51 PM or 05:51 PM
         strippedLabel = strippedLabel.replace(/\d{2}[:_]\d{2}\s*(AM|PM|am|pm)?/g, '');
-        // clean leading/trailing spaces, hyphens, underscores
         strippedLabel = strippedLabel.replace(/^[\s\-_]+|[\s\-_]+$/g, '');
         
         if (strippedLabel) {
@@ -2626,13 +2638,12 @@ Rules:
         const webViewUrl = `https://drive.google.com/uc?export=view&id=${img.id}`;
         let healed = false;
 
-        // Attempt to find a broken/unavailable entry that matches this photo
+        // 1. Attempt to find a broken/unavailable entry that matches this photo by label
         for (let i = 0; i < photoURLs.length; i++) {
           const p = photoURLs[i];
           if (isPhotoBroken(p)) {
             const normExistingLabel = normalize(p.label);
             
-            // Match if labels overlap (e.g., "plant1pota" vs "plant1potawholecanopystandard")
             const isMatch = normExistingLabel && normDriveLabel && (
               normExistingLabel.indexOf(normDriveLabel) !== -1 ||
               normDriveLabel.indexOf(normExistingLabel) !== -1
@@ -2646,11 +2657,30 @@ Rules:
               if (!p.date && photoDate) p.date = photoDate;
               healed = true;
               healedCount++;
+              // Remove this index from brokenPhotoIndices so it's not reused sequentially
+              const idxInBroken = brokenPhotoIndices.indexOf(i);
+              if (idxInBroken !== -1) {
+                brokenPhotoIndices.splice(idxInBroken, 1);
+              }
               break;
             }
           }
         }
 
+        // 2. Sequential fallback: If not healed by label, match to the first remaining broken photo sequentially
+        if (!healed && brokenPhotoIndices.length > 0) {
+          const targetIdx = brokenPhotoIndices.shift();
+          const p = photoURLs[targetIdx];
+          p.url = webViewUrl;
+          p.driveId = img.id;
+          p.fileName = img.name;
+          p.importedFrom = 'Drive';
+          if (!p.date && photoDate) p.date = photoDate;
+          healed = true;
+          healedCount++;
+        }
+
+        // 3. If no broken photo could be healed, append as new photo
         if (!healed) {
           photoURLs.push({
             url: webViewUrl,

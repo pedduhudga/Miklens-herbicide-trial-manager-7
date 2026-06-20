@@ -810,7 +810,24 @@ function listTrialPhotosFromDrive(ss, parentFolderId, payload = {}, auth) {
 
     const rootFolder = DriveApp.getFolderById(parentFolderId);
     const folderPath = getTrialFolderPath(ss, trial, auth);
-    let trialFolder = findNestedFolder(rootFolder, folderPath);
+    
+    let trialFolder = null;
+    let trialIdSuffix = '';
+    if (trialId && String(trialId).length > 5) {
+        trialIdSuffix = String(trialId).slice(-5);
+        try {
+            const folderMatches = rootFolder.searchFolders("mimeType = 'application/vnd.google-apps.folder' and title contains '" + trialIdSuffix + "'");
+            if (folderMatches.hasNext()) {
+                trialFolder = folderMatches.next();
+            }
+        } catch (err) {
+            Logger.log('Suffix folder search error: ' + err.message);
+        }
+    }
+
+    if (!trialFolder) {
+        trialFolder = findNestedFolder(rootFolder, folderPath);
+    }
 
     const dosage = trial.Dosage || trial.dosage || '';
     const dosageSuffix = dosage ? ' (' + dosage + ')' : '';
@@ -927,123 +944,147 @@ function listTrialPhotosFromDrive(ss, parentFolderId, payload = {}, auth) {
     if (photos.length === 0) {
         searchMessage = trialFolder ? 'Trial folder was empty. Running selective file search...' : 'Trial folder not found. Running selective file search...';
         
-        const searchKeywords = [];
+        // 1. Direct search by full trialId (extremely fast and accurate since filenames contain trialId)
         if (trialId) {
-            const strId = String(trialId);
-            searchKeywords.push(strId);
-            if (strId.length > 5) {
-                searchKeywords.push(strId.slice(-5));
-            }
-        }
-        if (formulationName && formulationName !== 'Unknown Formulation') {
-            searchKeywords.push(formulationName);
-        }
-        
-        const potLabel = payload.potLabel || payload.PotLabel || trial.PotLabel || '';
-        const potLabelLower = potLabel ? String(potLabel).toLowerCase() : '';
-
-        const collector = [];
-        const queryParts = [];
-        
-        // Match standard image mime types and common image extensions
-        queryParts.push("(mimeType contains 'image/' or title contains '.jpg' or title contains '.jpeg' or title contains '.png' or title contains '.webp' or title contains '.heic')");
-        
-        // Date and Time strings are highly selective (either YYYY-MM-DD or DD-MM-YYYY along with specific HH:MM time)
-        const dateQueries = [];
-        const brokenPhotos = payload.brokenPhotos || [];
-        
-        if (brokenPhotos.length > 0) {
-            for (let b = 0; b < brokenPhotos.length; b++) {
-                const p = brokenPhotos[b];
-                if (p.date) {
-                    const rawDate = String(p.date);
-                    // extract date DD-MM-YYYY or YYYY-MM-DD
-                    const dateMatch = rawDate.match(/(\d{2})[-_](\d{2})[-_](\d{4})/);
-                    let dStr = '';
-                    let dStrDMY = '';
-                    if (dateMatch) {
-                        dStrDMY = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
-                        dStr = `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
-                    } else {
-                        const ymdMatch = rawDate.match(/(\d{4})[-_](\d{2})[-_](\d{2})/);
-                        if (ymdMatch) {
-                            dStr = `${ymdMatch[1]}-${ymdMatch[2]}-${ymdMatch[3]}`;
-                            dStrDMY = `${ymdMatch[3]}-${ymdMatch[2]}-${ymdMatch[1]}`;
-                        }
-                    }
-
-                    // Extract time keywords if present (e.g. 05:51 PM -> 05, 51, PM)
-                    const timeMatch = rawDate.match(/(\d{2})[:_](\d{2})\s*(AM|PM|am|pm)?/);
-                    let timeParts = [];
-                    if (timeMatch) {
-                        timeParts.push(timeMatch[1] + '_' + timeMatch[2]);
-                        timeParts.push(timeMatch[1] + ':' + timeMatch[2]);
-                        if (timeMatch[3]) {
-                            timeParts.push(timeMatch[3]);
-                        }
-                    }
-
-                    const subQueries = [];
-                    if (dStr) subQueries.push("title contains '" + dStr + "'");
-                    if (dStrDMY) subQueries.push("title contains '" + dStrDMY + "'");
-                    
-                    if (timeParts.length > 0) {
-                        const timeSub = timeParts.map(function(t) { return "title contains '" + t + "'"; }).join(" or ");
-                        if (subQueries.length > 0) {
-                            dateQueries.push("((" + subQueries.join(" or ") + ") and (" + timeSub + "))");
-                        } else {
-                            dateQueries.push("(" + timeSub + ")");
-                        }
-                    } else if (subQueries.length > 0) {
-                        dateQueries.push("(" + subQueries.join(" or ") + ")");
-                    }
-                }
-            }
-        }
-
-        // Fallback: If no brokenPhotos dates found, use the trial start dates
-        if (dateQueries.length === 0) {
-            if (dateStr) dateQueries.push("title contains '" + dateStr + "'");
-            if (dateStrDMY) dateQueries.push("title contains '" + dateStrDMY + "'");
-        }
-
-        if (dateQueries.length > 0) {
-            queryParts.push("(" + dateQueries.join(" or ") + ")");
-        }
-
-        const queryString = queryParts.join(" and ");
-        
-        try {
-            const searchResults = rootFolder.searchFiles(queryString);
-            while (searchResults.hasNext() && collector.length < 100) {
-                const file = searchResults.next();
-                const name = String(file.getName() || '').toLowerCase();
-                
-                // Match condition:
-                // 1. Must contain the trial ID or formulation name keyword
-                const matchesTrial = searchKeywords.some(kw => kw && name.indexOf(kw.toLowerCase()) !== -1);
-                // 2. If potLabel is specified, the filename must ALSO contain the potLabel keyword
-                const matchesPot = !potLabelLower || name.indexOf(potLabelLower) !== -1;
-
-                if (matchesTrial && matchesPot) {
+            try {
+                const queryStr = "(mimeType contains 'image/' or title contains '.jpg' or title contains '.jpeg' or title contains '.png' or title contains '.webp' or title contains '.heic') and title contains '" + trialId + "'";
+                const searchResults = rootFolder.searchFiles(queryStr);
+                const collector = [];
+                while (searchResults.hasNext() && collector.length < 100) {
+                    const file = searchResults.next();
                     collector.push({
                         id: file.getId(),
                         name: file.getName(),
                         mimeType: file.getMimeType(),
+                        url: `https://drive.google.com/uc?export=view&id=${file.getId()}`,
+                        webViewLink: file.getUrl(),
                         createdTime: file.getDateCreated() ? file.getDateCreated().toISOString() : '',
                         updatedTime: file.getLastUpdated() ? file.getLastUpdated().toISOString() : ''
                     });
                 }
+                if (collector.length > 0) {
+                    photos = collector;
+                    searchMessage += ' Found ' + photos.length + ' photo(s) matching trial ID recursively.';
+                }
+            } catch (err) {
+                Logger.log('Recursive file search by trialId error: ' + err.message);
             }
-        } catch (searchErr) {
-            // Fallback: If search fails, log it
         }
 
-        if (collector.length > 0) {
-            photos = collector;
-            searchMessage += ' Found ' + photos.length + ' photo(s) via selective file search.';
-        } else {
-            searchMessage += ' No photos matched trial keywords on date ' + (dateStrDMY || dateStr) + '.';
+        // 2. Keyword/Date/Time selective search fallback
+        if (photos.length === 0) {
+            const searchKeywords = [];
+            if (trialId) {
+                const strId = String(trialId);
+                searchKeywords.push(strId);
+                if (strId.length > 5) {
+                    searchKeywords.push(strId.slice(-5));
+                }
+            }
+            if (formulationName && formulationName !== 'Unknown Formulation') {
+                searchKeywords.push(formulationName);
+            }
+            
+            const potLabel = payload.potLabel || payload.PotLabel || trial.PotLabel || '';
+            const potLabelLower = potLabel ? String(potLabel).toLowerCase() : '';
+
+            const collector = [];
+            const queryParts = [];
+            
+            queryParts.push("(mimeType contains 'image/' or title contains '.jpg' or title contains '.jpeg' or title contains '.png' or title contains '.webp' or title contains '.heic')");
+            
+            const dateQueries = [];
+            const brokenPhotos = payload.brokenPhotos || [];
+            
+            if (brokenPhotos.length > 0) {
+                for (let b = 0; b < brokenPhotos.length; b++) {
+                    const p = brokenPhotos[b];
+                    if (p.date) {
+                        const rawDate = String(p.date);
+                        const dateMatch = rawDate.match(/(\d{2})[-_](\d{2})[-_](\d{4})/);
+                        let dStr = '';
+                        let dStrDMY = '';
+                        if (dateMatch) {
+                            dStrDMY = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
+                            dStr = `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
+                        } else {
+                            const ymdMatch = rawDate.match(/(\d{4})[-_](\d{2})[-_](\d{2})/);
+                            if (ymdMatch) {
+                                dStr = `${ymdMatch[1]}-${ymdMatch[2]}-${ymdMatch[3]}`;
+                                dStrDMY = `${ymdMatch[3]}-${ymdMatch[2]}-${ymdMatch[1]}`;
+                            }
+                        }
+
+                        const timeMatch = rawDate.match(/(\d{2})[:_](\d{2})\s*(AM|PM|am|pm)?/);
+                        let timeParts = [];
+                        if (timeMatch) {
+                            timeParts.push(timeMatch[1] + '_' + timeMatch[2]);
+                            timeParts.push(timeMatch[1] + ':' + timeMatch[2]);
+                            if (timeMatch[3]) {
+                                timeParts.push(timeMatch[3]);
+                            }
+                        }
+
+                        const subQueries = [];
+                        if (dStr) subQueries.push("title contains '" + dStr + "'");
+                        if (dStrDMY) subQueries.push("title contains '" + dStrDMY + "'");
+                        
+                        if (timeParts.length > 0) {
+                            const timeSub = timeParts.map(function(t) { return "title contains '" + t + "'"; }).join(" or ");
+                            if (subQueries.length > 0) {
+                                dateQueries.push("((" + subQueries.join(" or ") + ") and (" + timeSub + "))");
+                            } else {
+                                dateQueries.push("(" + timeSub + ")");
+                            }
+                        } else if (subQueries.length > 0) {
+                            dateQueries.push("(" + subQueries.join(" or ") + ")");
+                        }
+                    }
+                }
+            }
+
+            if (dateQueries.length === 0) {
+                if (dateStr) dateQueries.push("title contains '" + dateStr + "'");
+                if (dateStrDMY) dateQueries.push("title contains '" + dateStrDMY + "'");
+            }
+
+            if (dateQueries.length > 0) {
+                queryParts.push("(" + dateQueries.join(" or ") + ")");
+            }
+
+            const queryString = queryParts.join(" and ");
+            
+            try {
+                const searchResults = rootFolder.searchFiles(queryString);
+                while (searchResults.hasNext() && collector.length < 100) {
+                    const file = searchResults.next();
+                    const name = String(file.getName() || '').toLowerCase();
+                    
+                    const matchesTrial = searchKeywords.some(kw => kw && name.indexOf(kw.toLowerCase()) !== -1);
+                    const matchesPot = !potLabelLower || name.indexOf(potLabelLower) !== -1;
+
+                    if (matchesTrial && matchesPot) {
+                        collector.push({
+                            id: file.getId(),
+                            name: file.getName(),
+                            mimeType: file.getMimeType(),
+                            url: `https://drive.google.com/uc?export=view&id=${file.getId()}`,
+                            webViewLink: file.getUrl(),
+                            createdTime: file.getDateCreated() ? file.getDateCreated().toISOString() : '',
+                            updatedTime: file.getLastUpdated() ? file.getLastUpdated().toISOString() : ''
+                        });
+                    }
+                }
+            } catch (searchErr) {
+                // Ignore search error
+            }
+
+            if (collector.length > 0) {
+                photos = collector;
+                searchMessage += ' Found ' + photos.length + ' photo(s) via selective file search.';
+            } else {
+                searchMessage += ' No photos matched trial keywords on date ' + (dateStrDMY || dateStr) + '.';
+            }
         }
     }
 
