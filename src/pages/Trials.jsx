@@ -2582,9 +2582,6 @@ Rules:
         return nameA.localeCompare(nameB);
       });
 
-      // Update PhotoURLs with found images
-      const existingIds = new Set(photoURLs.map(p => p.driveId || p.fileId || p.driveFileId || getDriveFileId(p.url || p.src)));
-
       let addedCount = 0;
       let healedCount = 0;
 
@@ -2602,7 +2599,13 @@ Rules:
       });
 
       images.forEach(img => {
-        if (existingIds.has(img.id)) return;
+        // Find if there is an existing entry matching this drive ID (even if broken or base64-removed)
+        const existingPhoto = photoURLs.find(p => 
+          p.driveId === img.id || 
+          p.fileId === img.id || 
+          p.driveFileId === img.id || 
+          getDriveFileId(p.url || p.src) === img.id
+        );
 
         // Smart parsing from filename
         let photoDate = img.createdTime ? img.createdTime.split('T')[0] : new Date().toISOString().split('T')[0];
@@ -2636,9 +2639,23 @@ Rules:
 
         const normDriveLabel = normalize(cleanLabel);
         const webViewUrl = `https://drive.google.com/uc?export=view&id=${img.id}`;
+
+        if (existingPhoto) {
+          // If the photo exists in the database but the URL is broken or has '[base64-removed]', restore it!
+          if (isPhotoBroken(existingPhoto) || !existingPhoto.url || existingPhoto.url.includes('[base64-removed]')) {
+            existingPhoto.url = webViewUrl;
+            existingPhoto.driveId = img.id;
+            existingPhoto.fileName = img.name;
+            existingPhoto.importedFrom = 'Drive';
+            if (!existingPhoto.date && photoDate) existingPhoto.date = photoDate;
+            healedCount++;
+          }
+          return; // Skip adding a duplicate
+        }
+
         let healed = false;
 
-        // 1. Attempt to find a broken/unavailable entry that matches this photo by label
+        // 1. Attempt to find an unmatched broken/unavailable entry that matches this photo by label
         for (let i = 0; i < photoURLs.length; i++) {
           const p = photoURLs[i];
           if (isPhotoBroken(p)) {
