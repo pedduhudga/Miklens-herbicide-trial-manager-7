@@ -479,7 +479,21 @@ export class AdvancedReportGenerator {
     this.category = category;
     this.config = getCategoryConfig(category);
     this.workbook = new ExcelJS.Workbook();
-    this.activeFields = this.config.observationFields || [];
+    
+    // Find representative trial to determine if it is a PotTrial
+    const isArr = Array.isArray(trialOrTrials);
+    const representative = isArr ? (trialOrTrials[0] || {}) : trialOrTrials;
+    
+    // Attempt to lookup backup project if design or custom pot fields are needed
+    const projects = getBackupProjects();
+    const proj = projects.find(p => String(p.ID) === String(representative.ProjectID));
+    
+    if (proj?.Design === 'PotTrial' || representative?.Design === 'PotTrial') {
+      const potFields = proj?.PotFields || representative?.PotFields || ['Plant Height', 'Branches', 'Flowers', 'Fruit Count', 'Yield'];
+      this.activeFields = potFields.map(f => ({ key: f, label: f }));
+    } else {
+      this.activeFields = this.config.observationFields || [];
+    }
 
     if (Array.isArray(trialOrTrials)) {
       // It's a list of trials (project-wide consolidated export)

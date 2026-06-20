@@ -305,11 +305,11 @@ function normalizeSrc(src) {
   if (!src || typeof src !== 'string') return src;
   // Already a data URI — use as-is
   if (/^data:image\//i.test(src)) return src;
-  // Google Drive URLs — thumbnail endpoint is CORS-blocked (302 redirect + no ACAO header).
-  // Route through images.weserv.nl which fetches server-side and returns a CORS-safe response.
-  const driveMatch = src.match(/[?&]id=([a-zA-Z0-9_-]{10,})/) ||
-                     src.match(/\/d\/([a-zA-Z0-9_-]{10,})/) ||
-                     src.match(/\/file\/d\/([a-zA-Z0-9_-]{10,})/);
+  
+  // Parse standard Google Drive IDs
+  const driveMatch = src.match(/[?&]id=([a-zA-Z0-9_-]{20,})/) ||
+                     src.match(/\/d\/([a-zA-Z0-9_-]{20,})/) ||
+                     src.match(/\/file\/d\/([a-zA-Z0-9_-]{20,})/);
   if (driveMatch) {
     const directUrl = `https://drive.google.com/uc?export=download&id=${driveMatch[1]}`;
     return `https://images.weserv.nl/?url=${encodeURIComponent(directUrl)}&w=400&output=jpg`;
