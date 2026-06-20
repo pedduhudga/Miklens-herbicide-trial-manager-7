@@ -2566,43 +2566,79 @@ Rules:
       const existingIds = new Set(photoURLs.map(p => p.driveId || p.fileId || p.driveFileId || getDriveFileId(p.url || p.src)));
 
       let addedCount = 0;
+      let healedCount = 0;
+
+      const normalize = (str) => {
+        if (!str) return '';
+        return String(str).toLowerCase().replace(/[^a-z0-9]/g, '');
+      };
+
       images.forEach(img => {
-        if (!existingIds.has(img.id)) {
-          const webViewUrl = `https://drive.google.com/uc?export=view&id=${img.id}`;
-          
-          // Smart parsing from filename
-          let photoDate = img.createdTime ? img.createdTime.split('T')[0] : new Date().toISOString().split('T')[0];
-          let cleanLabel = img.name.replace(/\.[^/.]+$/, ""); // strip extension
-          
-          // Try to extract date like DD-MM-YYYY (e.g. 17-06-2026)
-          const dateMatch = img.name.match(/(\d{2})[-_](\d{2})[-_](\d{4})/);
-          if (dateMatch) {
-            const day = dateMatch[1];
-            const month = dateMatch[2];
-            const year = dateMatch[3];
-            photoDate = `${year}-${month}-${day}`;
-          } else {
-            // Try YYYY-MM-DD
-            const ymdMatch = img.name.match(/(\d{4})[-_](\d{2})[-_](\d{2})/);
-            if (ymdMatch) {
-              photoDate = `${ymdMatch[1]}-${ymdMatch[2]}-${ymdMatch[3]}`;
+        if (existingIds.has(img.id)) return;
+
+        // Smart parsing from filename
+        let photoDate = img.createdTime ? img.createdTime.split('T')[0] : new Date().toISOString().split('T')[0];
+        let cleanLabel = img.name.replace(/\.[^/.]+$/, ""); // strip extension
+        
+        // Try to extract date like DD-MM-YYYY (e.g. 17-06-2026)
+        const dateMatch = img.name.match(/(\d{2})[-_](\d{2})[-_](\d{4})/);
+        if (dateMatch) {
+          const day = dateMatch[1];
+          const month = dateMatch[2];
+          const year = dateMatch[3];
+          photoDate = `${year}-${month}-${day}`;
+        } else {
+          // Try YYYY-MM-DD
+          const ymdMatch = img.name.match(/(\d{4})[-_](\d{2})[-_](\d{2})/);
+          if (ymdMatch) {
+            photoDate = `${ymdMatch[1]}-${ymdMatch[2]}-${ymdMatch[3]}`;
+          }
+        }
+        
+        // Extract clean pot name/label by stripping date and times
+        let strippedLabel = cleanLabel;
+        // strip date patterns like DD-MM-YYYY or YYYY-MM-DD
+        strippedLabel = strippedLabel.replace(/\d{2}[-_]\d{2}[-_]\d{4}/g, '');
+        strippedLabel = strippedLabel.replace(/\d{4}[-_]\d{2}[-_]\d{2}/g, '');
+        // strip time patterns like 05_51 PM or 05:51 PM
+        strippedLabel = strippedLabel.replace(/\d{2}[:_]\d{2}\s*(AM|PM|am|pm)?/g, '');
+        // clean leading/trailing spaces, hyphens, underscores
+        strippedLabel = strippedLabel.replace(/^[\s\-_]+|[\s\-_]+$/g, '');
+        
+        if (strippedLabel) {
+          cleanLabel = strippedLabel;
+        }
+
+        const normDriveLabel = normalize(cleanLabel);
+        const webViewUrl = `https://drive.google.com/uc?export=view&id=${img.id}`;
+        let healed = false;
+
+        // Attempt to find a broken/unavailable entry that matches this photo
+        for (let i = 0; i < photoURLs.length; i++) {
+          const p = photoURLs[i];
+          if (isPhotoBroken(p)) {
+            const normExistingLabel = normalize(p.label);
+            
+            // Match if labels overlap (e.g., "plant1pota" vs "plant1potawholecanopystandard")
+            const isMatch = normExistingLabel && normDriveLabel && (
+              normExistingLabel.indexOf(normDriveLabel) !== -1 ||
+              normDriveLabel.indexOf(normExistingLabel) !== -1
+            );
+
+            if (isMatch) {
+              p.url = webViewUrl;
+              p.driveId = img.id;
+              p.fileName = img.name;
+              p.importedFrom = 'Drive';
+              if (!p.date && photoDate) p.date = photoDate;
+              healed = true;
+              healedCount++;
+              break;
             }
           }
-          
-          // Extract clean pot name/label by stripping date and times
-          let strippedLabel = cleanLabel;
-          // strip date patterns like DD-MM-YYYY or YYYY-MM-DD
-          strippedLabel = strippedLabel.replace(/\d{2}[-_]\d{2}[-_]\d{4}/g, '');
-          strippedLabel = strippedLabel.replace(/\d{4}[-_]\d{2}[-_]\d{2}/g, '');
-          // strip time patterns like 05_51 PM or 05:51 PM
-          strippedLabel = strippedLabel.replace(/\d{2}[:_]\d{2}\s*(AM|PM|am|pm)?/g, '');
-          // clean leading/trailing spaces, hyphens, underscores
-          strippedLabel = strippedLabel.replace(/^[\s\-_]+|[\s\-_]+$/g, '');
-          
-          if (strippedLabel) {
-            cleanLabel = strippedLabel;
-          }
+        }
 
+        if (!healed) {
           photoURLs.push({
             url: webViewUrl,
             fileName: img.name,
@@ -2617,7 +2653,7 @@ Rules:
         }
       });
 
-      if (addedCount > 0) {
+      if (addedCount > 0 || healedCount > 0) {
         const updatedPhotoURLs = JSON.stringify(photoURLs);
         const updatedTrial = { ...trial, PhotoURLs: updatedPhotoURLs };
         
@@ -2629,7 +2665,15 @@ Rules:
           PhotoURLs: updatedPhotoURLs
         }, getAppState);
 
-        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Successfully imported ${addedCount} photo(s) from Drive!`, type: 'success' } }));
+        let msg = '';
+        if (healedCount > 0 && addedCount > 0) {
+          msg = `Restored ${healedCount} unavailable photo(s) and imported ${addedCount} new photo(s) from Drive!`;
+        } else if (healedCount > 0) {
+          msg = `Restored ${healedCount} unavailable photo(s) from Drive!`;
+        } else {
+          msg = `Successfully imported ${addedCount} photo(s) from Drive!`;
+        }
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg, type: 'success' } }));
       } else {
         window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'All Google Drive photos are already synced.', type: 'info' } }));
       }
