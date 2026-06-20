@@ -816,7 +816,8 @@ function listTrialPhotosFromDrive(ss, parentFolderId, payload = {}, auth) {
     if (trialId && String(trialId).length > 5) {
         trialIdSuffix = String(trialId).slice(-5);
         try {
-            const folderMatches = rootFolder.searchFolders("mimeType = 'application/vnd.google-apps.folder' and title contains '" + trialIdSuffix + "'");
+            // Search Drive globally to find the trial folder (highly accurate via suffix)
+            const folderMatches = DriveApp.searchFolders("mimeType = 'application/vnd.google-apps.folder' and title contains '" + trialIdSuffix + "'");
             if (folderMatches.hasNext()) {
                 trialFolder = folderMatches.next();
             }
@@ -944,11 +945,11 @@ function listTrialPhotosFromDrive(ss, parentFolderId, payload = {}, auth) {
     if (photos.length === 0) {
         searchMessage = trialFolder ? 'Trial folder was empty. Running selective file search...' : 'Trial folder not found. Running selective file search...';
         
-        // 1. Direct search by full trialId (extremely fast and accurate since filenames contain trialId)
+        // 1. Direct search by full trialId (globally across all of Drive, extremely fast and accurate since filenames contain trialId)
         if (trialId) {
             try {
                 const queryStr = "(mimeType contains 'image/' or title contains '.jpg' or title contains '.jpeg' or title contains '.png' or title contains '.webp' or title contains '.heic') and title contains '" + trialId + "'";
-                const searchResults = rootFolder.searchFiles(queryStr);
+                const searchResults = DriveApp.searchFiles(queryStr);
                 const collector = [];
                 while (searchResults.hasNext() && collector.length < 100) {
                     const file = searchResults.next();
