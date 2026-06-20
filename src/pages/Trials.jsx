@@ -309,6 +309,7 @@ export default function Trials({ onMenuClick }) {
   // --- AI Summary ---
   const [aiSummary, setAiSummary] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
+  const [syncingPhotos, setSyncingPhotos] = useState(false);
 
   // --- AI weed cover detection ---
   const [detectingCover, setDetectingCover] = useState(false);
@@ -2531,6 +2532,7 @@ Rules:
     if (!trial) return;
 
     try {
+      setSyncingPhotos(true);
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Scanning Google Drive for missing photos...', type: 'info' } }));
       
       const result = await apiCall('listTrialPhotosFromDrive', {
@@ -2680,6 +2682,8 @@ Rules:
     } catch (err) {
       console.error('Sync photos from Drive error:', err);
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Error syncing photos: ${err.message}`, type: 'error' } }));
+    } finally {
+      setSyncingPhotos(false);
     }
   };
 
@@ -5578,8 +5582,13 @@ If none are present, write "None".`;
                         <button onClick={() => { setCameraMode('general'); setIsCameraOpen(true); }} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                           <Camera className="w-3.5 h-3.5" />Camera
                         </button>
-                        <button onClick={() => handleSyncPhotosFromDrive()} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 shadow-md">
-                          <RefreshCw className="w-3.5 h-3.5" />Sync Drive
+                        <button 
+                          onClick={() => handleSyncPhotosFromDrive()} 
+                          disabled={syncingPhotos}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 shadow-md disabled:opacity-50 disabled:cursor-wait"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${syncingPhotos ? 'animate-spin' : ''}`} />
+                          {syncingPhotos ? 'Syncing...' : 'Sync Drive'}
                         </button>
                         <button onClick={() => setAiBatchModalOpen(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:from-purple-600 hover:to-pink-600 shadow-lg">
                           <Sparkles className="w-3.5 h-3.5" />AI Scan All
