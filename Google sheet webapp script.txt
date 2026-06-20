@@ -875,6 +875,24 @@ function listTrialPhotosFromDrive(ss, parentFolderId, payload = {}, auth) {
             }
             trialFolder = searchFolderRecursively(rootFolder, candidateNames, 1);
         }
+
+        // Broad Fallback: Look for ANY folder containing the formulation name (e.g., "NPK POWDER") anywhere inside the root folder
+        if (!trialFolder && formulationName && formulationName !== 'Unknown Formulation') {
+            function searchFolderContainsRecursively(currentDir, nameKeyword, depth) {
+                if (depth > 3) return null;
+                const subDirs = currentDir.getFolders();
+                while (subDirs.hasNext()) {
+                    const subDir = subDirs.next();
+                    if (subDir.getName().toLowerCase().indexOf(nameKeyword.toLowerCase()) !== -1) {
+                        return subDir;
+                    }
+                    const found = searchFolderContainsRecursively(subDir, nameKeyword, depth + 1);
+                    if (found) return found;
+                }
+                return null;
+            }
+            trialFolder = searchFolderContainsRecursively(rootFolder, formulationName, 1);
+        }
     }
 
     if (!trialFolder) {
