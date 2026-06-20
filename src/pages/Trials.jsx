@@ -2537,7 +2537,7 @@ Rules:
         trialId: trial.ID,
         formulation: trial.FormulationName,
         date: trial.Date
-      }, false);
+      }, false, getAppState);
 
       if (result._errType || !result.success) {
         window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Failed to scan Drive: ${result.message || 'Unknown error'}`, type: 'error' } }));
