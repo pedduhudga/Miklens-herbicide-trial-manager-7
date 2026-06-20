@@ -18,6 +18,19 @@ function safeJsonParse(val, fallback = []) {
   try { return JSON.parse(val); } catch { return fallback; }
 }
 
+function getBackupProjects() {
+  try {
+    const backupRaw = localStorage.getItem('backupState');
+    if (backupRaw) {
+      const state = JSON.parse(backupRaw);
+      return state.projects || [];
+    }
+  } catch (e) {
+    console.warn('Failed to parse backupState from localStorage', e);
+  }
+  return [];
+}
+
 // Helper to convert 1-based column index to Excel column letters (e.g. 7 -> G)
 function getColumnLetter(col) {
   let letter = '';
