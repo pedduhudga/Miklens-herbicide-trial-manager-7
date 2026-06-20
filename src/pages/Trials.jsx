@@ -2536,7 +2536,10 @@ Rules:
       const result = await apiCall('listTrialPhotosFromDrive', {
         trialId: trial.ID,
         formulation: trial.FormulationName,
-        date: trial.Date
+        date: trial.Date,
+        dosage: trial.Dosage || '',
+        category: trial.Category || '',
+        projectId: trial.ProjectID || ''
       }, false, getAppState);
 
       if (result._errType || !result.success) {
@@ -2545,7 +2548,7 @@ Rules:
       }
 
       if (!result.photos || result.photos.length === 0) {
-        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'No photos found in Drive folder.', type: 'warning' } }));
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `No photos found: ${result.message || 'Check your Drive folder structure.'}`, type: 'warning' } }));
         return;
       }
 
