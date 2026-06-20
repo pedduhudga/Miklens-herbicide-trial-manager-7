@@ -707,10 +707,10 @@ function uploadPhotoToDrive(parentFolderId, payload) {
 function getTrialFolderPath(ss, trialPayload, auth) {
     if (!trialPayload) throw new Error('Trial payload missing.');
 
-    let projectName = 'Ungrouped Projects';
+    let projectName = trialPayload.projectName || trialPayload.ProjectName || 'Ungrouped Projects';
     let project = null;
     const projectId = trialPayload.ProjectID || trialPayload.projectId || trialPayload.projectID;
-    if (projectId) {
+    if (projectName === 'Ungrouped Projects' && projectId) {
         try {
             project = getRecordById(ss, sheetsConfig.projects, projectId);
             if (project && project.Name) {
@@ -803,7 +803,8 @@ function listTrialPhotosFromDrive(ss, parentFolderId, payload = {}, auth) {
             Date: payload.date || payload.Date || new Date().toISOString(),
             Dosage: payload.dosage || payload.Dosage || '',
             ProjectID: payload.projectId || payload.ProjectID || '',
-            Category: payload.category || payload.Category || ''
+            Category: payload.category || payload.Category || '',
+            ProjectName: payload.projectName || payload.ProjectName || ''
         };
     }
 

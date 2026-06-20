@@ -2542,6 +2542,9 @@ Rules:
         tag: p.tag || ''
       }));
 
+      const projectObj = state.projects?.find(p => String(p.ID) === String(trial.ProjectID));
+      const projectName = projectObj ? projectObj.Name : '';
+
       const result = await apiCall('listTrialPhotosFromDrive', {
         trialId: trial.ID,
         formulation: trial.FormulationName,
@@ -2549,6 +2552,7 @@ Rules:
         dosage: trial.Dosage || '',
         category: trial.Category || '',
         projectId: trial.ProjectID || '',
+        projectName: projectName,
         potLabel: trial.PotLabel || '',
         plotNumber: trial.PlotNumber || '',
         brokenPhotos: brokenPhotos
