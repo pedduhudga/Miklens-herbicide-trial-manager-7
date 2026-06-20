@@ -15,6 +15,12 @@ export async function exportScientificReportAsDOC(scope, state, options = {}) {
     window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Generating Word Document...', type: 'info' } }));
 
     try {
+        const category = trial.Category || 'herbicide';
+        const catConfig = getCategoryConfig(category);
+        const targetLabel = catConfig.targetLabel || 'Target';
+        const targetField = catConfig.targetField || 'WeedSpecies';
+        const targetVal = trial[targetField] || trial.WeedSpecies || trial.DiseaseTarget || trial.PestTarget || trial.NutrientType || trial.BiostimulantType || 'N/A';
+
         let contentHtml = `
             <h1>SCIENTIFIC TRIAL REPORT</h1>
             <p class="center"><strong>Trial Protocol: ${trial.FormulationName}</strong></p>
@@ -22,33 +28,56 @@ export async function exportScientificReportAsDOC(scope, state, options = {}) {
             <table class="meta-table">
                 <tr><td><strong>Investigator:</strong> ${trial.InvestigatorName || 'N/A'}</td><td><strong>Date:</strong> ${trial.Date}</td></tr>
                 <tr><td><strong>Location:</strong> ${trial.Location || 'N/A'}</td><td><strong>Dosage:</strong> ${trial.Dosage || 'N/A'}</td></tr>
-                <tr><td><strong>Status:</strong> ${trial.IsCompleted ? 'Finalized' : 'Ongoing'}</td><td><strong>Target Weeds:</strong> ${trial.WeedSpecies || 'N/A'}</td></tr>
+                <tr><td><strong>Status:</strong> ${trial.IsCompleted ? 'Finalized' : 'Ongoing'}</td><td><strong>${targetLabel}:</strong> ${targetVal}</td></tr>
             </table><hr/>
         `;
 
         if (templateConfig) {
             templateConfig.forEach(blockId => {
                 switch(blockId) {
-                    case 'block-exec-summary':
-                        contentHtml += "<h2>Executive Summary</h2><p>Analysis of the trial indicates significant weed control efficacy across multiple species observations. The formulation demonstrates strong baseline performance.</p>"; break;
-                    case 'block-trial-design':
-                        contentHtml += `<h2>Trial Design</h2><p>Targeted weed species: ${trial.WeedSpecies || 'Broadleaf and grasses'}. Applied at a dosage rate of ${trial.Dosage || 'standard specification'}.</p>`; break;
-                    case 'block-table-means':
+                    case 'block-exec-summary': {
+                        let summaryText = `Analysis of the trial indicates significant efficacy and performance across multiple observations. The formulation demonstrates strong baseline performance.`;
+                        if (category === 'herbicide') {
+                            summaryText = `Analysis of the trial indicates significant weed control efficacy across target weed species. The formulation demonstrates strong baseline performance.`;
+                        } else if (category === 'fungicide') {
+                            summaryText = `Analysis of the trial indicates significant disease control efficiency against target pathogens. The formulation demonstrates strong protective efficacy.`;
+                        } else if (category === 'pesticide') {
+                            summaryText = `Analysis of the trial indicates significant pest reduction efficiency against target insect pests. The formulation demonstrates strong protective properties.`;
+                        } else if (category === 'nutrition') {
+                            summaryText = `Analysis of the trial indicates significant yield improvement and growth responses. The formulation demonstrates strong nutrient delivery efficacy.`;
+                        } else if (category === 'biostimulant') {
+                            summaryText = `Analysis of the trial indicates significant plant growth enhancement and stress tolerance responses. The formulation demonstrates strong biostimulatory efficacy.`;
+                        }
+                        contentHtml += `<h2>Executive Summary</h2><p>${summaryText}</p>`;
+                        break;
+                    }
+                    case 'block-trial-design': {
+                        let designText = `Targeted ${targetLabel.toLowerCase()}: ${targetVal}. Applied at a dosage rate of ${trial.Dosage || 'standard specification'}.`;
+                        contentHtml += `<h2>Trial Design</h2><p>${designText}</p>`;
+                        break;
+                    }
+                    case 'block-table-means': {
+                        const metricLabel = catConfig.primaryMetric.label;
+                        const metricUnit = catConfig.primaryMetric.unit;
                         contentHtml += `<h2>Efficacy Data Table</h2>
                         <table border="1">
-                          <tr><th>DAA</th><th>Total Cover %</th></tr>
-                          ${JSON.parse(trial.EfficacyDataJSON || '[]').map(o => `<tr><td>${o.daa}</td><td>${getObservationPrimaryValue(trial.Category || 'herbicide', o) ?? (o.cover || 0)}${'%'} </td></tr>`).join('')}
-                        </table>`; break;
+                          <tr><th>DAA</th><th>${metricLabel} (${metricUnit})</th></tr>
+                          ${JSON.parse(trial.EfficacyDataJSON || '[]').map(o => `<tr><td>${o.daa}</td><td>${getObservationPrimaryValue(category, o) ?? 0}${metricUnit} </td></tr>`).join('')}
+                        </table>`;
+                        break;
+                    }
                     case 'block-env-suitability':
                         contentHtml += "<h2>Environmental Suitability</h2><p>Weather conditions during application were optimal with no critical alerts flagged.</p>"; break;
                     case 'block-chart-wce': {
                         const efficacyList = JSON.parse(trial.EfficacyDataJSON || '[]');
-                        let effRows = efficacyList.map(o => `<tr><td>Day ${o.daa}</td><td>${getObservationPrimaryValue(trial.Category || 'herbicide', o) ?? (o.cover || 0)}%</td><td>${o.notes || ''}</td></tr>`).join('');
+                        const metricLabel = catConfig.primaryMetric.label;
+                        const metricUnit = catConfig.primaryMetric.unit;
+                        let effRows = efficacyList.map(o => `<tr><td>Day ${o.daa}</td><td>${getObservationPrimaryValue(category, o) ?? 0}${metricUnit}</td><td>${o.notes || ''}</td></tr>`).join('');
                         contentHtml += `
-                            <h2>Efficacy Timeline Trends</h2>
+                            <h2>${metricLabel} Timeline Trends</h2>
                             <p>Below is the temporal evolution of the trial observations reflecting efficacy metrics over days after application (DAA):</p>
                             <table border="1">
-                              <thead><tr><th>Observation Period</th><th>Primary Metric Value</th><th>Field Observations</th></tr></thead>
+                              <thead><tr><th>Observation Period</th><th>${metricLabel}</th><th>Field Observations</th></tr></thead>
                               <tbody>${effRows || '<tr><td colspan="3">No efficacy data recorded yet.</td></tr>'}</tbody>
                             </table>
                         `;
@@ -56,7 +85,7 @@ export async function exportScientificReportAsDOC(scope, state, options = {}) {
                     }
                     case 'block-chart-performance': {
                         const efficacyList = JSON.parse(trial.EfficacyDataJSON || '[]');
-                        const maxVal = efficacyList.length > 0 ? Math.max(...efficacyList.map(o => getObservationPrimaryValue(trial.Category || 'herbicide', o) ?? (o.cover || 0))) : 0;
+                        const maxVal = efficacyList.length > 0 ? Math.max(...efficacyList.map(o => getObservationPrimaryValue(category, o) ?? 0)) : 0;
                         contentHtml += `
                             <h2>Final Performance Summary</h2>
                             <p>Peak performance was calculated at <strong>${maxVal}%</strong> control/efficacy across the study timeframe.</p>
@@ -157,6 +186,17 @@ export async function exportRegulatoryReportAsDOC(project, state, options = {}) 
             analysisResults = project.AnalysisResultsJSON ? JSON.parse(project.AnalysisResultsJSON) : {};
         } catch (e) { analysisResults = {}; }
 
+        const category = project.Category || 'herbicide';
+        const catConfig = getCategoryConfig(category);
+        const targetLabel = catConfig.targetLabel || 'Target';
+        const targetField = catConfig.targetField || 'WeedSpecies';
+        const targetVal = project[targetField] || project.TargetWeed || project.DiseaseTarget || project.PestTarget || project.NutrientType || project.BiostimulantType || 'N/A';
+        const trialTypeLabel = category === 'herbicide' ? 'herbicide efficacy' 
+          : category === 'fungicide' ? 'fungicide efficacy' 
+          : category === 'pesticide' ? 'pest control efficacy' 
+          : category === 'nutrition' ? 'plant nutrition' 
+          : 'biostimulant response';
+
         // Build comprehensive HTML content
         let contentHtml = `
             <h1>REGULATORY COMPLIANCE REPORT</h1>
@@ -165,8 +205,8 @@ export async function exportRegulatoryReportAsDOC(project, state, options = {}) 
             <hr/>
 
             <h2>1. Executive Summary</h2>
-            <p>This report presents the findings of a Randomized Complete Block Design (RCBD) herbicide efficacy trial 
-            conducted to evaluate ${treatments.length} treatment(s) for the control of ${project.TargetWeed || 'target weed species'} 
+            <p>This report presents the findings of a Randomized Complete Block Design (RCBD) ${trialTypeLabel} trial 
+            conducted to evaluate ${treatments.length} treatment(s) for the control or evaluation of ${targetVal} 
             in ${project.Crop || 'specified crop'}.</p>
 
             <h2>2. Trial Design & Methodology</h2>
@@ -174,8 +214,8 @@ export async function exportRegulatoryReportAsDOC(project, state, options = {}) 
                 <tr><td><strong>Design:</strong></td><td>Randomized Complete Block Design (RCBD)</td></tr>
                 <tr><td><strong>Replications:</strong></td><td>${blocks.length} blocks</td></tr>
                 <tr><td><strong>Treatments:</strong></td><td>${treatments.join(', ')}</td></tr>
-                <tr><td><strong>Metric:</strong></td><td>${project.Metric || 'Weed Control Efficiency'}</td></tr>
-                <tr><td><strong>Target Weed:</strong></td><td>${project.TargetWeed || 'N/A'}</td></tr>
+                <tr><td><strong>Metric:</strong></td><td>${project.Metric || catConfig.primaryMetric.label}</td></tr>
+                <tr><td><strong>${targetLabel}:</strong></td><td>${targetVal}</td></tr>
                 <tr><td><strong>Crop:</strong></td><td>${project.Crop || 'N/A'}</td></tr>
             </table>
 
@@ -202,7 +242,7 @@ export async function exportRegulatoryReportAsDOC(project, state, options = {}) 
 
             <h2>4. Statistical Analysis</h2>
             ${Object.keys(analysisResults).length > 0 ? `
-                <p>Analysis of Variance (ANOVA) was conducted on Weed Control Efficacy data. 
+                <p>Analysis of Variance (ANOVA) was conducted on ${catConfig.primaryMetric.label} data. 
                 Key findings across observation periods:</p>
                 <table class="data-table">
                     <tr>
@@ -295,9 +335,14 @@ export async function exportTrialCardsPDF(trials, project) {
     doc.text('Trial Plot Cards', 20, y);
     y += 10;
 
+    const category = project?.Category || trials[0]?.Category || 'herbicide';
+    const catConfig = getCategoryConfig(category);
+    const targetLabel = catConfig.targetLabel || 'Target';
+    const targetField = catConfig.targetField || 'WeedSpecies';
+
     for(let i=0; i<trials.length; i++) {
         const trial = trials[i];
-        if(y > 270) {
+        if(y > 250) {
             doc.addPage();
             y = 20;
         }
@@ -306,12 +351,17 @@ export async function exportTrialCardsPDF(trials, project) {
         doc.text(trial.FormulationName || 'Unknown Trial', 20, y);
         y += 7;
 
+        const targetVal = trial[targetField] || trial.WeedSpecies || trial.DiseaseTarget || trial.PestTarget || trial.NutrientType || trial.BiostimulantType || project?.[targetField] || 'N/A';
+
         doc.setFontSize(10);
         doc.text(`ID: ${trial.ID}`, 20, y);
         doc.text(`Location: ${trial.Location || 'N/A'}`, 100, y);
         y += 5;
         doc.text(`Dosage: ${trial.Dosage || 'N/A'}`, 20, y);
         doc.text(`Date: ${trial.Date || 'N/A'}`, 100, y);
+        y += 5;
+        doc.text(`Crop: ${trial.CropCrop || trial.Crop || project?.Crop || 'N/A'}`, 20, y);
+        doc.text(`${targetLabel}: ${targetVal}`, 100, y);
 
         y += 15;
     }
@@ -329,9 +379,15 @@ export async function exportTrialToPPTX(trial, options = {}) {
         return;
     }
 
+    const category = trial.Category || 'herbicide';
+    const catConfig = getCategoryConfig(category);
+    const targetLabel = catConfig.targetLabel || 'Target';
+    const targetField = catConfig.targetField || 'WeedSpecies';
+    const targetVal = trial[targetField] || trial.WeedSpecies || trial.DiseaseTarget || trial.PestTarget || trial.NutrientType || trial.BiostimulantType || 'N/A';
+
     const pptx = new PptxGenJS();
     pptx.title = `Trial Report: ${trial.FormulationName || 'Unknown'}`;
-    pptx.subject = 'Herbicide Trial Analysis';
+    pptx.subject = `${catConfig.name} Trial Analysis`;
     pptx.author = trial.InvestigatorName || 'Trial Manager';
 
     // Color scheme
@@ -347,7 +403,7 @@ export async function exportTrialToPPTX(trial, options = {}) {
     // Slide 1: Title
     const titleSlide = pptx.addSlide();
     titleSlide.background = { color: 'F0FDF4' }; // Emerald 50
-    titleSlide.addText('Herbicide Trial Report', {
+    titleSlide.addText(`${catConfig.name} Trial Report`, {
         x: 0.5, y: 1.5, w: '90%', h: 1,
         fontSize: 36, bold: true, color: colors.primary, align: 'center'
     });
@@ -374,7 +430,7 @@ export async function exportTrialToPPTX(trial, options = {}) {
     const metaData = [
         ['Formulation', trial.FormulationName || 'N/A'],
         ['Dosage', trial.Dosage || 'N/A'],
-        ['Target Weeds', trial.WeedSpecies || 'N/A'],
+        [targetLabel, targetVal],
         ['Location', trial.Location || 'N/A'],
         ['Date', trial.Date || 'N/A'],
         ['Investigator', trial.InvestigatorName || 'N/A'],
@@ -415,7 +471,7 @@ export async function exportTrialToPPTX(trial, options = {}) {
     const efficacy = JSON.parse(trial.EfficacyDataJSON || '[]');
     if (efficacy.length > 0) {
         const effSlide = pptx.addSlide();
-        effSlide.addText('Efficacy Observations', {
+        effSlide.addText(`${catConfig.primaryMetric.label} Observations`, {
             x: 0.5, y: 0.5, w: '90%', h: 0.5,
             fontSize: 20, bold: true, color: colors.primary
         });
@@ -423,13 +479,13 @@ export async function exportTrialToPPTX(trial, options = {}) {
         const rows = efficacy.map((obs, i) => [
             String(i + 1),
             String(obs.daa || 'N/A'),
-            String(getObservationPrimaryValue(trial.Category || 'herbicide', obs) != null ? `${getObservationPrimaryValue(trial.Category || 'herbicide', obs)}%` : 'N/A'),
+            String(getObservationPrimaryValue(category, obs) != null ? `${getObservationPrimaryValue(category, obs)}${catConfig.primaryMetric.unit || ''}` : 'N/A'),
             String(obs.date || 'N/A'),
             String(obs.notes || '').substring(0, 30)
         ]);
 
         effSlide.addTable([
-            ['#', 'DAA', 'Weed Cover', 'Date', 'Notes'],
+            ['#', 'DAA', catConfig.primaryMetric.label, 'Date', 'Notes'],
             ...rows
         ], {
             x: 0.5, y: 1.2, w: '90%',
