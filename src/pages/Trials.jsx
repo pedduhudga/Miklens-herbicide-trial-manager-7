@@ -2535,6 +2535,13 @@ Rules:
       setSyncingPhotos(true);
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Scanning Google Drive for missing photos...', type: 'info' } }));
       
+      const photoURLs = safeJsonParse(trial.PhotoURLs, []);
+      const brokenPhotos = photoURLs.filter(isPhotoBroken).map(p => ({
+        date: p.date || '',
+        label: p.label || '',
+        tag: p.tag || ''
+      }));
+
       const result = await apiCall('listTrialPhotosFromDrive', {
         trialId: trial.ID,
         formulation: trial.FormulationName,
@@ -2543,7 +2550,8 @@ Rules:
         category: trial.Category || '',
         projectId: trial.ProjectID || '',
         potLabel: trial.PotLabel || '',
-        plotNumber: trial.PlotNumber || ''
+        plotNumber: trial.PlotNumber || '',
+        brokenPhotos: brokenPhotos
       }, false, getAppState);
 
       if (result._errType || !result.success) {
@@ -2564,7 +2572,6 @@ Rules:
       }
 
       // Update PhotoURLs with found images
-      const photoURLs = safeJsonParse(trial.PhotoURLs, []);
       const existingIds = new Set(photoURLs.map(p => p.driveId || p.fileId || p.driveFileId || getDriveFileId(p.url || p.src)));
 
       let addedCount = 0;

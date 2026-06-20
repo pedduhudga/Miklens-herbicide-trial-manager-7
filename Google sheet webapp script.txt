@@ -947,10 +947,65 @@ function listTrialPhotosFromDrive(ss, parentFolderId, payload = {}, auth) {
         // Match standard image mime types and common image extensions
         queryParts.push("(mimeType contains 'image/' or title contains '.jpg' or title contains '.jpeg' or title contains '.png' or title contains '.webp' or title contains '.heic')");
         
-        // Date strings are highly selective (either YYYY-MM-DD or DD-MM-YYYY)
+        // Date and Time strings are highly selective (either YYYY-MM-DD or DD-MM-YYYY along with specific HH:MM time)
         const dateQueries = [];
-        if (dateStr) dateQueries.push("title contains '" + dateStr + "'");
-        if (dateStrDMY) dateQueries.push("title contains '" + dateStrDMY + "'");
+        const brokenPhotos = payload.brokenPhotos || [];
+        
+        if (brokenPhotos.length > 0) {
+            for (let b = 0; b < brokenPhotos.length; b++) {
+                const p = brokenPhotos[b];
+                if (p.date) {
+                    const rawDate = String(p.date);
+                    // extract date DD-MM-YYYY or YYYY-MM-DD
+                    const dateMatch = rawDate.match(/(\d{2})[-_](\d{2})[-_](\d{4})/);
+                    let dStr = '';
+                    let dStrDMY = '';
+                    if (dateMatch) {
+                        dStrDMY = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
+                        dStr = `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
+                    } else {
+                        const ymdMatch = rawDate.match(/(\d{4})[-_](\d{2})[-_](\d{2})/);
+                        if (ymdMatch) {
+                            dStr = `${ymdMatch[1]}-${ymdMatch[2]}-${ymdMatch[3]}`;
+                            dStrDMY = `${ymdMatch[3]}-${ymdMatch[2]}-${ymdMatch[1]}`;
+                        }
+                    }
+
+                    // Extract time keywords if present (e.g. 05:51 PM -> 05, 51, PM)
+                    const timeMatch = rawDate.match(/(\d{2})[:_](\d{2})\s*(AM|PM|am|pm)?/);
+                    let timeParts = [];
+                    if (timeMatch) {
+                        timeParts.push(timeMatch[1] + '_' + timeMatch[2]);
+                        timeParts.push(timeMatch[1] + ':' + timeMatch[2]);
+                        if (timeMatch[3]) {
+                            timeParts.push(timeMatch[3]);
+                        }
+                    }
+
+                    const subQueries = [];
+                    if (dStr) subQueries.push("title contains '" + dStr + "'");
+                    if (dStrDMY) subQueries.push("title contains '" + dStrDMY + "'");
+                    
+                    if (timeParts.length > 0) {
+                        const timeSub = timeParts.map(function(t) { return "title contains '" + t + "'"; }).join(" or ");
+                        if (subQueries.length > 0) {
+                            dateQueries.push("((" + subQueries.join(" or ") + ") and (" + timeSub + "))");
+                        } else {
+                            dateQueries.push("(" + timeSub + ")");
+                        }
+                    } else if (subQueries.length > 0) {
+                        dateQueries.push("(" + subQueries.join(" or ") + ")");
+                    }
+                }
+            }
+        }
+
+        // Fallback: If no brokenPhotos dates found, use the trial start dates
+        if (dateQueries.length === 0) {
+            if (dateStr) dateQueries.push("title contains '" + dateStr + "'");
+            if (dateStrDMY) dateQueries.push("title contains '" + dateStrDMY + "'");
+        }
+
         if (dateQueries.length > 0) {
             queryParts.push("(" + dateQueries.join(" or ") + ")");
         }
