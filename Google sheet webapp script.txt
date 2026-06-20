@@ -895,32 +895,102 @@ function listTrialPhotosFromDrive(ss, parentFolderId, payload = {}, auth) {
         }
     }
 
-    if (!trialFolder) {
-        return {
-            success: true,
-            photos: [],
-            folderPath: folderPath,
-            message: 'Trial folder not found in Drive (checked path hierarchy and recursive name matches).'
-        };
+    let photos = [];
+    let trialFolderId = null;
+    let trialFolderName = null;
+    let searchMessage = '';
+
+    if (trialFolder) {
+        trialFolderId = trialFolder.getId();
+        trialFolderName = trialFolder.getName();
+        const allFiles = [];
+        listFilesInFolderRecursive(trialFolder, allFiles);
+
+        const imageMimePrefixes = ['image/'];
+        const imageExtensionRegex = /\.(jpg|jpeg|png|gif|webp|bmp|heic|heif|tif|tiff)$/i;
+        photos = allFiles.filter(file => {
+            const mimeType = String(file.mimeType || '').toLowerCase();
+            const fileName = String(file.name || '');
+            return imageMimePrefixes.some(prefix => mimeType.indexOf(prefix) === 0) || imageExtensionRegex.test(fileName);
+        });
     }
 
-    const allFiles = [];
-    listFilesInFolderRecursive(trialFolder, allFiles);
+    // File-level Search Fallback: If no trial folder was found, or the folder was empty,
+    // search the entire root folder recursively for files matching the trial criteria.
+    if (photos.length === 0) {
+        searchMessage = trialFolder ? 'Trial folder was empty. Running deep search for individual files...' : 'Trial folder not found. Running deep search for individual files...';
+        
+        const searchKeywords = [];
+        if (trialId) {
+            const strId = String(trialId);
+            searchKeywords.push(strId);
+            if (strId.length > 5) {
+                searchKeywords.push(strId.slice(-5));
+            }
+        }
+        const formulationName = trial.FormulationName || 'Unknown Formulation';
+        if (formulationName && formulationName !== 'Unknown Formulation') {
+            searchKeywords.push(formulationName);
+        }
+        
+        const potLabel = payload.potLabel || payload.PotLabel || trial.PotLabel || '';
+        const potLabelLower = potLabel ? String(potLabel).toLowerCase() : '';
 
-    const imageMimePrefixes = ['image/'];
-    const imageExtensionRegex = /\.(jpg|jpeg|png|gif|webp|bmp|heic|heif|tif|tiff)$/i;
-    const photos = allFiles.filter(file => {
-        const mimeType = String(file.mimeType || '').toLowerCase();
-        const fileName = String(file.name || '');
-        return imageMimePrefixes.some(prefix => mimeType.indexOf(prefix) === 0) || imageExtensionRegex.test(fileName);
-    });
+        const collector = [];
+        const imageMimePrefixes = ['image/'];
+        const imageExtensionRegex = /\.(jpg|jpeg|png|gif|webp|bmp|heic|heif|tif|tiff)$/i;
+
+        function deepSearchFiles(currentDir, depth) {
+            if (depth > 3 || collector.length >= 100) return;
+            
+            const files = currentDir.getFiles();
+            while (files.hasNext() && collector.length < 100) {
+                const file = files.next();
+                const name = String(file.getName() || '').toLowerCase();
+                const mime = String(file.getMimeType() || '').toLowerCase();
+                
+                const isImage = imageMimePrefixes.some(prefix => mime.indexOf(prefix) === 0) || imageExtensionRegex.test(name);
+                if (!isImage) continue;
+
+                // Match condition:
+                // 1. Must contain the trial ID or formulation name keyword
+                const matchesTrial = searchKeywords.some(kw => kw && name.indexOf(kw.toLowerCase()) !== -1);
+                // 2. If potLabel is specified, the filename must ALSO contain the potLabel keyword
+                const matchesPot = !potLabelLower || name.indexOf(potLabelLower) !== -1;
+
+                if (matchesTrial && matchesPot) {
+                    collector.push({
+                        id: file.getId(),
+                        name: file.getName(),
+                        mimeType: file.getMimeType(),
+                        createdTime: file.getDateCreated() ? file.getDateCreated().toISOString() : '',
+                        updatedTime: file.getLastUpdated() ? file.getLastUpdated().toISOString() : ''
+                    });
+                }
+            }
+
+            const subDirs = currentDir.getFolders();
+            while (subDirs.hasNext() && collector.length < 100) {
+                deepSearchFiles(subDirs.next(), depth + 1);
+            }
+        }
+
+        deepSearchFiles(rootFolder, 1);
+        if (collector.length > 0) {
+            photos = collector;
+            searchMessage += ' Found ' + photos.length + ' photo(s) via deep file search.';
+        } else {
+            searchMessage += ' No photos matched trial keywords (trial ID, formulation, or pot label).';
+        }
+    }
 
     return {
         success: true,
         photos: photos,
-        folderId: trialFolder.getId(),
-        folderName: trialFolder.getName(),
-        folderPath: folderPath
+        folderId: trialFolderId,
+        folderName: trialFolderName,
+        folderPath: folderPath,
+        message: searchMessage || 'Photos loaded successfully.'
     };
 }
 

@@ -2539,7 +2539,9 @@ Rules:
         date: trial.Date,
         dosage: trial.Dosage || '',
         category: trial.Category || '',
-        projectId: trial.ProjectID || ''
+        projectId: trial.ProjectID || '',
+        potLabel: trial.PotLabel || '',
+        plotNumber: trial.PlotNumber || ''
       }, false, getAppState);
 
       if (result._errType || !result.success) {
@@ -2567,11 +2569,45 @@ Rules:
       images.forEach(img => {
         if (!existingIds.has(img.id)) {
           const webViewUrl = `https://drive.google.com/uc?export=view&id=${img.id}`;
+          
+          // Smart parsing from filename
+          let photoDate = img.createdTime ? img.createdTime.split('T')[0] : new Date().toISOString().split('T')[0];
+          let cleanLabel = img.name.replace(/\.[^/.]+$/, ""); // strip extension
+          
+          // Try to extract date like DD-MM-YYYY (e.g. 17-06-2026)
+          const dateMatch = img.name.match(/(\d{2})[-_](\d{2})[-_](\d{4})/);
+          if (dateMatch) {
+            const day = dateMatch[1];
+            const month = dateMatch[2];
+            const year = dateMatch[3];
+            photoDate = `${year}-${month}-${day}`;
+          } else {
+            // Try YYYY-MM-DD
+            const ymdMatch = img.name.match(/(\d{4})[-_](\d{2})[-_](\d{2})/);
+            if (ymdMatch) {
+              photoDate = `${ymdMatch[1]}-${ymdMatch[2]}-${ymdMatch[3]}`;
+            }
+          }
+          
+          // Extract clean pot name/label by stripping date and times
+          let strippedLabel = cleanLabel;
+          // strip date patterns like DD-MM-YYYY or YYYY-MM-DD
+          strippedLabel = strippedLabel.replace(/\d{2}[-_]\d{2}[-_]\d{4}/g, '');
+          strippedLabel = strippedLabel.replace(/\d{4}[-_]\d{2}[-_]\d{2}/g, '');
+          // strip time patterns like 05_51 PM or 05:51 PM
+          strippedLabel = strippedLabel.replace(/\d{2}[:_]\d{2}\s*(AM|PM|am|pm)?/g, '');
+          // clean leading/trailing spaces, hyphens, underscores
+          strippedLabel = strippedLabel.replace(/^[\s\-_]+|[\s\-_]+$/g, '');
+          
+          if (strippedLabel) {
+            cleanLabel = strippedLabel;
+          }
+
           photoURLs.push({
             url: webViewUrl,
             fileName: img.name,
-            date: img.createdTime ? img.createdTime.split('T')[0] : new Date().toISOString().split('T')[0],
-            label: `Imported: ${img.name}`,
+            date: photoDate,
+            label: cleanLabel,
             importedFrom: 'Drive',
             driveId: img.id,
             tag: 'Field Observation',
