@@ -823,12 +823,56 @@ function listTrialPhotosFromDrive(ss, parentFolderId, payload = {}, auth) {
         trialFolder = findNestedFolder(rootFolder, legacyPath2);
     }
 
+    // Ultimate Fallback: If exact path fails (due to unmirrored project/category or user name mismatch),
+    // search for ANY folder inside the root directory whose name EXACTLY matches any of our target trial folder names.
+    if (!trialFolder) {
+        const trialFolderName = folderPath[3];
+        const dosage = trial.Dosage || trial.dosage || '';
+        const dosageSuffix = dosage ? ' (' + dosage + ')' : '';
+        const dateObj = trial.Date ? new Date(trial.Date) : new Date();
+        const dateStr = isNaN(dateObj.getTime()) ? new Date().toISOString().split('T')[0] : dateObj.toISOString().split('T')[0];
+        const formulationName = trial.FormulationName || 'Unknown Formulation';
+        
+        const candidateNames = [
+            trialFolderName, // FormulationName (Dosage) (YYYY-MM-DD) - ID
+            (formulationName + dosageSuffix + ' (' + dateStr + ')').trim(), // FormulationName (Dosage) (YYYY-MM-DD)
+            (formulationName + ' (' + dateStr + ')').trim() // FormulationName (YYYY-MM-DD)
+        ].filter(Boolean);
+
+        for (let j = 0; j < candidateNames.length; j++) {
+            const nameToFind = candidateNames[j];
+            const folderMatches = rootFolder.getFoldersByName(nameToFind);
+            if (folderMatches.hasNext()) {
+                trialFolder = folderMatches.next();
+                break;
+            }
+        }
+        
+        // If still not found, scan subfolders recursively (up to 3 levels deep) to find the folder name
+        if (!trialFolder) {
+            function searchFolderRecursively(currentDir, targetNames, depth) {
+                if (depth > 3) return null;
+                for (let k = 0; k < targetNames.length; k++) {
+                    const match = currentDir.getFoldersByName(targetNames[k]);
+                    if (match.hasNext()) return match.next();
+                }
+                const subDirs = currentDir.getFolders();
+                while (subDirs.hasNext()) {
+                    const found = searchFolderRecursively(subDirs.next(), targetNames, depth + 1);
+                    if (found) return found;
+                }
+                return null;
+            }
+            trialFolder = searchFolderRecursively(rootFolder, candidateNames, 1);
+        }
+    }
+
     if (!trialFolder) {
         return {
             success: true,
             photos: [],
             folderPath: folderPath,
-            message: 'Trial folder not found in Drive (checked both new and legacy folder names).'
+            message: 'Trial folder not found in Drive (checked path hierarchy and recursive name matches).'
         };
     }
 
