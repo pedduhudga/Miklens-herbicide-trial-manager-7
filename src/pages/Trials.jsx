@@ -311,6 +311,7 @@ export default function Trials({ onMenuClick }) {
   const [aiLoading, setAiLoading] = useState(false);
   const [syncingPhotos, setSyncingPhotos] = useState(false);
   const [syncingAllPhotos, setSyncingAllPhotos] = useState(false);
+  const [syncHealOnly, setSyncHealOnly] = useState(true);
 
   // --- AI weed cover detection ---
   const [detectingCover, setDetectingCover] = useState(false);
@@ -2543,7 +2544,7 @@ Rules:
     }
   };
 
-  const handleSyncPhotosFromDrive = async (targetTrial = null) => {
+  const handleSyncPhotosFromDrive = async (targetTrial = null, healOnly = syncHealOnly) => {
     const trial = targetTrial || activeTrial;
     if (!trial) return;
 
@@ -2718,17 +2719,19 @@ Rules:
 
         // 3. If no broken photo could be healed, append as new photo
         if (!healed) {
-          photoURLs.push({
-            url: webViewUrl,
-            fileName: img.name,
-            date: photoDate,
-            label: cleanLabel,
-            importedFrom: 'Drive',
-            driveId: img.id,
-            tag: 'Field Observation',
-            aiStatus: 'pending'
-          });
-          addedCount++;
+          if (!healOnly) {
+            photoURLs.push({
+              url: webViewUrl,
+              fileName: img.name,
+              date: photoDate,
+              label: cleanLabel,
+              importedFrom: 'Drive',
+              driveId: img.id,
+              tag: 'Field Observation',
+              aiStatus: 'pending'
+            });
+            addedCount++;
+          }
         }
       });
 
@@ -2764,26 +2767,28 @@ Rules:
     }
   };
 
-  const handleSyncAllPhotosFromDrive = async () => {
-    const trialsWithBroken = (state.trials || []).filter(t => {
-      const photos = safeJsonParse(t.PhotoURLs, []);
-      return Array.isArray(photos) && photos.some(isPhotoBroken);
-    });
+  const handleSyncAllPhotosFromDrive = async (healOnly = syncHealOnly) => {
+    const trialsToScan = healOnly
+      ? (state.trials || []).filter(t => {
+          const photos = safeJsonParse(t.PhotoURLs, []);
+          return Array.isArray(photos) && photos.some(p => isPhotoBroken(p) && !p.deleted);
+        })
+      : (state.trials || []);
 
-    if (trialsWithBroken.length === 0) {
-      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'All trial photos are already synchronized and healthy!', type: 'success' } }));
+    if (trialsToScan.length === 0) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: healOnly ? 'All trial photos are already synchronized and healthy!' : 'No trials found to synchronize.', type: 'info' } }));
       return;
     }
 
     try {
       setSyncingAllPhotos(true);
-      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Starting batch sync for ${trialsWithBroken.length} trial(s)...`, type: 'info' } }));
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Starting batch sync for ${trialsToScan.length} trial(s)...`, type: 'info' } }));
 
       let totalHealed = 0;
       let totalAdded = 0;
       let processedCount = 0;
 
-      for (const trial of trialsWithBroken) {
+      for (const trial of trialsToScan) {
         processedCount++;
         window.dispatchEvent(new CustomEvent('app:toast', { 
           detail: { 
@@ -2922,18 +2927,20 @@ Rules:
               }
 
               if (!healed) {
-                photoURLs.push({
-                  url: webViewUrl,
-                  fileName: img.name,
-                  date: photoDate,
-                  label: cleanLabel,
-                  importedFrom: 'Drive',
-                  driveId: img.id,
-                  tag: 'Field Observation',
-                  aiStatus: 'pending'
-                });
-                localAdded++;
-                totalAdded++;
+                if (!healOnly) {
+                  photoURLs.push({
+                    url: webViewUrl,
+                    fileName: img.name,
+                    date: photoDate,
+                    label: cleanLabel,
+                    importedFrom: 'Drive',
+                    driveId: img.id,
+                    tag: 'Field Observation',
+                    aiStatus: 'pending'
+                  });
+                  localAdded++;
+                  totalAdded++;
+                }
               }
             });
 
@@ -4385,13 +4392,23 @@ If none are present, write "None".`;
                   <FileDown className="w-4 h-4" />
                 </button>
                 <button 
-                  onClick={handleSyncAllPhotosFromDrive} 
+                  onClick={() => handleSyncAllPhotosFromDrive()} 
                   disabled={syncingAllPhotos}
                   title="Sync all broken/unavailable photos from Google Drive for all trials" 
                   className={`p-2 rounded-lg border transition ${syncingAllPhotos ? 'bg-slate-100 border-slate-300 text-slate-400 cursor-not-allowed' : 'border-slate-200 text-slate-500 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300'}`}
                 >
                   <RefreshCw className={`w-4 h-4 ${syncingAllPhotos ? 'animate-spin' : ''}`} />
                 </button>
+                <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg border border-slate-200 text-slate-500 bg-white" title="Heal existing only: Only restore broken/unavailable photos already in the list; do not import new/deleted photos.">
+                  <input 
+                    type="checkbox" 
+                    id="syncHealOnly"
+                    checked={syncHealOnly} 
+                    onChange={e => setSyncHealOnly(e.target.checked)} 
+                    className="w-3.5 h-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                  />
+                  <label htmlFor="syncHealOnly" className="text-xs select-none cursor-pointer">Heal only</label>
+                </div>
                 <input 
                   type="file" 
                   ref={armFileInputRef} 
@@ -5873,6 +5890,15 @@ If none are present, write "None".`;
                         <button onClick={() => { setCameraMode('general'); setIsCameraOpen(true); }} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                           <Camera className="w-3.5 h-3.5" />Camera
                         </button>
+                        <label className="flex items-center gap-1 text-xs text-slate-500 select-none cursor-pointer self-center" title="Heal existing only: Only restore broken/unavailable photos already in the list; do not import new/deleted photos.">
+                          <input 
+                            type="checkbox" 
+                            checked={syncHealOnly} 
+                            onChange={e => setSyncHealOnly(e.target.checked)} 
+                            className="w-3.5 h-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                          />
+                          <span>Heal only</span>
+                        </label>
                         <button 
                           onClick={() => handleSyncPhotosFromDrive()} 
                           disabled={syncingPhotos}
