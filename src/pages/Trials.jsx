@@ -18,7 +18,7 @@ import {
 import { safeJsonParse } from '../utils/helpers.js';
 import { resolvePhotoSrc, getPhotoThumbnailSrc, isPhotoBroken, getDriveFileId } from '../utils/photoUtils.js';
 import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryValue, calculateEfficacy } from '../utils/categoryConfig.js';
-import { calculateDAA, toDateKey, formatPhotoDate, toDatetimeLocal, formatDate, formatDateTime } from '../utils/dateUtils.js';
+import { calculateDAA, toDateKey, formatPhotoDate, toDatetimeLocal, formatDate, formatDateTime, parseDateFromFilename } from '../utils/dateUtils.js';
 import { normalizeObservation } from '../utils/categoryObservationUtils.js';
 import { validateEfficacyData } from '../utils/analysisUtils.js';
 import CameraCapture from '../components/CameraCapture.jsx';
@@ -2295,15 +2295,29 @@ export default function Trials({ onMenuClick }) {
     if (aiData.efficacyAssessment || aiData.overallAssessment) aiNotes.push(aiData.efficacyAssessment || aiData.overallAssessment);
     if (aiData.notes) aiNotes.push(aiData.notes);
 
+    let cleanNotes = aiNotes.length > 0 ? deduplicateText('', aiNotes.join('. ')) : `AI-analyzed on ${formatDateTime(new Date())}`;
+    let cleanEfficacy = aiData.efficacyAssessment || aiData.overallAssessment || '';
+
+    if (Number(daa) > 0) {
+      const rxDaa = new RegExp(`\\b(at|on|for|from|during)\\s+daa\\s*0\\b`, 'gi');
+      const rxDay = new RegExp(`\\b(at|on|for|from|during)\\s+day\\s*0\\b`, 'gi');
+      cleanNotes = cleanNotes.replace(rxDaa, `$1 DAA ${daa}`).replace(rxDay, `$1 Day ${daa}`);
+      cleanEfficacy = cleanEfficacy.replace(rxDaa, `$1 DAA ${daa}`).replace(rxDay, `$1 Day ${daa}`);
+      
+      // Also catch direct occurrences of "DAA 0" or "Day 0"
+      cleanNotes = cleanNotes.replace(/\bDAA\s*0\b/g, `DAA ${daa}`).replace(/\bDay\s*0\b/g, `Day ${daa}`);
+      cleanEfficacy = cleanEfficacy.replace(/\bDAA\s*0\b/g, `DAA ${daa}`).replace(/\bDay\s*0\b/g, `Day ${daa}`);
+    }
+
     const newObs = {
       date: obsDate || toDatetimeLocal(new Date()),
       daa: Number(daa),
       [primaryObsField]: primaryValue,
       weedCover: isHerbicide ? primaryValue : null,
       weedDetails: normalizedWeeds.length > 0 ? normalizedWeeds : [{ species: isHerbicide ? 'No weeds detected' : 'No targets detected', cover: 0, status: '', notes: aiData.notes || 'AI-analyzed', confidence: null, detectedCount: 0, incidence: 0.0 }],
-      notes: aiNotes.length > 0 ? deduplicateText('', aiNotes.join('. ')) : `AI-analyzed on ${formatDateTime(new Date())}`,
+      notes: cleanNotes,
       aiConfidence: aiData.confidence || 'MEDIUM',
-      aiEfficacyAssessment: aiData.efficacyAssessment || aiData.overallAssessment || '',
+      aiEfficacyAssessment: cleanEfficacy,
       competitionLevel: aiData.competitionLevel || '',
       status: 'Analyzed',
       source: 'AI',
@@ -2625,23 +2639,8 @@ Rules:
         );
 
         // Smart parsing from filename
-        let photoDate = img.createdTime ? img.createdTime.split('T')[0] : new Date().toISOString().split('T')[0];
+        let photoDate = parseDateFromFilename(img.name, trial.Date) || (img.createdTime ? img.createdTime.split('T')[0] : new Date().toISOString().split('T')[0]);
         let cleanLabel = img.name.replace(/\.[^/.]+$/, ""); // strip extension
-        
-        // Try to extract date like DD-MM-YYYY (e.g. 17-06-2026)
-        const dateMatch = img.name.match(/(\d{2})[-_](\d{2})[-_](\d{4})/);
-        if (dateMatch) {
-          const day = dateMatch[1];
-          const month = dateMatch[2];
-          const year = dateMatch[3];
-          photoDate = `${year}-${month}-${day}`;
-        } else {
-          // Try YYYY-MM-DD
-          const ymdMatch = img.name.match(/(\d{4})[-_](\d{2})[-_](\d{2})/);
-          if (ymdMatch) {
-            photoDate = `${ymdMatch[1]}-${ymdMatch[2]}-${ymdMatch[3]}`;
-          }
-        }
         
         // Extract clean pot name/label by stripping date and times
         let strippedLabel = cleanLabel;
@@ -2843,18 +2842,8 @@ Rules:
                 getDriveFileId(p.url || p.src) === img.id
               );
 
-              let photoDate = img.createdTime ? img.createdTime.split('T')[0] : new Date().toISOString().split('T')[0];
+              let photoDate = parseDateFromFilename(img.name, trial.Date) || (img.createdTime ? img.createdTime.split('T')[0] : new Date().toISOString().split('T')[0]);
               let cleanLabel = img.name.replace(/\.[^/.]+$/, "");
-              
-              const dateMatch = img.name.match(/(\d{2})[-_](\d{2})[-_](\d{4})/);
-              if (dateMatch) {
-                photoDate = `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
-              } else {
-                const ymdMatch = img.name.match(/(\d{4})[-_](\d{2})[-_](\d{2})/);
-                if (ymdMatch) {
-                  photoDate = `${ymdMatch[1]}-${ymdMatch[2]}-${ymdMatch[3]}`;
-                }
-              }
 
               let strippedLabel = cleanLabel;
               strippedLabel = strippedLabel.replace(/\d{2}[-_]\d{2}[-_]\d{4}/g, '');
@@ -7796,7 +7785,6 @@ If none are present, write "None".`;
                 <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Photo Date</label>
                 <input type="datetime-local"
                   value={pendingPhotoAnalysis.date}
-                  max={toDatetimeLocal(new Date())}
                   onChange={e => setPendingPhotoAnalysis(p => ({ ...p, date: e.target.value }))}
                   className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" />
               </div>

@@ -1089,14 +1089,28 @@ export default function LargeScaleTrials({ onMenuClick }) {
     if (aiData.efficacyAssessment || aiData.overallAssessment) aiNotes.push(aiData.efficacyAssessment || aiData.overallAssessment);
     if (aiData.notes) aiNotes.push(aiData.notes);
 
+    let cleanNotes = aiNotes.length > 0 ? deduplicateText('', aiNotes.join('. ')) : `AI-analyzed on ${formatDateTime(new Date())}`;
+    let cleanEfficacy = aiData.efficacyAssessment || aiData.overallAssessment || '';
+
+    if (Number(daa) > 0) {
+      const rxDaa = new RegExp(`\\b(at|on|for|from|during)\\s+daa\\s*0\\b`, 'gi');
+      const rxDay = new RegExp(`\\b(at|on|for|from|during)\\s+day\\s*0\\b`, 'gi');
+      cleanNotes = cleanNotes.replace(rxDaa, `$1 DAA ${daa}`).replace(rxDay, `$1 Day ${daa}`);
+      cleanEfficacy = cleanEfficacy.replace(rxDaa, `$1 DAA ${daa}`).replace(rxDay, `$1 Day ${daa}`);
+      
+      // Also catch direct occurrences of "DAA 0" or "Day 0"
+      cleanNotes = cleanNotes.replace(/\bDAA\s*0\b/g, `DAA ${daa}`).replace(/\bDay\s*0\b/g, `Day ${daa}`);
+      cleanEfficacy = cleanEfficacy.replace(/\bDAA\s*0\b/g, `DAA ${daa}`).replace(/\bDay\s*0\b/g, `Day ${daa}`);
+    }
+
     const newObs = {
       date: obsDate || toDatetimeLocal(new Date()),
       daa: Number(daa),
       weedCover: primaryValue, // mirrored for backwards compatibility
       weedDetails: normalizedWeeds.length > 0 ? normalizedWeeds : [{ species: isHerbicide ? 'No weeds detected' : `No ${catConfig.targetLabel}s detected`, cover: 0, status: '', notes: aiData.notes || 'AI-analyzed', confidence: null, detectedCount: 0, incidence: 0.0 }],
-      notes: aiNotes.length > 0 ? deduplicateText('', aiNotes.join('. ')) : `AI-analyzed on ${formatDateTime(new Date())}`,
+      notes: cleanNotes,
       aiConfidence: aiData.confidence || 'MEDIUM',
-      aiEfficacyAssessment: aiData.efficacyAssessment || aiData.overallAssessment || '',
+      aiEfficacyAssessment: cleanEfficacy,
       competitionLevel: aiData.competitionLevel || '',
       status: 'Analyzed',
       source: 'AI',

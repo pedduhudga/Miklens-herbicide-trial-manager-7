@@ -5,7 +5,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import pptxgen from 'pptxgenjs';
-import { formatPhotoDate, formatDate, formatDateTime, calculateDAA } from '../utils/dateUtils.js';
+import { formatPhotoDate, formatDate, formatDateTime, calculateDAA, parseCustomDate } from '../utils/dateUtils.js';
 import { getCategoryConfig, calculateEfficacy, getPrimaryObservationField, getObservationPrimaryValue } from '../utils/categoryConfig.js';
 import {
   performANOVA,
@@ -554,8 +554,17 @@ function secHeading(doc, text, y, ph, fs = 14, color = TEAL) {
 async function addPhotoGrid(doc, photos, y, ph, maxSize = 50, showDates = true) {
   const pw = doc.internal.pageSize.getWidth();
   let xOff = 14;
-  for (let i = 0; i < photos.length; i++) {
-    const p = photos[i]; const src = photoSrc(p); if (!src) continue;
+  const sortedPhotos = [...photos].sort((a, b) => {
+    const dateStrA = (typeof a === 'object' && a !== null) ? a.date : null;
+    const dateStrB = (typeof b === 'object' && b !== null) ? b.date : null;
+    const dateA = dateStrA ? parseCustomDate(dateStrA) : null;
+    const dateB = dateStrB ? parseCustomDate(dateStrB) : null;
+    const timeA = dateA ? dateA.getTime() : 0;
+    const timeB = dateB ? dateB.getTime() : 0;
+    return timeA - timeB;
+  });
+  for (let i = 0; i < sortedPhotos.length; i++) {
+    const p = sortedPhotos[i]; const src = photoSrc(p); if (!src) continue;
     try {
       const imgData = await toBase64(src, 400); if (!imgData) continue;
       const img = new Image(); img.src = imgData;
@@ -3274,9 +3283,12 @@ export async function generateMasterComprehensivePdf(project, subTrials, options
   // Calculate dynamic stats
   let maxDaa = 0;
   let totalObs = 0;
+  let totalPhotos = 0;
   subTrials.forEach(t => {
     const eff = safeJsonParse(t.EfficacyDataJSON, []);
     totalObs += eff.length;
+    const phs = safeJsonParse(t.PhotoURLs, []);
+    totalPhotos += phs.length;
     eff.forEach(o => {
       const dVal = (o.daa !== undefined && o.daa !== null && o.daa !== '' && o.daa !== '—') ? Number(o.daa) : calculateDAA(o.date, t.Date);
       if (!isNaN(dVal) && dVal > maxDaa) {
@@ -3312,8 +3324,9 @@ export async function generateMasterComprehensivePdf(project, subTrials, options
   doc.setFont(undefined, 'normal');
   const confidence = maxDaa <= 3 ? 'Low (Early Stage)' : maxDaa <= 14 ? 'Medium (Mid Stage)' : 'High (Final Stage)';
   const progressRows = [
-    ['Plots Evaluated', `${subTrials.length}/${subTrials.length}`, 'Total Observations', String(totalObs)],
-    ['DAA Observation Range', `0–${maxDaa} DAA`, 'Scientific Confidence', confidence]
+    ['Plots Evaluated', `${subTrials.length}/${subTrials.length}`, 'Total Observations (DAA Records)', String(totalObs)],
+    ['DAA Observation Range', `0–${maxDaa} DAA`, 'Total Photos', String(totalPhotos)],
+    ['Scientific Confidence', confidence, '', '']
   ];
   autoTable(doc, {
     startY: y,
@@ -3386,7 +3399,13 @@ export async function generateMasterComprehensivePdf(project, subTrials, options
   }
 
   // Consolidated comparative efficacy
-  y = secHeading(doc, `${sectionCounter++}. Comparative ${repConfig.primaryMetricLabel} (${repConfig.primaryMetricKey}%)`, y, ph, 14, primaryColor);
+  let sectionMetricLabel = `${repConfig.primaryMetricLabel} (${repConfig.primaryMetricKey}%)`;
+  let metricColHeader = `${repConfig.primaryMetricKey} %`;
+  if ((categoryId === 'nutrition' || categoryId === 'biostimulant') && yields.length === 0) {
+    sectionMetricLabel = 'Vigor/Growth Improvement (%)';
+    metricColHeader = 'Vigor/Growth Imp. %';
+  }
+  y = secHeading(doc, `${sectionCounter++}. Comparative ${sectionMetricLabel}`, y, ph, 14, primaryColor);
   const wceRows = [];
   subTrials.forEach(st => {
     const eff = validateEfficacy(safeJsonParse(st.EfficacyDataJSON, []));
@@ -3406,7 +3425,7 @@ export async function generateMasterComprehensivePdf(project, subTrials, options
   if (wceRows.length) {
     autoTable(doc, {
       startY: y,
-      head: [['Sub-Trial / Spot', 'Rep', repConfig.targetLabel, `Initial ${repConfig.primaryObsLabel}`, `Final ${repConfig.primaryObsLabel}`, `${repConfig.primaryMetricKey} %`]],
+      head: [['Sub-Trial / Spot', 'Rep', repConfig.targetLabel, `Initial ${repConfig.primaryObsLabel}`, `Final ${repConfig.primaryObsLabel}`, metricColHeader]],
       body: wceRows,
       headStyles: { fillColor: primaryColor }, theme: 'striped', styles: { fontSize: 8 }
     });
@@ -3502,9 +3521,12 @@ export async function generateMasterScientificReport(project, subTrials, options
   // Calculate dynamic stats
   let maxDaa = 0;
   let totalObs = 0;
+  let totalPhotos = 0;
   subTrials.forEach(t => {
     const eff = safeJsonParse(t.EfficacyDataJSON, []);
     totalObs += eff.length;
+    const phs = safeJsonParse(t.PhotoURLs, []);
+    totalPhotos += phs.length;
     eff.forEach(o => {
       const dVal = (o.daa !== undefined && o.daa !== null && o.daa !== '' && o.daa !== '—') ? Number(o.daa) : calculateDAA(o.date, t.Date);
       if (!isNaN(dVal) && dVal > maxDaa) {
@@ -3540,8 +3562,9 @@ export async function generateMasterScientificReport(project, subTrials, options
   doc.setFont(undefined, 'normal');
   const confidence = maxDaa <= 3 ? 'Low (Early Stage)' : maxDaa <= 14 ? 'Medium (Mid Stage)' : 'High (Final Stage)';
   const progressRows = [
-    ['Plots Evaluated', `${subTrials.length}/${subTrials.length}`, 'Total Observations', String(totalObs)],
-    ['DAA Observation Range', `0–${maxDaa} DAA`, 'Scientific Confidence', confidence]
+    ['Plots Evaluated', `${subTrials.length}/${subTrials.length}`, 'Total Observations (DAA Records)', String(totalObs)],
+    ['DAA Observation Range', `0–${maxDaa} DAA`, 'Total Photos', String(totalPhotos)],
+    ['Scientific Confidence', confidence, '', '']
   ];
   autoTable(doc, {
     startY: y,
@@ -3606,10 +3629,16 @@ export async function generateMasterScientificReport(project, subTrials, options
     });
   });
 
+  const masterSciYields = subTrials.map(st => parseFloat(st.YieldValue || st.Yield || 0)).filter(y => y > 0);
+  let metricColHeader = `${repConfig.primaryMetricKey} %`;
+  if ((categoryId === 'nutrition' || categoryId === 'biostimulant') && masterSciYields.length === 0) {
+    metricColHeader = 'Vigor/Growth Imp. %';
+  }
+
   if (wceRows.length) {
     autoTable(doc, {
       startY: y,
-      head: [['Sub-Trial / Spot', 'Rep', repConfig.targetLabel, `Initial ${repConfig.primaryObsLabel}`, `Final ${repConfig.primaryObsLabel}`, `${repConfig.primaryMetricKey} %`]],
+      head: [['Sub-Trial / Spot', 'Rep', repConfig.targetLabel, `Initial ${repConfig.primaryObsLabel}`, `Final ${repConfig.primaryObsLabel}`, metricColHeader]],
       body: wceRows,
       headStyles: { fillColor: primaryColor }, theme: 'striped', styles: { fontSize: 9 }
     });

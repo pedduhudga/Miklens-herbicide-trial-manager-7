@@ -551,7 +551,31 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                                                 };
                                                 const newObs = buildAiObservationPayload(category, eff, extra);
 
-                                                eData.push(newObs);
+                                                const existingIdx = eData.findIndex(obs => Number(obs.daa) === Number(daa));
+                                                if (existingIdx >= 0) {
+                                                    const existing = eData[existingIdx];
+                                                    const count = Number(existing.sampleCount || 1);
+                                                    const primaryField = getPrimaryObservationField(category);
+                                                    const existingPrimaryValue = parseFloat(existing[primaryField] ?? 0) || 0;
+                                                    const newPrimaryValue = parseFloat(newObs[primaryField] ?? 0) || 0;
+                                                    const mergedPrimaryValue = parseFloat(((existingPrimaryValue * count) + newPrimaryValue) / (count + 1));
+                                                    
+                                                    const mergedObs = {
+                                                        ...existing,
+                                                        sampleCount: count + 1,
+                                                        [primaryField]: Number(mergedPrimaryValue.toFixed(2)),
+                                                    };
+                                                    if (primaryField === 'weedCover') {
+                                                        mergedObs.weedCover = Number(mergedPrimaryValue.toFixed(2));
+                                                    }
+                                                    if (newObs.notes || existing.notes) {
+                                                        mergedObs.notes = [existing.notes, newObs.notes].filter(Boolean).join(' | ');
+                                                    }
+                                                    eData[existingIdx] = mergedObs;
+                                                } else {
+                                                    eData.push(newObs);
+                                                }
+
                                                 t.EfficacyDataJSON = JSON.stringify(eData);
                                                 t.AISummariesJSON = '{}';
                                                 await updateTrial({ ID: t.ID, EfficacyDataJSON: t.EfficacyDataJSON, AISummariesJSON: '{}' }, getAppState);

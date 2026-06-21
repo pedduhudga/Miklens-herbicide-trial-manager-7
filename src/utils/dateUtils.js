@@ -46,15 +46,17 @@ export function parseCustomDate(str) {
 
 export function toDateKey (value) {
     if (!value) return '';
+    const isUTC = typeof value === 'string' && value.endsWith('Z');
     const parsed = parseCustomDate(value);
     if (parsed) {
-        const y = parsed.getFullYear();
-        const m = String(parsed.getMonth() + 1).padStart(2, '0');
-        const d = String(parsed.getDate()).padStart(2, '0');
+        const y = isUTC ? parsed.getUTCFullYear() : parsed.getFullYear();
+        const m = String((isUTC ? parsed.getUTCMonth() : parsed.getMonth()) + 1).padStart(2, '0');
+        const d = String(isUTC ? parsed.getUTCDate() : parsed.getDate()).padStart(2, '0');
         return `${y}-${m}-${d}`;
     }
     return '';
 }
+
 
 /**
  * Calculate DAA (Days After Application) using normalized calendar dates only.
@@ -144,4 +146,71 @@ export function toDatetimeLocal(dateInput) {
     const h = String(d.getHours()).padStart(2, '0');
     const min = String(d.getMinutes()).padStart(2, '0');
     return `${y}-${m}-${day}T${h}:${min}`;
+}
+
+export function parseDateFromFilename(filename, trialDateStr) {
+  if (!filename) return null;
+  const cleanName = filename.replace(/\.[^/.]+$/, "").trim();
+  
+  // 1. Check for full DD-MM-YYYY or DD_MM_YYYY
+  const dmYMatch = cleanName.match(/\b(\d{1,2})[-_](\d{1,2})[-_](\d{4})\b/);
+  if (dmYMatch) {
+    const d = String(dmYMatch[1]).padStart(2, '0');
+    const m = String(dmYMatch[2]).padStart(2, '0');
+    const y = dmYMatch[3];
+    return `${y}-${m}-${d}`;
+  }
+
+  // 2. Check for full YYYY-MM-DD or YYYY_MM_DD
+  const ymdMatch = cleanName.match(/\b(\d{4})[-_](\d{1,2})[-_](\d{1,2})\b/);
+  if (ymdMatch) {
+    const y = ymdMatch[1];
+    const m = String(ymdMatch[2]).padStart(2, '0');
+    const d = String(ymdMatch[3]).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  // If we have a valid trial date, we can use it to resolve partial dates or DAA
+  if (trialDateStr) {
+    const tKey = toDateKey(trialDateStr); // YYYY-MM-DD
+    if (tKey) {
+      const [ty, tm, td] = tKey.split('-').map(Number);
+      
+      // 3. Check for DAA patterns: "daa 2", "daa2", "day 2", "day2", "daa_2"
+      const daaMatch = cleanName.match(/\b(?:daa|day)[-_ ]*(\d+)\b/i) || cleanName.match(/\b(\d+)[-_ ]*(?:daa|day)\b/i);
+      if (daaMatch) {
+        const daaOffset = parseInt(daaMatch[1], 10);
+        const tDate = new Date(Date.UTC(ty, tm - 1, td));
+        tDate.setUTCDate(tDate.getUTCDate() + daaOffset);
+        const ry = tDate.getUTCFullYear();
+        const rm = String(tDate.getUTCMonth() + 1).padStart(2, '0');
+        const rd = String(tDate.getUTCDate()).padStart(2, '0');
+        return `${ry}-${rm}-${rd}`;
+      }
+
+      // 4. Check for day of month patterns: e.g. "19th", "17th", "day 19", "day 17"
+      // Match "19th", "17th", etc. or a standalone number 1-31
+      // We look for patterns like "pot c 19" or "pot a 17" or "pot a 17th"
+      const dayMatch = cleanName.match(/\b(\d{1,2})(?:st|nd|rd|th)\b/i) || cleanName.match(/\b(?:pot|plant)[-_ ]*[a-z0-9]+[-_ ]+(\d{1,2})\b/i);
+      if (dayMatch) {
+        const dayVal = parseInt(dayMatch[1], 10);
+        if (dayVal >= 1 && dayVal <= 31) {
+          // Construct using trial's year and month
+          // If the day is smaller than the trial start day, it might belong to the next month
+          let targetMonth = tm;
+          let targetYear = ty;
+          if (dayVal < td) {
+            targetMonth = tm + 1;
+            if (targetMonth > 12) {
+              targetMonth = 1;
+              targetYear += 1;
+            }
+          }
+          return `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(dayVal).padStart(2, '0')}`;
+        }
+      }
+    }
+  }
+
+  return null;
 }
