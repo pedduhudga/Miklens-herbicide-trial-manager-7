@@ -213,8 +213,12 @@ export function getTimelineData(efficacy, categoryId = 'herbicide', trial = null
   // Build headers
   const headers = ['DAA', categoryId === 'herbicide' ? 'Weed Species' : config.targetLabel];
   
-  // Add primary metric column
-  headers.push(`${config.primaryMetric?.label || 'Efficacy'} (${config.primaryMetric?.unit || '%'})`);
+  const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
+  if (isVigor) {
+    headers.push('Visual Vigor Rating (0–10)');
+  } else {
+    headers.push(`${config.primaryMetric?.label || 'Efficacy'} (${config.primaryMetric?.unit || '%'})`);
+  }
   
   // Add secondary observation fields as actual columns!
   activeFields.forEach(f => {
@@ -1742,12 +1746,24 @@ export async function generatePpt(trial) {
   // Slide 3 – WCE
   if (wce.length) {
     const s3 = pptx.addSlide();
-    s3.addText(`Efficacy Analysis – ${repConfig.primaryMetricKey} per ${repConfig.targetLabel}`, { x: 0.4, y: 0.2, w: 9, h: 0.7, fontSize: 22, bold: true, color: primaryHex });
+    const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
+    const hasYield = parseFloat(trial.YieldValue || trial.Yield || 0) > 0;
+    let slideTitle = `Efficacy Analysis – ${repConfig.primaryMetricKey} per ${repConfig.targetLabel}`;
+    let metricHeaderCell = `${repConfig.primaryMetricKey} (%)`;
+    if (isVigor) {
+      if (hasYield) {
+        slideTitle = `Efficacy Analysis – Yield Improvement per ${repConfig.targetLabel}`;
+        metricHeaderCell = `Yield Improvement (%)`;
+      } else {
+        slideTitle = `Efficacy Analysis – Visual Vigor per ${repConfig.targetLabel}`;
+        metricHeaderCell = `Visual Vigor Rating (0–10)`;
+      }
+    }
+    s3.addText(slideTitle, { x: 0.4, y: 0.2, w: 9, h: 0.7, fontSize: 22, bold: true, color: primaryHex });
     const hdr = [{ text: repConfig.targetLabel, options: { bold: true, color: 'FFFFFF', fill: { color: primaryHex } } },
                  { text: `Initial ${repConfig.primaryObsLabel}`, options: { bold: true, color: 'FFFFFF', fill: { color: primaryHex } } },
                  { text: `Final ${repConfig.primaryObsLabel}`, options: { bold: true, color: 'FFFFFF', fill: { color: primaryHex } } },
-                 { text: `${repConfig.primaryMetricKey} (%)`, options: { bold: true, color: 'FFFFFF', fill: { color: primaryHex } } }];
-    const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
+                 { text: metricHeaderCell, options: { bold: true, color: 'FFFFFF', fill: { color: primaryHex } } }];
     const obsUnit = isVigor ? '/10' : '';
     s3.addTable([hdr, ...wce.map(w => [w.species, w.initialCover.toFixed(1) + obsUnit, w.finalCover.toFixed(1) + obsUnit, w.wce.toFixed(1)])],
       { x: 0.4, y: 1.0, w: 9.2, fontSize: 13, colW: [3, 2, 2, 2.2], border: { pt: 0.5, color: 'CBD5E1' } });
@@ -2322,6 +2338,19 @@ export function exportHtmlReport(trial, projectName = '') {
   const repConfig = getReportConfig(trial);
   const categoryId = repConfig.cat;
   const primaryHex = repConfig.config.color?.hex || '#0d9488';
+  const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
+  const hasYield = parseFloat(trial.YieldValue || trial.Yield || 0) > 0;
+  let sectionMetricLabel = `${repConfig.primaryMetricLabel} (${repConfig.primaryMetricKey})`;
+  let metricColHeader = `${repConfig.primaryMetricKey} %`;
+  if (isVigor) {
+    if (hasYield) {
+      sectionMetricLabel = 'Comparative Yield Improvement (%)';
+      metricColHeader = 'Yield Improvement (%)';
+    } else {
+      sectionMetricLabel = 'Comparative Vigor Improvement (%)';
+      metricColHeader = 'Visual Vigor Rating (0–10)';
+    }
+  }
 
   toast(`Generating HTML report…`, 'info');
 
@@ -2373,12 +2402,12 @@ export function exportHtmlReport(trial, projectName = '') {
   `).join('');
 
   const wceRows = wce.map(w => {
-    const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
     const obsUnit = isVigor ? '/10' : repConfig.primaryMetricUnit;
+    const valueUnit = (isVigor && !hasYield) ? '' : '%';
     return `<tr>
     <td>${w.species}</td><td>${w.initialCover.toFixed(1)}${obsUnit}</td>
     <td>${w.finalCover.toFixed(1)}${obsUnit}</td>
-    <td style="font-weight:700;color:${w.wce >= 80 ? '#10b981' : w.wce >= 60 ? '#3b82f6' : w.wce >= 40 ? '#f59e0b' : '#ef4444'};">${w.wce.toFixed(1)}%</td>
+    <td style="font-weight:700;color:${w.wce >= 80 ? '#10b981' : w.wce >= 60 ? '#3b82f6' : w.wce >= 40 ? '#f59e0b' : '#ef4444'};">${w.wce.toFixed(1)}${valueUnit}</td>
   </tr>`;
   }).join('');
 
@@ -2478,8 +2507,8 @@ export function exportHtmlReport(trial, projectName = '') {
 
     ${wce.length ? `
     <div class="section">
-      <h2>${repConfig.primaryMetricLabel} (${repConfig.primaryMetricKey})</h2>
-      <table><thead><tr><th>${repConfig.targetLabel}</th><th>Initial ${repConfig.primaryObsLabel}</th><th>Final ${repConfig.primaryObsLabel}</th><th>${repConfig.primaryMetricKey} %</th></tr></thead>
+      <h2>${sectionMetricLabel}</h2>
+      <table><thead><tr><th>${repConfig.targetLabel}</th><th>Initial ${repConfig.primaryObsLabel}</th><th>Final ${repConfig.primaryObsLabel}</th><th>${metricColHeader}</th></tr></thead>
       <tbody>${wceRows}</tbody></table>
     </div>` : ''}
 
@@ -2811,6 +2840,19 @@ export async function exportTrialDocx(trial, options = {}) {
   const categoryId = trial.Category || 'herbicide';
   const repConfig = getReportConfig(trial);
   const primaryHex = repConfig.config.color?.hex || '#0d9488';
+  const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
+  const hasYield = parseFloat(trial.YieldValue || trial.Yield || 0) > 0;
+  let sectionMetricLabel = `${repConfig.primaryMetricLabel} (${repConfig.primaryMetricKey})`;
+  let metricColHeader = `${repConfig.primaryMetricKey} %`;
+  if (isVigor) {
+    if (hasYield) {
+      sectionMetricLabel = 'Comparative Yield Improvement (%)';
+      metricColHeader = 'Yield Improvement (%)';
+    } else {
+      sectionMetricLabel = 'Comparative Vigor Improvement (%)';
+      metricColHeader = 'Visual Vigor Rating (0–10)';
+    }
+  }
 
   const efficacy  = validateEfficacy(safeJsonParse(trial.EfficacyDataJSON, []));
   const photos    = safeJsonParse(trial.PhotoURLs, []);
@@ -2878,22 +2920,22 @@ export async function exportTrialDocx(trial, options = {}) {
     </table>` : '';
 
   const wceRows = wce.map(w => {
-    const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
     const obsUnit = isVigor ? '/10' : repConfig.primaryMetricUnit;
+    const valueUnit = (isVigor && !hasYield) ? '' : '%';
     return `<tr>
     <td style="border:1px solid #e2e8f0;padding:5px 8px;">${w.species}</td>
     <td style="border:1px solid #e2e8f0;padding:5px 8px;">${w.initialCover.toFixed(1)}${obsUnit}</td>
     <td style="border:1px solid #e2e8f0;padding:5px 8px;">${w.finalCover.toFixed(1)}${obsUnit}</td>
-    <td style="border:1px solid #e2e8f0;padding:5px 8px;font-weight:bold;color:${w.wce >= 80 ? '#10b981' : w.wce >= 60 ? '#3b82f6' : w.wce >= 40 ? '#f59e0b' : '#ef4444'};">${w.wce.toFixed(1)}%</td>
+    <td style="border:1px solid #e2e8f0;padding:5px 8px;font-weight:bold;color:${w.wce >= 80 ? '#10b981' : w.wce >= 60 ? '#3b82f6' : w.wce >= 40 ? '#f59e0b' : '#ef4444'};">${w.wce.toFixed(1)}${valueUnit}</td>
   </tr>`;
   }).join('');
 
   const wceHtml = wce.length ? `
-    <h2 style="color:${primaryHex};font-size:14pt;border-bottom:2px solid ${primaryHex};padding-bottom:4px;margin-top:24px;">${repConfig.primaryMetricLabel} (${repConfig.primaryMetricKey})</h2>
+    <h2 style="color:${primaryHex};font-size:14pt;border-bottom:2px solid ${primaryHex};padding-bottom:4px;margin-top:24px;">${sectionMetricLabel}</h2>
     <table style="width:100%;border-collapse:collapse;font-size:10pt;">
       <thead><tr style="background:${primaryHex};color:#fff;">
         <th style="padding:6px 8px;text-align:left;">${repConfig.targetLabel}</th><th style="padding:6px 8px;text-align:left;">Initial ${repConfig.primaryObsLabel}</th>
-        <th style="padding:6px 8px;text-align:left;">Final ${repConfig.primaryObsLabel}</th><th style="padding:6px 8px;text-align:left;">${repConfig.primaryMetricKey} %</th>
+        <th style="padding:6px 8px;text-align:left;">Final ${repConfig.primaryObsLabel}</th><th style="padding:6px 8px;text-align:left;">${metricColHeader}</th>
       </tr></thead>
       <tbody>${wceRows}</tbody>
     </table>` : '';
