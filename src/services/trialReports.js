@@ -587,8 +587,13 @@ async function addPhotoGrid(doc, photos, y, ph, maxSize = 50, showDates = true) 
   const pw = doc.internal.pageSize.getWidth();
   let xOff = 14;
   const sortedPhotos = [...photos].sort((a, b) => {
-    const dateStrA = (typeof a === 'object' && a !== null) ? a.date : null;
-    const dateStrB = (typeof b === 'object' && b !== null) ? b.date : null;
+    const getPhotoDateStr = (p) => {
+      if (!p) return null;
+      if (typeof p === 'string') return p;
+      return p.date || p.label || p.name || null;
+    };
+    const dateStrA = getPhotoDateStr(a);
+    const dateStrB = getPhotoDateStr(b);
     const dateA = dateStrA ? parseCustomDate(dateStrA) : null;
     const dateB = dateStrB ? parseCustomDate(dateStrB) : null;
     const timeA = dateA ? dateA.getTime() : 0;
@@ -1339,9 +1344,11 @@ export async function generateComprehensivePdf(trial, options = {}) {
     if (y + 30 > ph - 20) { doc.addPage(); y = 20; }
     const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
     const obsUnit = isVigor ? '/10' : '';
+    const hasYield = parseFloat(trial.YieldValue || trial.Yield || 0) > 0;
+    const metricColHeader = (isVigor && !hasYield) ? 'Visual Vigor Rating (0–10)' : `${repConfig.primaryMetricKey} (${repConfig.primaryMetricUnit})`;
     autoTable(doc, {
       startY: y,
-      head: [[repConfig.targetLabel, `Initial ${repConfig.primaryObsLabel}`, `Final ${repConfig.primaryObsLabel}`, `${repConfig.primaryMetricKey} (${repConfig.primaryMetricUnit})`]],
+      head: [[repConfig.targetLabel, `Initial ${repConfig.primaryObsLabel}`, `Final ${repConfig.primaryObsLabel}`, metricColHeader]],
       body: wce.map(w => [w.species, w.initialCover.toFixed(1) + obsUnit, w.finalCover.toFixed(1) + obsUnit, w.wce.toFixed(1)]),
       headStyles: { fillColor: primaryColor }, theme: 'striped', styles: { fontSize: 9 }
     });
@@ -1576,9 +1583,11 @@ export async function generateScientificReport(trial, options = {}) {
   if (wce.length) {
     const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
     const obsUnit = isVigor ? '/10' : '';
+    const hasYield = parseFloat(trial.YieldValue || trial.Yield || 0) > 0;
+    const metricColHeader = (isVigor && !hasYield) ? 'Visual Vigor Rating (0–10)' : `${repConfig.primaryMetricKey} (${repConfig.primaryMetricUnit})`;
     autoTable(doc, {
       startY: y,
-      head: [[repConfig.targetLabel, `Initial ${repConfig.primaryObsLabel}`, `Final ${repConfig.primaryObsLabel}`, `${repConfig.primaryMetricKey} (${repConfig.primaryMetricUnit})`]],
+      head: [[repConfig.targetLabel, `Initial ${repConfig.primaryObsLabel}`, `Final ${repConfig.primaryObsLabel}`, metricColHeader]],
       body: wce.map(w => [w.species, w.initialCover.toFixed(1) + obsUnit, w.finalCover.toFixed(1) + obsUnit, w.wce.toFixed(1)]),
       headStyles: { fillColor: primaryColor }, theme: 'striped', styles: { fontSize: 9 }
     });
@@ -3368,7 +3377,7 @@ export async function generateMasterComprehensivePdf(project, subTrials, options
   doc.setFontSize(10); doc.setFont(undefined, 'bold');
   doc.text('Trial Progress Summary', 14, y); y += 4;
   doc.setFont(undefined, 'normal');
-  const confidence = maxDaa <= 3 ? 'Low (Early Stage)' : maxDaa <= 14 ? 'Medium (Mid Stage)' : 'High (Final Stage)';
+  const confidence = maxDaa <= 3 ? 'Preliminary (Early Stage Assessment)' : maxDaa <= 14 ? 'Medium (Mid Stage)' : 'High (Final Stage)';
   const progressRows = [
     ['Plots Evaluated', `${subTrials.length}/${subTrials.length}`, 'Total Observations (DAA Records)', String(totalObs)],
     ['DAA Observation Range', `0–${maxDaa} DAA`, 'Total Photos', String(totalPhotos)],
@@ -3608,7 +3617,7 @@ export async function generateMasterScientificReport(project, subTrials, options
   doc.setFontSize(10); doc.setFont(undefined, 'bold');
   doc.text('Trial Progress Summary', 14, y); y += 4;
   doc.setFont(undefined, 'normal');
-  const confidence = maxDaa <= 3 ? 'Low (Early Stage)' : maxDaa <= 14 ? 'Medium (Mid Stage)' : 'High (Final Stage)';
+  const confidence = maxDaa <= 3 ? 'Preliminary (Early Stage Assessment)' : maxDaa <= 14 ? 'Medium (Mid Stage)' : 'High (Final Stage)';
   const progressRows = [
     ['Plots Evaluated', `${subTrials.length}/${subTrials.length}`, 'Total Observations (DAA Records)', String(totalObs)],
     ['DAA Observation Range', `0–${maxDaa} DAA`, 'Total Photos', String(totalPhotos)],

@@ -13,36 +13,45 @@ if (typeof Date !== 'undefined') {
 
 export function parseCustomDate(str) {
     if (!str) return null;
+    if (str instanceof Date) return str;
     const s = String(str).trim();
     const monthMap = { jan:0, feb:1, mar:2, apr:3, may:4, jun:5, jul:6, aug:7, sep:8, oct:9, nov:10, dec:11 };
     
-    // Match DD-MMM (e.g. 19-Jun or 17-Jun)
-    const shortMonthMatch = s.match(/^(\d{1,2})[-/]([a-z]{3})$/i);
-    if (shortMonthMatch) {
-        const day = parseInt(shortMonthMatch[1], 10);
-        const monthStr = shortMonthMatch[2].toLowerCase();
-        const month = monthMap[monthStr] !== undefined ? monthMap[monthStr] : 0;
-        const year = new Date().getFullYear();
-        return new Date(year, month, day);
+    // Check if the string contains any month name (e.g. Jun, June, Jan)
+    const lowerStr = s.toLowerCase();
+    let foundMonth = null;
+    let foundMonthIndex = -1;
+    for (const mName of Object.keys(monthMap)) {
+        if (lowerStr.includes(mName)) {
+            foundMonth = mName;
+            foundMonthIndex = monthMap[mName];
+            break;
+        }
     }
 
-    // Match DD-MMM-YYYY (e.g. 19-Jun-2026 or 19-Jun-26)
-    const mMatch = s.match(/^(\d{1,2})[-/]([a-z]{3})[-/](\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::\d{2})?\s*([AP]M)?)?/i);
-    if (mMatch) {
-        const day = parseInt(mMatch[1], 10);
-        const monthStr = mMatch[2].toLowerCase();
-        const month = monthMap[monthStr] !== undefined ? monthMap[monthStr] : 0;
-        let year = parseInt(mMatch[3], 10);
-        if (year < 100) year += 2000;
-        let hour = mMatch[4] ? parseInt(mMatch[4], 10) : 0;
-        const minute = mMatch[5] ? parseInt(mMatch[5], 10) : 0;
-        const ampm = mMatch[6];
-        if (ampm) {
-            if (ampm.toUpperCase() === 'PM' && hour < 12) hour += 12;
-            if (ampm.toUpperCase() === 'AM' && hour === 12) hour = 0;
+    if (foundMonth !== null) {
+        // Extract all numbers from the string
+        const numbers = s.match(/\d+/g);
+        if (numbers && numbers.length > 0) {
+            const day = parseInt(numbers[0], 10);
+            let year = new Date().getFullYear();
+            if (numbers.length > 1) {
+                let possibleYear = parseInt(numbers[1], 10);
+                if (possibleYear > 31) {
+                    year = possibleYear;
+                    if (year < 100) year += 2000;
+                } else if (numbers.length > 2) {
+                    let possibleYear3 = parseInt(numbers[2], 10);
+                    if (possibleYear3 > 31) {
+                        year = possibleYear3;
+                        if (year < 100) year += 2000;
+                    }
+                }
+            }
+            return new Date(year, foundMonthIndex, day);
         }
-        return new Date(year, month, day, hour, minute);
     }
+
     // Match DD-MM-YYYY HH:MM AM/PM or similar
     const match = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::\d{2})?\s*([AP]M)?)?/i);
     if (match) {
@@ -59,7 +68,6 @@ export function parseCustomDate(str) {
         return new Date(year, month, day, hour, minute);
     }
     // Fallback to ISO-like YYYY-MM-DD
-    // If it ends with Z, it is a UTC string; let it fall through to native parsing so timezone conversion is correct.
     const isoMatch = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/);
     if (isoMatch && !s.endsWith('Z')) {
         const year = parseInt(isoMatch[1], 10);
