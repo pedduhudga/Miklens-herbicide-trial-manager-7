@@ -25,6 +25,7 @@ import BottomNav from './components/BottomNav.jsx';
 import Toast from './components/Toast.jsx';
 import LoadingOverlay from './components/LoadingOverlay.jsx';
 import ConflictResolverModal from './components/ConflictResolverModal.jsx';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 
 
 import Setup from './pages/Setup.jsx';
@@ -348,16 +349,18 @@ function WebPlatformAdapter({ children }) {
 
 function App() {
   return (
-    <AppStateProvider>
-      <HashRouter>
-        <Routes>
-          {/* Public live QR page — no auth required */}
-          <Route path="/live/:id" element={<LiveTrialPage />} />
-          {/* All authenticated app routes */}
-          <Route path="/*" element={<WebPlatformAdapter><AppLayout /></WebPlatformAdapter>} />
-        </Routes>
-      </HashRouter>
-    </AppStateProvider>
+    <ErrorBoundary>
+      <AppStateProvider>
+        <HashRouter>
+          <Routes>
+            {/* Public live QR page — no auth required */}
+            <Route path="/live/:id" element={<LiveTrialPage />} />
+            {/* All authenticated app routes */}
+            <Route path="/*" element={<WebPlatformAdapter><AppLayout /></WebPlatformAdapter>} />
+          </Routes>
+        </HashRouter>
+      </AppStateProvider>
+    </ErrorBoundary>
   );
 }
 

@@ -47,6 +47,12 @@ export default function Login() {
       setForgotError('Please enter your email address.');
       return;
     }
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(forgotEmail.trim())) {
+      setForgotError('Please enter a valid email address.');
+      return;
+    }
     setForgotError('');
     setForgotSuccess('');
     setForgotLoading(true);
@@ -60,7 +66,7 @@ export default function Login() {
         setForgotError(res.message || 'Failed to send reset email.');
       }
     } catch (err) {
-      setForgotError(err.message || 'An error occurred.');
+      setForgotError(err.message || 'An error occurred. Please try again.');
     } finally {
       setForgotLoading(false);
     }

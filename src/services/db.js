@@ -114,9 +114,12 @@ export async function apiCall(action, payload = {}, showOverlay = true, getAppSt
         return unwrapResponse(rawResult);
     };
 
+    const appState = getAppState ? getAppState() : null;
+    const platformAdapter = appState?.platformAdapter;
+
     if (window.google && window.google.script && typeof window.google.script.run === 'object') {
         return new Promise((resolve) => {
-            if (showOverlay) if(getAppState().platformAdapter?.showLoading) getAppState().platformAdapter.showLoading(true);
+            if (showOverlay) platformAdapter?.showLoading?.(true);
             try {
                 const fullPayload = {
                     ...payload,
@@ -131,12 +134,12 @@ export async function apiCall(action, payload = {}, showOverlay = true, getAppSt
             } catch (err) {
                 resolve(buildQueueError('client', err?.message || String(err)));
             } finally {
-                if (showOverlay) if(getAppState().platformAdapter?.showLoading) getAppState().platformAdapter.showLoading(false);
+                if (showOverlay) platformAdapter?.showLoading?.(false);
             }
         });
     }
 
-    if (showOverlay) if(getAppState().platformAdapter?.showLoading) getAppState().platformAdapter.showLoading(true);
+    if (showOverlay) platformAdapter?.showLoading?.(true);
 
     try {
         const fullPayload = {
@@ -193,61 +196,118 @@ function findObjectValues(value) {
     return nested || null;
 }
 
+/**
+ * Reassemble chunked JSON fields that were split across multiple columns
+ * due to Google Sheets' 50,000 character cell limit.
+ * Fields with suffixes like FieldName__p1, FieldName__p2 are reassembled.
+ */
+function reassembleChunkedFields(obj) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return obj;
+    
+    const result = { ...obj };
+    const fieldPartsMap = {};
+    
+    // Find all chunked fields and group them
+    for (const key of Object.keys(result)) {
+        const match = key.match(/^(.+?)__p(\d+)$/);
+        if (match) {
+            const fieldName = match[1];
+            const partNum = parseInt(match[2], 10);
+            if (!fieldPartsMap[fieldName]) {
+                fieldPartsMap[fieldName] = [];
+            }
+            fieldPartsMap[fieldName][partNum - 1] = result[key];
+        }
+    }
+    
+    // Reassemble each chunked field
+    for (const [fieldName, parts] of Object.entries(fieldPartsMap)) {
+        // Remove all chunk keys from result
+        for (let i = 1; i <= parts.length + 1; i++) {
+            delete result[`${fieldName}__p${i}`];
+        }
+        delete result[`${fieldName}__parts`];
+        
+        // Join all parts and store as original field name
+        const assembled = parts.filter(p => p).join('');
+        if (assembled) {
+            result[fieldName] = assembled;
+        }
+    }
+    
+    return result;
+}
+
 function normalizeArrayResponse(response, key) {
-    if (Array.isArray(response)) return response;
-    if (!response || typeof response !== 'object') return [];
-    if (Array.isArray(response[key])) return response[key];
-    if (Array.isArray(response.data)) return response.data;
-    if (response.data && Array.isArray(response.data[key])) return response.data[key];
-    if (response.data && response.data.response) {
+    let arr = null;
+    
+    if (Array.isArray(response)) arr = response;
+    else if (!response || typeof response !== 'object') arr = null;
+    else if (Array.isArray(response[key])) arr = response[key];
+    else if (Array.isArray(response.data)) arr = response.data;
+    else if (response.data && Array.isArray(response.data[key])) arr = response.data[key];
+    else if (response.data && response.data.response) {
         const nested = normalizeArrayResponse(response.data.response, key);
-        if (Array.isArray(nested)) return nested;
+        if (Array.isArray(nested)) arr = nested;
     }
-    if (response.data && response.data.payload) {
+    else if (response.data && response.data.payload) {
         const nested = normalizeArrayResponse(response.data.payload, key);
-        if (Array.isArray(nested)) return nested;
+        if (Array.isArray(nested)) arr = nested;
     }
-    if (Array.isArray(response.result)) return response.result;
-    if (response.result && Array.isArray(response.result[key])) return response.result[key];
-    if (response.result && response.result.response) {
+    else if (Array.isArray(response.result)) arr = response.result;
+    else if (response.result && Array.isArray(response.result[key])) arr = response.result[key];
+    else if (response.result && response.result.response) {
         const nested = normalizeArrayResponse(response.result.response, key);
-        if (Array.isArray(nested)) return nested;
+        if (Array.isArray(nested)) arr = nested;
     }
-    if (response.result && response.result.payload) {
+    else if (response.result && response.result.payload) {
         const nested = normalizeArrayResponse(response.result.payload, key);
-        if (Array.isArray(nested)) return nested;
+        if (Array.isArray(nested)) arr = nested;
     }
-    if (response.payload && Array.isArray(response.payload)) return response.payload;
-    if (response.payload && Array.isArray(response.payload[key])) return response.payload[key];
-    if (response.payload && response.payload.response) {
+    else if (response.payload && Array.isArray(response.payload)) arr = response.payload;
+    else if (response.payload && Array.isArray(response.payload[key])) arr = response.payload[key];
+    else if (response.payload && response.payload.response) {
         const nested = normalizeArrayResponse(response.payload.response, key);
-        if (Array.isArray(nested)) return nested;
+        if (Array.isArray(nested)) arr = nested;
     }
-    if (response.payload && response.payload.data) {
+    else if (response.payload && response.payload.data) {
         const nested = normalizeArrayResponse(response.payload.data, key);
-        if (Array.isArray(nested)) return nested;
+        if (Array.isArray(nested)) arr = nested;
     }
-    if (response.response && Array.isArray(response.response[key])) return response.response[key];
-    if (response.response) {
+    else if (response.response && Array.isArray(response.response[key])) arr = response.response[key];
+    else if (response.response) {
         const nested = normalizeArrayResponse(response.response, key);
-        if (Array.isArray(nested)) return nested;
+        if (Array.isArray(nested)) arr = nested;
+    }
+    else {
+        const keys = Object.keys(response);
+        if (keys.length === 1 && Array.isArray(response[keys[0]])) arr = response[keys[0]];
+        else {
+            const foundArray = findFirstArray(response);
+            if (Array.isArray(foundArray)) arr = foundArray;
+            else {
+                const foundObjectValues = findObjectValues(response[key]) || findObjectValues(response.data) || findObjectValues(response.result) || findObjectValues(response.payload) || findObjectValues(response);
+                if (Array.isArray(foundObjectValues)) arr = foundObjectValues;
+            }
+        }
     }
 
-    const keys = Object.keys(response);
-    if (keys.length === 1 && Array.isArray(response[keys[0]])) return response[keys[0]];
-
-    const foundArray = findFirstArray(response);
-    if (Array.isArray(foundArray)) return foundArray;
-
-    const foundObjectValues = findObjectValues(response[key]) || findObjectValues(response.data) || findObjectValues(response.result) || findObjectValues(response.payload) || findObjectValues(response);
-    if (Array.isArray(foundObjectValues)) return foundObjectValues;
-
-    if (response._errType || response.message || response.error) {
-        console.warn('Received non-array API response for list fetch:', { key, response });
-    } else {
-        console.warn('Unable to normalize API response to array:', { key, response });
+    if (!arr) {
+        if (response._errType || response.message || response.error) {
+            console.warn('Received non-array API response for list fetch:', { key, response });
+        } else {
+            console.warn('Unable to normalize API response to array:', { key, response });
+        }
+        return [];
     }
-    return [];
+
+    // Reassemble chunked JSON fields in each record
+    return arr.map(item => {
+        if (item && typeof item === 'object' && !Array.isArray(item)) {
+            return reassembleChunkedFields(item);
+        }
+        return item;
+    });
 }
 
 export const getAllData = (payload, getAppState, showOverlay = true) => apiCall('getAllData', payload, showOverlay, getAppState);

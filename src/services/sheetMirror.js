@@ -154,7 +154,14 @@ function updatePayload(id, payload) {
 export function mirrorWrite(action, payload, getAppState) {
   const state = getAppState ? getAppState() : null;
   if (!state?.settings?.sheetMirrorEnabled) return;
-  if (!state?.settings?.scriptUrl) return;
+  if (!state?.settings?.scriptUrl) {
+    // Warn user that mirroring is enabled but script URL is missing
+    console.warn('[SheetMirror] sheetMirrorEnabled is true but scriptUrl is not configured. Data will not be mirrored to Google Sheets.');
+    if (state?.platformAdapter?.showToast) {
+      state.platformAdapter.showToast('Sheet mirroring enabled but Script URL is missing. Data will not be mirrored.', 'warn');
+    }
+    return;
+  }
   enqueue(action, payload);
   setTimeout(() => flushMirrorQueue(getAppState), 0);
 }

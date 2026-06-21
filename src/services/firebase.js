@@ -37,10 +37,20 @@ export function initFirebase(config) {
 
   if (typeof window !== 'undefined') {
     enableIndexedDbPersistence(_db).catch((err) => {
+      let message = '';
       if (err.code === 'failed-precondition') {
+        message = 'Offline persistence unavailable: Multiple tabs open. Close other tabs to enable offline data caching.';
         console.warn('[Firebase] Persistence failed-precondition: Multiple tabs open.');
       } else if (err.code === 'unimplemented') {
+        message = 'Offline persistence not supported by this browser.';
         console.warn('[Firebase] Persistence unimplemented by browser.');
+      } else {
+        message = 'Failed to enable offline data caching.';
+        console.warn('[Firebase] Persistence error:', err.code, err.message);
+      }
+      // Dispatch toast event to notify the user
+      if (message && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: message, type: 'warn' } }));
       }
     });
   }

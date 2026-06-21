@@ -153,8 +153,13 @@ window._getActiveApiModel = getActiveApiModel;
 export class MultiProviderAI {
 
                 constructor() {
-                    this.retryDelay = parseInt(localStorage.getItem('AI_RETRY_DELAY') || '4000');
-                    this.maxRetries = parseInt(localStorage.getItem('AI_MAX_RETRIES') || '3');
+                    try {
+                        this.retryDelay = parseInt(localStorage.getItem('AI_RETRY_DELAY') || '4000');
+                        this.maxRetries = parseInt(localStorage.getItem('AI_MAX_RETRIES') || '3');
+                    } catch (e) {
+                        this.retryDelay = 4000;
+                        this.maxRetries = 3;
+                    }
                     this.providers = [
                         {
                             id: 'groq',
@@ -207,19 +212,29 @@ export class MultiProviderAI {
                 }
 
                 loadUsageStats() {
-                    const stored = localStorage.getItem('ai_provider_usage');
+                    let stored = null;
+                    try {
+                        stored = localStorage.getItem('ai_provider_usage');
+                    } catch (e) {
+                        this.usage = {};
+                        return;
+                    }
                     if (!stored) {
                         this.usage = {};
                         return;
                     }
 
-                    const data = JSON.parse(stored);
-                    const today = new Date().toISOString().split('T')[0];
+                    try {
+                        const data = JSON.parse(stored);
+                        const today = new Date().toISOString().split('T')[0];
 
-                    if (data.date !== today) {
+                        if (data.date !== today) {
+                            this.usage = {};
+                        } else {
+                            this.usage = data.usage || {};
+                        }
+                    } catch (e) {
                         this.usage = {};
-                    } else {
-                        this.usage = data.usage || {};
                     }
                 }
 
@@ -239,14 +254,18 @@ export class MultiProviderAI {
                     const keys = [];
 
                     // First try base key without number
-                    const baseKey = localStorage.getItem(`AI_KEY_${baseId}`);
-                    if (baseKey) keys.push(baseKey);
+                    try {
+                        const baseKey = localStorage.getItem(`AI_KEY_${baseId}`);
+                        if (baseKey) keys.push(baseKey);
+                    } catch (e) { /* ignore */ }
 
                     // Then try numbered keys (1-5)
-                    for (let i = 1; i <= 5; i++) {
-                        const key = localStorage.getItem(`AI_KEY_${baseId}_${i}`);
-                        if (key) keys.push(key);
-                    }
+                    try {
+                        for (let i = 1; i <= 5; i++) {
+                            const key = localStorage.getItem(`AI_KEY_${baseId}_${i}`);
+                            if (key) keys.push(key);
+                        }
+                    } catch (e) { /* ignore */ }
 
                     return keys; // Return array of keys
                 }
@@ -3722,7 +3741,12 @@ async function _callGeminiApiWithRetries_impl(apiCallFunction, getAppState, retr
                         const primaryMetric = hasYield ? 'yield' : 'cover';
                         console.log('5. Primary Metric:', primaryMetric);
 
-                        const savedPostHoc = localStorage.getItem('analysis_posthoc_method') || 'lsd';
+                        let savedPostHoc = 'lsd';
+                try {
+                    savedPostHoc = localStorage.getItem('analysis_posthoc_method') || 'lsd';
+                } catch (e) {
+                    savedPostHoc = 'lsd';
+                }
                         const results = await engine.analyze(primaryMetric, null, null, { postHoc: savedPostHoc });
                         let currentResults = results;
                         console.log('6. Analysis Results:', results);
@@ -5199,7 +5223,12 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions. Foc
 
             function generateQrContent(trial, mode) {
                 // IMPORTANT: Reload settings from localStorage to ensure latest QR preferences are used
-                const savedSettings = localStorage.getItem('appSettings');
+                let savedSettings = null;
+                try {
+                    savedSettings = localStorage.getItem('appSettings');
+                } catch (e) {
+                    console.warn('Could not access localStorage:', e);
+                }
                 if (savedSettings) {
                     try {
                         const parsed = JSON.parse(savedSettings);
@@ -7548,7 +7577,13 @@ Respond ONLY with a single minified JSON object in this format: {"identification
 
             // --- AUTHENTICATION FUNCTIONS ---
             function checkSession() {
-                const savedAuth = localStorage.getItem('herbicide_auth');
+                let savedAuth = null;
+                try {
+                    savedAuth = localStorage.getItem('herbicide_auth');
+                } catch (e) {
+                    console.warn('Could not access localStorage:', e);
+                    return false;
+                }
                 if (savedAuth) {
                     try {
                         const auth = JSON.parse(savedAuth);
@@ -7784,8 +7819,13 @@ Respond ONLY with a single minified JSON object in this format: {"identification
                     }
 
                     // Restore Admin View State
-                    state.adminViewUserId = localStorage.getItem('adminViewUserId');
-                    state.adminViewUsername = localStorage.getItem('adminViewUsername');
+                    try {
+                        state.adminViewUserId = localStorage.getItem('adminViewUserId');
+                        state.adminViewUsername = localStorage.getItem('adminViewUsername');
+                    } catch (e) {
+                        state.adminViewUserId = null;
+                        state.adminViewUsername = null;
+                    }
                     if (state.adminViewUserId && state.adminViewUsername) {
                         const banner = document.getElementById('admin-view-status');
                         const label = document.getElementById('admin-viewing-user-name');
@@ -7850,7 +7890,12 @@ Respond ONLY with a single minified JSON object in this format: {"identification
             }
 
             function loadSettings() {
-                const settingsStr = localStorage.getItem('appSettings');
+                let settingsStr = null;
+                try {
+                    settingsStr = localStorage.getItem('appSettings');
+                } catch (e) {
+                    console.warn('Could not access localStorage:', e);
+                }
                 const defaultSettings = {
                     apiKeys: [],
                     currentApiKeyIndex: 0,
@@ -7909,7 +7954,12 @@ Respond ONLY with a single minified JSON object in this format: {"identification
                     console.info('Loaded default app settings with 0 Gemini keys.');
                 }
 
-                const chat = localStorage.getItem('aiChatHistory');
+                let chat = null;
+                try {
+                    chat = localStorage.getItem('aiChatHistory');
+                } catch (e) {
+                    chat = null;
+                }
                 state.aiChatHistory = chat ? JSON.parse(chat) : [];
 
                 // NOTE: Sync queue is restored in initializeApp() using herbicide_sync_queue key

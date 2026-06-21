@@ -67,14 +67,18 @@ export function useSync() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      if (!isSyncing && isOnline && state.syncQueue && state.syncQueue.length > 0) {
-        const pending = state.syncQueue.filter(s => s.status === 'pending' || s.status === 'failed').length;
+      const appState = getAppState();
+      // Use a ref-like pattern: read from getAppState() to avoid stale closure
+      // The runSync function already checks isSyncing internally, so we just need to trigger it
+      // This interval should run consistently every 60 seconds regardless of queue changes
+      if (isOnline) {
+        const pending = (appState.syncQueue || []).filter(s => s.status === 'pending' || s.status === 'failed').length;
         if (pending > 0) runSync();
       }
     }, 60000);
 
     return () => clearInterval(interval);
-  }, [isSyncing, isOnline, state.syncQueue, runSync]);
+  }, [isOnline, runSync]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
