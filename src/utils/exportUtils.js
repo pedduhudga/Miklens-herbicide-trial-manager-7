@@ -2,10 +2,56 @@ import { saveAs } from 'file-saver';
 import jsPDF from 'jspdf';
 import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryValue } from './categoryConfig.js';
 
-// Stub integrations for export logic
-// In a full implementation, this uses html-docx-js to render React components to strings and build a word doc.
-// For now, we simulate the builder honoring the template config.
+// Helper utilities for DOCX exports
+async function toBase64(url, maxWidth = 600) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let w = img.width;
+      let h = img.height;
+      if (w > maxWidth) {
+        h = (maxWidth / w) * h;
+        w = maxWidth;
+      }
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL('image/jpeg', 0.8));
+    };
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
 
+function photoSrc(p) {
+  if (!p) return '';
+  return p.fileData || p.url || p.src || '';
+}
+
+function safeFormatDate(d) {
+  if (!d) return 'N/A';
+  try {
+    const dt = new Date(d);
+    if (isNaN(dt.getTime())) return 'N/A';
+    const day = String(dt.getDate()).padStart(2, '0');
+    const month = String(dt.getMonth() + 1).padStart(2, '0');
+    const year = dt.getFullYear();
+    return `${day}-${month}-${year}`;
+  } catch { return 'N/A'; }
+}
+
+function getCleanPhotoLabel(photo, index, trialDaa) {
+  if (photo.label && !/^photo_[a-f0-9]/i.test(photo.label) && !/\.[a-z]{3,4}$/i.test(photo.label)) {
+    return photo.label;
+  }
+  if (trialDaa !== undefined && trialDaa !== null) {
+    return `Field Observation \u2013 DAA ${trialDaa}`;
+  }
+  return `Field Observation #${index + 1}`;
+}
 
 export async function exportScientificReportAsDOC(scope, state, options = {}) {
     const { templateConfig } = options;
@@ -26,14 +72,14 @@ export async function exportScientificReportAsDOC(scope, state, options = {}) {
             <p class="center"><strong>Trial Protocol: ${trial.FormulationName}</strong></p>
 
             <table class="meta-table">
-                <tr><td><strong>Investigator:</strong> ${trial.InvestigatorName || 'N/A'}</td><td><strong>Date:</strong> ${trial.Date}</td></tr>
+                <tr><td><strong>Investigator:</strong> ${trial.InvestigatorName || 'N/A'}</td><td><strong>Date:</strong> ${safeFormatDate(trial.Date)}</td></tr>
                 <tr><td><strong>Location:</strong> ${trial.Location || 'N/A'}</td><td><strong>Dosage:</strong> ${trial.Dosage || 'N/A'}</td></tr>
                 <tr><td><strong>Status:</strong> ${trial.IsCompleted ? 'Finalized' : 'Ongoing'}</td><td><strong>${targetLabel}:</strong> ${targetVal}</td></tr>
             </table><hr/>
         `;
 
         if (templateConfig) {
-            templateConfig.forEach(blockId => {
+            for (const blockId of templateConfig) {
                 switch(blockId) {
                     case 'block-exec-summary': {
                         let summaryText = `Analysis of the trial indicates significant efficacy and performance across multiple observations. The formulation demonstrates strong baseline performance.`;
@@ -77,8 +123,8 @@ export async function exportScientificReportAsDOC(scope, state, options = {}) {
                             <h2>${metricLabel} Timeline Trends</h2>
                             <p>Below is the temporal evolution of the trial observations reflecting efficacy metrics over days after application (DAA):</p>
                             <table border="1">
-                              <thead><tr><th>Observation Period</th><th>${metricLabel}</th><th>Field Observations</th></tr></thead>
-                              <tbody>${effRows || '<tr><td colspan="3">No efficacy data recorded yet.</td></tr>'}</tbody>
+                                <thead><tr><th>Observation Period</th><th>${metricLabel}</th><th>Field Observations</th></tr></thead>
+                                <tbody>${effRows || '<tr><td colspan="3">No efficacy data recorded yet.</td></tr>'}</tbody>
                             </table>
                         `;
                         break;
@@ -106,28 +152,45 @@ export async function exportScientificReportAsDOC(scope, state, options = {}) {
                         } catch {
                             photoArray = [];
                         }
-                        let photoGrid = photoArray.map((p, idx) => {
-                            const label = p.label || `Photo ${idx + 1}`;
-                            const dateStr = p.date ? new Date(p.date).toLocaleDateString() : '';
-                            const imgSrc = p.fileData || p.url || p.src || '';
-                            return `
-                                <div style="display: inline-block; width: 45%; margin: 2%; border: 1px solid #ccc; padding: 5px; text-align: center; vertical-align: top;">
-                                    <p style="font-size: 9pt; font-weight: bold; margin: 5px 0;">${label}</p>
-                                    <p style="font-size: 8pt; color: #666; margin: 0 0 5px 0;">Captured: ${dateStr}</p>
-                                    ${imgSrc ? `<img src="${imgSrc}" style="max-width: 100%; max-height: 180px; display: block; margin: 5px auto;" />` : ''}
-                                </div>
-                            `;
-                        }).join('');
+                        const photoCards = [];
+                        for (let idx = 0; idx < photoArray.length; idx++) {
+                            const p = photoArray[idx];
+                            const label = getCleanPhotoLabel(p, idx);
+                            const dateStr = p.date ? safeFormatDate(p.date) : '';
+                            const imgSrc = photoSrc(p);
+                            if (imgSrc) {
+                                try {
+                                    const b64 = await toBase64(imgSrc, 400);
+                                    if (b64) {
+                                        photoCards.push(`
+                                            <div style="display: inline-block; width: 45%; margin: 2%; border: 1px solid #ccc; padding: 5px; text-align: center; vertical-align: top;">
+                                                <p style="font-size: 9pt; font-weight: bold; margin: 5px 0;">${label}</p>
+                                                ${dateStr ? `<p style="font-size: 8pt; color: #666; margin: 0 0 5px 0;">Captured: ${dateStr}</p>` : ''}
+                                                <img src="${b64}" style="max-width: 100%; max-height: 180px; display: block; margin: 5px auto;" />
+                                            </div>
+                                        `);
+                                        continue;
+                                    }
+                                } catch { /* skip */ }
+                            }
+                            photoCards.push(`<li>${label}${dateStr ? ` — ${dateStr}` : ''}</li>`);
+                        }
+                        const imgGrid = photoCards.filter(c => c.includes('<img'));
+                        const listGrid = photoCards.filter(c => c.includes('<li'));
                         contentHtml += `
                             <h2>Trial Photographic Log</h2>
-                            <div style="width: 100%;">${photoGrid || '<p>No photographic records linked to this trial.</p>'}</div>
+                            <div style="width: 100%;">
+                                ${imgGrid.length ? imgGrid.join('') : ''}
+                                ${listGrid.length ? `<ul>${listGrid.join('')}</ul>` : ''}
+                                ${(!imgGrid.length && !listGrid.length) ? '<p>No photographic records linked to this trial.</p>' : ''}
+                            </div>
                         `;
                         break;
                     }
                     default:
                         break;
                 }
-            });
+            }
         }
 
         const fullHtml = `<!DOCTYPE html>
@@ -292,7 +355,7 @@ export async function exportRegulatoryReportAsDOC(project, state, options = {}) 
                 <tr><td><strong>With Efficacy Data:</strong></td><td>${projectTrials.filter(t => (JSON.parse(t.EfficacyDataJSON || '[]')).length > 0).length}</td></tr>
             </table>
 
-            ${(() => {
+            ${await (async () => {
                 const allPhotos = [];
                 projectTrials.forEach(t => {
                     const pList = JSON.parse(t.PhotoURLs || '[]');
@@ -305,21 +368,36 @@ export async function exportRegulatoryReportAsDOC(project, state, options = {}) 
                     });
                 });
                 if (allPhotos.length === 0) return '';
+                const photoCards = [];
+                for (let idx = 0; idx < allPhotos.length; idx++) {
+                    const p = allPhotos[idx];
+                    const label = `[${p.trialName} - ${p.rep}] ${getCleanPhotoLabel(p, idx)}`;
+                    const dateStr = p.date ? safeFormatDate(p.date) : '';
+                    const imgSrc = photoSrc(p);
+                    if (imgSrc) {
+                        try {
+                            const b64 = await toBase64(imgSrc, 400);
+                            if (b64) {
+                                photoCards.push(`
+                                    <div style="display: inline-block; width: 45%; margin: 2%; border: 1px solid #ccc; padding: 5px; text-align: center; vertical-align: top;">
+                                        <p style="font-size: 9pt; font-weight: bold; margin: 5px 0;">${label}</p>
+                                        ${dateStr ? `<p style="font-size: 8pt; color: #666; margin: 0 0 5px 0;">Captured: ${dateStr}</p>` : ''}
+                                        <img src="${b64}" style="max-width: 100%; max-height: 180px; display: block; margin: 5px auto;" />
+                                    </div>
+                                `);
+                                continue;
+                            }
+                        } catch { /* skip */ }
+                    }
+                    photoCards.push(`<li>${label}${dateStr ? ` — ${dateStr}` : ''}</li>`);
+                }
+                const imgGrid = photoCards.filter(c => c.includes('<img'));
+                const listGrid = photoCards.filter(c => c.includes('<li'));
                 return `
                     <h2>7. Photographic Evidence Log</h2>
                     <div style="width: 100%;">
-                        ${allPhotos.map((p, idx) => {
-                            const label = p.label ? `[${p.trialName} - ${p.rep}] ${p.label}` : `Plot - ${p.trialName} - ${p.rep} - Image ${idx + 1}`;
-                            const dateStr = p.date ? new Date(p.date).toLocaleDateString() : '';
-                            const imgSrc = p.fileData || p.url || p.src || '';
-                            return `
-                                <div style="display: inline-block; width: 45%; margin: 2%; border: 1px solid #ccc; padding: 5px; text-align: center; vertical-align: top;">
-                                    <p style="font-size: 9pt; font-weight: bold; margin: 5px 0;">${label}</p>
-                                    <p style="font-size: 8pt; color: #666; margin: 0 0 5px 0;">Captured: ${dateStr}</p>
-                                    ${imgSrc ? `<img src="${imgSrc}" style="max-width: 100%; max-height: 180px; display: block; margin: 5px auto;" />` : ''}
-                                </div>
-                            `;
-                        }).join('')}
+                        ${imgGrid.length ? imgGrid.join('') : ''}
+                        ${listGrid.length ? `<ul>${listGrid.join('')}</ul>` : ''}
                     </div>
                 `;
             })()}

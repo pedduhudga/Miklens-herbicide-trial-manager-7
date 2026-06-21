@@ -3281,13 +3281,18 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
   };
 
   // ── Regulatory DOCX Export ────────────────────────────────────────────────
-  const handleRegulatoryDOCX = () => {
+  const handleRegulatoryDOCX = async () => {
     if (!activeProject || !analysisResults) { toast('Run analysis first', 'error'); return; }
     const pTrials = (state.trials || []).filter(t => String(t.ProjectID) === String(activeProject.ID));
-    exportMasterDocx(activeProject, pTrials, {
-      aiSummary: narrative,
-      analysis: analysisResults
-    });
+    try {
+      await exportMasterDocx(activeProject, pTrials, {
+        aiSummary: narrative,
+        analysis: analysisResults
+      });
+    } catch (err) {
+      console.error(err);
+      toast(`Failed to generate Regulatory DOCX: ${err.message}`, 'error');
+    }
   };
 
   const handleDownloadMasterPDF = async () => {

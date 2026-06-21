@@ -57,12 +57,17 @@ function getReportConfig(trial) {
     primaryMetricKey,
     primaryMetricUnit,
     primaryField,
+    primaryObsLabel,
   };
 }
 
 function calculateStatus(categoryId, pVal, baseVal = 0) {
   const isPositive = (categoryId === 'nutrition' || categoryId === 'biostimulant');
   if (isPositive) {
+    // Detect 0-10 scale values (visualVigor, overallVigor) vs 0-100 percentage scale
+    if (pVal <= 10) {
+      return pVal >= 8 ? 'Excellent' : pVal >= 6 ? 'Good' : pVal >= 4 ? 'Fair' : 'Poor';
+    }
     return pVal >= 80 ? 'Excellent' : pVal >= 60 ? 'Good' : pVal >= 40 ? 'Fair' : 'Poor';
   } else if (categoryId === 'pesticide') {
     const pctReduction = (baseVal > 0) ? ((baseVal - pVal) / baseVal) * 100 : 0;
@@ -280,6 +285,26 @@ function fmtDate(d) {
   return formatDateTime(d);
 }
 function safeName(s) { return (s || 'trial').replace(/[^a-z0-9_\-]/gi, '_'); }
+function safeFormatDate(d) {
+  if (!d) return 'N/A';
+  try {
+    const dt = new Date(d);
+    if (isNaN(dt.getTime())) return 'N/A';
+    const day = String(dt.getDate()).padStart(2, '0');
+    const month = String(dt.getMonth() + 1).padStart(2, '0');
+    const year = dt.getFullYear();
+    return `${day}-${month}-${year}`;
+  } catch { return 'N/A'; }
+}
+function getCleanPhotoLabel(photo, index, trialDaa) {
+  if (photo.label && !/^photo_[a-f0-9]/i.test(photo.label) && !/\.[a-z]{3,4}$/i.test(photo.label)) {
+    return photo.label;
+  }
+  if (trialDaa !== undefined && trialDaa !== null) {
+    return `Field Observation \u2013 DAA ${trialDaa}`;
+  }
+  return `Field Observation #${index + 1}`;
+}
 function dlBlob(blob, name) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = name; a.click();
@@ -508,7 +533,7 @@ async function addPhotoGrid(doc, photos, y, ph, maxSize = 50, showDates = true) 
       if (y + ih + 14 > ph - 20) { doc.addPage(); y = 20; xOff = 14; }
       addImgSafe(doc, imgData, xOff, y, iw, ih);
       doc.setFontSize(7);
-      const label = p.label || (p.date ? `Photo: ${formatPhotoDate(p.date)}` : `Photo ${i + 1}`);
+      const label = getCleanPhotoLabel(p, i) || (p.date ? `Photo: ${formatPhotoDate(p.date)}` : `Photo ${i + 1}`);
       doc.text(label, xOff, y + ih + 4, { maxWidth: iw + 8 });
       if (showDates && p.date && p.label) doc.text(formatPhotoDate(p.date), xOff, y + ih + 8, { maxWidth: iw + 8 });
       xOff += iw + 12;
@@ -526,6 +551,18 @@ function anovaTable(doc, stats, y, ph, trial, options = {}) {
   const metricLabel = config.primaryMetric?.label || 'Efficacy';
   const metricUnit = config.primaryMetric?.unit || '%';
   const { excludeOutliers = false } = options;
+
+  // Compute maximum DAA across all project trials for early-stage detection
+  let maxDaa = 0;
+  projectTrials.forEach(t => {
+    const eff = safeJsonParse(t.EfficacyDataJSON, []);
+    eff.forEach(o => {
+      if (o.daa !== undefined && o.daa !== null && Number(o.daa) > maxDaa) {
+        maxDaa = Number(o.daa);
+      }
+    });
+  });
+  const isEarlyStage = maxDaa <= 3;
 
   // Group trials by treatment
   const treatments = {};
@@ -631,7 +668,23 @@ function anovaTable(doc, stats, y, ph, trial, options = {}) {
 
   // Stage 2: ANOVA (only if Replications >= 3)
   const maxN = Math.max(...descRows.map(r => r.n), 0);
-  if (maxN >= 3 && descRows.length >= 2) {
+  if (isEarlyStage) {
+    // Show preliminary analysis warning instead of full ANOVA for early-stage data
+    const earlyPw = doc.internal.pageSize.getWidth();
+    if (y + 30 > ph - 20) { doc.addPage(); y = 20; }
+    doc.setFillColor(255, 251, 235);
+    doc.rect(14, y, earlyPw - 28, 22, 'F');
+    doc.setDrawColor(217, 119, 6);
+    doc.rect(14, y, earlyPw - 28, 22, 'S');
+    doc.setFont(undefined, 'bold'); doc.setFontSize(9);
+    doc.setTextColor(146, 64, 14);
+    doc.text('Preliminary Analysis (Early Observation Only)', 18, y + 6);
+    doc.setFont(undefined, 'normal'); doc.setFontSize(8);
+    doc.text(`Results are based on early vegetative observations (0-${maxDaa} DAA) and should not be interpreted`, 18, y + 12);
+    doc.text('as final treatment performance. ANOVA has been omitted for early-stage data.', 18, y + 16);
+    doc.setTextColor(0, 0, 0);
+    y += 28;
+  } else if (maxN >= 3 && descRows.length >= 2) {
     const trialDesign = trial.TrialDesign || trial.Design || 'RCBD';
     let anova;
     let designName = trialDesign;
@@ -1763,8 +1816,8 @@ export async function generatePpt(trial) {
       try {
         const imgData = await toBase64(src, 600); if (!imgData) continue;
         const [px, py, pw2, ph2] = pos[i];
-        s5.addImage({ data: imgData, x: px, y: py, w: pw2, h: ph2 });
-        s5.addText(photos[i].label || `Photo ${i + 1}`, { x: px, y: py + ph2 + 0.05, w: pw2, h: 0.3, fontSize: 9, color: '475569' });
+        s5.addImage({ path: imgData, x: px, y: py, w: pw2, h: ph2 });
+        s5.addText(getCleanPhotoLabel(photos[i], i), { x: px, y: py + ph2 + 0.05, w: pw2, h: 0.3, fontSize: 9, color: '475569' });
       } catch { /* skip */ }
     }
   }
@@ -2770,12 +2823,40 @@ export async function exportTrialDocx(trial, options = {}) {
     }
   }
 
-  const photoHtml = photos.length ? `
-    <h2 style="color:${primaryHex};font-size:14pt;border-bottom:2px solid ${primaryHex};padding-bottom:4px;margin-top:24px;">Field Photos (${photos.length})</h2>
-    <p style="font-size:10pt;color:#64748b;font-style:italic;">Note: Photos are embedded in the HTML report export. This document lists ${photos.length} photo(s) on record.</p>
-    <ul style="font-size:10pt;">
-      ${photos.map((p, i) => `<li>${p.label || `Photo ${i + 1}`}${p.date ? ` — ${formatDateTime(p.date)}` : ''}</li>`).join('')}
-    </ul>` : '';
+  // Resolve photos to inline base64 for Word embedding (Protected View blocks remote URLs)
+  let photoHtml = '';
+  if (photos.length) {
+    const photoCards = [];
+    for (let pi = 0; pi < photos.length; pi++) {
+      const p = photos[pi];
+      const src = photoSrc(p);
+      const label = getCleanPhotoLabel(p, pi);
+      const dateStr = p.date ? safeFormatDate(p.date) : '';
+      if (src) {
+        try {
+          const b64 = await toBase64(src, 400);
+          if (b64) {
+            photoCards.push(`
+              <div style="display:inline-block;width:45%;margin:2%;border:1px solid #ccc;padding:5px;text-align:center;vertical-align:top;">
+                <p style="font-size:9pt;font-weight:bold;margin:5px 0;">${label}</p>
+                ${dateStr ? `<p style="font-size:8pt;color:#666;margin:0 0 5px 0;">Captured: ${dateStr}</p>` : ''}
+                <img src="${b64}" style="max-width:100%;max-height:180px;display:block;margin:5px auto;" />
+              </div>
+            `);
+            continue;
+          }
+        } catch { /* skip */ }
+      }
+      photoCards.push(`<li>${label}${dateStr ? ` — ${dateStr}` : ''}</li>`);
+    }
+    const imgCards = photoCards.filter(c => c.includes('<img'));
+    const listCards = photoCards.filter(c => c.includes('<li'));
+    photoHtml = `
+      <h2 style="color:${primaryHex};font-size:14pt;border-bottom:2px solid ${primaryHex};padding-bottom:4px;margin-top:24px;">Field Photos (${photos.length})</h2>
+      ${imgCards.length ? `<div style="width:100%;">${imgCards.join('')}</div>` : ''}
+      ${listCards.length ? `<ul style="font-size:10pt;">${listCards.join('')}</ul>` : ''}
+    `;
+  }
 
   const recordLabel = categoryId === 'herbicide' ? 'Weed Identification Record' :
                       categoryId === 'fungicide' ? 'Disease Identification Record' :
@@ -3612,8 +3693,8 @@ export async function generateMasterPpt(project, subTrials) {
           const imgData = await toBase64(src, 600);
           if (imgData) {
             const [px, py, pw2, ph2] = pos[photoCount];
-            s4.addImage({ data: imgData, x: px, y: py, w: pw2, h: ph2 });
-            s4.addText(`${st.FormulationName || 'Untreated Check'} - ${photos[0].label || 'Latest'}`, { x: px, y: py + ph2 + 0.05, w: pw2, h: 0.3, fontSize: 9, color: '475569' });
+            s4.addImage({ path: imgData, x: px, y: py, w: pw2, h: ph2 });
+            s4.addText(`${st.FormulationName || 'Untreated Check'} - ${getCleanPhotoLabel(photos[0], 0)}`, { x: px, y: py + ph2 + 0.05, w: pw2, h: 0.3, fontSize: 9, color: '475569' });
             photoCount++;
           }
         } catch { /* skip */ }
@@ -4047,7 +4128,7 @@ export function exportMasterHtml(project, subTrials, options = {}) {
   toast('Master HTML Report downloaded!', 'success');
 }
 
-export function exportMasterDocx(project, subTrials, options = {}) {
+export async function exportMasterDocx(project, subTrials, options = {}) {
   const { aiSummary = '', analysis = null } = options;
   const categoryId = project.Category || (subTrials[0]?.Category) || 'herbicide';
   const repConfig = getReportConfig({ Category: categoryId });
@@ -4266,24 +4347,36 @@ export function exportMasterDocx(project, subTrials, options = {}) {
     </tr>`;
   }).join('');
 
-  const photoLogHtml = subTrials.map(st => {
-    const photos = safeJsonParse(st.PhotoURLs, []);
-    if (!photos.length) return '';
-    const imgGrid = photos.map((p, idx) => {
-      const label = p.label ? `[${st.FormulationName}] ${p.label}` : `Plot ${st.PlotNumber || ''} - ${st.FormulationName} - Photo ${idx + 1}`;
-      const dateStr = p.date ? new Date(p.date).toLocaleDateString() : '';
-      const imgSrc = p.fileData || p.url || p.src || '';
-      if (!imgSrc) return '';
-      return `
+  // Resolve all sub-trial photos to inline base64 with safe date formatting
+  const photoLogParts = [];
+  for (const st of subTrials) {
+    const stPhotos = safeJsonParse(st.PhotoURLs, []);
+    if (!stPhotos.length) continue;
+    const imgCards = [];
+    for (let idx = 0; idx < stPhotos.length; idx++) {
+      const p = stPhotos[idx];
+      const label = `[${st.FormulationName || 'Untreated Check'}] ${getCleanPhotoLabel(p, idx)}`;
+      const dateStr = p.date ? safeFormatDate(p.date) : '';
+      const rawSrc = photoSrc(p);
+      if (!rawSrc) continue;
+      let resolvedSrc = rawSrc;
+      try {
+        const b64 = await toBase64(rawSrc, 400);
+        if (b64) resolvedSrc = b64;
+      } catch { /* use original */ }
+      imgCards.push(`
         <div style="display:inline-block;width:45%;margin:2%;border:1px solid #ccc;padding:5px;text-align:center;vertical-align:top;">
           <p style="font-size:9pt;font-weight:bold;margin:5px 0;">${label}</p>
-          <p style="font-size:8pt;color:#666;margin:0 0 5px 0;">Captured: ${dateStr}</p>
-          <img src="${imgSrc}" style="max-width:100%;max-height:180px;display:block;margin:5px auto;" />
+          ${dateStr ? `<p style="font-size:8pt;color:#666;margin:0 0 5px 0;">Captured: ${dateStr}</p>` : ''}
+          <img src="${resolvedSrc}" style="max-width:100%;max-height:180px;display:block;margin:5px auto;" />
         </div>
-      `;
-    }).join('');
-    return imgGrid ? `<h3>Photos for ${st.FormulationName || 'Untreated Check'} (${st.Replication || 'R1'})</h3><div style="width:100%;">${imgGrid}</div>` : '';
-  }).filter(Boolean).join('');
+      `);
+    }
+    if (imgCards.length) {
+      photoLogParts.push(`<h3>Photos for ${st.FormulationName || 'Untreated Check'} (${stPhotos.length})</h3><div style="width:100%;">${imgCards.join('')}</div>`);
+    }
+  }
+  const photoLogHtml = photoLogParts.join('');
 
   const photoSection = photoLogHtml ? `<h2>Photographic Log</h2>${photoLogHtml}` : '';
 
