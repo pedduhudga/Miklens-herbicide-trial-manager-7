@@ -14,6 +14,24 @@ if (typeof Date !== 'undefined') {
 export function parseCustomDate(str) {
     if (!str) return null;
     const s = String(str).trim();
+    // Match DD-MMM-YYYY (e.g. 19-Jun-2026 or 19-Jun-26)
+    const monthMap = { jan:0, feb:1, mar:2, apr:3, may:4, jun:5, jul:6, aug:7, sep:8, oct:9, nov:10, dec:11 };
+    const mMatch = s.match(/^(\d{1,2})[-/]([a-z]{3})[-/](\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::\d{2})?\s*([AP]M)?)?/i);
+    if (mMatch) {
+        const day = parseInt(mMatch[1], 10);
+        const monthStr = mMatch[2].toLowerCase();
+        const month = monthMap[monthStr] !== undefined ? monthMap[monthStr] : 0;
+        let year = parseInt(mMatch[3], 10);
+        if (year < 100) year += 2000;
+        let hour = mMatch[4] ? parseInt(mMatch[4], 10) : 0;
+        const minute = mMatch[5] ? parseInt(mMatch[5], 10) : 0;
+        const ampm = mMatch[6];
+        if (ampm) {
+            if (ampm.toUpperCase() === 'PM' && hour < 12) hour += 12;
+            if (ampm.toUpperCase() === 'AM' && hour === 12) hour = 0;
+        }
+        return new Date(year, month, day, hour, minute);
+    }
     // Match DD-MM-YYYY HH:MM AM/PM or similar
     const match = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::\d{2})?\s*([AP]M)?)?/i);
     if (match) {
