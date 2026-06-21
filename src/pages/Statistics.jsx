@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useAppState } from '../hooks/useAppState.jsx';
-import { performANOVA, performTukeyHSD, performDunnettTest, performDuncanMRT, performANCOVA, performMetaAnalysis, performTypeIIIANOVA } from '../utils/statsUtils.js';
+import { performANOVA, performTukeyHSD, performDunnettTest, performDuncanMRT, performANCOVA, performMetaAnalysis, performTypeIIIANOVA, performKruskalWallis } from '../utils/statsUtils.js';
 import { safeJsonParse } from '../utils/helpers.js';
 import { 
   BarChart3, Calculator, ChevronDown, Download, 
@@ -24,6 +24,7 @@ export default function Statistics() {
   const [test, setTest] = useState('anova'); // anova, typeIII, tukey, dunnett, ancova, meta
   const [alpha, setAlpha] = useState(0.05);
   const [daa, setDaa] = useState('');
+  const [excludeOutliers, setExcludeOutliers] = useState(false);
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -89,7 +90,8 @@ export default function Statistics() {
         metric, 
         alpha,
         daa: daa ? parseInt(daa) : null,
-        design: activeProject?.Design || 'RCBD'
+        design: activeProject?.Design || 'RCBD',
+        excludeOutliers
       };
       
       let result;
@@ -113,6 +115,9 @@ export default function Statistics() {
           const metaProjects = projects.filter(p => selectedMetaProjects.includes(p.ID));
           result = performMetaAnalysis(metaProjects, trials, options);
           break;
+        case 'kruskal':
+          result = performKruskalWallis(projectTrials, options);
+          break;
         case 'anova':
         default:
           result = performANOVA(projectTrials, options);
@@ -122,7 +127,7 @@ export default function Statistics() {
       setResults(result);
       setLoading(false);
     }, 100);
-  }, [projectTrials, metric, alpha, test, daa, controlTreatment, covariateMetric, selectedMetaProjects, projects, trials, activeProject]);
+  }, [projectTrials, metric, alpha, test, daa, controlTreatment, covariateMetric, selectedMetaProjects, projects, trials, activeProject, excludeOutliers]);
 
   // Export results as CSV
   const exportResults = useCallback(() => {
@@ -236,11 +241,12 @@ export default function Statistics() {
               className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm"
             >
               <option value="anova">ANOVA (F-test)</option>
-              <option value="typeIII">Type III ANOVA (Unbalanced)</option>
+              <option value="typeIII">Approximate Type III ANOVA (Unbalanced)</option>
               <option value="tukey">Tukey HSD (All Pairs)</option>
               <option value="duncan">Duncan's MRT (Step-wise Ranked)</option>
               <option value="dunnett">Dunnett's Test (vs Control)</option>
               <option value="ancova">ANCOVA (Covariate Adjustment)</option>
+              <option value="kruskal">Kruskal-Wallis (Non-Parametric)</option>
               <option value="meta">Combined Meta-Analysis (Multi-Project)</option>
             </select>
           </div>
@@ -332,24 +338,36 @@ export default function Statistics() {
           )}
         </div>
 
-        {/* Alpha Level */}
-        <div className="mt-4 flex items-center gap-4">
-          <label className="text-sm font-semibold text-slate-700">Significance Level (α):</label>
-          <div className="flex gap-2">
-            {[0.01, 0.05, 0.10].map(a => (
-              <button
-                key={a}
-                onClick={() => { setAlpha(a); setResults(null); }}
-                className={`px-3 py-1 rounded-full text-sm font-medium transition ${
-                  alpha === a 
-                    ? 'bg-emerald-100 text-emerald-700 border-2 border-emerald-500' 
-                    : 'bg-slate-100 text-slate-600 border-2 border-transparent hover:bg-slate-200'
-                }`}
-              >
-                {a === 0.01 ? '1%' : a === 0.05 ? '5%' : '10%'}
-              </button>
-            ))}
+        {/* Alpha Level & Outliers */}
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <label className="text-sm font-semibold text-slate-700">Significance Level (α):</label>
+            <div className="flex gap-2">
+              {[0.01, 0.05, 0.10].map(a => (
+                <button
+                  key={a}
+                  onClick={() => { setAlpha(a); setResults(null); }}
+                  className={`px-3 py-1 rounded-full text-sm font-medium transition ${
+                    alpha === a 
+                      ? 'bg-emerald-100 text-emerald-700 border-2 border-emerald-500' 
+                      : 'bg-slate-100 text-slate-600 border-2 border-transparent hover:bg-slate-200'
+                  }`}
+                >
+                  {a === 0.01 ? '1%' : a === 0.05 ? '5%' : '10%'}
+                </button>
+              ))}
+            </div>
           </div>
+          
+          <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 cursor-pointer">
+            <input 
+              type="checkbox"
+              checked={excludeOutliers}
+              onChange={(e) => { setExcludeOutliers(e.target.checked); setResults(null); }}
+              className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-4 h-4"
+            />
+            <span>Exclude Outliers (Z &gt; 2.5)</span>
+          </label>
         </div>
 
         {/* Run Button */}
@@ -386,12 +404,145 @@ export default function Statistics() {
                 <p className="text-sm mt-1">{results.balanceWarning}</p>
                 {test !== 'typeIII' && (
                   <p className="text-xs text-amber-700 mt-2 font-medium">
-                    Recommendation: Switch the statistical test to <strong>Type III ANOVA (Unbalanced)</strong> to resolve statistical bias and control type I error rates.
+                    Recommendation: Switch the statistical test to <strong>Approximate Type III ANOVA</strong> to resolve statistical bias and control type I error rates.
                   </p>
                 )}
               </div>
             </div>
           )}
+
+          {results.detectedOutliers && results.detectedOutliers.length > 0 && (
+            <div className="bg-rose-50 border border-rose-200 text-rose-800 p-4 rounded-xl flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <span className="font-semibold text-sm">⚠ Potential Outliers Detected ({results.detectedOutliers.length})</span>
+                <p className="text-xs text-rose-700 mt-1">
+                  The following observations deviate significantly from their treatment averages (|Z| &gt; 2.5). They are currently {excludeOutliers ? 'excluded from' : 'included in'} the calculation. Toggle "Exclude Outliers" above to {excludeOutliers ? 'include' : 'exclude'} them.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 mt-3 max-h-32 overflow-y-auto">
+                  {results.detectedOutliers.map((o, idx) => (
+                    <div key={idx} className="bg-white/85 p-2 rounded border border-rose-100 text-[10px] space-y-0.5">
+                      <p className="font-bold text-slate-700 truncate">{o.treatment}</p>
+                      <p className="text-slate-500">Rep/Block: <span className="font-medium text-slate-700">{o.block}</span></p>
+                      <p className="text-slate-500">Value: <span className="font-bold text-rose-700">{o.value}</span> | Z-Score: <span className="font-bold text-rose-700">{o.zScore.toFixed(2)}</span></p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Experimental Precision & Assumptions Report */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* Precision card */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 lg:col-span-2 space-y-3 shadow-sm">
+              <h4 className="font-bold text-slate-800 flex items-center gap-2 text-sm border-b border-slate-100 pb-2">
+                <CheckCircle className="w-4 h-4 text-emerald-600" /> Experimental Precision & Quality Report
+              </h4>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100 relative group">
+                  <span className="text-slate-500 text-[9px] font-semibold block uppercase cursor-help flex items-center gap-1">
+                    CV% (Coeff. Var)
+                    <Info className="w-2.5 h-2.5 text-slate-400" />
+                  </span>
+                  <span className="text-md font-bold text-slate-800 block mt-0.5">
+                    {results.cv !== undefined ? `${results.cv.toFixed(2)}%` : 'N/A'}
+                  </span>
+                  {results.cv !== undefined && (
+                    <span className={`text-[10px] font-semibold block mt-0.5 ${
+                      results.cv < 10 ? 'text-emerald-600' :
+                      results.cv <= 20 ? 'text-blue-600' :
+                      results.cv <= 30 ? 'text-amber-600' : 'text-rose-600'
+                    }`}>
+                      {results.cv < 10 ? 'Excellent' :
+                       results.cv <= 20 ? 'Good' :
+                       results.cv <= 30 ? 'Fair' : 'Poor'}
+                    </span>
+                  )}
+                  {/* Tooltip */}
+                  <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-48 bg-slate-800 text-white text-[9px] rounded p-2 opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity duration-200 shadow-md z-10 leading-normal">
+                    <p className="font-bold border-b border-slate-700 pb-1 mb-1">Experimental Precision:</p>
+                    <p>• &lt; 10%: Excellent precision</p>
+                    <p>• 10–20%: Good precision</p>
+                    <p>• 20–30%: Fair precision</p>
+                    <p>• &gt; 30%: Poor precision</p>
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                  <span className="text-slate-500 text-[9px] font-semibold block uppercase">SEm± (Std Error)</span>
+                  <span className="text-md font-bold text-slate-800 block mt-0.5">
+                    {results.semGlobal !== undefined ? `±${results.semGlobal.toFixed(3)}` : 'N/A'}
+                  </span>
+                </div>
+
+                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                  <span className="text-slate-500 text-[9px] font-semibold block uppercase">CD / LSD (5%)</span>
+                  <span className="text-md font-bold text-slate-800 block mt-0.5">
+                    {results.cd5 !== undefined ? `${results.cd5.toFixed(2)}` : 'N/A'}
+                  </span>
+                </div>
+
+                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                  <span className="text-slate-500 text-[9px] font-semibold block uppercase">CD / LSD (1%)</span>
+                  <span className="text-md font-bold text-slate-800 block mt-0.5">
+                    {results.cd1 !== undefined ? `${results.cd1.toFixed(2)}` : 'N/A'}
+                  </span>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                <div>
+                  <span className="text-slate-500 text-[9px] font-semibold block uppercase">Design Balance</span>
+                  <span className="text-[11px] font-bold text-slate-700 block mt-0.5">
+                    {results.balanceWarning ? 'Unbalanced' : 'Balanced'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 text-[9px] font-semibold block uppercase">Layout (Trts × Reps)</span>
+                  <span className="text-[11px] font-bold text-slate-700 block mt-0.5">
+                    {results.treatments ? `${results.treatments.length} Treatments` : 'N/A'} × {results.blocks ? `${results.blocks.length} Replications` : 'N/A'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 text-[9px] font-semibold block uppercase">Total Plots</span>
+                  <span className="text-[11px] font-bold text-slate-700 block mt-0.5">
+                    {results.trtRepCounts ? `${Object.values(results.trtRepCounts).reduce((a, b) => a + b, 0)} Plots` : '0 Plots'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 text-[9px] font-semibold block uppercase">Outliers (Flagged / Excl)</span>
+                  <span className="text-[11px] font-bold text-slate-700 block mt-0.5">
+                    {results.detectedOutliers && results.detectedOutliers.length > 0
+                      ? `${results.detectedOutliers.length} Flagged / ${excludeOutliers ? 'Yes' : 'No'}`
+                      : 'None / No'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Assumptions verification card */}
+            {results.assumptions ? (
+              <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-2.5 shadow-sm">
+                <h4 className="font-bold text-slate-800 flex items-center gap-2 text-sm border-b border-slate-100 pb-2">
+                  <Info className="w-4 h-4 text-blue-600" /> Assumptions Validation
+                </h4>
+                <div className="space-y-2 text-xs">
+                  <div className={`p-2 rounded border ${results.assumptions.normalityPassed ? 'bg-emerald-50/50 border-emerald-100 text-emerald-800' : 'bg-rose-50/50 border-rose-100 text-rose-800'}`}>
+                    <span className="font-semibold block text-[10px]">Normality (Jarque-Bera)</span>
+                    <span className="font-bold">{results.assumptions.normalityPassed ? 'Passed' : 'Failed'}</span> (p = {results.assumptions.normalityP?.toFixed(4)})
+                  </div>
+                  <div className={`p-2 rounded border ${results.assumptions.variancePassed ? 'bg-emerald-50/50 border-emerald-100 text-emerald-800' : 'bg-rose-50/50 border-rose-100 text-rose-800'}`}>
+                    <span className="font-semibold block text-[10px]">Variance (Levene's)</span>
+                    <span className="font-bold">{results.assumptions.variancePassed ? 'Passed' : 'Failed'}</span> (p = {results.assumptions.varianceP?.toFixed(4)})
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-white p-4 rounded-xl border border-slate-200 flex items-center justify-center text-slate-400 text-xs shadow-sm">
+                No assumption validation available for this test type.
+              </div>
+            )}
+          </div>
 
           {/* Summary Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -408,7 +559,7 @@ export default function Statistics() {
                 {results.significant ? 'Significant' : 'Not Significant'}
               </p>
               <p className="text-sm text-slate-500 mt-1">
-                F = {results.fStatistic?.toFixed(3)}, p = {results.pValue?.toFixed(4)}
+                {test === 'kruskal' ? `H = ${results.statistic?.toFixed(3)}` : `F = ${results.fStatistic?.toFixed(3)}`}, p = {results.pValue?.toFixed(4)}
               </p>
             </div>
 
@@ -421,7 +572,7 @@ export default function Statistics() {
                 {results.treatmentMeans ? Object.keys(results.treatmentMeans).length : 0}
               </p>
               <p className="text-sm text-slate-500 mt-1">
-                {test === 'meta' ? 'Multi-location analysis' : `${results.blocks?.length || 0} replications per treatment`}
+                {test === 'meta' ? 'Multi-location analysis' : test === 'kruskal' ? `Sample sizes: ${results.counts ? Object.entries(results.counts).map(([k,v])=>`${k}:${v}`).join(', ') : 'N/A'}` : `${results.blocks?.length || 0} replications per treatment`}
               </p>
             </div>
 
@@ -592,6 +743,44 @@ export default function Statistics() {
                     );
                   })}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Mean Separation Table */}
+          {results.treatmentMeans && results.groups && (
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+                <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                  <Table2 className="w-5 h-5 text-emerald-600" />
+                  Mean Separation Table (Tukey HSD)
+                </h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="px-4 py-2 text-left font-semibold text-slate-700">Treatment</th>
+                      <th className="px-4 py-2 text-right font-semibold text-slate-700">Mean</th>
+                      <th className="px-4 py-2 text-center font-semibold text-slate-700">Significance Letters</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(results.treatmentMeans)
+                      .sort((a, b) => b[1] - a[1])
+                      .map(([trt, mean], i) => (
+                        <tr key={trt} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50 border-t border-slate-100'}>
+                          <td className="px-4 py-2.5 font-medium text-slate-800">{trt}</td>
+                          <td className="px-4 py-2.5 text-right font-bold text-slate-700">{mean.toFixed(2)}</td>
+                          <td className="px-4 py-2.5 text-center">
+                            <span className="inline-block text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded">
+                              {results.groups[trt] || 'a'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}

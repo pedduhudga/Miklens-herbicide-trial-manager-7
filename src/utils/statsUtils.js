@@ -21,17 +21,156 @@ export function calculateStats(values) {
   return { mean, variance, stdDev, n, min: Math.min(...values), max: Math.max(...values) };
 }
 
+const T_TABLE_05 = {
+  1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571,
+  6: 2.447, 7: 2.365, 8: 2.306, 9: 2.262, 10: 2.228,
+  11: 2.201, 12: 2.179, 13: 2.160, 14: 2.145, 15: 2.131,
+  16: 2.120, 17: 2.110, 18: 2.101, 19: 2.093, 20: 2.086,
+  21: 2.080, 22: 2.074, 23: 2.069, 24: 2.064, 25: 2.060,
+  26: 2.056, 27: 2.052, 28: 2.048, 29: 2.045, 30: 2.042,
+  40: 2.021, 60: 2.000, 120: 1.980, inf: 1.960
+};
+
+const T_TABLE_01 = {
+  1: 63.657, 2: 9.925, 3: 5.841, 4: 4.604, 5: 4.032,
+  6: 3.707, 7: 3.499, 8: 3.355, 9: 3.250, 10: 3.169,
+  11: 3.106, 12: 3.055, 13: 3.012, 14: 2.977, 15: 2.947,
+  16: 2.921, 17: 2.898, 18: 2.878, 19: 2.861, 20: 2.845,
+  21: 2.831, 22: 2.819, 23: 2.807, 24: 2.797, 25: 2.787,
+  26: 2.779, 27: 2.771, 28: 2.763, 29: 2.756, 30: 2.750,
+  40: 2.704, 60: 2.660, 120: 2.617, inf: 2.576
+};
+
+export function getStudentTCritical(alpha, df) {
+  const table = (alpha <= 0.01) ? T_TABLE_01 : T_TABLE_05;
+  if (df <= 0) return 1.96;
+  
+  const dfKeys = Object.keys(table).map(key => key === "inf" ? Infinity : parseInt(key));
+  dfKeys.sort((a, b) => a - b);
+  
+  let lowerDf = 1;
+  let upperDf = Infinity;
+  
+  for (let i = 0; i < dfKeys.length; i++) {
+    if (dfKeys[i] <= df) {
+      lowerDf = dfKeys[i];
+    }
+    if (dfKeys[i] >= df) {
+      upperDf = dfKeys[i];
+      break;
+    }
+  }
+  
+  const lowerKey = lowerDf === Infinity ? "inf" : lowerDf;
+  const upperKey = upperDf === Infinity ? "inf" : upperDf;
+  
+  const lowerVal = table[lowerKey];
+  const upperVal = table[upperKey];
+  
+  if (lowerDf === upperDf) return lowerVal;
+  if (upperDf === Infinity) return lowerVal;
+  
+  // Linear interpolation
+  const weight = (df - lowerDf) / (upperDf - lowerDf);
+  return lowerVal + weight * (upperVal - lowerVal);
+}
+
+/**
+ * One-way ANOVA for RCBD (Randomized Complete Block Design)
+ * Returns complete ANOVA table and significance test
+ */
+// Internal helper to calculate ANOVA sums of squares, means, df and ms
+function computeAnovaInternal(treatments, design) {
+  const treatmentNames = Object.keys(treatments);
+  const blockIds = [...new Set(treatmentNames.flatMap(trt => Object.keys(treatments[trt])))];
+  
+  const grandSum = [];
+  const treatmentMeans = {};
+  const blockRawValues = {};
+  const trtRepCounts = {};
+  
+  blockIds.forEach(block => {
+    blockRawValues[block] = [];
+  });
+  
+  treatmentNames.forEach(trt => {
+    const trtValues = [];
+    blockIds.forEach(block => {
+      const vals = treatments[trt][block] || [];
+      trtValues.push(...vals);
+      grandSum.push(...vals);
+      if (vals.length > 0) {
+        blockRawValues[block].push(...vals);
+      }
+    });
+    trtRepCounts[trt] = trtValues.length;
+    if (trtValues.length > 0) {
+      treatmentMeans[trt] = trtValues.reduce((a, b) => a + b, 0) / trtValues.length;
+    } else {
+      treatmentMeans[trt] = 0;
+    }
+  });
+
+  const grandMean = grandSum.length > 0 ? (grandSum.reduce((a, b) => a + b, 0) / grandSum.length) : 0;
+  const N = grandSum.length;
+  const t = treatmentNames.length;
+  const b = blockIds.length;
+  
+  let ssTotal = 0;
+  let ssTreatments = 0;
+  let ssBlocks = 0;
+  
+  grandSum.forEach(y => {
+    ssTotal += Math.pow(y - grandMean, 2);
+  });
+  
+  treatmentNames.forEach(trt => {
+    ssTreatments += trtRepCounts[trt] * Math.pow(treatmentMeans[trt] - grandMean, 2);
+  });
+  
+  const blockMeans = {};
+  if (design !== 'CRD') {
+    blockIds.forEach(block => {
+      const vals = blockRawValues[block] || [];
+      if (vals.length > 0) {
+        const blockMean = vals.reduce((a, b) => a + b, 0) / vals.length;
+        blockMeans[block] = blockMean;
+        ssBlocks += vals.length * Math.pow(blockMean - grandMean, 2);
+      } else {
+        blockMeans[block] = 0;
+      }
+    });
+  }
+  
+  const ssError = Math.max(0, ssTotal - ssTreatments - ssBlocks);
+  const dfTreatments = t - 1;
+  const dfBlocks = design === 'CRD' ? 0 : b - 1;
+  const dfError = design === 'CRD' ? N - t : Math.max(1, N - t - b + 1);
+  const dfTotal = N - 1;
+  
+  const msTreatments = ssTreatments / (dfTreatments || 1);
+  const msBlocks = dfBlocks > 0 ? ssBlocks / dfBlocks : 0;
+  const msError = ssError / (dfError || 1);
+  
+  return {
+    ssTotal, ssTreatments, ssBlocks, ssError,
+    dfTreatments, dfBlocks, dfError, dfTotal,
+    msTreatments, msBlocks, msError,
+    treatmentMeans, blockMeans, grandMean, N, t, b,
+    trtRepCounts, blockIds, treatmentNames, grandSum, blockRawValues
+  };
+}
+
 /**
  * One-way ANOVA for RCBD (Randomized Complete Block Design)
  * Returns complete ANOVA table and significance test
  */
 export function performANOVA(trials, options = {}) {
-  const { metric = 'controlPct', daa = null, species = null, design = 'RCBD' } = options;
+  const { metric = 'controlPct', daa = null, species = null, design = 'RCBD', excludeOutliers = false } = options;
   
   // Group trials by treatment
   const treatments = {};
   const blocks = new Set();
-  const trtRepCounts = {};
   
   trials.forEach(trial => {
     const trt = trial.FormulationName || 'Unknown';
@@ -60,34 +199,78 @@ export function performANOVA(trials, options = {}) {
     }
   });
 
-  // Outlier detection and winsorization/trimming step:
-  Object.keys(treatments).forEach(trt => {
-    Object.keys(treatments[trt]).forEach(blockId => {
-      const vals = treatments[trt][blockId];
-      if (vals.length > 2) {
-        const stats = calculateStats(vals);
-        treatments[trt][blockId] = vals.filter(v => {
-          if (stats.stdDev === 0) return true;
-          const z = (v - stats.mean) / stats.stdDev;
-          return Math.abs(z) <= 2.5; // Exclude extreme outliers
-        });
-      }
-    });
-  });
-  
-  const blockIds = [...blocks];
   const treatmentNames = Object.keys(treatments);
-  
   if (treatmentNames.length < 2) {
     return { error: 'Need at least 2 treatments for ANOVA', fStatistic: null, pValue: null };
   }
 
-  // Count active observations per treatment
-  treatmentNames.forEach(trt => {
-    trtRepCounts[trt] = Object.values(treatments[trt]).flat().length;
-  });
+  // First pass ANOVA to find residuals and run Studentized Residuals outlier detection
+  const firstPass = computeAnovaInternal(treatments, design);
+  if (firstPass.N === 0) {
+    return { error: 'No observations found for ANOVA.', fStatistic: null, pValue: null };
+  }
 
-  // Check for design balance (all treatment-block combinations should have the same number of observations)
+  const detectedOutliers = [];
+  let outliersFound = false;
+
+  if (firstPass.N > 2 && firstPass.msError > 0) {
+    treatmentNames.forEach(trt => {
+      Object.keys(treatments[trt]).forEach(blockId => {
+        const vals = treatments[trt][blockId];
+        const newVals = vals.filter(v => {
+          const meanT = firstPass.treatmentMeans[trt];
+          const meanB = firstPass.blockMeans[blockId] || firstPass.grandMean;
+          const residual = v - (design === 'CRD' ? meanT : (meanT + meanB - firstPass.grandMean));
+          
+          const r = firstPass.trtRepCounts[trt] || 1;
+          const leverage = design === 'CRD' ? (1 / r) : (1 / r + 1 / firstPass.b - 1 / firstPass.N);
+          const seRes = Math.sqrt(firstPass.msError * Math.max(0, 1 - leverage));
+          
+          const studRes = seRes > 0 ? (residual / seRes) : 0;
+          
+          if (Math.abs(studRes) > 2.5) {
+            detectedOutliers.push({
+              treatment: trt,
+              block: blockId,
+              value: v,
+              zScore: studRes
+            });
+            outliersFound = true;
+            return !excludeOutliers;
+          }
+          return true;
+        });
+        treatments[trt][blockId] = newVals;
+      });
+    });
+  }
+
+  // Second pass (if outliers excluded) or use first pass results
+  const finalPass = (outliersFound && excludeOutliers)
+    ? computeAnovaInternal(treatments, design)
+    : firstPass;
+
+  if (finalPass.N === 0) {
+    return { error: 'No observations remaining for ANOVA after outlier exclusion.', fStatistic: null, pValue: null };
+  }
+
+  const {
+    ssTotal, ssTreatments, ssBlocks, ssError,
+    dfTreatments, dfBlocks, dfError, dfTotal,
+    msTreatments, msBlocks, msError,
+    treatmentMeans, grandMean, N, t, b,
+    trtRepCounts, blockIds, grandSum
+  } = finalPass;
+
+  // F-statistics
+  const fStatistic = msError > 0 ? msTreatments / msError : 0;
+  const fBlock = (design !== 'CRD' && msError > 0 && dfBlocks > 0) ? msBlocks / msError : 0;
+  
+  // Approximate p-values
+  const pValue = approximatePValue(fStatistic, dfTreatments, dfError);
+  const pBlock = (design !== 'CRD' && dfBlocks > 0) ? approximatePValue(fBlock, dfBlocks, dfError) : null;
+  
+  // Design Balance warning
   let isBalanced = true;
   let expectedCount = -1;
   for (const trt of treatmentNames) {
@@ -101,87 +284,57 @@ export function performANOVA(trials, options = {}) {
     }
   }
   const balanceWarning = isBalanced ? null : "Warning: Experimental design is unbalanced. Some treatment/block combinations have missing or multiple observations. ANOVA calculations may be statistically biased.";
-  
-  // Calculate means
-  const grandSum = [];
-  const treatmentMeans = {};
-  const blockRawValues = {};
-  
-  blockIds.forEach(block => {
-    blockRawValues[block] = [];
-  });
-  
+
+  // Calculate residuals for assumptions validation
+  const residuals = [];
   treatmentNames.forEach(trt => {
-    const trtValues = [];
     blockIds.forEach(block => {
       const vals = treatments[trt][block] || [];
-      trtValues.push(...vals);
-      grandSum.push(...vals);
-      
       if (vals.length > 0) {
-        blockRawValues[block].push(...vals);
+        const mean = treatmentMeans[trt];
+        vals.forEach(v => {
+          residuals.push(v - mean);
+        });
       }
     });
-    
-    if (trtValues.length > 0) {
-      treatmentMeans[trt] = trtValues.reduce((a, b) => a + b, 0) / trtValues.length;
-    }
   });
+
+  const normalityResult = checkNormality(residuals);
   
-  const grandMean = grandSum.reduce((a, b) => a + b, 0) / grandSum.length;
-  const N = grandSum.length;
-  const t = treatmentNames.length;
-  const b = blockIds.length;
-  
-  // Calculate Sum of Squares
-  let ssTotal = 0;
-  let ssTreatments = 0;
-  let ssBlocks = 0;
-  
-  // SSTotal
-  grandSum.forEach(y => {
-    ssTotal += Math.pow(y - grandMean, 2);
-  });
-  
-  // SSTreatments
+  const groupsForLevene = {};
   treatmentNames.forEach(trt => {
-    const nTrt = Object.values(treatments[trt]).flat().length;
-    ssTreatments += nTrt * Math.pow(treatmentMeans[trt] - grandMean, 2);
+    groupsForLevene[trt] = Object.values(treatments[trt]).flat();
   });
-  
-  // SSBlocks (only if RCBD) - calculated from raw block totals
-  if (design !== 'CRD') {
-    blockIds.forEach(block => {
-      const vals = blockRawValues[block] || [];
-      if (vals.length > 0) {
-        const blockMean = vals.reduce((a, b) => a + b, 0) / vals.length;
-        ssBlocks += vals.length * Math.pow(blockMean - grandMean, 2);
-      }
-    });
+  const leveneResult = checkLeveneTest(groupsForLevene);
+
+  let recommendation = null;
+  if (!normalityResult.normalityPassed || !leveneResult.variancePassed) {
+    recommendation = "Warning: ANOVA assumptions violated. ";
+    if (!normalityResult.normalityPassed) recommendation += "Residuals are not normally distributed (p < 0.05). ";
+    if (!leveneResult.variancePassed) recommendation += "Variances are not homogeneous (Levene's test p < 0.05). ";
+    recommendation += "Consider running the Kruskal-Wallis non-parametric test.";
   }
+
+  // Calculate SEm, CD (LSD), CV
+  const rValues = Object.values(trtRepCounts);
+  const isRBalanced = rValues.every(val => val === rValues[0]);
+  const rHarmonic = isRBalanced ? rValues[0] : (rValues.length / rValues.reduce((sum, rVal) => sum + 1 / (rVal || 1), 0));
   
-  // SSError
-  const ssError = Math.max(0, ssTotal - ssTreatments - ssBlocks);
+  const cv = grandMean > 0 ? (Math.sqrt(msError) / grandMean) * 100 : 0;
   
-  // Degrees of freedom
-  const dfTreatments = t - 1;
-  const dfBlocks = design === 'CRD' ? 0 : b - 1;
-  const dfError = design === 'CRD' ? N - t : Math.max(1, N - t - b + 1);
-  const dfTotal = N - 1;
+  const tCritical5 = getStudentTCritical(0.05, dfError);
+  const tCritical1 = getStudentTCritical(0.01, dfError);
   
-  // Mean Squares
-  const msTreatments = ssTreatments / dfTreatments;
-  const msBlocks = dfBlocks > 0 ? ssBlocks / dfBlocks : 0;
-  const msError = ssError / dfError;
+  const semGlobal = Math.sqrt(msError / rHarmonic);
+  const cd5 = tCritical5 * Math.sqrt(2 * msError / rHarmonic);
+  const cd1 = tCritical1 * Math.sqrt(2 * msError / rHarmonic);
   
-  // F-statistic
-  const fStatistic = msError > 0 ? msTreatments / msError : 0;
-  const fBlock = (design !== 'CRD' && msError > 0 && dfBlocks > 0) ? msBlocks / msError : 0;
-  
-  // Approximate p-values
-  const pValue = approximatePValue(fStatistic, dfTreatments, dfError);
-  const pBlock = (design !== 'CRD' && dfBlocks > 0) ? approximatePValue(fBlock, dfBlocks, dfError) : null;
-  
+  const treatmentSems = {};
+  treatmentNames.forEach(trt => {
+    const r = trtRepCounts[trt] || 1;
+    treatmentSems[trt] = Math.sqrt(msError / r);
+  });
+
   return {
     anovaTable: {
       source: design === 'CRD' ? ['Treatments', 'Error', 'Total'] : ['Treatments', 'Blocks', 'Error', 'Total'],
@@ -200,7 +353,20 @@ export function performANOVA(trials, options = {}) {
     blocks: design === 'CRD' ? [] : blockIds,
     trtRepCounts,
     balanceWarning,
-    design
+    design,
+    cv,
+    semGlobal,
+    treatmentSems,
+    cd5,
+    cd1,
+    detectedOutliers,
+    assumptions: {
+      normalityPassed: normalityResult.normalityPassed,
+      normalityP: normalityResult.pValue,
+      variancePassed: leveneResult.variancePassed,
+      varianceP: leveneResult.pValue,
+      recommendation
+    }
   };
 }
 
@@ -403,45 +569,105 @@ function assignLetterGroups(treatments, treatmentMeans, comparisons) {
 }
 
 /**
- * Studentized Range Q-table (simplified critical values)
+ * Studentized Range Q-tables (Studentized Range Distribution)
  */
 const Q_TABLE_05 = {
-  1: [17.97, 26.98, 32.82, 37.08, 40.41, 43.12, 45.4, 47.36, 49.07, 50.59],
-  2: [6.08, 8.33, 9.8, 10.88, 11.74, 12.44, 13.03, 13.54, 13.99, 14.39],
-  3: [4.5, 5.91, 6.82, 7.5, 8.04, 8.48, 8.85, 9.18, 9.46, 9.72],
-  4: [3.93, 5.04, 5.76, 6.29, 6.71, 7.05, 7.35, 7.6, 7.83, 8.03],
-  5: [3.64, 4.6, 5.22, 5.67, 6.03, 6.33, 6.58, 6.8, 6.99, 7.17],
-  6: [3.46, 4.34, 4.9, 5.3, 5.63, 5.9, 6.12, 6.32, 6.49, 6.65],
-  7: [3.34, 4.16, 4.68, 5.06, 5.36, 5.61, 5.82, 6, 6.16, 6.3],
-  8: [3.26, 4.04, 4.53, 4.89, 5.17, 5.4, 5.6, 5.77, 5.92, 6.05],
-  9: [3.2, 3.95, 4.41, 4.76, 5.02, 5.24, 5.43, 5.59, 5.74, 5.87],
-  10: [3.15, 3.88, 4.33, 4.65, 4.91, 5.12, 5.3, 5.46, 5.6, 5.72],
-  11: [3.11, 3.82, 4.26, 4.57, 4.82, 5.03, 5.2, 5.35, 5.49, 5.61],
-  12: [3.08, 3.77, 4.2, 4.51, 4.75, 4.95, 5.12, 5.27, 5.4, 5.51],
-  13: [3.06, 3.73, 4.15, 4.45, 4.69, 4.88, 5.05, 5.19, 5.32, 5.43],
-  14: [3.03, 3.7, 4.11, 4.41, 4.64, 4.83, 4.99, 5.13, 5.25, 5.36],
-  15: [3.01, 3.67, 4.08, 4.37, 4.59, 4.78, 4.94, 5.08, 5.2, 5.31],
-  16: [3, 3.65, 4.05, 4.33, 4.56, 4.74, 4.9, 5.03, 5.15, 5.26],
-  17: [2.98, 3.63, 4.02, 4.3, 4.52, 4.7, 4.86, 4.99, 5.11, 5.21],
-  18: [2.97, 3.61, 4, 4.28, 4.49, 4.67, 4.82, 4.96, 5.07, 5.17],
-  19: [2.96, 3.59, 3.98, 4.25, 4.47, 4.65, 4.79, 4.92, 5.04, 5.14],
-  20: [2.95, 3.58, 3.96, 4.23, 4.45, 4.62, 4.77, 4.9, 5.01, 5.11],
-  24: [2.92, 3.53, 3.9, 4.17, 4.37, 4.54, 4.68, 4.81, 4.92, 5.01],
-  30: [2.89, 3.49, 3.85, 4.1, 4.3, 4.46, 4.6, 4.72, 4.82, 4.92],
-  40: [2.86, 3.44, 3.79, 4.04, 4.23, 4.39, 4.52, 4.63, 4.73, 4.82],
-  60: [2.83, 3.4, 3.74, 3.98, 4.16, 4.31, 4.44, 4.55, 4.65, 4.73],
-  "inf": [2.77, 3.31, 3.63, 3.86, 4.03, 4.17, 4.29, 4.39, 4.47, 4.55]
+  1: [17.97, 26.98, 32.82, 37.08, 40.41, 43.12, 45.40, 47.36, 49.07, 50.59, 51.96, 53.20, 54.33, 55.36, 56.32, 57.22, 58.04, 58.83, 59.56],
+  2: [6.08, 8.33, 9.80, 10.88, 11.74, 12.44, 13.03, 13.54, 13.99, 14.39, 14.75, 15.08, 15.38, 15.65, 15.91, 16.14, 16.37, 16.57, 16.77],
+  3: [4.50, 5.91, 6.82, 7.50, 8.04, 8.48, 8.85, 9.18, 9.46, 9.72, 9.95, 10.15, 10.35, 10.52, 10.69, 10.84, 10.98, 11.11, 11.24],
+  4: [3.93, 5.04, 5.76, 6.29, 6.71, 7.05, 7.35, 7.60, 7.83, 8.03, 8.21, 8.37, 8.52, 8.66, 8.79, 8.91, 9.03, 9.13, 9.23],
+  5: [3.64, 4.60, 5.22, 5.67, 6.03, 6.33, 6.58, 6.80, 6.99, 7.17, 7.32, 7.47, 7.60, 7.72, 7.83, 7.93, 8.03, 8.12, 8.21],
+  6: [3.46, 4.34, 4.90, 5.30, 5.63, 5.90, 6.12, 6.32, 6.49, 6.65, 6.79, 6.92, 7.03, 7.14, 7.24, 7.34, 7.43, 7.51, 7.59],
+  7: [3.34, 4.16, 4.68, 5.06, 5.36, 5.61, 5.82, 6.00, 6.16, 6.30, 6.43, 6.55, 6.66, 6.76, 6.85, 6.94, 7.02, 7.10, 7.17],
+  8: [3.26, 4.04, 4.53, 4.89, 5.17, 5.40, 5.60, 5.77, 5.92, 6.05, 6.18, 6.29, 6.39, 6.48, 6.57, 6.65, 6.73, 6.80, 6.87],
+  9: [3.20, 3.95, 4.41, 4.76, 5.02, 5.24, 5.43, 5.59, 5.74, 5.87, 5.98, 6.09, 6.19, 6.28, 6.36, 6.44, 6.51, 6.58, 6.64],
+  10: [3.15, 3.88, 4.33, 4.65, 4.91, 5.12, 5.30, 5.46, 5.60, 5.72, 5.83, 5.93, 6.03, 6.11, 6.19, 6.27, 6.34, 6.40, 6.47],
+  11: [3.11, 3.82, 4.26, 4.57, 4.82, 5.03, 5.20, 5.35, 5.49, 5.61, 5.71, 5.81, 5.90, 5.98, 6.06, 6.13, 6.20, 6.27, 6.33],
+  12: [3.08, 3.77, 4.20, 4.51, 4.75, 4.95, 5.12, 5.27, 5.39, 5.51, 5.61, 5.71, 5.80, 5.88, 5.95, 6.02, 6.09, 6.15, 6.21],
+  13: [3.06, 3.73, 4.15, 4.45, 4.69, 4.88, 5.05, 5.19, 5.32, 5.43, 5.53, 5.63, 5.71, 5.79, 5.86, 5.93, 5.99, 6.05, 6.11],
+  14: [3.03, 3.70, 4.11, 4.41, 4.64, 4.83, 4.99, 5.13, 5.25, 5.36, 5.46, 5.55, 5.64, 5.71, 5.79, 5.85, 5.91, 5.97, 6.03],
+  15: [3.01, 3.67, 4.08, 4.37, 4.59, 4.78, 4.94, 5.08, 5.20, 5.31, 5.40, 5.49, 5.57, 5.65, 5.72, 5.78, 5.85, 5.90, 5.96],
+  16: [3.00, 3.65, 4.05, 4.33, 4.56, 4.74, 4.90, 5.03, 5.15, 5.26, 5.35, 5.44, 5.52, 5.59, 5.66, 5.73, 5.79, 5.84, 5.90],
+  17: [2.98, 3.63, 4.02, 4.30, 4.52, 4.70, 4.86, 4.99, 5.11, 5.21, 5.31, 5.39, 5.47, 5.54, 5.61, 5.67, 5.73, 5.79, 5.84],
+  18: [2.97, 3.61, 4.00, 4.28, 4.49, 4.67, 4.82, 4.96, 5.07, 5.17, 5.27, 5.35, 5.43, 5.50, 5.57, 5.63, 5.69, 5.74, 5.79],
+  19: [2.96, 3.59, 3.98, 4.25, 4.47, 4.65, 4.79, 4.92, 5.04, 5.14, 5.23, 5.31, 5.39, 5.46, 5.53, 5.59, 5.65, 5.70, 5.75],
+  20: [2.95, 3.58, 3.96, 4.23, 4.45, 4.62, 4.77, 4.90, 5.01, 5.11, 5.20, 5.28, 5.36, 5.43, 5.49, 5.55, 5.61, 5.67, 5.71],
+  24: [2.92, 3.53, 3.90, 4.17, 4.37, 4.54, 4.68, 4.81, 4.92, 5.01, 5.10, 5.18, 5.25, 5.32, 5.38, 5.44, 5.49, 5.55, 5.59],
+  30: [2.89, 3.49, 3.85, 4.10, 4.30, 4.46, 4.60, 4.72, 4.82, 4.92, 5.00, 5.08, 5.15, 5.21, 5.27, 5.33, 5.38, 5.43, 5.47],
+  40: [2.86, 3.44, 3.79, 4.04, 4.23, 4.39, 4.52, 4.63, 4.73, 4.82, 4.90, 4.98, 5.04, 5.11, 5.16, 5.22, 5.27, 5.31, 5.36],
+  60: [2.83, 3.40, 3.74, 3.98, 4.16, 4.31, 4.44, 4.55, 4.65, 4.73, 4.81, 4.88, 4.94, 5.00, 5.06, 5.11, 5.15, 5.20, 5.24],
+  120: [2.80, 3.36, 3.68, 3.92, 4.10, 4.24, 4.36, 4.47, 4.56, 4.64, 4.71, 4.78, 4.84, 4.90, 4.95, 5.00, 5.04, 5.09, 5.13],
+  "inf": [2.77, 3.31, 3.63, 3.86, 4.03, 4.17, 4.29, 4.39, 4.47, 4.55, 4.62, 4.68, 4.74, 4.80, 4.85, 4.89, 4.94, 4.98, 5.01]
+};
+
+const Q_TABLE_01 = {
+  1: [90.03, 135.0, 164.3, 185.6, 202.2, 215.8, 227.2, 237.0, 245.6, 253.2, 260.1, 266.2, 271.8, 277.0, 281.7, 286.1, 290.2, 294.1, 297.7],
+  2: [14.04, 19.02, 22.29, 24.72, 26.63, 28.20, 29.53, 30.68, 31.69, 32.59, 33.40, 34.13, 34.81, 35.43, 36.00, 36.53, 37.03, 37.50, 37.95],
+  3: [8.26, 10.62, 12.17, 13.33, 14.24, 15.00, 15.64, 16.20, 16.69, 17.13, 17.53, 17.89, 18.22, 18.52, 18.81, 19.07, 19.32, 19.55, 19.77],
+  4: [6.51, 8.12, 9.17, 9.96, 10.58, 11.10, 11.55, 11.93, 12.27, 12.57, 12.84, 13.09, 13.32, 13.53, 13.73, 13.91, 14.08, 14.24, 14.40],
+  5: [5.70, 6.98, 7.80, 8.42, 8.91, 9.32, 9.67, 9.97, 10.24, 10.48, 10.70, 10.89, 11.08, 11.24, 11.40, 11.55, 11.68, 11.81, 11.93],
+  6: [5.24, 6.33, 7.03, 7.56, 7.97, 8.32, 8.61, 8.87, 9.10, 9.30, 9.48, 9.65, 9.81, 9.95, 10.08, 10.21, 10.32, 10.43, 10.54],
+  7: [4.95, 5.92, 6.54, 7.01, 7.37, 7.68, 7.94, 8.17, 8.37, 8.55, 8.71, 8.86, 9.00, 9.12, 9.24, 9.35, 9.46, 9.55, 9.65],
+  8: [4.75, 5.64, 6.20, 6.62, 6.96, 7.24, 7.47, 7.68, 7.86, 8.03, 8.18, 8.31, 8.44, 8.55, 8.66, 8.76, 8.85, 8.94, 9.03],
+  9: [4.60, 5.43, 5.96, 6.35, 6.66, 6.91, 7.13, 7.33, 7.49, 7.65, 7.78, 7.91, 8.03, 8.13, 8.23, 8.33, 8.41, 8.49, 8.57],
+  10: [4.48, 5.27, 5.77, 6.14, 6.43, 6.67, 6.87, 7.05, 7.21, 7.36, 7.48, 7.60, 7.71, 7.81, 7.91, 7.99, 8.08, 8.15, 8.23],
+  11: [4.39, 5.15, 5.62, 5.97, 6.25, 6.48, 6.67, 6.84, 6.99, 7.13, 7.25, 7.36, 7.46, 7.56, 7.65, 7.73, 7.81, 7.88, 7.95],
+  12: [4.32, 5.05, 5.50, 5.84, 6.10, 6.32, 6.51, 6.67, 6.81, 6.94, 7.06, 7.17, 7.26, 7.36, 7.44, 7.52, 7.59, 7.66, 7.73],
+  13: [4.26, 4.96, 5.40, 5.73, 5.98, 6.19, 6.37, 6.53, 6.67, 6.79, 6.90, 7.01, 7.10, 7.19, 7.27, 7.35, 7.42, 7.48, 7.55],
+  14: [4.21, 4.89, 5.32, 5.63, 5.88, 6.08, 6.26, 6.41, 6.54, 6.66, 6.77, 6.87, 6.96, 7.05, 7.13, 7.20, 7.27, 7.33, 7.39],
+  15: [4.17, 4.84, 5.25, 5.56, 5.80, 5.99, 6.16, 6.31, 6.44, 6.55, 6.66, 6.76, 6.84, 6.93, 7.00, 7.07, 7.14, 7.20, 7.26],
+  16: [4.13, 4.79, 5.19, 5.49, 5.72, 5.92, 6.08, 6.22, 6.35, 6.46, 6.56, 6.66, 6.74, 6.82, 6.90, 6.97, 7.03, 7.09, 7.15],
+  17: [4.10, 4.74, 5.14, 5.43, 5.66, 5.85, 6.01, 6.15, 6.27, 6.38, 6.48, 6.57, 6.66, 6.73, 6.81, 6.87, 6.94, 7.00, 7.05],
+  18: [4.07, 4.70, 5.09, 5.38, 5.60, 5.79, 5.94, 6.08, 6.20, 6.31, 6.41, 6.50, 6.58, 6.65, 6.73, 6.79, 6.85, 6.91, 6.97],
+  19: [4.05, 4.67, 5.05, 5.33, 5.55, 5.73, 5.89, 6.02, 6.14, 6.25, 6.34, 6.43, 6.51, 6.58, 6.65, 6.72, 6.78, 6.83, 6.89],
+  20: [4.02, 4.64, 5.01, 5.29, 5.51, 5.69, 5.84, 5.97, 6.09, 6.19, 6.28, 6.37, 6.45, 6.52, 6.59, 6.65, 6.71, 6.77, 6.82],
+  24: [3.96, 4.55, 4.91, 5.17, 5.37, 5.54, 5.69, 5.81, 5.92, 6.02, 6.11, 6.19, 6.26, 6.33, 6.39, 6.45, 6.51, 6.56, 6.61],
+  30: [3.89, 4.45, 4.80, 5.05, 5.24, 5.40, 5.54, 5.65, 5.76, 5.85, 5.93, 6.01, 6.08, 6.14, 6.20, 6.26, 6.31, 6.36, 6.41],
+  40: [3.82, 4.37, 4.70, 4.93, 5.11, 5.26, 5.39, 5.50, 5.60, 5.69, 5.76, 5.83, 5.90, 5.96, 6.02, 6.07, 6.12, 6.16, 6.21],
+  60: [3.76, 4.28, 4.59, 4.82, 4.99, 5.13, 5.25, 5.36, 5.45, 5.53, 5.60, 5.67, 5.73, 5.78, 5.84, 5.89, 5.93, 5.97, 6.02],
+  120: [3.70, 4.20, 4.50, 4.71, 4.87, 5.01, 5.12, 5.21, 5.30, 5.37, 5.44, 5.50, 5.56, 5.61, 5.66, 5.71, 5.75, 5.79, 5.83],
+  "inf": [3.64, 4.12, 4.40, 4.60, 4.76, 4.88, 4.99, 5.08, 5.16, 5.23, 5.29, 5.35, 5.40, 5.45, 5.49, 5.54, 5.57, 5.61, 5.65]
 };
 
 /**
- * Get critical q-value for Tukey HSD
+ * Returns the critical value q(alpha, k, df) from the Studentized Range Distribution.
+ * Supports alpha=0.05 and alpha=0.01 with interpolation.
  */
 function getStudentizedRangeCritical(alpha, k, df) {
-  const table = alpha <= 0.01 ? Q_TABLE_01 : Q_TABLE_05;
-  const dfKey = df >= 120 ? "inf" : (df >= 60 ? 60 : (df >= 40 ? 40 : (df >= 30 ? 30 : (df >= 24 ? 24 : (df >= 20 ? 20 : (df >= 15 ? 15 : (df >= 12 ? 12 : (df >= 10 ? 10 : (df >= 9 ? 9 : (df >= 8 ? 8 : (df >= 6 ? 6 : 5)))))))))));
+  const useTable = (alpha <= 0.01) ? Q_TABLE_01 : Q_TABLE_05;
+  
+  // Clamp k to table range (2 to 20)
   const kIndex = Math.min(Math.max(Math.round(k), 2), 20) - 2;
-  const dfEntry = table[dfKey] || table["inf"];
-  return dfEntry[Math.min(kIndex, dfEntry.length - 1)] || 4.0;
+  
+  // Find df entries for interpolation
+  const dfKeys = Object.keys(useTable).map(key => key === "inf" ? Infinity : parseInt(key));
+  dfKeys.sort((a, b) => a - b);
+  
+  let lowerDf = 1;
+  let upperDf = Infinity;
+  
+  for (let i = 0; i < dfKeys.length; i++) {
+    if (dfKeys[i] <= df) {
+      lowerDf = dfKeys[i];
+    }
+    if (dfKeys[i] >= df) {
+      upperDf = dfKeys[i];
+      break;
+    }
+  }
+  
+  const lowerKey = lowerDf === Infinity ? "inf" : lowerDf;
+  const upperKey = upperDf === Infinity ? "inf" : upperDf;
+  
+  const lowerVal = useTable[lowerKey][kIndex];
+  const upperVal = useTable[upperKey][kIndex];
+  
+  if (lowerDf === upperDf) return lowerVal;
+  if (upperDf === Infinity) return lowerVal;
+  
+  // Linear interpolation
+  const weight = (df - lowerDf) / (upperDf - lowerDf);
+  return lowerVal + weight * (upperVal - lowerVal);
 }
 
 /**
@@ -470,24 +696,9 @@ const DUNNETT_TABLE_05 = {
   120: [1.98, 2.24, 2.38, 2.47, 2.55, 2.6, 2.65, 2.69, 2.73],
   "inf": [1.96, 2.21, 2.35, 2.44, 2.51, 2.57, 2.61, 2.65, 2.69]
 };
-
-const Q_TABLE_01 = {
-  1: [90, 135, 164, 185, 202, 216, 227, 237, 246, 253],
-  2: [14.9, 19.02, 22.29, 24.72, 26.63, 28.2, 29.53, 30.68, 31.69, 32.59],
-  3: [8.26, 10.62, 12.17, 13.33, 14.24, 15, 15.64, 16.2, 16.69, 17.13],
-  4: [6.51, 8.12, 9.17, 9.96, 10.58, 11.1, 11.55, 11.93, 12.27, 12.57],
-  5: [5.7, 6.98, 7.8, 8.42, 8.91, 9.32, 9.67, 9.97, 10.24, 10.48],
-  6: [5.24, 6.33, 7.03, 7.56, 7.97, 8.32, 8.61, 8.87, 9.1, 9.3],
-  7: [4.95, 5.92, 6.54, 7.01, 7.37, 7.68, 7.94, 8.17, 8.37, 8.55],
-  8: [4.75, 5.64, 6.2, 6.62, 6.96, 7.24, 7.47, 7.68, 7.86, 8.03],
-  9: [4.6, 5.43, 5.96, 6.35, 6.66, 6.91, 7.13, 7.33, 7.49, 7.65],
-  10: [4.48, 5.27, 5.77, 6.14, 6.43, 6.67, 6.87, 7.05, 7.21, 7.36],
-  "inf": [3.64, 4.12, 4.4, 4.6, 4.76, 4.88, 4.99, 5.08, 5.16, 5.23]
-};
-
 function getDunnettCritical(alpha, k, df) {
   const table = alpha <= 0.01 ? DUNNETT_TABLE_01 : DUNNETT_TABLE_05;
-  const dfKey = df >= 120 ? "inf" : (df >= 60 ? 60 : (df >= 40 ? 40 : (df >= 30 ? 30 : (df >= 20 ? 20 : (df >= 15 ? 15 : (df >= 12 ? 12 : 10))))));
+  const dfKey = df >= 120 ? "inf" : (df >= 60 ? 60 : (df >= 40 ? 40 : (df >= 30 ? 30 : (df >= 20 ? 20 : (df >= 15 ? 15 : (df >= 12 ? 12 : (df >= 10 ? 10 : (df >= 9 ? 9 : (df >= 8 ? 8 : (df >= 7 ? 7 : (df >= 6 ? 6 : 5)))))))))));
   const kIndex = Math.min(Math.max(k - 1, 0), 8);
   const dfEntry = table[dfKey] || table["inf"];
   return dfEntry ? dfEntry[kIndex] : 2.5;
@@ -690,12 +901,9 @@ function getDuncanCriticalRange(alpha, p, df) {
 }
 
 export function performTwoWayANOVA(trials, options = {}) {
-  const { metric = 'controlPct', daa = null, species = null } = options;
+  const { metric = 'controlPct', daa = null, species = null, excludeOutliers = false } = options;
   
-  const dataPoints = [];
-  const factorALevels = new Set();
-  const factorBLevels = new Set();
-  const blocks = new Set();
+  const rawDataPoints = [];
   
   trials.forEach(trial => {
     let factorA = (trial.MainFactor || '').trim();
@@ -724,24 +932,67 @@ export function performTwoWayANOVA(trials, options = {}) {
       }
       if (value !== null && value !== undefined && !isNaN(value)) {
         const valNum = parseFloat(value);
-        dataPoints.push({
+        rawDataPoints.push({
           y: valNum,
           factorA,
           factorB,
           block: blockId,
           trial
         });
-        factorALevels.add(factorA);
-        factorBLevels.add(factorB);
-        blocks.add(blockId);
       }
     }
   });
+
+  const detectedOutliers = [];
+  const cellGroups = {};
+  rawDataPoints.forEach((dp, idx) => {
+    const key = `${dp.factorA} x ${dp.factorB}`;
+    if (!cellGroups[key]) cellGroups[key] = [];
+    cellGroups[key].push({ dp, idx });
+  });
+
+  const dataPoints = [];
+  Object.keys(cellGroups).forEach(key => {
+    const items = cellGroups[key];
+    const vals = items.map(item => item.dp.y);
+    if (vals.length > 2) {
+      const stats = calculateStats(vals);
+      items.forEach(item => {
+        if (stats.stdDev === 0) {
+          dataPoints.push(item.dp);
+          return;
+        }
+        const z = (item.dp.y - stats.mean) / stats.stdDev;
+        if (Math.abs(z) > 2.5) {
+          detectedOutliers.push({
+            treatment: key,
+            block: item.dp.block,
+            value: item.dp.y,
+            zScore: z
+          });
+          if (!excludeOutliers) {
+            dataPoints.push(item.dp);
+          }
+        } else {
+          dataPoints.push(item.dp);
+        }
+      });
+    } else {
+      items.forEach(item => dataPoints.push(item.dp));
+    }
+  });
+
+  const factorALevels = new Set(dataPoints.map(dp => dp.factorA));
+  const factorBLevels = new Set(dataPoints.map(dp => dp.factorB));
+  const blocks = new Set(dataPoints.map(dp => dp.block));
   
   const listA = [...factorALevels];
   const listB = [...factorBLevels];
   const listBlocks = [...blocks];
   const N = dataPoints.length;
+  if (N === 0) {
+    return { error: 'No observations remaining for Two-Way ANOVA after filtering.' };
+  }
   
   if (listA.length < 2 || listB.length < 2) {
     return { error: 'Need at least 2 levels for each factor to perform Two-Way ANOVA' };
@@ -837,6 +1088,7 @@ export function performTwoWayANOVA(trials, options = {}) {
     total: { ss: ssTotal, df: dfTotal },
     grandMean,
     cv,
+    detectedOutliers,
     isTwoWay: true
   };
 }
@@ -1325,6 +1577,26 @@ export function performTypeIIIANOVA(trials, options = {}) {
     treatmentMeans[trt] = vals.reduce((a, b) => a + b, 0) / (vals.length || 1);
   });
 
+  const residuals = [];
+  data.forEach(d => {
+    residuals.push(d.value - treatmentMeans[d.trt]);
+  });
+  const normalityResult = checkNormality(residuals);
+  
+  const groupsForLevene = {};
+  trts.forEach(trt => {
+    groupsForLevene[trt] = data.filter(d => d.trt === trt).map(d => d.value);
+  });
+  const leveneResult = checkLeveneTest(groupsForLevene);
+
+  let recommendation = null;
+  if (!normalityResult.normalityPassed || !leveneResult.variancePassed) {
+    recommendation = "Warning: ANOVA assumptions violated. ";
+    if (!normalityResult.normalityPassed) recommendation += "Residuals are not normally distributed (p < 0.05). ";
+    if (!leveneResult.variancePassed) recommendation += "Variances are not homogeneous (Levene's test p < 0.05). ";
+    recommendation += "Consider running the Kruskal-Wallis non-parametric test.";
+  }
+
   return {
     anovaTable: {
       source: ['Treatments', 'Blocks', 'Error', 'Total'],
@@ -1341,7 +1613,199 @@ export function performTypeIIIANOVA(trials, options = {}) {
     grandMean,
     treatments: trts,
     blocks: blocks,
-    isTypeIII: true
+    isTypeIII: true,
+    assumptions: {
+      normalityPassed: normalityResult.normalityPassed,
+      normalityP: normalityResult.pValue,
+      variancePassed: leveneResult.variancePassed,
+      varianceP: leveneResult.pValue,
+      recommendation
+    }
+  };
+}
+
+export function checkNormality(residuals) {
+  const n = residuals.length;
+  if (n < 4) return { normalityPassed: true, pValue: 1.0, score: 0 };
+  const mean = residuals.reduce((a, b) => a + b, 0) / n;
+  const variance = residuals.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / (n - 1);
+  const stdDev = Math.sqrt(variance);
+  if (stdDev === 0) return { normalityPassed: true, pValue: 1.0, score: 0 };
+
+  const m3 = residuals.reduce((sum, v) => sum + Math.pow(v - mean, 3), 0) / n;
+  const m4 = residuals.reduce((sum, v) => sum + Math.pow(v - mean, 4), 0) / n;
+
+  const skewness = m3 / Math.pow(stdDev, 3);
+  const kurtosis = (m4 / Math.pow(stdDev, 4)) - 3;
+
+  // Jarque-Bera test statistic
+  const jb = (n / 6) * (Math.pow(skewness, 2) + Math.pow(kurtosis, 2) / 4);
+  // JB follows Chi-Square(2). p-value approximation: exp(-jb / 2)
+  const pVal = Math.exp(-jb / 2);
+  
+  return {
+    normalityPassed: pVal >= 0.05,
+    pValue: pVal,
+    skewness,
+    kurtosis,
+    statistic: jb
+  };
+}
+
+export function checkLeveneTest(groups) {
+  const trtKeys = Object.keys(groups);
+  const k = trtKeys.length;
+  if (k < 2) return { variancePassed: true, pValue: 1.0 };
+
+  const absoluteDeviations = {};
+  const allDeviations = [];
+  
+  trtKeys.forEach(trt => {
+    const vals = groups[trt];
+    const mean = vals.reduce((a, b) => a + b, 0) / (vals.length || 1);
+    absoluteDeviations[trt] = vals.map(v => Math.abs(v - mean));
+    allDeviations.push(...absoluteDeviations[trt]);
+  });
+
+  const N = allDeviations.length;
+  if (N - k <= 0) return { variancePassed: true, pValue: 1.0 };
+
+  const grandMeanDev = allDeviations.reduce((a, b) => a + b, 0) / N;
+
+  let ssTreatments = 0;
+  trtKeys.forEach(trt => {
+    const devs = absoluteDeviations[trt];
+    const meanDev = devs.reduce((a, b) => a + b, 0) / (devs.length || 1);
+    ssTreatments += devs.length * Math.pow(meanDev - grandMeanDev, 2);
+  });
+
+  let ssTotal = 0;
+  allDeviations.forEach(d => {
+    ssTotal += Math.pow(d - grandMeanDev, 2);
+  });
+
+  const ssError = Math.max(0, ssTotal - ssTreatments);
+
+  const dfTreatments = k - 1;
+  const dfError = N - k;
+
+  const msTreatments = ssTreatments / dfTreatments;
+  const msError = ssError / dfError;
+
+  const fStatistic = msError > 0 ? msTreatments / msError : 0;
+  const pValue = approximatePValue(fStatistic, dfTreatments, dfError);
+
+  return {
+    variancePassed: pValue >= 0.05,
+    pValue,
+    fStatistic
+  };
+}
+
+export function performKruskalWallis(trials, options = {}) {
+  const { metric = 'controlPct', daa = null } = options;
+  
+  const groups = {};
+  trials.forEach(trial => {
+    const trt = trial.FormulationName || 'Unknown';
+    const efficacy = safeJsonParse(trial.EfficacyDataJSON, []);
+    const observations = daa 
+      ? efficacy.filter(e => e.daa === daa || e.daysAfterApplication === daa)
+      : efficacy;
+    
+    if (observations.length > 0) {
+      const latest = observations[observations.length - 1];
+      const category = trial.Category || 'herbicide';
+      let value = latest[metric] ?? latest[metric === 'yield' ? 'yieldKgPlot' : metric] ?? latest.controlPct ?? latest.wce ?? getObservationPrimaryValue(category, latest) ?? latest.diseaseSeverity ?? latest.pestCount ?? latest.yieldKgPlot ?? latest.overallVigor;
+      if (metric === 'yield' && (value === null || value === undefined || value === '')) {
+        value = trial.Yield ?? trial.YieldValue;
+      }
+      if (value !== null && value !== undefined && !isNaN(value)) {
+        if (!groups[trt]) groups[trt] = [];
+        groups[trt].push({ value: parseFloat(value), trt });
+      }
+    }
+  });
+
+  const trtKeys = Object.keys(groups);
+  const k = trtKeys.length;
+  if (k < 2) {
+    return { error: 'Need at least 2 treatments for Kruskal-Wallis test' };
+  }
+
+  const allItems = [];
+  trtKeys.forEach(trt => {
+    groups[trt].forEach(item => allItems.push(item));
+  });
+
+  allItems.sort((a, b) => a.value - b.value);
+
+  let i = 0;
+  const N = allItems.length;
+  const ranks = new Array(N);
+  let tieSum = 0;
+
+  while (i < N) {
+    let j = i + 1;
+    while (j < N && allItems[j].value === allItems[i].value) {
+      j++;
+    }
+    const rankSum = ((i + 1) + j) * (j - i) / 2;
+    const avgRank = rankSum / (j - i);
+    for (let m = i; m < j; m++) {
+      ranks[m] = avgRank;
+    }
+    if (j - i > 1) {
+      const t = j - i;
+      tieSum += (Math.pow(t, 3) - t);
+    }
+    i = j;
+  }
+
+  for (let m = 0; m < N; m++) {
+    allItems[m].rank = ranks[m];
+  }
+
+  const rankSums = {};
+  const counts = {};
+  trtKeys.forEach(trt => {
+    rankSums[trt] = 0;
+    counts[trt] = groups[trt].length;
+  });
+
+  allItems.forEach(item => {
+    rankSums[item.trt] += item.rank;
+  });
+
+  let sumSqR = 0;
+  trtKeys.forEach(trt => {
+    sumSqR += Math.pow(rankSums[trt], 2) / counts[trt];
+  });
+
+  let H = (12 / (N * (N + 1))) * sumSqR - 3 * (N + 1);
+
+  const C = 1 - (tieSum / (Math.pow(N, 3) - N));
+  if (C > 0 && C < 1) {
+    H /= C;
+  }
+
+  const df = k - 1;
+  const pValue = approximatePValue(H / df, df, 999999);
+
+  const treatmentMeans = {};
+  trtKeys.forEach(trt => {
+    const vals = groups[trt].map(g => g.value);
+    treatmentMeans[trt] = vals.reduce((a, b) => a + b, 0) / (vals.length || 1);
+  });
+
+  return {
+    statistic: H,
+    df,
+    pValue,
+    significant: pValue < 0.05,
+    treatmentMeans,
+    test: 'Kruskal-Wallis',
+    counts
   };
 }
 
@@ -1356,6 +1820,9 @@ if (typeof window !== 'undefined') {
   window.performANCOVA = performANCOVA;
   window.performMetaAnalysis = performMetaAnalysis;
   window.performTypeIIIANOVA = performTypeIIIANOVA;
+  window.checkNormality = checkNormality;
+  window.checkLeveneTest = checkLeveneTest;
+  window.performKruskalWallis = performKruskalWallis;
 }
 
 export default {
@@ -1368,6 +1835,9 @@ export default {
   detectOutliers,
   performANCOVA,
   performMetaAnalysis,
-  performTypeIIIANOVA
+  performTypeIIIANOVA,
+  checkNormality,
+  checkLeveneTest,
+  performKruskalWallis
 };
 

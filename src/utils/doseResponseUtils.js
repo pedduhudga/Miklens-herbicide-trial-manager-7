@@ -189,7 +189,7 @@ export function fitDoseResponse(data) {
   const ed50 = computeED(50);
   const ed90 = computeED(90);
 
-  const selectivityIndex = ed10 && ed90 ? ed90 / ed10 : null;
+  const doseRatio = ed10 && ed90 ? ed90 / ed10 : null;
 
   // Generate smooth curve points for plotting (log scale)
   const maxDose = Math.max(...doses, e * 4);
@@ -208,7 +208,7 @@ export function fitDoseResponse(data) {
     ed10: ed10 ? Math.round(ed10 * 100) / 100 : null,
     ed50: ed50 ? Math.round(ed50 * 100) / 100 : null,
     ed90: ed90 ? Math.round(ed90 * 100) / 100 : null,
-    selectivityIndex: selectivityIndex ? Math.round(selectivityIndex * 10) / 10 : null,
+    doseRatio: doseRatio ? Math.round(doseRatio * 10) / 10 : null,
     r2: Math.round(r2 * 1000) / 1000,
     curvePoints,
     dataPoints: valid,
@@ -295,11 +295,13 @@ export function extractDoseResponseData(trials, formulationName, targetVal, targ
  * Compare dose-response curves between two formulations
  * Returns relative potency (RP = ED50_ref / ED50_test)
  */
-export function compareDoseResponseCurves(fit1, fit2) {
+export function compareDoseResponseCurves(fit1, fit2, isCropVsWeed = false) {
   if (!fit1?.ed50 || !fit2?.ed50) return null;
   const relativePotency = fit1.ed50 / fit2.ed50;
+  const selectivityIndex = isCropVsWeed ? fit1.ed50 / fit2.ed50 : null;
   return {
     relativePotency: Math.round(relativePotency * 100) / 100,
+    selectivityIndex: selectivityIndex ? Math.round(selectivityIndex * 100) / 100 : null,
     interpretation: relativePotency > 1
       ? `Formulation 2 is ${relativePotency.toFixed(1)}x more potent than Formulation 1`
       : `Formulation 1 is ${(1 / relativePotency).toFixed(1)}x more potent than Formulation 2`

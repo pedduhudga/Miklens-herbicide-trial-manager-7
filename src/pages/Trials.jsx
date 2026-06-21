@@ -13,7 +13,7 @@ import {
   QrCode, BrainCircuit, TrendingDown, Download, RefreshCw, Leaf,
   Navigation, FolderOpen, Lock, Unlock,
   FileDown, Share2, MoreVertical, FileSpreadsheet,
-  FileCode, MonitorPlay, Archive, Pencil, ScanLine, Crop, Clock, Calculator
+  FileCode, MonitorPlay, Archive, Pencil, ScanLine, Crop, Clock, Calculator, Loader2
 } from 'lucide-react';
 import { safeJsonParse } from '../utils/helpers.js';
 import { resolvePhotoSrc, getPhotoThumbnailSrc, isPhotoBroken, getDriveFileId } from '../utils/photoUtils.js';
@@ -184,6 +184,7 @@ export default function Trials({ onMenuClick }) {
 
   // --- Detail modal ---
   const [activeTrial, setActiveTrial] = useState(null);
+  const detailTrial = activeTrial ? (trials.find(t => t.ID === activeTrial.ID) || activeTrial) : null;
   const [detailTab, setDetailTab] = useState('info');
   const [selectedPhotoForDetails, setSelectedPhotoForDetails] = useState(null);
 
@@ -308,6 +309,8 @@ export default function Trials({ onMenuClick }) {
   // --- AI Summary ---
   const [aiSummary, setAiSummary] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
+  const [syncingPhotos, setSyncingPhotos] = useState(false);
+  const [syncingAllPhotos, setSyncingAllPhotos] = useState(false);
 
   // --- AI weed cover detection ---
   const [detectingCover, setDetectingCover] = useState(false);
@@ -1532,7 +1535,6 @@ export default function Trials({ onMenuClick }) {
   };
 
   // ── DETAIL TRIAL DERIVATIONS ──────────────────────────────────────
-  const detailTrial = activeTrial ? (trials.find(t => t.ID === activeTrial.ID) || activeTrial) : null;
   const detailEfficacy = detailTrial ? validateEfficacyData(safeJsonParse(detailTrial.EfficacyDataJSON, []), activeCategory) : [];
   const detailPhotos = detailTrial ? safeJsonParse(detailTrial.PhotoURLs, []) : [];
   const detailIsCompleted = detailTrial?.IsCompleted === true || detailTrial?.IsCompleted === 'true';
@@ -2296,6 +2298,7 @@ export default function Trials({ onMenuClick }) {
     // Save all dynamic metrics fields directly into the observation
     if (aiData.metrics && typeof aiData.metrics === 'object') {
       Object.entries(aiData.metrics).forEach(([k, v]) => {
+        if (v === null || v === undefined || v === '') return;
         const num = parseFloat(v);
         if (!isNaN(num)) {
           newObs[k] = num;
@@ -2325,6 +2328,7 @@ export default function Trials({ onMenuClick }) {
       // Average all dynamic metrics
       if (aiData.metrics && typeof aiData.metrics === 'object') {
         Object.entries(aiData.metrics).forEach(([k, v]) => {
+          if (v === null || v === undefined || v === '') return;
           const num = parseFloat(v);
           if (!isNaN(num)) {
             const oldVal = parseFloat(existing[k]);
@@ -2521,6 +2525,427 @@ Rules:
       await updateTrial(patch, getAppState);
     } catch (e) {
       console.error('Failed to save AI observation:', e);
+    }
+  };
+
+  const handleSyncPhotosFromDrive = async (targetTrial = null) => {
+    const trial = targetTrial || activeTrial;
+    if (!trial) return;
+
+    try {
+      setSyncingPhotos(true);
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Scanning Google Drive for missing photos...', type: 'info' } }));
+      
+      const photoURLs = safeJsonParse(trial.PhotoURLs, []);
+      const brokenPhotos = photoURLs.filter(isPhotoBroken).map(p => ({
+        date: p.date || '',
+        label: p.label || '',
+        tag: p.tag || ''
+      }));
+
+      const projectObj = state.projects?.find(p => String(p.ID) === String(trial.ProjectID));
+      const projectName = projectObj ? projectObj.Name : '';
+
+      const result = await apiCall('listTrialPhotosFromDrive', {
+        trialId: trial.ID,
+        formulation: trial.FormulationName,
+        date: trial.Date,
+        dosage: trial.Dosage || '',
+        category: trial.Category || '',
+        projectId: trial.ProjectID || '',
+        projectName: projectName,
+        potLabel: trial.PotLabel || '',
+        plotNumber: trial.PlotNumber || '',
+        brokenPhotos: brokenPhotos
+      }, false, getAppState);
+
+      if (result._errType || !result.success) {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Failed to scan Drive: ${result.message || 'Unknown error'}`, type: 'error' } }));
+        return;
+      }
+
+      if (!result.photos || result.photos.length === 0) {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `No photos found: ${result.message || 'Check your Drive folder structure.'}`, type: 'warning' } }));
+        return;
+      }
+
+      // Filter out files that might not be images
+      const images = result.photos.filter(f => /\.(jpg|jpeg|png|gif|webp|bmp|heic|heif|tif|tiff)$/i.test(f.name));
+      if (images.length === 0) {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'No image files found in Drive folder.', type: 'warning' } }));
+        return;
+      }
+
+      // Sort discovered images by name or createdTime to ensure consistent chronological order
+      images.sort((a, b) => {
+        const nameA = String(a.name || '');
+        const nameB = String(b.name || '');
+        return nameA.localeCompare(nameB);
+      });
+
+      let addedCount = 0;
+      let healedCount = 0;
+
+      const normalize = (str) => {
+        if (!str) return '';
+        return String(str).toLowerCase().replace(/[^a-z0-9]/g, '');
+      };
+
+      // Collect indices of broken/unavailable photos to heal sequentially
+      const brokenPhotoIndices = [];
+      photoURLs.forEach((p, idx) => {
+        if (isPhotoBroken(p)) {
+          brokenPhotoIndices.push(idx);
+        }
+      });
+
+      images.forEach(img => {
+        // Find if there is an existing entry matching this drive ID (even if broken or base64-removed)
+        const existingPhoto = photoURLs.find(p => 
+          p.driveId === img.id || 
+          p.fileId === img.id || 
+          p.driveFileId === img.id || 
+          getDriveFileId(p.url || p.src) === img.id
+        );
+
+        // Smart parsing from filename
+        let photoDate = img.createdTime ? img.createdTime.split('T')[0] : new Date().toISOString().split('T')[0];
+        let cleanLabel = img.name.replace(/\.[^/.]+$/, ""); // strip extension
+        
+        // Try to extract date like DD-MM-YYYY (e.g. 17-06-2026)
+        const dateMatch = img.name.match(/(\d{2})[-_](\d{2})[-_](\d{4})/);
+        if (dateMatch) {
+          const day = dateMatch[1];
+          const month = dateMatch[2];
+          const year = dateMatch[3];
+          photoDate = `${year}-${month}-${day}`;
+        } else {
+          // Try YYYY-MM-DD
+          const ymdMatch = img.name.match(/(\d{4})[-_](\d{2})[-_](\d{2})/);
+          if (ymdMatch) {
+            photoDate = `${ymdMatch[1]}-${ymdMatch[2]}-${ymdMatch[3]}`;
+          }
+        }
+        
+        // Extract clean pot name/label by stripping date and times
+        let strippedLabel = cleanLabel;
+        strippedLabel = strippedLabel.replace(/\d{2}[-_]\d{2}[-_]\d{4}/g, '');
+        strippedLabel = strippedLabel.replace(/\d{4}[-_]\d{2}[-_]\d{2}/g, '');
+        strippedLabel = strippedLabel.replace(/\d{2}[:_]\d{2}\s*(AM|PM|am|pm)?/g, '');
+        strippedLabel = strippedLabel.replace(/^[\s\-_]+|[\s\-_]+$/g, '');
+        
+        if (strippedLabel) {
+          cleanLabel = strippedLabel;
+        }
+
+        const normDriveLabel = normalize(cleanLabel);
+        const webViewUrl = `https://drive.google.com/uc?export=view&id=${img.id}`;
+
+        if (existingPhoto) {
+          // If the photo exists in the database but the URL is broken or has '[base64-removed]', restore it!
+          if (isPhotoBroken(existingPhoto) || !existingPhoto.url || existingPhoto.url.includes('[base64-removed]')) {
+            existingPhoto.url = webViewUrl;
+            existingPhoto.driveId = img.id;
+            existingPhoto.fileName = img.name;
+            existingPhoto.importedFrom = 'Drive';
+            if (!existingPhoto.date && photoDate) existingPhoto.date = photoDate;
+            healedCount++;
+          }
+          return; // Skip adding a duplicate
+        }
+
+        let healed = false;
+
+        // 1. Attempt to find an unmatched broken/unavailable entry that matches this photo by label
+        for (let i = 0; i < photoURLs.length; i++) {
+          const p = photoURLs[i];
+          if (isPhotoBroken(p)) {
+            const normExistingLabel = normalize(p.label);
+            
+            const isMatch = normExistingLabel && normDriveLabel && (
+              normExistingLabel.indexOf(normDriveLabel) !== -1 ||
+              normDriveLabel.indexOf(normExistingLabel) !== -1
+            );
+
+            if (isMatch) {
+              p.url = webViewUrl;
+              p.driveId = img.id;
+              p.fileName = img.name;
+              p.importedFrom = 'Drive';
+              if (!p.date && photoDate) p.date = photoDate;
+              healed = true;
+              healedCount++;
+              // Remove this index from brokenPhotoIndices so it's not reused sequentially
+              const idxInBroken = brokenPhotoIndices.indexOf(i);
+              if (idxInBroken !== -1) {
+                brokenPhotoIndices.splice(idxInBroken, 1);
+              }
+              break;
+            }
+          }
+        }
+
+        // 2. Sequential fallback: If not healed by label, match to the first remaining broken photo sequentially
+        if (!healed && brokenPhotoIndices.length > 0) {
+          const targetIdx = brokenPhotoIndices.shift();
+          const p = photoURLs[targetIdx];
+          p.url = webViewUrl;
+          p.driveId = img.id;
+          p.fileName = img.name;
+          p.importedFrom = 'Drive';
+          if (!p.date && photoDate) p.date = photoDate;
+          healed = true;
+          healedCount++;
+        }
+
+        // 3. If no broken photo could be healed, append as new photo
+        if (!healed) {
+          photoURLs.push({
+            url: webViewUrl,
+            fileName: img.name,
+            date: photoDate,
+            label: cleanLabel,
+            importedFrom: 'Drive',
+            driveId: img.id,
+            tag: 'Field Observation',
+            aiStatus: 'pending'
+          });
+          addedCount++;
+        }
+      });
+
+      if (addedCount > 0 || healedCount > 0) {
+        const updatedPhotoURLs = JSON.stringify(photoURLs);
+        const updatedTrial = { ...trial, PhotoURLs: updatedPhotoURLs };
+        
+        updateState({ trials: getAppState().trials.map(t => t.ID === updatedTrial.ID ? updatedTrial : t) });
+        if (activeTrial?.ID === updatedTrial.ID) setActiveTrial(updatedTrial);
+
+        await updateTrial({
+          ID: trial.ID,
+          PhotoURLs: updatedPhotoURLs
+        }, getAppState);
+
+        let msg = '';
+        if (healedCount > 0 && addedCount > 0) {
+          msg = `Restored ${healedCount} unavailable photo(s) and imported ${addedCount} new photo(s) from Drive!`;
+        } else if (healedCount > 0) {
+          msg = `Restored ${healedCount} unavailable photo(s) from Drive!`;
+        } else {
+          msg = `Successfully imported ${addedCount} photo(s) from Drive!`;
+        }
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg, type: 'success' } }));
+      } else {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'All Google Drive photos are already synced.', type: 'info' } }));
+      }
+    } catch (err) {
+      console.error('Sync photos from Drive error:', err);
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Error syncing photos: ${err.message}`, type: 'error' } }));
+    } finally {
+      setSyncingPhotos(false);
+    }
+  };
+
+  const handleSyncAllPhotosFromDrive = async () => {
+    const trialsWithBroken = (state.trials || []).filter(t => {
+      const photos = safeJsonParse(t.PhotoURLs, []);
+      return Array.isArray(photos) && photos.some(isPhotoBroken);
+    });
+
+    if (trialsWithBroken.length === 0) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'All trial photos are already synchronized and healthy!', type: 'success' } }));
+      return;
+    }
+
+    try {
+      setSyncingAllPhotos(true);
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Starting batch sync for ${trialsWithBroken.length} trial(s)...`, type: 'info' } }));
+
+      let totalHealed = 0;
+      let totalAdded = 0;
+      let processedCount = 0;
+
+      for (const trial of trialsWithBroken) {
+        processedCount++;
+        window.dispatchEvent(new CustomEvent('app:toast', { 
+          detail: { 
+            msg: `Syncing photos for "${trial.FormulationName || 'Trial'}" (${processedCount}/${trialsWithBroken.length})...`, 
+            type: 'info' 
+          } 
+        }));
+
+        const photoURLs = safeJsonParse(trial.PhotoURLs, []);
+        const brokenPhotos = photoURLs.filter(isPhotoBroken).map(p => ({
+          date: p.date || '',
+          label: p.label || '',
+          tag: p.tag || ''
+        }));
+
+        const projectObj = state.projects?.find(p => String(p.ID) === String(trial.ProjectID));
+        const projectName = projectObj ? projectObj.Name : '';
+
+        const result = await apiCall('listTrialPhotosFromDrive', {
+          trialId: trial.ID,
+          formulation: trial.FormulationName,
+          date: trial.Date,
+          dosage: trial.Dosage || '',
+          category: trial.Category || '',
+          projectId: trial.ProjectID || '',
+          projectName: projectName,
+          potLabel: trial.PotLabel || '',
+          plotNumber: trial.PlotNumber || '',
+          brokenPhotos: brokenPhotos
+        }, false, getAppState);
+
+        if (result && result.success && result.photos && result.photos.length > 0) {
+          const images = result.photos.filter(f => /\.(jpg|jpeg|png|gif|webp|bmp|heic|heif|tif|tiff)$/i.test(f.name));
+          if (images.length > 0) {
+            images.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+
+            const brokenPhotoIndices = [];
+            photoURLs.forEach((p, idx) => {
+              if (isPhotoBroken(p)) {
+                brokenPhotoIndices.push(idx);
+              }
+            });
+
+            let localHealed = 0;
+            let localAdded = 0;
+
+            images.forEach(img => {
+              const existingPhoto = photoURLs.find(p => 
+                p.driveId === img.id || 
+                p.fileId === img.id || 
+                p.driveFileId === img.id || 
+                getDriveFileId(p.url || p.src) === img.id
+              );
+
+              let photoDate = img.createdTime ? img.createdTime.split('T')[0] : new Date().toISOString().split('T')[0];
+              let cleanLabel = img.name.replace(/\.[^/.]+$/, "");
+              
+              const dateMatch = img.name.match(/(\d{2})[-_](\d{2})[-_](\d{4})/);
+              if (dateMatch) {
+                photoDate = `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
+              } else {
+                const ymdMatch = img.name.match(/(\d{4})[-_](\d{2})[-_](\d{2})/);
+                if (ymdMatch) {
+                  photoDate = `${ymdMatch[1]}-${ymdMatch[2]}-${ymdMatch[3]}`;
+                }
+              }
+
+              let strippedLabel = cleanLabel;
+              strippedLabel = strippedLabel.replace(/\d{2}[-_]\d{2}[-_]\d{4}/g, '');
+              strippedLabel = strippedLabel.replace(/\d{4}[-_]\d{2}[-_]\d{2}/g, '');
+              strippedLabel = strippedLabel.replace(/\d{2}[:_]\d{2}\s*(AM|PM|am|pm)?/g, '');
+              strippedLabel = strippedLabel.replace(/^[\s\-_]+|[\s\-_]+$/g, '');
+              
+              if (strippedLabel) {
+                cleanLabel = strippedLabel;
+              }
+
+              const normDriveLabel = cleanLabel.toLowerCase().replace(/[^a-z0-9]/g, '');
+              const webViewUrl = `https://drive.google.com/uc?export=view&id=${img.id}`;
+
+              if (existingPhoto) {
+                if (isPhotoBroken(existingPhoto) || !existingPhoto.url || existingPhoto.url.includes('[base64-removed]')) {
+                  existingPhoto.url = webViewUrl;
+                  existingPhoto.driveId = img.id;
+                  existingPhoto.fileName = img.name;
+                  existingPhoto.importedFrom = 'Drive';
+                  if (!existingPhoto.date && photoDate) existingPhoto.date = photoDate;
+                  localHealed++;
+                  totalHealed++;
+                }
+                return;
+              }
+
+              let healed = false;
+              for (let i = 0; i < photoURLs.length; i++) {
+                const p = photoURLs[i];
+                if (isPhotoBroken(p)) {
+                  const normExistingLabel = (p.label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                  const isMatch = normExistingLabel && normDriveLabel && (
+                    normExistingLabel.indexOf(normDriveLabel) !== -1 ||
+                    normDriveLabel.indexOf(normExistingLabel) !== -1
+                  );
+
+                  if (isMatch) {
+                    p.url = webViewUrl;
+                    p.driveId = img.id;
+                    p.fileName = img.name;
+                    p.importedFrom = 'Drive';
+                    if (!p.date && photoDate) p.date = photoDate;
+                    healed = true;
+                    localHealed++;
+                    totalHealed++;
+                    const idxInBroken = brokenPhotoIndices.indexOf(i);
+                    if (idxInBroken !== -1) {
+                      brokenPhotoIndices.splice(idxInBroken, 1);
+                    }
+                    break;
+                  }
+                }
+              }
+
+              if (!healed && brokenPhotoIndices.length > 0) {
+                const targetIdx = brokenPhotoIndices.shift();
+                const p = photoURLs[targetIdx];
+                p.url = webViewUrl;
+                p.driveId = img.id;
+                p.fileName = img.name;
+                p.importedFrom = 'Drive';
+                if (!p.date && photoDate) p.date = photoDate;
+                healed = true;
+                localHealed++;
+                totalHealed++;
+              }
+
+              if (!healed) {
+                photoURLs.push({
+                  url: webViewUrl,
+                  fileName: img.name,
+                  date: photoDate,
+                  label: cleanLabel,
+                  importedFrom: 'Drive',
+                  driveId: img.id,
+                  tag: 'Field Observation',
+                  aiStatus: 'pending'
+                });
+                localAdded++;
+                totalAdded++;
+              }
+            });
+
+            if (localHealed > 0 || localAdded > 0) {
+              const updatedPhotoURLs = JSON.stringify(photoURLs);
+              const updatedTrial = { ...trial, PhotoURLs: updatedPhotoURLs };
+
+              updateState({ trials: getAppState().trials.map(t => t.ID === updatedTrial.ID ? updatedTrial : t) });
+
+              await updateTrial({
+                ID: trial.ID,
+                PhotoURLs: updatedPhotoURLs
+              }, getAppState);
+            }
+          }
+        }
+      }
+
+      if (totalHealed > 0 || totalAdded > 0) {
+        window.dispatchEvent(new CustomEvent('app:toast', { 
+          detail: { 
+            msg: `Batch sync complete! Restored ${totalHealed} photo(s) and added ${totalAdded} photo(s) across trials!`, 
+            type: 'success' 
+          } 
+        }));
+      } else {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Batch sync complete. All photo URLs are up to date.', type: 'info' } }));
+      }
+    } catch (err) {
+      console.error('Batch sync photos error:', err);
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Batch sync failed: ${err.message}`, type: 'error' } }));
+    } finally {
+      setSyncingAllPhotos(false);
     }
   };
 
@@ -3686,15 +4111,19 @@ If none are present, write "None".`;
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Download/Export permission is disabled for your account.', type: 'error' } }));
       return;
     }
-    const config = getCategoryConfig(activeCategory);
+    const currentProj = detailTrial ? projects.find(p => String(p.ID) === String(detailTrial.ProjectID)) : null;
+    const isPotTrial = currentProj?.Design === 'PotTrial';
+    const fields = isPotTrial
+      ? (currentProj.PotFields || ['Plant Height', 'Branches', 'Flowers', 'Fruit Count', 'Yield']).map(f => ({ key: f, label: f }))
+      : (getCategoryConfig(activeCategory).observationFields || []);
     const initialSelection = {};
-    (config.observationFields || []).forEach(f => {
+    fields.forEach(f => {
       initialSelection[f.key] = true;
     });
     setReportFieldSelection(initialSelection);
     setPendingReportExport(() => exportFn);
     setCustomiseReportModalOpen(true);
-  }, [activeCategory, canDownload]);
+  }, [activeCategory, canDownload, detailTrial, projects]);
 
   // ── EXPORT FUNCTIONS (delegated to trialReports.js service) ─────────
   const exportTxtReport     = useCallback((trial) => {
@@ -3933,6 +4362,14 @@ If none are present, write "None".`;
               <>
                 <button onClick={exportAllCsv} title="Export all trials to CSV" className="p-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 transition">
                   <FileDown className="w-4 h-4" />
+                </button>
+                <button 
+                  onClick={handleSyncAllPhotosFromDrive} 
+                  disabled={syncingAllPhotos}
+                  title="Sync all broken/unavailable photos from Google Drive for all trials" 
+                  className={`p-2 rounded-lg border transition ${syncingAllPhotos ? 'bg-slate-100 border-slate-300 text-slate-400 cursor-not-allowed' : 'border-slate-200 text-slate-500 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300'}`}
+                >
+                  <RefreshCw className={`w-4 h-4 ${syncingAllPhotos ? 'animate-spin' : ''}`} />
                 </button>
                 <input 
                   type="file" 
@@ -5414,6 +5851,14 @@ If none are present, write "None".`;
                         </button>
                         <button onClick={() => { setCameraMode('general'); setIsCameraOpen(true); }} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                           <Camera className="w-3.5 h-3.5" />Camera
+                        </button>
+                        <button 
+                          onClick={() => handleSyncPhotosFromDrive()} 
+                          disabled={syncingPhotos}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 shadow-md disabled:opacity-50 disabled:cursor-wait"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${syncingPhotos ? 'animate-spin' : ''}`} />
+                          {syncingPhotos ? 'Syncing...' : 'Sync Drive'}
                         </button>
                         <button onClick={() => setAiBatchModalOpen(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:from-purple-600 hover:to-pink-600 shadow-lg">
                           <Sparkles className="w-3.5 h-3.5" />AI Scan All
@@ -7537,20 +7982,27 @@ If none are present, write "None".`;
             Select the observation variables/columns you want to include in the generated report:
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-[50vh] overflow-y-auto pr-1">
-            {(getCategoryConfig(activeCategory).observationFields || []).map(f => (
-              <label key={f.key} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-slate-50 cursor-pointer transition">
-                <input
-                  type="checkbox"
-                  checked={reportFieldSelection[f.key] !== false}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setReportFieldSelection(prev => ({ ...prev, [f.key]: checked }));
-                  }}
-                  className="rounded border-slate-300 text-teal-600 focus:ring-teal-500"
-                />
-                <span className="text-sm font-medium text-slate-700">{f.label}</span>
-              </label>
-            ))}
+            {(() => {
+              const currentProj = detailTrial ? projects.find(p => String(p.ID) === String(detailTrial.ProjectID)) : null;
+              const isPotTrial = currentProj?.Design === 'PotTrial';
+              const fields = isPotTrial
+                ? (currentProj.PotFields || ['Plant Height', 'Branches', 'Flowers', 'Fruit Count', 'Yield']).map(f => ({ key: f, label: f }))
+                : (getCategoryConfig(activeCategory).observationFields || []);
+              return fields.map(f => (
+                <label key={f.key} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-slate-50 cursor-pointer transition">
+                  <input
+                    type="checkbox"
+                    checked={reportFieldSelection[f.key] !== false}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setReportFieldSelection(prev => ({ ...prev, [f.key]: checked }));
+                    }}
+                    className="rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                  />
+                  <span className="text-sm font-medium text-slate-700">{f.label}</span>
+                </label>
+              ));
+            })()}
           </div>
           <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
             <button
@@ -7562,8 +8014,11 @@ If none are present, write "None".`;
             <button
               onClick={() => {
                 if (pendingReportExport) {
+                  const currentProj = detailTrial ? projects.find(p => String(p.ID) === String(detailTrial.ProjectID)) : null;
+                  const isPotTrial = currentProj?.Design === 'PotTrial';
+                  const key = isPotTrial ? (currentProj.Category || activeCategory) : activeCategory;
                   if (!window.activeReportFields) window.activeReportFields = {};
-                  window.activeReportFields[activeCategory] = reportFieldSelection;
+                  window.activeReportFields[key] = reportFieldSelection;
                   pendingReportExport();
                 }
                 setCustomiseReportModalOpen(false);
@@ -7585,6 +8040,42 @@ If none are present, write "None".`;
         onApplyValue={(val) => {
           const primaryField = getPrimaryObservationField(activeCategory);
           setObsForm(prev => ({ ...prev, [primaryField]: val }));
+        }}
+        onSave={async (updatedBounds) => {
+          setPhotoAnalyzerResults(updatedBounds);
+          setWeedIdResult(updatedBounds);
+          
+          if (!activeTrial) return;
+          const photos = safeJsonParse(activeTrial.PhotoURLs, []);
+          const targetIdx = photos.findIndex(p => {
+            const pSrc = typeof p === 'string' ? p : (p.fileData || p.url);
+            return pSrc === photoAnalyzerUrl;
+          });
+          
+          if (targetIdx !== -1) {
+            const updatedPhotos = photos.map((p, idx) => {
+              if (idx === targetIdx) {
+                if (typeof p === 'string') {
+                  const isDrive = p.includes('drive.google.com');
+                  return {
+                    [isDrive ? 'url' : 'fileData']: p,
+                    bounds: updatedBounds
+                  };
+                } else {
+                  return { ...p, bounds: updatedBounds };
+                }
+              }
+              return p;
+            });
+            const updatedTrial = { ...activeTrial, PhotoURLs: JSON.stringify(updatedPhotos) };
+            updateState({ trials: trials.map(t => t.ID === updatedTrial.ID ? updatedTrial : t) });
+            setActiveTrial(updatedTrial);
+            try {
+              await updateTrial({ ID: updatedTrial.ID, PhotoURLs: updatedTrial.PhotoURLs }, getAppState);
+            } catch (dbErr) {
+              console.error('Failed to save cached bounds:', dbErr);
+            }
+          }
         }}
         activeCategory={activeCategory}
       />

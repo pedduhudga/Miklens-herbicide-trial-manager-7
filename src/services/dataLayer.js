@@ -22,6 +22,16 @@ function getCategory(getAppState) {
   return state.activeCategory || 'herbicide';
 }
 
+function getRecordCategory(collectionType, payload, getAppState) {
+  if (payload?.Category) return payload.Category;
+  if (payload?.category) return payload.category;
+
+  const state = getAppState ? getAppState() : {};
+  const list = state[collectionType] || [];
+  const record = list.find(r => r.ID === (payload?.id || payload?.ID) || r.id === (payload?.id || payload?.ID));
+  return record?.Category || record?.category || getCategory(getAppState);
+}
+
 function getUserId(getAppState) {
   const state = getAppState ? getAppState() : {};
   return state.auth?.uid || state.auth?.user?.ID || state.auth?.user?.uid || null;
@@ -161,7 +171,7 @@ export async function updateTrial(payload, getAppState) {
     if (!checkOwnership('trials', payload.id || payload.ID, getAppState)) {
       throw new Error("Permission Denied: You cannot modify another user's trial.");
     }
-    const category = getCategory(getAppState);
+    const category = getRecordCategory('trials', payload, getAppState);
     const result = await fbDB.fbCatUpdateTrial(category, payload);
     mirror('updateTrialRecord', payload, getAppState);
     return result;
@@ -175,7 +185,7 @@ export async function deleteTrial(payload, getAppState, showOverlay = true) {
     if (!checkOwnership('trials', payload.id || payload.ID, getAppState, 'delete')) {
       throw new Error("Permission Denied: You cannot delete another user's trial.");
     }
-    const category = getCategory(getAppState);
+    const category = getRecordCategory('trials', payload, getAppState);
     const result = await fbDB.fbCatDeleteTrial(category, payload.id || payload.ID);
     mirror('deleteTrialRecord', payload, getAppState);
     return result;
@@ -202,7 +212,7 @@ export async function finalizeTrial(payload, getAppState) {
     if (!checkOwnership('trials', payload.id || payload.ID, getAppState)) {
       throw new Error("Permission Denied: You cannot modify another user's trial.");
     }
-    const category = getCategory(getAppState);
+    const category = getRecordCategory('trials', payload, getAppState);
     const result = await fbDB.fbCatUpdateTrial(category, { ...payload, ControlFinalized: true, FinalizationDate: new Date().toISOString() });
     mirror('finalizeTrial', payload, getAppState);
     return result;
@@ -216,7 +226,7 @@ export async function updateTrialStatus(payload, getAppState) {
     if (!checkOwnership('trials', payload.id || payload.ID, getAppState)) {
       throw new Error("Permission Denied: You cannot modify another user's trial.");
     }
-    const category = getCategory(getAppState);
+    const category = getRecordCategory('trials', payload, getAppState);
     const result = await fbDB.fbCatUpdateTrial(category, payload);
     mirror('updateTrialStatus', payload, getAppState);
     return result;
@@ -255,7 +265,8 @@ export async function updateFormulation(payload, getAppState) {
     if (!checkOwnership('formulations', payload.id || payload.ID, getAppState)) {
       throw new Error("Permission Denied: You cannot modify another user's formulation.");
     }
-    const result = await fbDB.fbUpdateFormulation(payload);
+    const category = getRecordCategory('formulations', payload, getAppState);
+    const result = await fbDB.fbCatUpdateFormulation(category, payload);
     mirror('updateFormulation', payload, getAppState);
     return result;
   }
@@ -268,7 +279,7 @@ export async function deleteFormulation(payload, getAppState) {
     if (!checkOwnership('formulations', payload.id || payload.ID, getAppState, 'delete')) {
       throw new Error("Permission Denied: You cannot delete another user's formulation.");
     }
-    const category = getCategory(getAppState);
+    const category = getRecordCategory('formulations', payload, getAppState);
     const result = await fbDB.fbCatDeleteFormulation(category, payload.id || payload.ID);
     mirror('deleteFormulation', payload, getAppState);
     return result;
@@ -342,7 +353,7 @@ export async function updateProject(payload, getAppState) {
     if (!checkOwnership('projects', payload.id || payload.ID, getAppState)) {
       throw new Error("Permission Denied: You cannot modify another user's project.");
     }
-    const category = getCategory(getAppState);
+    const category = getRecordCategory('projects', payload, getAppState);
     const result = await fbDB.fbCatUpdateProject(category, payload);
     mirror('updateProject', payload, getAppState);
     return result;
@@ -356,7 +367,7 @@ export async function deleteProject(payload, getAppState) {
     if (!checkOwnership('projects', payload.id || payload.ID, getAppState, 'delete')) {
       throw new Error("Permission Denied: You cannot delete another user's project.");
     }
-    const category = getCategory(getAppState);
+    const category = getRecordCategory('projects', payload, getAppState);
     const result = await fbDB.fbCatDeleteProject(category, payload.id || payload.ID);
     mirror('deleteProject', payload, getAppState);
     return result;
@@ -384,7 +395,7 @@ export async function deleteBlock(payload, getAppState, showOverlay = true) {
     if (!checkOwnership('blocks', payload.id || payload.ID, getAppState)) {
       throw new Error("Permission Denied: You cannot delete another user's block.");
     }
-    const category = getCategory(getAppState);
+    const category = getRecordCategory('blocks', payload, getAppState);
     const result = await fbDB.fbCatDeleteBlock(category, payload.id || payload.ID);
     mirror('deleteBlock', payload, getAppState);
     return result;

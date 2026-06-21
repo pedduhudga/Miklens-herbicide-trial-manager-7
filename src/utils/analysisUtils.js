@@ -1,10 +1,10 @@
 import { isMixedWeedPlaceholder, canonicalizeWeedSpecies, normalizeLifecycleSafeStatus, upsertCoverCorrectionNote } from './weedUtils.js';
-import { safeJsonParse, extractMetricValue, formatSignificance } from './helpers.js';
+import { safeJsonParse, extractMetricValue, formatSignificance, getPlotAreaHectares } from './helpers.js';
 import { getPrimaryObservationField, getObservationPrimaryValue, getCategoryConfig } from './categoryConfig.js';
 import { normalizeObservation } from './categoryObservationUtils.js';
 import jStat from 'jstat';
 import { apiCall } from '../services/db.js';
-import { performTwoWayANOVA, detectOutliers } from './statsUtils.js';
+import { performANOVA, performTwoWayANOVA, detectOutliers } from './statsUtils.js';
 
 
 
@@ -719,13 +719,26 @@ export class AnalysisEngine {
                     }
 
                     if (metric === 'nue') {
-                        const yieldVal = parseFloat(trial.Yield || trial.YieldValue || obs.yield || obs.yieldKgPlot || 0);
+                        const plotSize = trial.plotSize || trial.PlotSize || this.project?.plotSize || this.project?.PlotSize;
+                        const areaHa = getPlotAreaHectares(plotSize);
+                        
+                        const getYieldInKgHa = (t, o) => {
+                            const rawYield = parseFloat(t.Yield || t.YieldValue || o?.yield || o?.yieldKgPlot || o?.yieldValue || 0);
+                            const isPlotYield = t.yieldKgPlot !== undefined || o?.yieldKgPlot !== undefined || (t.Yield && String(t.Yield).toLowerCase().includes('plot')) || (o?.yield && String(o?.yield).toLowerCase().includes('plot'));
+                            if (isPlotYield && areaHa > 0) {
+                                return rawYield / areaHa;
+                            }
+                            return rawYield;
+                        };
+
+                        const yieldVal = getYieldInKgHa(trial, obs);
                         const rate = parseFloat(trial.Dosage || 1);
                         if (rate <= 0) return null;
                         const utcReps = this.getReplications(this.utcName || '');
                         const utcYields = utcReps.map(ur => {
                             const eff = safeJsonParse(ur.EfficacyDataJSON, []);
-                            const y = parseFloat(ur.Yield || ur.YieldValue || (eff.length ? (eff[eff.length - 1].yield || eff[eff.length - 1].yieldValue) : 0));
+                            const lastObs = eff.length ? eff[eff.length - 1] : null;
+                            const y = getYieldInKgHa(ur, lastObs);
                             return Number.isFinite(y) ? y : null;
                         }).filter(v => v !== null);
                         const utcMeanYield = utcYields.length ? utcYields.reduce((a, b) => a + b, 0) / utcYields.length : 0;

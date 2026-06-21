@@ -7,7 +7,17 @@ import autoTable from 'jspdf-autotable';
 import pptxgen from 'pptxgenjs';
 import { formatPhotoDate, formatDate, formatDateTime } from '../utils/dateUtils.js';
 import { getCategoryConfig, calculateEfficacy, getPrimaryObservationField, getObservationPrimaryValue } from '../utils/categoryConfig.js';
-import { performANOVA, performTukeyHSD, performTwoWayANOVA } from '../utils/statsUtils.js';
+import {
+  performANOVA,
+  performTukeyHSD,
+  performTwoWayANOVA,
+  performDuncanMRT,
+  performDunnettTest,
+  performTypeIIIANOVA,
+  checkNormality,
+  checkLeveneTest,
+  performKruskalWallis
+} from '../utils/statsUtils.js';
 
 
 // ── COLORS ────────────────────────────────────────────────────────────────────
@@ -305,11 +315,11 @@ function normalizeSrc(src) {
   if (!src || typeof src !== 'string') return src;
   // Already a data URI — use as-is
   if (/^data:image\//i.test(src)) return src;
-  // Google Drive URLs — thumbnail endpoint is CORS-blocked (302 redirect + no ACAO header).
-  // Route through images.weserv.nl which fetches server-side and returns a CORS-safe response.
-  const driveMatch = src.match(/[?&]id=([a-zA-Z0-9_-]{10,})/) ||
-                     src.match(/\/d\/([a-zA-Z0-9_-]{10,})/) ||
-                     src.match(/\/file\/d\/([a-zA-Z0-9_-]{10,})/);
+  
+  // Parse standard Google Drive IDs
+  const driveMatch = src.match(/[?&]id=([a-zA-Z0-9_-]{20,})/) ||
+                     src.match(/\/d\/([a-zA-Z0-9_-]{20,})/) ||
+                     src.match(/\/file\/d\/([a-zA-Z0-9_-]{20,})/);
   if (driveMatch) {
     const directUrl = `https://drive.google.com/uc?export=download&id=${driveMatch[1]}`;
     return `https://images.weserv.nl/?url=${encodeURIComponent(directUrl)}&w=400&output=jpg`;
@@ -506,7 +516,7 @@ async function addPhotoGrid(doc, photos, y, ph, maxSize = 50, showDates = true) 
   }
   return y + maxSize + 16;
 }
-function anovaTable(doc, stats, y, ph, trial) {
+function anovaTable(doc, stats, y, ph, trial, options = {}) {
   const allTrials = getBackupTrials();
   const projectTrials = allTrials.filter(t => t.ProjectID && trial.ProjectID && String(t.ProjectID) === String(trial.ProjectID));
   
@@ -515,6 +525,7 @@ function anovaTable(doc, stats, y, ph, trial) {
   const primaryField = getPrimaryObservationField(categoryId);
   const metricLabel = config.primaryMetric?.label || 'Efficacy';
   const metricUnit = config.primaryMetric?.unit || '%';
+  const { excludeOutliers = false } = options;
 
   // Group trials by treatment
   const treatments = {};
@@ -618,7 +629,6 @@ function anovaTable(doc, stats, y, ph, trial) {
     y += 5;
   }
 
-
   // Stage 2: ANOVA (only if Replications >= 3)
   const maxN = Math.max(...descRows.map(r => r.n), 0);
   if (maxN >= 3 && descRows.length >= 2) {
@@ -626,12 +636,12 @@ function anovaTable(doc, stats, y, ph, trial) {
     let anova;
     let designName = trialDesign;
     if (trialDesign === 'Factorial' || trialDesign === 'Split-Plot') {
-      anova = performTwoWayANOVA(projectTrials, { metric: primaryField });
-      if (anova.error) anova = performANOVA(projectTrials, { metric: primaryField, design: 'RCBD' });
+      anova = performTwoWayANOVA(projectTrials, { metric: primaryField, excludeOutliers });
+      if (anova.error) anova = performANOVA(projectTrials, { metric: primaryField, design: 'RCBD', excludeOutliers });
       else designName = trialDesign === 'Split-Plot' ? 'Split-Plot (Two-Way)' : 'Factorial Two-Way';
     } else {
       const design = /CRD/i.test(trialDesign) ? 'CRD' : 'RCBD';
-      anova = performANOVA(projectTrials, { metric: primaryField, design });
+      anova = performANOVA(projectTrials, { metric: primaryField, design, excludeOutliers });
       designName = design;
     }
     
@@ -662,26 +672,89 @@ function anovaTable(doc, stats, y, ph, trial) {
         theme: 'grid',
         styles: { fontSize: 8.5 }
       });
-      y = (doc.lastAutoTable?.finalY ?? y) + 5;
+      y = (doc.lastAutoTable?.finalY ?? y) + 6;
 
-      // Calculate Coefficient of Variation (CV%)
-      const errIdx = anova.anovaTable.source.indexOf('Error');
-      const msError = errIdx !== -1 ? anova.anovaTable.ms[errIdx] : (anova.anovaTable.source.includes('Blocks') ? anova.anovaTable.ms[2] : anova.anovaTable.ms[1]);
-      const grandMean = anova.grandMean;
-      const cv = (grandMean > 0 && msError >= 0) ? (Math.sqrt(msError) / grandMean) * 100 : null;
-
-      if (cv !== null) {
-        doc.setFont(undefined, 'normal'); doc.setFontSize(8.5);
-        doc.text(`Coefficient of Variation (CV%): ${cv.toFixed(2)}%`, 14, y);
-        y += 5;
-      }
+      // Draw Experimental Quality & Precision Block
+      if (y + 40 > ph - 20) { doc.addPage(); y = 20; }
+      doc.setFont(undefined, 'bold'); doc.setFontSize(9.5);
+      doc.text('Experimental Precision & Quality Certification:', 14, y);
       y += 5;
+      
+      const getCvRating = (c) => {
+        if (c < 10) return 'Excellent Precision';
+        if (c <= 20) return 'Good Precision';
+        if (c <= 30) return 'Acceptable Precision';
+        return 'Poor Precision (High Variation)';
+      };
 
-      // Stage 3: Multiple Comparison Tests (only if ANOVA pValue < 0.05 or any factor has significant effect in two-way/split-plot)
+      const cvVal = anova.cv ?? 0;
+      const semVal = anova.semGlobal ?? 0;
+      const cd5Val = anova.cd5 ?? 0;
+      const cd1Val = anova.cd1 ?? 0;
+      const balanceStatus = anova.balanceWarning ? 'Unbalanced Layout' : 'Balanced Layout';
+      const outlierCount = anova.detectedOutliers?.length || 0;
+      const outlierHandling = excludeOutliers ? 'Automatically Excluded' : 'Flagged but Kept';
+
+      const qualityRows = [
+        ['Coefficient of Variation (CV%)', `${cvVal.toFixed(2)}% (${getCvRating(cvVal)})`, 'Design Balance Status', balanceStatus],
+        ['Global Standard Error (SEm±)', `± ${semVal.toFixed(4)}`, 'Layout Configuration', `${anova.treatments?.length || 0} Treatments × ${maxN} Replications`],
+        ['Critical Difference (CD / LSD 5%)', cd5Val.toFixed(4), 'Outliers Detected', `${outlierCount} plot(s)`],
+        ['Critical Difference (CD / LSD 1%)', cd1Val.toFixed(4), 'Outliers Handling Status', outlierHandling]
+      ];
+
+      autoTable(doc, {
+        startY: y,
+        body: qualityRows,
+        theme: 'plain',
+        styles: { fontSize: 8, cellPadding: 2 },
+        columnStyles: {
+          0: { fontStyle: 'bold', cellWidth: 50 },
+          2: { fontStyle: 'bold', cellWidth: 50 }
+        }
+      });
+      y = (doc.lastAutoTable?.finalY ?? y) + 6;
+
+      // Print Outlier details
+      if (anova.detectedOutliers && anova.detectedOutliers.length > 0) {
+        if (y + 15 > ph - 20) { doc.addPage(); y = 20; }
+        doc.setFont(undefined, 'bold'); doc.setFontSize(8.5);
+        doc.text('Flagged Outliers Log:', 14, y);
+        y += 4;
+        doc.setFont(undefined, 'normal'); doc.setFontSize(8);
+        anova.detectedOutliers.forEach(out => {
+          doc.text(`• Treatment: ${out.treatment} | Rep/Block: ${out.block} | Observed Value: ${out.value} | Residual Z-score: ${out.zScore.toFixed(2)} (${outlierHandling})`, 16, y);
+          y += 4;
+        });
+        y += 3;
+      }
+
+      // Experimental Assumption Checks
+      if (anova.assumptions) {
+        if (y + 25 > ph - 20) { doc.addPage(); y = 20; }
+        doc.setFont(undefined, 'bold'); doc.setFontSize(9);
+        doc.text('Experimental Assumption Verification:', 14, y);
+        y += 5;
+        doc.setFont(undefined, 'normal'); doc.setFontSize(8.5);
+        const normPass = anova.assumptions.normalityPassed ? 'Passed' : 'Failed (p < 0.05)';
+        const varPass = anova.assumptions.variancePassed ? 'Passed' : 'Failed (p < 0.05)';
+        doc.text(`• Normality of Residuals (JB Test): ${normPass} | Statistic: ${anova.assumptions.statistic?.toFixed(3) || '—'} (p = ${anova.assumptions.normalityP !== null && anova.assumptions.normalityP !== undefined ? anova.assumptions.normalityP.toFixed(4) : '—'})`, 14, y);
+        y += 4.5;
+        doc.text(`• Homogeneity of Variances (Levene's Test): ${varPass} | Statistic: ${anova.assumptions.fStatistic?.toFixed(3) || '—'} (p = ${anova.assumptions.varianceP !== null && anova.assumptions.varianceP !== undefined ? anova.assumptions.varianceP.toFixed(4) : '—'})`, 14, y);
+        y += 4.5;
+        if (anova.assumptions.recommendation) {
+          doc.setFont(undefined, 'italic');
+          doc.text(`• Recommendation: ${anova.assumptions.recommendation}`, 14, y);
+          doc.setFont(undefined, 'normal');
+          y += 5;
+        }
+        y += 4;
+      }
+
+      // Stage 3: Multiple Comparison Tests
       const hasSignificantEffect = anova.isTwoWay ? (anova.factorA?.p < 0.05 || anova.factorB?.p < 0.05 || anova.interaction?.p < 0.05) : (anova.pValue < 0.05);
       if (hasSignificantEffect) {
-        if (y + 20 > ph - 20) { doc.addPage(); y = 20; }
-        doc.setFont(undefined, 'bold'); doc.setFontSize(10);
+        if (y + 22 > ph - 20) { doc.addPage(); y = 20; }
+        doc.setFont(undefined, 'bold'); doc.setFontSize(9.5);
         doc.text('Stage 3: Multiple Comparisons (Tukey HSD Letter Groupings)', 14, y);
         y += 5;
 
@@ -689,23 +762,87 @@ function anovaTable(doc, stats, y, ph, trial) {
         if (tukey && tukey.groups) {
           const groupRows = descRows.map(r => {
             const letter = tukey.groups[r.treatment] || 'a';
-            return [r.treatment, `${r.meanVal.toFixed(2)} ${letter}`];
+            return {
+              treatment: r.treatment,
+              meanVal: r.meanVal,
+              letter: letter
+            };
           });
+          
+          groupRows.sort((a, b) => b.meanVal - a.meanVal);
 
           autoTable(doc, {
             startY: y,
-            head: [['Treatment', `${metricLabel} Mean with Significance Grouping`]],
-            body: groupRows,
+            head: [['Treatment/Formulation', `Mean (${metricUnit})`, 'Tukey HSD Grouping']],
+            body: groupRows.map(r => [r.treatment, r.meanVal.toFixed(2), r.letter]),
             headStyles: { fillColor: TEAL },
             theme: 'striped',
             styles: { fontSize: 8.5 }
           });
-          y = (doc.lastAutoTable?.finalY ?? y) + 10;
+          y = (doc.lastAutoTable?.finalY ?? y) + 8;
+        }
+
+        // Duncan's Multiple Range Test (MRT)
+        const duncan = performDuncanMRT(projectTrials, { metric: primaryField });
+        if (duncan && duncan.groups && !duncan.error) {
+          if (y + 22 > ph - 20) { doc.addPage(); y = 20; }
+          doc.setFont(undefined, 'bold'); doc.setFontSize(9.5);
+          doc.text("Duncan's Multiple Range Test (MRT) Groupings", 14, y);
+          y += 5;
+          
+          const duncanRows = descRows.map(r => {
+            const letter = duncan.groups[r.treatment] || 'a';
+            return {
+              treatment: r.treatment,
+              meanVal: r.meanVal,
+              letter: letter
+            };
+          });
+          
+          duncanRows.sort((a, b) => b.meanVal - a.meanVal);
+
+          autoTable(doc, {
+            startY: y,
+            head: [['Treatment/Formulation', `Mean (${metricUnit})`, 'Duncan Grouping']],
+            body: duncanRows.map(r => [r.treatment, r.meanVal.toFixed(2), r.letter]),
+            headStyles: { fillColor: [37, 99, 235] },
+            theme: 'striped',
+            styles: { fontSize: 8.5 }
+          });
+          y = (doc.lastAutoTable?.finalY ?? y) + 8;
+        }
+
+        // Dunnett's Test vs Control (UTC)
+        if (controlName) {
+          const dunnett = performDunnettTest(projectTrials, controlName, { metric: primaryField });
+          if (dunnett && dunnett.comparisons && !dunnett.error) {
+            if (y + 22 > ph - 20) { doc.addPage(); y = 20; }
+            doc.setFont(undefined, 'bold'); doc.setFontSize(9.5);
+            doc.text(`Dunnett's Comparative Test vs. Control (${controlName})`, 14, y);
+            y += 5;
+            const dunnettRows = dunnett.comparisons.map(c => [
+              c.treatment,
+              c.treatmentMean.toFixed(2),
+              c.controlMean.toFixed(2),
+              c.difference.toFixed(2),
+              c.tStatistic.toFixed(2),
+              c.significant ? 'Significant (*)' : 'Non-significant (ns)'
+            ]);
+            autoTable(doc, {
+              startY: y,
+              head: [['Treatment', 'Mean', 'Control Mean', 'Difference', 't-Stat', 'Significance (α=0.05)']],
+              body: dunnettRows,
+              headStyles: { fillColor: [147, 51, 234] },
+              theme: 'striped',
+              styles: { fontSize: 8.5 }
+            });
+            y = (doc.lastAutoTable?.finalY ?? y) + 10;
+          }
         }
       } else {
         if (y + 12 > ph - 20) { doc.addPage(); y = 20; }
         doc.setFontSize(9); doc.setTextColor(120, 120, 120);
-        doc.text('Stage 3: Post-hoc tests (Tukey HSD) skipped because ANOVA is not significant (P >= 0.05).', 14, y);
+        doc.text('Stage 3: Post-hoc tests (Tukey/Duncan/Dunnett) skipped because ANOVA is not significant (P >= 0.05).', 14, y);
         doc.setTextColor(0, 0, 0); doc.setFontSize(10);
         y += 8;
       }
@@ -736,6 +873,209 @@ function conclusionNotes(doc, trial, y, ph) {
     if (y + ls.length * 5 > ph - 20) { doc.addPage(); y = 20; }
     doc.text(ls, 14, y); y += ls.length * 5 + 8;
   });
+  return y;
+}
+
+// Local helper: Root-to-Shoot Ratio
+function calculateRootToShoot(obs) {
+  const root = parseFloat(obs.rootBiomass);
+  const shoot = parseFloat(obs.shootBiomass);
+  if (!isNaN(root) && !isNaN(shoot) && shoot > 0) {
+    return parseFloat((root / shoot).toFixed(3));
+  }
+  return null;
+}
+
+// Local helper: AUDPC (Area Under Disease Progress Curve)
+function calculateAUDPC(plotObservations, severityKey) {
+  const sorted = [...plotObservations].sort((a, b) => (parseFloat(a.daa || 0)) - (parseFloat(b.daa || 0)));
+  let audpc = 0;
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const y1 = parseFloat(sorted[i][severityKey]);
+    const y2 = parseFloat(sorted[i+1][severityKey]);
+    const t1 = parseFloat(sorted[i].daa || 0);
+    const t2 = parseFloat(sorted[i+1].daa || 0);
+    if (!isNaN(y1) && !isNaN(y2)) {
+      audpc += ((y1 + y2) / 2) * (t2 - t1);
+    }
+  }
+  return parseFloat(audpc.toFixed(2));
+}
+
+// Local helper: Nutrient Use Efficiency (NUE)
+function calculateNUE(tMean, cMean, rate) {
+  const r = parseFloat(rate);
+  if (!isNaN(r) && r > 0) {
+    return parseFloat(((tMean - cMean) / r).toFixed(3));
+  }
+  return null;
+}
+
+function getAdvancedIndicesTableData(trial, efficacy, categoryId) {
+  const data = [];
+  if (categoryId === 'fungicide') {
+    // Group observations by plot/rep and calculate AUDPC
+    const plots = [...new Set(efficacy.map(o => o.plotNumber || o.plot || 1))];
+    plots.forEach(plotNum => {
+      const plotObs = efficacy.filter(o => (o.plotNumber || o.plot || 1) === plotNum);
+      const audpc = calculateAUDPC(plotObs, 'diseaseSeverity');
+      const rep = plotObs[0]?.replication || plotObs[0]?.rep || 1;
+      const trt = plotObs[0]?.treatmentNumber || plotObs[0]?.treatment || 1;
+      data.push([`Plot ${plotNum} (Rep ${rep}, Trt ${trt})`, `AUDPC`, String(audpc)]);
+    });
+  } else if (categoryId === 'biostimulant') {
+    efficacy.forEach((obs, idx) => {
+      const r2s = calculateRootToShoot(obs);
+      if (r2s !== null) {
+        const plot = obs.plotNumber || obs.plot || (idx + 1);
+        const rep = obs.replication || obs.rep || 1;
+        data.push([`Plot ${plot} (Rep ${rep}, DAA ${obs.daa || 0})`, `Root-to-Shoot Ratio`, String(r2s)]);
+      }
+    });
+  } else if (categoryId === 'nutrition') {
+    // NUE is a treatment level metric comparing Treated vs Control
+    const allTrials = getBackupTrials();
+    const projectTrials = allTrials.filter(t => t.ProjectID && trial.ProjectID && String(t.ProjectID) === String(trial.ProjectID));
+    const treatments = {};
+    projectTrials.forEach(t => {
+      const trt = t.FormulationName || 'Untreated Check';
+      if (!treatments[trt]) treatments[trt] = [];
+      const yieldVal = parseFloat(t.YieldValue || t.Yield || 0);
+      if (!isNaN(yieldVal) && yieldVal > 0) {
+        treatments[trt].push(yieldVal);
+      }
+    });
+    const controlName = Object.keys(treatments).find(f => 
+      f?.toLowerCase().includes('control') || 
+      f?.toLowerCase().includes('untreated') ||
+      f?.toLowerCase().includes('check') ||
+      f?.toLowerCase().includes('utc')
+    ) || Object.keys(treatments)[0];
+    if (controlName) {
+      const cVals = treatments[controlName] || [];
+      const cMean = cVals.length ? cVals.reduce((a,b)=>a+b, 0)/cVals.length : 0;
+      Object.entries(treatments).forEach(([trt, vals]) => {
+        if (trt !== controlName) {
+          const tMean = vals.length ? vals.reduce((a,b)=>a+b, 0)/vals.length : 0;
+          const dosage = parseFloat(trial.Dosage || 1);
+          const nue = calculateNUE(tMean, cMean, dosage);
+          if (nue !== null) {
+            data.push([trt, `Nutrient Use Efficiency (NUE)`, `${nue} (Yield gain/applied rate)`]);
+          }
+        }
+      });
+    }
+  }
+  return data;
+}
+
+function yieldAnovaTable(doc, y, ph, trial) {
+  const allTrials = getBackupTrials();
+  const projectTrials = allTrials.filter(t => t.ProjectID && trial.ProjectID && String(t.ProjectID) === String(trial.ProjectID));
+  
+  const categoryId = trial.Category || 'herbicide';
+  if (categoryId !== 'nutrition' && categoryId !== 'biostimulant') return y;
+
+  // Check if any trials have yield values
+  const hasYield = projectTrials.some(t => t.YieldValue || t.Yield);
+  if (!hasYield) return y;
+
+  const treatments = {};
+  projectTrials.forEach(t => {
+    const trt = t.FormulationName || 'Untreated Check';
+    if (!treatments[trt]) treatments[trt] = [];
+    const val = parseFloat(t.YieldValue || t.Yield);
+    if (val !== undefined && val !== null && !isNaN(val)) {
+      treatments[trt].push(val);
+    }
+  });
+
+  const descRows = [];
+  Object.entries(treatments).forEach(([trt, vals]) => {
+    const n = vals.length;
+    if (n === 0) return;
+    const mean = vals.reduce((a, b) => a + b, 0) / n;
+    let sd = 0, cv = 0, se = 0;
+    if (n > 1) {
+      const squaredDiffs = vals.map(v => Math.pow(v - mean, 2));
+      const variance = squaredDiffs.reduce((a, b) => a + b, 0) / (n - 1);
+      sd = Math.sqrt(variance);
+      cv = mean > 0 ? (sd / mean) * 100 : 0;
+      se = sd / Math.sqrt(n);
+    }
+    const ci_lower = mean - (1.96 * se);
+    const ci_upper = mean + (1.96 * se);
+    descRows.push({
+      treatment: trt,
+      meanSE: `${mean.toFixed(2)} ± ${se.toFixed(2)}`,
+      sd: sd.toFixed(2),
+      se: se.toFixed(2),
+      cv: cv.toFixed(1) + '%',
+      ciRange: `95% CI: ${ci_lower.toFixed(2)}–${ci_upper.toFixed(2)}`,
+      n,
+      meanVal: mean
+    });
+  });
+
+  if (descRows.length < 2) return y;
+
+  if (y + 20 > ph - 20) { doc.addPage(); y = 20; }
+  doc.setFont(undefined, 'bold'); doc.setFontSize(10);
+  doc.text(`Stage 4: Crop Yield Descriptive Statistics & ANOVA`, 14, y);
+  y += 5;
+
+  autoTable(doc, {
+    startY: y,
+    head: [['Treatment/Formulation', 'Yield Mean ± SE', 'SD', 'CV%', '95% Confidence Interval', 'Replications']],
+    body: descRows.map(r => [r.treatment, r.meanSE, r.sd, r.cv, r.ciRange, String(r.n)]),
+    headStyles: { fillColor: DARK },
+    theme: 'striped',
+    styles: { fontSize: 8.5 }
+  });
+  y = (doc.lastAutoTable?.finalY ?? y) + 5;
+
+  const maxN = Math.max(...descRows.map(r => r.n), 0);
+  if (maxN >= 3) {
+    const trialDesign = trial.TrialDesign || trial.Design || 'RCBD';
+    const design = /CRD/i.test(trialDesign) ? 'CRD' : 'RCBD';
+    
+    // We mock projectTrials with yield values inside EfficacyDataJSON to run ANOVA
+    const mockTrials = projectTrials.map(t => {
+      const yieldVal = parseFloat(t.YieldValue || t.Yield || 0);
+      return {
+        ...t,
+        EfficacyDataJSON: JSON.stringify([{
+          daa: 999,
+          yield: yieldVal
+        }])
+      };
+    });
+
+    const anova = performANOVA(mockTrials, { metric: 'yield', daa: 999, design });
+    if (anova && !anova.error && anova.anovaTable) {
+      autoTable(doc, {
+        startY: y,
+        head: [['Yield Variation Source', 'DF', 'SS', 'MS', 'F-Value', 'P-Value', 'Significance']],
+        body: anova.anovaTable.source.map((src, i) => {
+          const pVal = anova.anovaTable.p[i];
+          const sig = pVal !== null && pVal !== undefined ? (pVal < 0.01 ? '**' : pVal < 0.05 ? '*' : 'ns') : '';
+          return [
+            src,
+            anova.anovaTable.df[i] ?? '—',
+            anova.anovaTable.ss[i]?.toFixed(2) ?? '—',
+            anova.anovaTable.ms[i]?.toFixed(2) ?? '—',
+            anova.anovaTable.f[i]?.toFixed(2) ?? '—',
+            pVal !== null && pVal !== undefined ? pVal.toFixed(4) : '—',
+            sig
+          ];
+        }),
+        headStyles: { fillColor: DARK },
+        theme: 'grid',
+        styles: { fontSize: 8.5 }
+      });
+      y = (doc.lastAutoTable?.finalY ?? y) + 10;
+    }
+  }
   return y;
 }
 async function addWeedIdSection(doc, weedPhotos, trial, y, ph) {
@@ -855,7 +1195,7 @@ export async function generateComprehensivePdf(trial, options = {}) {
 
   // ANOVA
   y = secHeading(doc, '2. Statistical Analysis (ANOVA)', y, ph);
-  y = anovaTable(doc, safeJsonParse(trial.StatisticsJSON, {}), y, ph, trial);
+  y = anovaTable(doc, safeJsonParse(trial.StatisticsJSON, {}), y, ph, trial, options);
 
   // Efficacy Analysis
   y = secHeading(doc, '3. Efficacy Analysis', y, ph);
@@ -876,6 +1216,26 @@ export async function generateComprehensivePdf(trial, options = {}) {
       headStyles: { fillColor: primaryColor }, theme: 'striped', styles: { fontSize: 9 }
     });
     y = (doc.lastAutoTable?.finalY ?? y) + 10;
+  }
+
+  // Advanced Agronomic Indices Section
+  const advIndices = getAdvancedIndicesTableData(trial, efficacy, categoryId);
+  if (advIndices.length > 0) {
+    y = secHeading(doc, '3.1 Advanced Agronomic Indices', y, ph);
+    autoTable(doc, {
+      startY: y,
+      head: [['Replication / Treatment', 'Index parameter', 'Value']],
+      body: advIndices,
+      headStyles: { fillColor: primaryColor },
+      theme: 'striped',
+      styles: { fontSize: 9 }
+    });
+    y = (doc.lastAutoTable?.finalY ?? y) + 10;
+  }
+
+  // Crop Yield Analysis Section
+  if (categoryId === 'nutrition' || categoryId === 'biostimulant') {
+    y = yieldAnovaTable(doc, y, ph, trial);
   }
 
   // Timeline
@@ -1078,7 +1438,7 @@ export async function generateScientificReport(trial, options = {}) {
 
   // ANOVA
   y = secHeading(doc, '2. Statistical Analysis (ANOVA)', y, ph);
-  y = anovaTable(doc, safeJsonParse(trial.StatisticsJSON, {}), y, ph, trial);
+  y = anovaTable(doc, safeJsonParse(trial.StatisticsJSON, {}), y, ph, trial, options);
 
   // Efficacy
   y = secHeading(doc, '3. Efficacy Analysis', y, ph);
@@ -1095,6 +1455,26 @@ export async function generateScientificReport(trial, options = {}) {
     doc.setFontSize(9); doc.setTextColor(100, 100, 100);
     doc.text('No structured efficacy observations recorded.', 14, y); y += 10;
     doc.setTextColor(0, 0, 0); doc.setFontSize(10);
+  }
+
+  // Advanced Agronomic Indices
+  const advIndicesSci = getAdvancedIndicesTableData(trial, efficacy, categoryId);
+  if (advIndicesSci.length > 0) {
+    y = secHeading(doc, '3.1 Advanced Agronomic Indices', y, ph);
+    autoTable(doc, {
+      startY: y,
+      head: [['Replication / Treatment', 'Index parameter', 'Value']],
+      body: advIndicesSci,
+      headStyles: { fillColor: primaryColor },
+      theme: 'striped',
+      styles: { fontSize: 9 }
+    });
+    y = (doc.lastAutoTable?.finalY ?? y) + 10;
+  }
+
+  // Crop Yield Analysis Section
+  if (categoryId === 'nutrition' || categoryId === 'biostimulant') {
+    y = yieldAnovaTable(doc, y, ph, trial);
   }
 
   // Timeline
@@ -1228,6 +1608,126 @@ export async function generatePpt(trial) {
                  { text: `${repConfig.primaryMetricKey} (%)`, options: { bold: true, color: 'FFFFFF', fill: { color: primaryHex } } }];
     s3.addTable([hdr, ...wce.map(w => [w.species, w.initialCover.toFixed(1), w.finalCover.toFixed(1), w.wce.toFixed(1)])],
       { x: 0.4, y: 1.0, w: 9.2, fontSize: 13, colW: [3, 2, 2, 2.2], border: { pt: 0.5, color: 'CBD5E1' } });
+  }
+
+  // Slide 3.5 – ANOVA & Tukey Significance Letters
+  const allTrialsPpt = getBackupTrials();
+  const projectTrialsPpt = allTrialsPpt.filter(t => t.ProjectID && trial.ProjectID && String(t.ProjectID) === String(trial.ProjectID));
+  if (projectTrialsPpt.length >= 2) {
+    const trialDesign = trial.TrialDesign || trial.Design || 'RCBD';
+    const design = /CRD/i.test(trialDesign) ? 'CRD' : 'RCBD';
+    const primaryField = getPrimaryObservationField(categoryId);
+    const anova = performANOVA(projectTrialsPpt, { metric: primaryField, design });
+    
+    if (anova && !anova.error) {
+      const tukey = performTukeyHSD(projectTrialsPpt, { metric: primaryField, anova });
+      if (tukey && tukey.groups) {
+        const s35 = pptx.addSlide();
+        s35.addText(`ANOVA & Tukey HSD Significance Groupings`, { x: 0.4, y: 0.2, w: 9, h: 0.7, fontSize: 22, bold: true, color: primaryHex });
+        
+        const tableRows = [
+          [{ text: 'Treatment Name', options: { bold: true, color: 'FFFFFF', fill: { color: primaryHex } } },
+           { text: `${repConfig.primaryMetricLabel} Mean`, options: { bold: true, color: 'FFFFFF', fill: { color: primaryHex } } },
+           { text: 'Tukey Grouping', options: { bold: true, color: 'FFFFFF', fill: { color: primaryHex } } }]
+        ];
+        
+        const sortedMeans = Object.entries(anova.treatmentMeans)
+          .map(([trt, val]) => ({ trt, val, letter: tukey.groups[trt] || 'a' }))
+          .sort((a, b) => b.val - a.val);
+
+        sortedMeans.forEach(r => {
+          tableRows.push([r.trt, r.val.toFixed(2), r.letter]);
+        });
+        
+        s35.addTable(tableRows, { x: 0.4, y: 1.0, w: 5.5, fontSize: 13, border: { pt: 0.5, color: 'CBD5E1' } });
+        
+        s35.addText(`Interpretation:\nTreatments sharing a letter are not significantly different (alpha = 0.05).\nANOVA p-value: ${anova.pValue.toFixed(4)} (${anova.pValue < 0.05 ? 'Significant Effect' : 'No Significant Difference'})\n\nCoefficient of Variation (CV%): ${anova.cv ? anova.cv.toFixed(2) + '%' : 'N/A'}\nGlobal SEm±: ${anova.semGlobal ? '± ' + anova.semGlobal.toFixed(4) : 'N/A'}\nCD / LSD (5% Level): ${anova.cd5 ? anova.cd5.toFixed(4) : 'N/A'}\nCD / LSD (1% Level): ${anova.cd1 ? anova.cd1.toFixed(4) : 'N/A'}\nOutliers Detected: ${anova.detectedOutliers?.length || 0} plot(s)`, {
+          x: 6.2, y: 1.0, w: 3.4, h: 3.8, fontSize: 11, color: '475569', fill: { color: 'F8FAFC' }, border: { pt: 0.5, color: 'E2E8F0' }
+        });
+
+        // Add Graphical Bar Chart Slide for Tukey
+        const chartSlide = pptx.addSlide();
+        chartSlide.addText(`Mean Efficacy Chart with Tukey HSD Groupings`, { x: 0.4, y: 0.2, w: 9, h: 0.7, fontSize: 22, bold: true, color: primaryHex });
+        
+        const chartData = [];
+        const labels = [];
+        const values = [];
+        
+        Object.entries(anova.treatmentMeans).forEach(([trt, val]) => {
+          const letter = tukey.groups[trt] || 'a';
+          labels.push(`${trt} (${letter})`);
+          values.push(parseFloat(val.toFixed(2)));
+        });
+        
+        chartData.push({
+          name: repConfig.primaryMetricKey,
+          labels: labels,
+          values: values
+        });
+        
+        chartSlide.addChart(pptx.ChartType.bar, chartData, {
+          x: 0.5, y: 1.0, w: 8.5, h: 5.0,
+          showVal: true,
+          valFontSize: 11,
+          valGridLine: { style: 'none' },
+          catAxisLabelColor: '475569',
+          catAxisLabelFontSize: 10,
+          title: `${repConfig.primaryMetricLabel} per Treatment`,
+          titleFontSize: 12,
+          chartColors: [primaryHex]
+        });
+      }
+
+      // Add Duncan MRT slide
+      const duncan = performDuncanMRT(projectTrialsPpt, { metric: primaryField });
+      if (duncan && duncan.groups && !duncan.error) {
+        const sDuncan = pptx.addSlide();
+        sDuncan.addText(`Duncan's MRT Significance Groupings`, { x: 0.4, y: 0.2, w: 9, h: 0.7, fontSize: 22, bold: true, color: primaryHex });
+        const duncanRows = [
+          [{ text: 'Treatment Name', options: { bold: true, color: 'FFFFFF', fill: { color: primaryHex } } },
+           { text: `${repConfig.primaryMetricLabel} Mean`, options: { bold: true, color: 'FFFFFF', fill: { color: primaryHex } } },
+           { text: 'Duncan Grouping', options: { bold: true, color: 'FFFFFF', fill: { color: primaryHex } } }]
+        ];
+        Object.entries(anova.treatmentMeans).forEach(([trt, val]) => {
+          const letter = duncan.groups[trt] || 'a';
+          duncanRows.push([trt, val.toFixed(2), letter]);
+        });
+        sDuncan.addTable(duncanRows, { x: 0.4, y: 1.0, w: 5.5, fontSize: 13, border: { pt: 0.5, color: 'CBD5E1' } });
+      }
+
+      // Add Dunnett comparison slide
+      const controlName = Object.keys(anova.treatmentMeans).find(f => 
+        f?.toLowerCase().includes('control') || 
+        f?.toLowerCase().includes('untreated') ||
+        f?.toLowerCase().includes('check') ||
+        f?.toLowerCase().includes('utc')
+      );
+      if (controlName && anova.pValue < 0.05) {
+        const dunnett = performDunnettTest(projectTrialsPpt, controlName, { metric: primaryField });
+        if (dunnett && dunnett.comparisons && !dunnett.error) {
+          const sDunnett = pptx.addSlide();
+          sDunnett.addText(`Dunnett's Comparative Test vs. Control (${controlName})`, { x: 0.4, y: 0.2, w: 9, h: 0.7, fontSize: 22, bold: true, color: primaryHex });
+          const dunnettHdr = [
+            { text: 'Treatment', options: { bold: true, color: 'FFFFFF', fill: { color: primaryHex } } },
+            { text: 'Mean', options: { bold: true, color: 'FFFFFF', fill: { color: primaryHex } } },
+            { text: 'Difference', options: { bold: true, color: 'FFFFFF', fill: { color: primaryHex } } },
+            { text: 't-Stat', options: { bold: true, color: 'FFFFFF', fill: { color: primaryHex } } },
+            { text: 'Significance', options: { bold: true, color: 'FFFFFF', fill: { color: primaryHex } } }
+          ];
+          const dunRows = [dunnettHdr];
+          dunnett.comparisons.forEach(c => {
+            dunRows.push([
+              c.treatment,
+              c.treatmentMean.toFixed(2),
+              c.difference.toFixed(2),
+              c.tStatistic.toFixed(2),
+              c.significant ? 'Significant (*)' : 'ns'
+            ]);
+          });
+          sDunnett.addTable(dunRows, { x: 0.4, y: 1.0, w: 9.2, fontSize: 11, border: { pt: 0.5, color: 'CBD5E1' } });
+        }
+      }
+    }
   }
 
   // Slide 4 – Timeline
@@ -1527,6 +2027,140 @@ export function exportFieldReportTxt(trial, projectName = '') {
     lines.push(sep, `${repConfig.primaryMetricLabel.toUpperCase()} (${repConfig.primaryMetricKey})`, sep);
     wce.forEach(w => lines.push(`  ${w.species}: ${w.wce.toFixed(1)}% (${w.initialCover.toFixed(1)} → ${w.finalCover.toFixed(1)})`));
   }
+
+  // --- Advanced Agronomic Indices Section ---
+  const advIndices = getAdvancedIndicesTableData(trial, efficacy, categoryId);
+  if (advIndices.length) {
+    lines.push(sep, 'ADVANCED AGRONOMIC INDICES', sep);
+    advIndices.forEach(([plotInfo, indexName, valStr]) => {
+      lines.push(`  ${plotInfo} | ${indexName}: ${valStr}`);
+    });
+  }
+
+  // --- Statistical Summary Section ---
+  const allTrials = getBackupTrials();
+  const projectTrials = allTrials.filter(t => t.ProjectID && trial.ProjectID && String(t.ProjectID) === String(trial.ProjectID));
+  const replicationsCount = Math.max(...projectTrials.map(t => parseInt(t.Replication) || 1), projectTrials.length);
+
+  if (replicationsCount >= 3) {
+    lines.push(sep, 'STATISTICAL ANALYSIS & DESCRIPTIVE STATISTICS', sep);
+    const primaryField = getPrimaryObservationField(categoryId);
+    const metricLabel = repConfig.primaryMetricKey;
+
+    // Group by treatment
+    const treatments = {};
+    projectTrials.forEach(t => {
+      const trt = t.FormulationName || 'Untreated Check';
+      if (!treatments[trt]) treatments[trt] = [];
+      const stEff = validateEfficacy(safeJsonParse(t.EfficacyDataJSON, []));
+      if (stEff.length) {
+        const lastVal = getObservationPrimaryValue(categoryId, stEff[stEff.length - 1]);
+        if (lastVal !== null && lastVal !== undefined && !isNaN(lastVal)) {
+          treatments[trt].push(lastVal);
+        }
+      }
+    });
+
+    lines.push('Descriptive Statistics:');
+    const descRows = [];
+    Object.entries(treatments).forEach(([trt, vals]) => {
+      const n = vals.length;
+      if (n === 0) return;
+      const mean = vals.reduce((a, b) => a + b, 0) / n;
+      let sd = 0, se = 0;
+      if (n > 1) {
+        const squaredDiffs = vals.map(v => Math.pow(v - mean, 2));
+        const variance = squaredDiffs.reduce((a, b) => a + b, 0) / (n - 1);
+        sd = Math.sqrt(variance);
+        se = sd / Math.sqrt(n);
+      }
+      descRows.push({ treatment: trt, mean, sd, se, n });
+      lines.push(`  * ${trt}: Mean = ${mean.toFixed(2)} ± ${se.toFixed(2)}, SD = ${sd.toFixed(2)}, N = ${n}`);
+    });
+
+    // Run ANOVA
+    const trialDesign = trial.TrialDesign || trial.Design || 'RCBD';
+    const design = /CRD/i.test(trialDesign) ? 'CRD' : 'RCBD';
+    const anova = performANOVA(projectTrials, { metric: primaryField, design });
+
+    if (anova && !anova.error && anova.anovaTable) {
+      lines.push('\nANOVA Table:');
+      anova.anovaTable.source.forEach((src, i) => {
+        const dfVal = anova.anovaTable.df[i] ?? '—';
+        const ssVal = anova.anovaTable.ss[i]?.toFixed(2) ?? '—';
+        const msVal = anova.anovaTable.ms[i]?.toFixed(2) ?? '—';
+        const fVal = anova.anovaTable.f[i]?.toFixed(2) ?? '—';
+        const pVal = anova.anovaTable.p[i] !== null && anova.anovaTable.p[i] !== undefined ? anova.anovaTable.p[i].toFixed(4) : '—';
+        const sig = anova.anovaTable.p[i] !== null && anova.anovaTable.p[i] !== undefined ? (anova.anovaTable.p[i] < 0.01 ? '**' : anova.anovaTable.p[i] < 0.05 ? '*' : 'ns') : '';
+        lines.push(`  * ${src.padEnd(12)} | DF: ${dfVal} | SS: ${ssVal} | MS: ${msVal} | F: ${fVal} | P: ${pVal} [${sig}]`);
+      });
+
+      // Post-hoc (Tukey HSD)
+      const hasSignificantEffect = anova.isTwoWay ? (anova.factorA?.p < 0.05 || anova.factorB?.p < 0.05 || anova.interaction?.p < 0.05) : (anova.pValue < 0.05);
+      if (hasSignificantEffect) {
+        const tukey = performTukeyHSD(projectTrials, { metric: primaryField, anova });
+        if (tukey && tukey.groups) {
+          lines.push('\nTukey HSD Letter Groupings:');
+          Object.entries(tukey.groups)
+            .sort((a, b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]))
+            .forEach(([trt, letter]) => {
+              lines.push(`  * ${trt}: ${letter}`);
+            });
+        }
+      }
+    }
+
+    // Secondary Yield ANOVA
+    if (categoryId === 'nutrition' || categoryId === 'biostimulant') {
+      const hasYield = projectTrials.some(t => t.YieldValue || t.Yield);
+      if (hasYield) {
+        const yieldTreatments = {};
+        projectTrials.forEach(t => {
+          const trt = t.FormulationName || 'Untreated Check';
+          if (!yieldTreatments[trt]) yieldTreatments[trt] = [];
+          const yVal = parseFloat(t.YieldValue || t.Yield);
+          if (!isNaN(yVal)) yieldTreatments[trt].push(yVal);
+        });
+
+        lines.push('\nYield Descriptive Statistics:');
+        Object.entries(yieldTreatments).forEach(([trt, vals]) => {
+          const n = vals.length;
+          if (n === 0) return;
+          const mean = vals.reduce((a, b) => a + b, 0) / n;
+          let sd = 0, se = 0;
+          if (n > 1) {
+            const squaredDiffs = vals.map(v => Math.pow(v - mean, 2));
+            const variance = squaredDiffs.reduce((a, b) => a + b, 0) / (n - 1);
+            sd = Math.sqrt(variance);
+            se = sd / Math.sqrt(n);
+          }
+          lines.push(`  * ${trt}: Yield Mean = ${mean.toFixed(2)} ± ${se.toFixed(2)}, SD = ${sd.toFixed(2)}, N = ${n}`);
+        });
+
+        const mockTrials = projectTrials.map(t => {
+          const yieldVal = parseFloat(t.YieldValue || t.Yield || 0);
+          return {
+            ...t,
+            EfficacyDataJSON: JSON.stringify([{ daa: 999, yield: yieldVal }])
+          };
+        });
+        const yieldAnova = performANOVA(mockTrials, { metric: 'yield', daa: 999, design });
+        if (yieldAnova && !yieldAnova.error && yieldAnova.anovaTable) {
+          lines.push('\nYield ANOVA Table:');
+          yieldAnova.anovaTable.source.forEach((src, i) => {
+            const dfVal = yieldAnova.anovaTable.df[i] ?? '—';
+            const ssVal = yieldAnova.anovaTable.ss[i]?.toFixed(2) ?? '—';
+            const msVal = yieldAnova.anovaTable.ms[i]?.toFixed(2) ?? '—';
+            const fVal = yieldAnova.anovaTable.f[i]?.toFixed(2) ?? '—';
+            const pVal = yieldAnova.anovaTable.p[i] !== null && yieldAnova.anovaTable.p[i] !== undefined ? yieldAnova.anovaTable.p[i].toFixed(4) : '—';
+            const sig = yieldAnova.anovaTable.p[i] !== null && yieldAnova.anovaTable.p[i] !== undefined ? (yieldAnova.anovaTable.p[i] < 0.01 ? '**' : yieldAnova.anovaTable.p[i] < 0.05 ? '*' : 'ns') : '';
+            lines.push(`  * ${src.padEnd(12)} | DF: ${dfVal} | SS: ${ssVal} | MS: ${msVal} | F: ${fVal} | P: ${pVal} [${sig}]`);
+          });
+        }
+      }
+    }
+  }
+
   if (trial.Conclusion) lines.push(sep, 'CONCLUSION', sep, trial.Conclusion);
   if (trial.Notes)      lines.push(sep, 'NOTES', sep, trial.Notes);
   lines.push(sep, `Generated: ${new Date().toLocaleString()}`, '═'.repeat(60));
@@ -1701,6 +2335,269 @@ export function exportHtmlReport(trial, projectName = '') {
       <table><thead><tr><th>${repConfig.targetLabel}</th><th>Initial ${repConfig.primaryObsLabel}</th><th>Final ${repConfig.primaryObsLabel}</th><th>${repConfig.primaryMetricKey} %</th></tr></thead>
       <tbody>${wceRows}</tbody></table>
     </div>` : ''}
+
+    ${(() => {
+      const advIndices = getAdvancedIndicesTableData(trial, efficacy, categoryId);
+      if (!advIndices.length) return '';
+      const advRowsHtml = advIndices.map(([plotInfo, indexName, valStr]) => `
+        <tr>
+          <td>${plotInfo}</td>
+          <td>${indexName}</td>
+          <td style="font-weight:700;color:${primaryHex};">${valStr}</td>
+        </tr>
+      `).join('');
+      return `
+      <div class="section">
+        <h2>Advanced Agronomic Indices</h2>
+        <table>
+          <thead>
+            <tr><th>Plot / Observation Point</th><th>Index Metric</th><th>Calculated Value</th></tr>
+          </thead>
+          <tbody>${advRowsHtml}</tbody>
+        </table>
+      </div>`;
+    })()}
+
+    ${(() => {
+      const allTrials = getBackupTrials();
+      const projectTrials = allTrials.filter(t => t.ProjectID && trial.ProjectID && String(t.ProjectID) === String(trial.ProjectID));
+      const replicationsCount = Math.max(...projectTrials.map(t => parseInt(t.Replication) || 1), projectTrials.length);
+
+      if (replicationsCount < 3) return '';
+
+      const primaryField = getPrimaryObservationField(categoryId);
+      const metricLabel = repConfig.primaryMetricKey;
+
+      // Group by treatment
+      const treatments = {};
+      projectTrials.forEach(t => {
+        const trt = t.FormulationName || 'Untreated Check';
+        if (!treatments[trt]) treatments[trt] = [];
+        const stEff = validateEfficacy(safeJsonParse(t.EfficacyDataJSON, []));
+        if (stEff.length) {
+          const lastVal = getObservationPrimaryValue(categoryId, stEff[stEff.length - 1]);
+          if (lastVal !== null && lastVal !== undefined && !isNaN(lastVal)) {
+            treatments[trt].push(lastVal);
+          }
+        }
+      });
+
+      const descRows = [];
+      Object.entries(treatments).forEach(([trt, vals]) => {
+        const n = vals.length;
+        if (n === 0) return;
+        const mean = vals.reduce((a, b) => a + b, 0) / n;
+        let sd = 0, se = 0, cv = 0;
+        if (n > 1) {
+          const squaredDiffs = vals.map(v => Math.pow(v - mean, 2));
+          const variance = squaredDiffs.reduce((a, b) => a + b, 0) / (n - 1);
+          sd = Math.sqrt(variance);
+          cv = mean > 0 ? (sd / mean) * 100 : 0;
+          se = sd / Math.sqrt(n);
+        }
+        const ci_lower = mean - (1.96 * se);
+        const ci_upper = mean + (1.96 * se);
+        descRows.push({
+          treatment: trt,
+          meanSE: `${mean.toFixed(2)} ± ${se.toFixed(2)}`,
+          sd: sd.toFixed(2),
+          cv: cv.toFixed(1) + '%',
+          ciRange: `${ci_lower.toFixed(2)}–${ci_upper.toFixed(2)}`,
+          n,
+          meanVal: mean
+        });
+      });
+
+      const descHtmlRows = descRows.map(r => `
+        <tr>
+          <td><b>${r.treatment}</b></td>
+          <td>${r.meanSE}</td>
+          <td>${r.sd}</td>
+          <td>${r.cv}</td>
+          <td>${r.ciRange}</td>
+          <td>${r.n}</td>
+        </tr>
+      `).join('');
+
+      const trialDesign = trial.TrialDesign || trial.Design || 'RCBD';
+      const design = /CRD/i.test(trialDesign) ? 'CRD' : 'RCBD';
+      const anova = performANOVA(projectTrials, { metric: primaryField, design });
+
+      let anovaHtml = '';
+      let tukeyHtml = '';
+
+      if (anova && !anova.error && anova.anovaTable) {
+        const anovaRows = anova.anovaTable.source.map((src, i) => {
+          const pVal = anova.anovaTable.p[i];
+          const sig = pVal !== null && pVal !== undefined ? (pVal < 0.01 ? '**' : pVal < 0.05 ? '*' : 'ns') : '';
+          return `
+            <tr>
+              <td>${src}</td>
+              <td>${anova.anovaTable.df[i] ?? '—'}</td>
+              <td>${anova.anovaTable.ss[i]?.toFixed(2) ?? '—'}</td>
+              <td>${anova.anovaTable.ms[i]?.toFixed(2) ?? '—'}</td>
+              <td>${anova.anovaTable.f[i]?.toFixed(2) ?? '—'}</td>
+              <td>${pVal !== null && pVal !== undefined ? pVal.toFixed(4) : '—'}</td>
+              <td style="font-weight:bold;color:${sig === 'ns' ? '#6b7280' : '#b91c1c'};">${sig}</td>
+            </tr>
+          `;
+        }).join('');
+
+        anovaHtml = `
+          <h3 style="font-size:14px;color:#475569;margin-top:20px;margin-bottom:8px;">ANOVA (Analysis of Variance) Table</h3>
+          <table>
+            <thead>
+              <tr><th>Source of Variation</th><th>DF</th><th>SS</th><th>MS</th><th>F-Value</th><th>P-Value</th><th>Sig.</th></tr>
+            </thead>
+            <tbody>${anovaRows}</tbody>
+          </table>
+        `;
+
+        const hasSignificantEffect = anova.isTwoWay ? (anova.factorA?.p < 0.05 || anova.factorB?.p < 0.05 || anova.interaction?.p < 0.05) : (anova.pValue < 0.05);
+        if (hasSignificantEffect) {
+          const tukey = performTukeyHSD(projectTrials, { metric: primaryField, anova });
+          if (tukey && tukey.groups) {
+            const tukeyRows = descRows.map(r => {
+              const letter = tukey.groups[r.treatment] || 'a';
+              return `
+                <tr>
+                  <td><b>${r.treatment}</b></td>
+                  <td>${r.meanVal.toFixed(2)}</td>
+                  <td style="font-weight:bold;color:${primaryHex};">${letter}</td>
+                </tr>
+              `;
+            }).join('');
+
+            tukeyHtml = `
+              <h3 style="font-size:14px;color:#475569;margin-top:20px;margin-bottom:8px;">Tukey HSD Multiple Comparisons (Letter Grouping)</h3>
+              <table>
+                <thead>
+                  <tr><th>Treatment</th><th>Mean Efficacy</th><th>Tukey Significance Letter</th></tr>
+                </thead>
+                <tbody>${tukeyRows}</tbody>
+              </table>
+            `;
+          }
+        } else {
+          tukeyHtml = `<p style="font-size:12px;color:#64748b;font-style:italic;margin-top:12px;">Tukey HSD post-hoc groupings skipped because ANOVA treatment factor is not statistically significant (p >= 0.05).</p>`;
+        }
+      }
+
+      // Secondary Yield ANOVA
+      let yieldHtml = '';
+      if (categoryId === 'nutrition' || categoryId === 'biostimulant') {
+        const hasYield = projectTrials.some(t => t.YieldValue || t.Yield);
+        if (hasYield) {
+          const yieldTreatments = {};
+          projectTrials.forEach(t => {
+            const trt = t.FormulationName || 'Untreated Check';
+            if (!yieldTreatments[trt]) yieldTreatments[trt] = [];
+            const yVal = parseFloat(t.YieldValue || t.Yield);
+            if (!isNaN(yVal)) yieldTreatments[trt].push(yVal);
+          });
+
+          const yieldDescRows = [];
+          Object.entries(yieldTreatments).forEach(([trt, vals]) => {
+            const n = vals.length;
+            if (n === 0) return;
+            const mean = vals.reduce((a, b) => a + b, 0) / n;
+            let sd = 0, se = 0, cv = 0;
+            if (n > 1) {
+              const squaredDiffs = vals.map(v => Math.pow(v - mean, 2));
+              const variance = squaredDiffs.reduce((a, b) => a + b, 0) / (n - 1);
+              sd = Math.sqrt(variance);
+              cv = mean > 0 ? (sd / mean) * 100 : 0;
+              se = sd / Math.sqrt(n);
+            }
+            const ci_lower = mean - (1.96 * se);
+            const ci_upper = mean + (1.96 * se);
+            yieldDescRows.push({
+              treatment: trt,
+              meanSE: `${mean.toFixed(2)} ± ${se.toFixed(2)}`,
+              sd: sd.toFixed(2),
+              cv: cv.toFixed(1) + '%',
+              ciRange: `${ci_lower.toFixed(2)}–${ci_upper.toFixed(2)}`,
+              n
+            });
+          });
+
+          const yieldDescHtml = yieldDescRows.map(r => `
+            <tr>
+              <td><b>${r.treatment}</b></td>
+              <td>${r.meanSE}</td>
+              <td>${r.sd}</td>
+              <td>${r.cv}</td>
+              <td>${r.ciRange}</td>
+              <td>${r.n}</td>
+            </tr>
+          `).join('');
+
+          const mockTrials = projectTrials.map(t => {
+            const yieldVal = parseFloat(t.YieldValue || t.Yield || 0);
+            return {
+              ...t,
+              EfficacyDataJSON: JSON.stringify([{ daa: 999, yield: yieldVal }])
+            };
+          });
+
+          const yieldAnova = performANOVA(mockTrials, { metric: 'yield', daa: 999, design });
+          let yieldAnovaHtml = '';
+          if (yieldAnova && !yieldAnova.error && yieldAnova.anovaTable) {
+            const yieldAnovaRows = yieldAnova.anovaTable.source.map((src, i) => {
+              const pVal = yieldAnova.anovaTable.p[i];
+              const sig = pVal !== null && pVal !== undefined ? (pVal < 0.01 ? '**' : pVal < 0.05 ? '*' : 'ns') : '';
+              return `
+                <tr>
+                  <td>${src}</td>
+                  <td>${yieldAnova.anovaTable.df[i] ?? '—'}</td>
+                  <td>${yieldAnova.anovaTable.ss[i]?.toFixed(2) ?? '—'}</td>
+                  <td>${yieldAnova.anovaTable.ms[i]?.toFixed(2) ?? '—'}</td>
+                  <td>${yieldAnova.anovaTable.f[i]?.toFixed(2) ?? '—'}</td>
+                  <td>${pVal !== null && pVal !== undefined ? pVal.toFixed(4) : '—'}</td>
+                  <td style="font-weight:bold;color:${sig === 'ns' ? '#6b7280' : '#b91c1c'};">${sig}</td>
+                </tr>
+              `;
+            }).join('');
+
+            yieldAnovaHtml = `
+              <h3 style="font-size:14px;color:#475569;margin-top:20px;margin-bottom:8px;">Crop Yield ANOVA Table</h3>
+              <table>
+                <thead>
+                  <tr><th>Source of Variation</th><th>DF</th><th>SS</th><th>MS</th><th>F-Value</th><th>P-Value</th><th>Sig.</th></tr>
+                </thead>
+                <tbody>${yieldAnovaRows}</tbody>
+              </table>
+            `;
+          }
+
+          yieldHtml = `
+            <hr style="border:0;border-top:1px solid #e2e8f0;margin:24px 0;" />
+            <h3 style="font-size:15px;color:${primaryHex};margin-bottom:8px;">Crop Yield Descriptive Statistics</h3>
+            <table>
+              <thead>
+                <tr><th>Treatment / Formulation</th><th>Yield Mean ± SE</th><th>SD</th><th>CV%</th><th>95% Confidence Interval</th><th>Replications</th></tr>
+              </thead>
+              <tbody>${yieldDescHtml}</tbody>
+            </table>
+            ${yieldAnovaHtml}
+          `;
+        }
+      }
+
+      return `
+      <div class="section">
+        <h2>Descriptive Statistics & ANOVA (${metricLabel})</h2>
+        <table>
+          <thead>
+            <tr><th>Treatment / Formulation</th><th>Efficacy Mean ± SE</th><th>SD</th><th>CV%</th><th>95% Confidence Interval</th><th>Replications</th></tr>
+          </thead>
+          <tbody>${descHtmlRows}</tbody>
+        </table>
+        ${anovaHtml}
+        ${tukeyHtml}
+        ${yieldHtml}
+      </div>`;
+    })()}
 
     ${trial.Conclusion ? `<div class="section"><h2>Conclusion</h2><p style="margin:0;line-height:1.7;">${trial.Conclusion}</p></div>` : ''}
     ${trial.Notes      ? `<div class="section"><h2>Notes</h2><p style="margin:0;line-height:1.7;">${trial.Notes}</p></div>` : ''}
@@ -1904,6 +2801,254 @@ export async function exportTrialDocx(trial, options = {}) {
       </tbody>
     </table>` : '';
 
+  const allTrials = getBackupTrials();
+  const projectTrials = allTrials.filter(t => t.ProjectID && trial.ProjectID && String(t.ProjectID) === String(trial.ProjectID));
+  const replicationsCount = Math.max(...projectTrials.map(t => parseInt(t.Replication) || 1), projectTrials.length);
+
+  let docxAnovaHtml = '';
+  if (replicationsCount >= 3) {
+    const { excludeOutliers = false } = options;
+    const primaryField = getPrimaryObservationField(categoryId);
+    const metricLabel = repConfig.primaryMetricKey;
+    const trialDesign = trial.TrialDesign || trial.Design || 'RCBD';
+    const design = /CRD/i.test(trialDesign) ? 'CRD' : 'RCBD';
+    const anova = performANOVA(projectTrials, { metric: primaryField, design, excludeOutliers });
+
+    if (anova && !anova.error) {
+      const tukey = performTukeyHSD(projectTrials, { metric: primaryField, anova });
+      
+      // Group by treatment for desc stats
+      const treatments = {};
+      projectTrials.forEach(t => {
+        const trt = t.FormulationName || 'Untreated Check';
+        if (!treatments[trt]) treatments[trt] = [];
+        const stEff = validateEfficacy(safeJsonParse(t.EfficacyDataJSON, []));
+        if (stEff.length) {
+          const lastVal = getObservationPrimaryValue(categoryId, stEff[stEff.length - 1]);
+          if (lastVal !== null && lastVal !== undefined && !isNaN(lastVal)) {
+            treatments[trt].push(lastVal);
+          }
+        }
+      });
+
+      const descRows = [];
+      Object.entries(treatments).forEach(([trt, vals]) => {
+        const n = vals.length;
+        if (n === 0) return;
+        const mean = vals.reduce((a, b) => a + b, 0) / n;
+        let sd = 0, se = 0, cv = 0;
+        if (n > 1) {
+          const squaredDiffs = vals.map(v => Math.pow(v - mean, 2));
+          const variance = squaredDiffs.reduce((a, b) => a + b, 0) / (n - 1);
+          sd = Math.sqrt(variance);
+          cv = mean > 0 ? (sd / mean) * 100 : 0;
+          se = sd / Math.sqrt(n);
+        }
+        const ci_lower = mean - (1.96 * se);
+        const ci_upper = mean + (1.96 * se);
+        descRows.push({
+          treatment: trt,
+          meanSE: `${mean.toFixed(2)} ± ${se.toFixed(2)}`,
+          sd: sd.toFixed(2),
+          cv: cv.toFixed(1) + '%',
+          ciRange: `${ci_lower.toFixed(2)}–${ci_upper.toFixed(2)}`,
+          n,
+          meanVal: mean
+        });
+      });
+
+      const descHtmlRows = descRows.map(r => `
+        <tr>
+          <td style="border:1px solid #cbd5e1;padding:5px 8px;"><b>${r.treatment}</b></td>
+          <td style="border:1px solid #cbd5e1;padding:5px 8px;">${r.meanSE}</td>
+          <td style="border:1px solid #cbd5e1;padding:5px 8px;">${r.sd}</td>
+          <td style="border:1px solid #cbd5e1;padding:5px 8px;">${r.cv}</td>
+          <td style="border:1px solid #cbd5e1;padding:5px 8px;">${r.ciRange}</td>
+          <td style="border:1px solid #cbd5e1;padding:5px 8px;">${r.n}</td>
+        </tr>
+      `).join('');
+
+      let anovaRows = '';
+      if (anova.anovaTable) {
+        anovaRows = anova.anovaTable.source.map((src, i) => {
+          const pVal = anova.anovaTable.p[i];
+          const sig = pVal !== null && pVal !== undefined ? (pVal < 0.01 ? '**' : pVal < 0.05 ? '*' : 'ns') : '';
+          return `
+            <tr>
+              <td style="border:1px solid #cbd5e1;padding:5px 8px;">${src}</td>
+              <td style="border:1px solid #cbd5e1;padding:5px 8px;">${anova.anovaTable.df[i] ?? '—'}</td>
+              <td style="border:1px solid #cbd5e1;padding:5px 8px;">${anova.anovaTable.ss[i]?.toFixed(2) ?? '—'}</td>
+              <td style="border:1px solid #cbd5e1;padding:5px 8px;">${anova.anovaTable.ms[i]?.toFixed(2) ?? '—'}</td>
+              <td style="border:1px solid #cbd5e1;padding:5px 8px;">${anova.anovaTable.f[i]?.toFixed(2) ?? '—'}</td>
+              <td style="border:1px solid #cbd5e1;padding:5px 8px;">${pVal !== null && pVal !== undefined ? pVal.toFixed(4) : '—'}</td>
+              <td style="border:1px solid #cbd5e1;padding:5px 8px;font-weight:bold;color:${sig === 'ns' ? '#6b7280' : '#b91c1c'};">${sig}</td>
+            </tr>
+          `;
+        }).join('');
+      }
+
+      // Experimental Quality and Precision summary table
+      const getCvRating = (c) => {
+        if (c < 10) return 'Excellent Precision';
+        if (c <= 20) return 'Good Precision';
+        if (c <= 30) return 'Acceptable Precision';
+        return 'Poor Precision (High Variation)';
+      };
+
+      const cvVal = anova.cv ?? 0;
+      const semVal = anova.semGlobal ?? 0;
+      const cd5Val = anova.cd5 ?? 0;
+      const cd1Val = anova.cd1 ?? 0;
+      const balanceStatus = anova.balanceWarning ? 'Unbalanced Layout' : 'Balanced Layout';
+      const outlierCount = anova.detectedOutliers?.length || 0;
+      const outlierHandling = excludeOutliers ? 'Automatically Excluded' : 'Flagged but Kept';
+
+      const qualityHtml = `
+        <h3 style="color:${primaryHex};font-size:12pt;margin-top:16px;">Experimental Precision & Quality Certification</h3>
+        <table style="width:100%;border-collapse:collapse;font-size:10pt;margin-bottom:12px;">
+          <tr>
+            <td style="border:1px solid #cbd5e1;padding:5px 8px;font-weight:bold;background:#f8fafc;width:25%;">Coefficient of Variation (CV%)</td>
+            <td style="border:1px solid #cbd5e1;padding:5px 8px;width:25%;">${cvVal.toFixed(2)}% (${getCvRating(cvVal)})</td>
+            <td style="border:1px solid #cbd5e1;padding:5px 8px;font-weight:bold;background:#f8fafc;width:25%;">Design Balance Status</td>
+            <td style="border:1px solid #cbd5e1;padding:5px 8px;width:25%;">${balanceStatus}</td>
+          </tr>
+          <tr>
+            <td style="border:1px solid #cbd5e1;padding:5px 8px;font-weight:bold;background:#f8fafc;">Global Standard Error (SEm±)</td>
+            <td style="border:1px solid #cbd5e1;padding:5px 8px;">± ${semVal.toFixed(4)}</td>
+            <td style="border:1px solid #cbd5e1;padding:5px 8px;font-weight:bold;background:#f8fafc;">Layout Configuration</td>
+            <td style="border:1px solid #cbd5e1;padding:5px 8px;">${anova.treatments?.length || 0} Treatments × ${replicationsCount} Replications</td>
+          </tr>
+          <tr>
+            <td style="border:1px solid #cbd5e1;padding:5px 8px;font-weight:bold;background:#f8fafc;">CD / LSD (5% Level)</td>
+            <td style="border:1px solid #cbd5e1;padding:5px 8px;">${cd5Val.toFixed(4)}</td>
+            <td style="border:1px solid #cbd5e1;padding:5px 8px;font-weight:bold;background:#f8fafc;">Outliers Detected</td>
+            <td style="border:1px solid #cbd5e1;padding:5px 8px;">${outlierCount} plot(s)</td>
+          </tr>
+          <tr>
+            <td style="border:1px solid #cbd5e1;padding:5px 8px;font-weight:bold;background:#f8fafc;">CD / LSD (1% Level)</td>
+            <td style="border:1px solid #cbd5e1;padding:5px 8px;">${cd1Val.toFixed(4)}</td>
+            <td style="border:1px solid #cbd5e1;padding:5px 8px;font-weight:bold;background:#f8fafc;">Outliers Handling</td>
+            <td style="border:1px solid #cbd5e1;padding:5px 8px;">${outlierHandling}</td>
+          </tr>
+        </table>
+      `;
+
+      let outlierLogHtml = '';
+      if (anova.detectedOutliers && anova.detectedOutliers.length > 0) {
+        outlierLogHtml = `
+          <h3 style="color:${primaryHex};font-size:11pt;margin-top:12px;">Flagged Outliers Log</h3>
+          <ul style="font-size:9.5pt;margin-bottom:12px;">
+            ${anova.detectedOutliers.map(out => `<li>Treatment: <b>${out.treatment}</b> | Rep/Block: <b>${out.block}</b> | Observed Value: <b>${out.value}</b> | Residual Z-score: <b>${out.zScore.toFixed(2)}</b> (${outlierHandling})</li>`).join('')}
+          </ul>
+        `;
+      }
+
+      let tukeyHtml = '';
+      if (tukey && tukey.groups && anova.pValue < 0.05) {
+        const sortedTukeyRows = descRows.map(r => {
+          const letter = tukey.groups[r.treatment] || 'a';
+          return {
+            treatment: r.treatment,
+            meanVal: r.meanVal,
+            letter: letter
+          };
+        }).sort((a, b) => b.meanVal - a.meanVal);
+
+        const tukeyRows = sortedTukeyRows.map(r => `
+          <tr>
+            <td style="border:1px solid #cbd5e1;padding:5px 8px;"><b>${r.treatment}</b></td>
+            <td style="border:1px solid #cbd5e1;padding:5px 8px;">${r.meanVal.toFixed(2)}</td>
+            <td style="border:1px solid #cbd5e1;padding:5px 8px;font-weight:bold;color:${primaryHex};">${r.letter}</td>
+          </tr>
+        `).join('');
+
+        tukeyHtml = `
+          <h3 style="color:${primaryHex};font-size:12pt;margin-top:16px;">Tukey HSD Multiple Comparisons</h3>
+          <table style="width:100%;border-collapse:collapse;font-size:10pt;">
+            <thead><tr style="background:${primaryHex};color:#fff;">
+              <th style="padding:6px 8px;text-align:left;">Treatment</th>
+              <th style="padding:6px 8px;text-align:left;">Mean</th>
+              <th style="padding:6px 8px;text-align:left;">Tukey Grouping</th>
+            </tr></thead>
+            <tbody>${tukeyRows}</tbody>
+          </table>
+        `;
+      }
+
+      // Dunnett's Test vs Control
+      let dunnettHtml = '';
+      const controlName = Object.keys(anova.treatmentMeans).find(f => 
+        f?.toLowerCase().includes('control') || 
+        f?.toLowerCase().includes('untreated') ||
+        f?.toLowerCase().includes('check') ||
+        f?.toLowerCase().includes('utc')
+      );
+      if (controlName && anova.significant) {
+        const dunnett = performDunnettTest(projectTrials, controlName, { metric: primaryField });
+        if (dunnett && dunnett.comparisons && !dunnett.error) {
+          const dunnettRows = dunnett.comparisons.map(c => `
+            <tr>
+              <td style="border:1px solid #cbd5e1;padding:5px 8px;"><b>${c.treatment}</b></td>
+              <td style="border:1px solid #cbd5e1;padding:5px 8px;">${c.treatmentMean.toFixed(2)}</td>
+              <td style="border:1px solid #cbd5e1;padding:5px 8px;">${c.controlMean.toFixed(2)}</td>
+              <td style="border:1px solid #cbd5e1;padding:5px 8px;">${c.difference.toFixed(2)}</td>
+              <td style="border:1px solid #cbd5e1;padding:5px 8px;">${c.tStatistic.toFixed(2)}</td>
+              <td style="border:1px solid #cbd5e1;padding:5px 8px;font-weight:bold;color:${c.significant ? '#b91c1c' : '#6b7280'};">${c.significant ? 'Significant (*)' : 'ns'}</td>
+            </tr>
+          `).join('');
+          
+          dunnettHtml = `
+            <h3 style="color:${primaryHex};font-size:12pt;margin-top:16px;">Dunnett's Test vs. Control (${controlName})</h3>
+            <table style="width:100%;border-collapse:collapse;font-size:10pt;">
+              <thead><tr style="background:${primaryHex};color:#fff;">
+                <th style="padding:6px 8px;text-align:left;">Treatment</th>
+                <th style="padding:6px 8px;text-align:left;">Mean</th>
+                <th style="padding:6px 8px;text-align:left;">Control Mean</th>
+                <th style="padding:6px 8px;text-align:left;">Difference</th>
+                <th style="padding:6px 8px;text-align:left;">t-Stat</th>
+                <th style="padding:6px 8px;text-align:left;">Significance (α=0.05)</th>
+              </tr></thead>
+              <tbody>${dunnettRows}</tbody>
+            </table>
+          `;
+        }
+      }
+
+      docxAnovaHtml = `
+        <h2 style="color:${primaryHex};font-size:14pt;border-bottom:2px solid ${primaryHex};padding-bottom:4px;margin-top:24px;">Descriptive Statistics & ANOVA</h2>
+        <table style="width:100%;border-collapse:collapse;font-size:10pt;margin-bottom:12px;">
+          <thead><tr style="background:${primaryHex};color:#fff;">
+            <th style="padding:6px 8px;text-align:left;">Treatment / Formulation</th>
+            <th style="padding:6px 8px;text-align:left;">Mean ± SE</th>
+            <th style="padding:6px 8px;text-align:left;">SD</th>
+            <th style="padding:6px 8px;text-align:left;">CV%</th>
+            <th style="padding:6px 8px;text-align:left;">95% Confidence Interval</th>
+            <th style="padding:6px 8px;text-align:left;">Replications</th>
+          </tr></thead>
+          <tbody>${descHtmlRows}</tbody>
+        </table>
+        
+        <h3 style="color:${primaryHex};font-size:12pt;margin-top:16px;">ANOVA Table</h3>
+        <table style="width:100%;border-collapse:collapse;font-size:10pt;margin-bottom:12px;">
+          <thead><tr style="background:${primaryHex};color:#fff;">
+            <th style="padding:6px 8px;text-align:left;">Source of Variation</th>
+            <th style="padding:6px 8px;text-align:left;">DF</th>
+            <th style="padding:6px 8px;text-align:left;">SS</th>
+            <th style="padding:6px 8px;text-align:left;">MS</th>
+            <th style="padding:6px 8px;text-align:left;">F-Value</th>
+            <th style="padding:6px 8px;text-align:left;">P-Value</th>
+            <th style="padding:6px 8px;text-align:left;">Sig.</th>
+          </tr></thead>
+          <tbody>${anovaRows}</tbody>
+        </table>
+        ${qualityHtml}
+        ${outlierLogHtml}
+        ${tukeyHtml}
+        ${dunnettHtml}
+      `;
+    }
+  }
+
   const conclusionHtml = [
     trial.Conclusion ? `<h2 style="color:${primaryHex};font-size:14pt;border-bottom:2px solid ${primaryHex};padding-bottom:4px;margin-top:24px;">Conclusion</h2><p style="font-size:11pt;line-height:1.7;">${trial.Conclusion}</p>` : '',
     trial.Notes ? `<h2 style="color:${primaryHex};font-size:14pt;border-bottom:2px solid ${primaryHex};padding-bottom:4px;margin-top:24px;">Notes</h2><p style="font-size:11pt;line-height:1.7;">${trial.Notes}</p>` : '',
@@ -1929,6 +3074,7 @@ export async function exportTrialDocx(trial, options = {}) {
     ${efficacyHtml}
     ${wceHtml}
     ${ingredientsHtml}
+    ${docxAnovaHtml}
     ${conclusionHtml}
     ${photoHtml}
     ${weedIdHtml}
@@ -2346,6 +3492,111 @@ export async function generateMasterPpt(project, subTrials) {
   });
   s3.addTable(wceRows, { x: 0.4, y: 1.0, w: 9.2, fontSize: 11, colW: [2.8, 2.2, 1.4, 1.4, 1.4], border: { pt: 0.5, color: 'CBD5E1' } });
 
+  // Slide 3.5 – ANOVA & Tukey HSD Significance Groups
+  const maxN = Math.max(...subTrials.map(st => {
+    return subTrials.filter(x => x.FormulationName === st.FormulationName).length;
+  }), 0);
+
+  if (maxN >= 3 && subTrials.length >= 2) {
+    const trialDesign = project.TrialDesign || project.Design || 'RCBD';
+    const design = /CRD/i.test(trialDesign) ? 'CRD' : 'RCBD';
+    const primaryField = getPrimaryObservationField(categoryId);
+    const anova = performANOVA(subTrials, { metric: primaryField, design });
+    
+    if (anova && !anova.error) {
+      const tukey = performTukeyHSD(subTrials, { metric: primaryField, anova });
+      
+      const s35 = pptx.addSlide();
+      s35.addText(`ANOVA & Tukey HSD Significance Groups`, { x: 0.4, y: 0.2, w: 9, h: 0.7, fontSize: 22, bold: true, color: themeHex });
+      
+      const tableRows = [
+        [{ text: 'Treatment Formulation', options: { bold: true, color: 'FFFFFF', fill: { color: themeHex } } },
+         { text: `${repConfig.primaryMetricKey} Mean`, options: { bold: true, color: 'FFFFFF', fill: { color: themeHex } } },
+         { text: 'Tukey Grouping', options: { bold: true, color: 'FFFFFF', fill: { color: themeHex } } }]
+      ];
+      
+      const sortedMeans = Object.entries(anova.treatmentMeans)
+        .map(([trt, val]) => ({ trt, val, letter: (tukey && tukey.groups) ? (tukey.groups[trt] || 'a') : 'a' }))
+        .sort((a, b) => b.val - a.val);
+
+      sortedMeans.forEach(r => {
+        tableRows.push([r.trt, r.val.toFixed(2), r.letter]);
+      });
+      
+      s35.addTable(tableRows, { x: 0.4, y: 1.0, w: 5.5, fontSize: 11, border: { pt: 0.5, color: 'CBD5E1' } });
+      
+      s35.addText(`Interpretation:\nTreatments sharing a letter are not significantly different (alpha = 0.05).\nANOVA p-value: ${anova.pValue.toFixed(4)} (${anova.pValue < 0.05 ? 'Significant Effect' : 'No Significant Difference'})\n\nCoefficient of Variation (CV%): ${anova.cv ? anova.cv.toFixed(2) + '%' : 'N/A'}\nGlobal SEm±: ${anova.semGlobal ? '± ' + anova.semGlobal.toFixed(4) : 'N/A'}\nCD / LSD (5% Level): ${anova.cd5 ? anova.cd5.toFixed(4) : 'N/A'}\nCD / LSD (1% Level): ${anova.cd1 ? anova.cd1.toFixed(4) : 'N/A'}\nOutliers Detected: ${anova.detectedOutliers?.length || 0} plot(s)`, {
+        x: 6.2, y: 1.0, w: 3.4, h: 3.8, fontSize: 11, color: '475569', fill: { color: 'F8FAFC' }, border: { pt: 0.5, color: 'E2E8F0' }
+      });
+
+      // Tukey Graphical Representation Slide (Bar Chart)
+      const chartSlide = pptx.addSlide();
+      chartSlide.addText(`Mean Efficacy Chart with Tukey HSD Groupings`, { x: 0.4, y: 0.2, w: 9, h: 0.7, fontSize: 22, bold: true, color: themeHex });
+      
+      const chartData = [];
+      const labels = [];
+      const values = [];
+      
+      Object.entries(anova.treatmentMeans).forEach(([trt, val]) => {
+        const letter = (tukey && tukey.groups) ? (tukey.groups[trt] || 'a') : 'a';
+        labels.push(`${trt} (${letter})`);
+        values.push(parseFloat(val.toFixed(2)));
+      });
+      
+      chartData.push({
+        name: repConfig.primaryMetricKey,
+        labels: labels,
+        values: values
+      });
+      
+      chartSlide.addChart(pptx.ChartType.bar, chartData, {
+        x: 0.5, y: 1.0, w: 8.5, h: 5.0,
+        showVal: true,
+        valFontSize: 11,
+        valGridLine: { style: 'none' },
+        catAxisLabelColor: '475569',
+        catAxisLabelFontSize: 10,
+        title: `${repConfig.primaryMetricLabel} per Treatment`,
+        titleFontSize: 12,
+        chartColors: [themeHex]
+      });
+
+      // Dunnett's test vs Control table in PPTX
+      const controlName = Object.keys(anova.treatmentMeans).find(f => 
+        f?.toLowerCase().includes('control') || 
+        f?.toLowerCase().includes('untreated') ||
+        f?.toLowerCase().includes('check') ||
+        f?.toLowerCase().includes('utc')
+      );
+      if (controlName && anova.pValue < 0.05) {
+        const dunnett = performDunnettTest(subTrials, controlName, { metric: primaryField });
+        if (dunnett && dunnett.comparisons && !dunnett.error) {
+          const s36 = pptx.addSlide();
+          s36.addText(`Dunnett's Test vs. Control (${controlName})`, { x: 0.4, y: 0.2, w: 9, h: 0.7, fontSize: 22, bold: true, color: themeHex });
+          
+          const dunnettHdr = [
+            { text: 'Treatment', options: { bold: true, color: 'FFFFFF', fill: { color: themeHex } } },
+            { text: 'Treatment Mean', options: { bold: true, color: 'FFFFFF', fill: { color: themeHex } } },
+            { text: 'Difference', options: { bold: true, color: 'FFFFFF', fill: { color: themeHex } } },
+            { text: 't-Stat', options: { bold: true, color: 'FFFFFF', fill: { color: themeHex } } },
+            { text: 'Significance', options: { bold: true, color: 'FFFFFF', fill: { color: themeHex } } }
+          ];
+          const dunRows = [dunnettHdr];
+          dunnett.comparisons.forEach(c => {
+            dunRows.push([
+              c.treatment,
+              c.treatmentMean.toFixed(2),
+              c.difference.toFixed(2),
+              c.tStatistic.toFixed(2),
+              c.significant ? 'Significant (*)' : 'ns'
+            ]);
+          });
+          s36.addTable(dunRows, { x: 0.4, y: 1.0, w: 9.2, fontSize: 11, border: { pt: 0.5, color: 'CBD5E1' } });
+        }
+      }
+    }
+  }
+
   // Slide 4: Unified Photos
   const s4 = pptx.addSlide();
   s4.addText('Field Photographs Summary', { x: 0.4, y: 0.2, w: 9, h: 0.6, fontSize: 22, bold: true, color: themeHex });
@@ -2387,12 +3638,43 @@ export function exportMasterCSV(project, subTrials) {
     }
   });
 
+  // Perform ANOVA & Tukey HSD to get grouping letters
+  const trialDesign = project.TrialDesign || project.Design || 'RCBD';
+  const design = /CRD/i.test(trialDesign) ? 'CRD' : 'RCBD';
+  const primaryField = getPrimaryObservationField(categoryId);
+  const anova = performANOVA(subTrials, { metric: primaryField, design });
+  const tukey = (anova && !anova.error) ? performTukeyHSD(subTrials, { metric: primaryField, anova }) : null;
+  const tukeyGroups = tukey?.groups || {};
+
+  // For NUE comparison
+  const treatments = {};
+  subTrials.forEach(t => {
+    const trt = t.FormulationName || 'Untreated Check';
+    if (!treatments[trt]) treatments[trt] = [];
+    const yieldVal = parseFloat(t.YieldValue || t.Yield || 0);
+    if (!isNaN(yieldVal) && yieldVal > 0) {
+      treatments[trt].push(yieldVal);
+    }
+  });
+  const controlName = Object.keys(treatments).find(f => 
+    f?.toLowerCase().includes('control') || 
+    f?.toLowerCase().includes('untreated') ||
+    f?.toLowerCase().includes('check') ||
+    f?.toLowerCase().includes('utc')
+  ) || Object.keys(treatments)[0];
+  let controlMean = 0;
+  if (controlName) {
+    const cVals = treatments[controlName] || [];
+    controlMean = cVals.length ? cVals.reduce((a,b)=>a+b, 0)/cVals.length : 0;
+  }
+
   const header = [
     'Master Project', 'Sub-Trial ID', 'Category', 'Formulation', 'Replication', 'Plot #', 
     'Location', 'Dosage', 'Crop', 'Yield', 'Application Timing', 'Growth Stage', 'BBCH Code', 'App Method', 'Spray Vol (L/ha)', 'Nozzle',
     'Soil pH', 'Soil Clay %', 'Soil Sand %', 'Soil OC', 'Soil Texture', 'Soil N (ppm)', 'Soil P (ppm)', 'Soil K (ppm)', 'Soil CEC', 'Soil Moisture %',
     'Trial Design',
     'Target Label', 'Target Value', 'Overall Result', 'Trial Status',
+    'Tukey Grouping', 'AUDPC', 'Root-to-Shoot Ratio', 'NUE',
     'DAA', 'Obs Date'
   ];
 
@@ -2414,6 +3696,19 @@ export function exportMasterCSV(project, subTrials) {
     const efficacy = validateEfficacy(safeJsonParse(st.EfficacyDataJSON, []));
     const isCompletedStr = (st.IsCompleted === true || st.IsCompleted === 'true') ? 'Finalized' : 'Ongoing';
 
+    // Calculate sub-trial level indices
+    const audpcVal = categoryId === 'fungicide' ? calculateAUDPC(efficacy, 'diseaseSeverity') : '';
+    
+    let nueVal = '';
+    if (categoryId === 'nutrition' && controlName && st.FormulationName !== controlName) {
+      const tVals = treatments[st.FormulationName] || [];
+      const tMean = tVals.length ? tVals.reduce((a,b)=>a+b, 0)/tVals.length : 0;
+      const dosage = parseFloat(st.Dosage || 1);
+      nueVal = calculateNUE(tMean, controlMean, dosage) ?? '';
+    }
+
+    const tGrouping = tukeyGroups[st.FormulationName || 'Untreated Check'] || 'a';
+
     const baseRow = [
       project.Name, st.ID, st.Category || 'herbicide', st.FormulationName, st.Replication || 'R1', st.PlotNumber || '',
       st.Location || '', st.Dosage || '', dataFields.crop, dataFields.yieldValue, dataFields.applicationTiming, dataFields.cropStage, dataFields.bbchCode,
@@ -2421,7 +3716,8 @@ export function exportMasterCSV(project, subTrials) {
       dataFields.soil?.ph || '', dataFields.soil?.clay || '', dataFields.soil?.sand || '', dataFields.soil?.organicCarbon || '', dataFields.soil?.texture || '',
       dataFields.soil?.nitrogen || '', dataFields.soil?.phosphorus || '', dataFields.soil?.potassium || '', dataFields.soil?.cec || '', dataFields.soil?.moisture || '',
       st.TrialDesign || st.Design || 'RCBD',
-      trialConfig.targetLabel, trialConfig.targetValue, st.Result || 'Pending', isCompletedStr
+      trialConfig.targetLabel, trialConfig.targetValue, st.Result || 'Pending', isCompletedStr,
+      tGrouping, audpcVal, '', nueVal // placeholder for Root-to-Shoot which is observation-specific
     ];
 
     if (efficacy.length) {
@@ -2433,6 +3729,9 @@ export function exportMasterCSV(project, subTrials) {
         const obsDate = obs.date || '';
         const daa = obs.daa ?? '';
 
+        // Calculate observation-specific indices
+        const r2sVal = categoryId === 'biostimulant' ? (calculateRootToShoot(obs) ?? '') : '';
+
         // Let's determine rating / status
         const pVal = getObservationPrimaryValue(trialConfig.cat, obs) ?? 0;
         const status = calculateStatus(trialConfig.cat, pVal, baseVal);
@@ -2443,10 +3742,14 @@ export function exportMasterCSV(project, subTrials) {
         const rain = obs.weatherRain ?? '';
         const notes = obs.notes || '';
 
+        // Copy base row and fill Root-to-Shoot Ratio specifically
+        const rowWithObsIndex = [...baseRow];
+        rowWithObsIndex[header.indexOf('Root-to-Shoot Ratio')] = r2sVal;
+
         if (categoryId === 'herbicide') {
           const details = obs.weedDetails?.length ? obs.weedDetails : [{ species: 'Total', cover: getObservationPrimaryValue(trialConfig.cat, obs) ?? '' }];
           details.forEach(wd => {
-            const row = [...baseRow, daa, obsDate];
+            const row = [...rowWithObsIndex, daa, obsDate];
             obsFields.forEach(f => {
               if (f.key === 'weedCover') {
                 row.push(getObservationPrimaryValue(trialConfig.cat, obs) ?? '');
@@ -2458,7 +3761,7 @@ export function exportMasterCSV(project, subTrials) {
             rows.push(row);
           });
         } else {
-          const row = [...baseRow, daa, obsDate];
+          const row = [...rowWithObsIndex, daa, obsDate];
           obsFields.forEach(f => {
             const val = obs[f.key];
             row.push((val !== undefined && val !== null) ? val : '');
@@ -2491,17 +3794,189 @@ export function exportMasterHtml(project, subTrials, options = {}) {
 
   const analysisHtml = analysis && analysis.anova ? (() => {
     const anova = analysis.anova;
-    const postHoc = analysis.postHoc?.groups ? Object.entries(analysis.postHoc.groups)
-      .sort((a, b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]))
-      .map(([treatment, letter]) => `${treatment} (${letter})`).join(', ') : '';
+    
+    // ANOVA table rows
+    let anovaRows = '';
+    if (anova.anovaTable) {
+      anovaRows = anova.anovaTable.source.map((src, i) => {
+        const dfVal = anova.anovaTable.df[i] ?? '—';
+        const ssVal = anova.anovaTable.ss[i]?.toFixed(2) ?? '—';
+        const msVal = anova.anovaTable.ms[i]?.toFixed(2) ?? '—';
+        const fVal = anova.anovaTable.f[i]?.toFixed(2) ?? '—';
+        const pVal = anova.anovaTable.p[i] !== null && anova.anovaTable.p[i] !== undefined ? anova.anovaTable.p[i].toFixed(4) : '—';
+        const sig = anova.anovaTable.p[i] !== null && anova.anovaTable.p[i] !== undefined ? (anova.anovaTable.p[i] < 0.01 ? '**' : anova.anovaTable.p[i] < 0.05 ? '*' : 'ns') : '';
+        return `
+          <tr>
+            <td>${src}</td>
+            <td>${dfVal}</td>
+            <td>${ssVal}</td>
+            <td>${msVal}</td>
+            <td>${fVal}</td>
+            <td>${pVal}</td>
+            <td style="font-weight:bold;color:${sig === 'ns' ? '#6b7280' : '#b91c1c'};">${sig}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    // Tukey post-hoc table rows (sorted descending by mean)
+    let postHocHtml = '';
+    if (analysis.postHoc?.groups) {
+      const sortedTukey = Object.entries(anova.treatmentMeans || {})
+        .map(([trt, val]) => ({
+          trt,
+          val,
+          letter: analysis.postHoc.groups[trt] || 'a'
+        }))
+        .sort((a, b) => b.val - a.val);
+
+      const tukeyRows = sortedTukey.map(r => `
+        <tr>
+          <td><b>${r.trt}</b></td>
+          <td>${r.val.toFixed(2)}</td>
+          <td style="font-weight:bold;color:${primaryHex};">${r.letter}</td>
+        </tr>
+      `).join('');
+
+      postHocHtml = `
+        <h3 style="font-size:14px;color:#475569;margin-top:20px;margin-bottom:8px;">Tukey HSD Multiple Comparisons (Letter Grouping)</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Treatment</th>
+              <th>Mean Efficacy</th>
+              <th>Tukey Significance Letter</th>
+            </tr>
+          </thead>
+          <tbody>${tukeyRows}</tbody>
+        </table>
+      `;
+    }
+
+    // Dunnett's test table rows
+    let dunnettHtml = '';
+    const controlName = Object.keys(anova.treatmentMeans || {}).find(f => 
+      f?.toLowerCase().includes('control') || 
+      f?.toLowerCase().includes('untreated') ||
+      f?.toLowerCase().includes('check') ||
+      f?.toLowerCase().includes('utc')
+    );
+    if (controlName && anova.significant) {
+      const primaryField = getPrimaryObservationField(categoryId);
+      const dunnett = performDunnettTest(subTrials, controlName, { metric: primaryField });
+      if (dunnett && dunnett.comparisons && !dunnett.error) {
+        const dunnettRows = dunnett.comparisons.map(c => `
+          <tr>
+            <td><b>${c.treatment}</b></td>
+            <td>${c.treatmentMean.toFixed(2)}</td>
+            <td>${c.controlMean.toFixed(2)}</td>
+            <td>${c.difference.toFixed(2)}</td>
+            <td>${c.tStatistic.toFixed(2)}</td>
+            <td style="font-weight:bold;color:${c.significant ? '#b91c1c' : '#6b7280'};">${c.significant ? 'Significant (*)' : 'ns'}</td>
+          </tr>
+        `).join('');
+        
+        dunnettHtml = `
+          <h3 style="font-size:14px;color:#475569;margin-top:20px;margin-bottom:8px;">Dunnett's Test vs. Control (${controlName})</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Treatment</th>
+                <th>Mean</th>
+                <th>Control Mean</th>
+                <th>Difference</th>
+                <th>t-Stat</th>
+                <th>Significance (α=0.05)</th>
+              </tr>
+            </thead>
+            <tbody>${dunnettRows}</tbody>
+          </table>
+        `;
+      }
+    }
+
+    const getCvRating = (c) => {
+      if (c < 10) return 'Excellent Precision';
+      if (c <= 20) return 'Good Precision';
+      if (c <= 30) return 'Acceptable Precision';
+      return 'Poor Precision (High Variation)';
+    };
+
+    const cvVal = anova.cv ?? 0;
+    const semVal = anova.semGlobal ?? 0;
+    const cd5Val = anova.cd5 ?? 0;
+    const cd1Val = anova.cd1 ?? 0;
+    const balanceStatus = anova.balanceWarning ? 'Unbalanced Layout' : 'Balanced Layout';
+    const outlierCount = anova.detectedOutliers?.length || 0;
+    const outlierHandling = anova.detectedOutliers ? 'Flagged/Kept' : 'None';
+
+    const qualityHtml = `
+      <h3 style="font-size:14px;color:#475569;margin-top:20px;margin-bottom:8px;">Experimental Precision & Quality Certification</h3>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-size:10pt;">
+        <tr>
+          <td style="border:1px solid #cbd5e1;padding:6px;font-weight:bold;background:#f8fafc;width:25%;">Coefficient of Variation (CV%)</td>
+          <td style="border:1px solid #cbd5e1;padding:6px;width:25%;">${cvVal.toFixed(2)}% (${getCvRating(cvVal)})</td>
+          <td style="border:1px solid #cbd5e1;padding:6px;font-weight:bold;background:#f8fafc;width:25%;">Design Balance Status</td>
+          <td style="border:1px solid #cbd5e1;padding:6px;width:25%;">${balanceStatus}</td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #cbd5e1;padding:6px;font-weight:bold;background:#f8fafc;">Global Standard Error (SEm±)</td>
+          <td style="border:1px solid #cbd5e1;padding:6px;">± ${semVal.toFixed(4)}</td>
+          <td style="border:1px solid #cbd5e1;padding:6px;font-weight:bold;background:#f8fafc;">Layout Configuration</td>
+          <td style="border:1px solid #cbd5e1;padding:6px;">${anova.treatments?.length || 0} Treatments × ${Math.max(1, Math.round(subTrials.length / (anova.treatments?.length || 1)))} Reps</td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #cbd5e1;padding:6px;font-weight:bold;background:#f8fafc;">CD / LSD (5% Level)</td>
+          <td style="border:1px solid #cbd5e1;padding:6px;">${cd5Val.toFixed(4)}</td>
+          <td style="border:1px solid #cbd5e1;padding:6px;font-weight:bold;background:#f8fafc;">Outliers Detected</td>
+          <td style="border:1px solid #cbd5e1;padding:6px;">${outlierCount} plot(s)</td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #cbd5e1;padding:6px;font-weight:bold;background:#f8fafc;">CD / LSD (1% Level)</td>
+          <td style="border:1px solid #cbd5e1;padding:6px;">${cd1Val.toFixed(4)}</td>
+          <td style="border:1px solid #cbd5e1;padding:6px;font-weight:bold;background:#f8fafc;">Outliers Status</td>
+          <td style="border:1px solid #cbd5e1;padding:6px;">${outlierHandling}</td>
+        </tr>
+      </table>
+    `;
+
+    let outlierLogHtml = '';
+    if (anova.detectedOutliers && anova.detectedOutliers.length > 0) {
+      outlierLogHtml = `
+        <h3 style="font-size:12px;color:#475569;margin-top:12px;margin-bottom:6px;">Flagged Outliers Log</h3>
+        <ul style="font-size:9.5pt;margin-bottom:12px;">
+          ${anova.detectedOutliers.map(out => `<li>Treatment: <b>${out.treatment}</b> | Rep/Block: <b>${out.block}</b> | Observed Value: <b>${out.value}</b> | Residual Z-score: <b>${out.zScore.toFixed(2)}</b></li>`).join('')}
+        </ul>
+      `;
+    }
+
     return `
       <h2 style="color:${primaryHex};font-size:14pt;border-bottom:2px solid ${primaryHex};padding-bottom:4px;margin-top:24px;">Statistical Analysis Summary</h2>
       <p><strong>Analysis method:</strong> ${analysis.analysisMethod || 'ANOVA'}</p>
       <p><strong>Design:</strong> ${analysis.design || (anova.design || 'RCBD')}</p>
       <p><strong>ANOVA result:</strong> F = ${anova.fStatistic?.toFixed(2) || 'N/A'}, p = ${anova.pValue?.toFixed(4) || 'N/A'} (${anova.significant ? 'significant' : 'not significant'})</p>
-      ${postHoc ? `<p><strong>Post-hoc grouping:</strong> ${postHoc}</p>` : ''}
       ${analysis.balanceWarning ? `<p style="color:#9a3412"><strong>Warning:</strong> ${analysis.balanceWarning}</p>` : ''}
       ${analysis.missingFinalWarning ? `<p style="color:#9a3412"><strong>Note:</strong> ${analysis.missingFinalWarning}</p>` : ''}
+      
+      <h3 style="font-size:14px;color:#475569;margin-top:20px;margin-bottom:8px;">ANOVA (Analysis of Variance) Table</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Source of Variation</th>
+            <th>DF</th>
+            <th>SS</th>
+            <th>MS</th>
+            <th>F-Value</th>
+            <th>P-Value</th>
+            <th>Sig.</th>
+          </tr>
+        </thead>
+        <tbody>${anovaRows}</tbody>
+      </table>
+      ${qualityHtml}
+      ${outlierLogHtml}
+      ${postHocHtml}
+      ${dunnettHtml}
     `;
   })() : '';
 
@@ -2580,17 +4055,189 @@ export function exportMasterDocx(project, subTrials, options = {}) {
 
   const analysisHtml = analysis && analysis.anova ? (() => {
     const anova = analysis.anova;
-    const postHoc = analysis.postHoc?.groups ? Object.entries(analysis.postHoc.groups)
-      .sort((a, b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]))
-      .map(([treatment, letter]) => `${treatment} (${letter})`).join(', ') : '';
+    
+    // ANOVA table rows
+    let anovaRows = '';
+    if (anova.anovaTable) {
+      anovaRows = anova.anovaTable.source.map((src, i) => {
+        const dfVal = anova.anovaTable.df[i] ?? '—';
+        const ssVal = anova.anovaTable.ss[i]?.toFixed(2) ?? '—';
+        const msVal = anova.anovaTable.ms[i]?.toFixed(2) ?? '—';
+        const fVal = anova.anovaTable.f[i]?.toFixed(2) ?? '—';
+        const pVal = anova.anovaTable.p[i] !== null && anova.anovaTable.p[i] !== undefined ? anova.anovaTable.p[i].toFixed(4) : '—';
+        const sig = anova.anovaTable.p[i] !== null && anova.anovaTable.p[i] !== undefined ? (anova.anovaTable.p[i] < 0.01 ? '**' : anova.anovaTable.p[i] < 0.05 ? '*' : 'ns') : '';
+        return `
+          <tr>
+            <td>${src}</td>
+            <td>${dfVal}</td>
+            <td>${ssVal}</td>
+            <td>${msVal}</td>
+            <td>${fVal}</td>
+            <td>${pVal}</td>
+            <td style="font-weight:bold;color:${sig === 'ns' ? '#6b7280' : '#b91c1c'};">${sig}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    // Tukey post-hoc table rows (sorted descending by mean)
+    let postHocHtml = '';
+    if (analysis.postHoc?.groups) {
+      const sortedTukey = Object.entries(anova.treatmentMeans || {})
+        .map(([trt, val]) => ({
+          trt,
+          val,
+          letter: analysis.postHoc.groups[trt] || 'a'
+        }))
+        .sort((a, b) => b.val - a.val);
+
+      const tukeyRows = sortedTukey.map(r => `
+        <tr>
+          <td><b>${r.trt}</b></td>
+          <td>${r.val.toFixed(2)}</td>
+          <td style="font-weight:bold;color:${primaryHex};">${r.letter}</td>
+        </tr>
+      `).join('');
+
+      postHocHtml = `
+        <h3>Tukey HSD Multiple Comparisons (Letter Grouping)</h3>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:12pt;font-size:9pt;">
+          <thead>
+            <tr style="background:${primaryHex};color:#fff;">
+              <th style="padding:4pt;text-align:left;">Treatment</th>
+              <th style="padding:4pt;text-align:left;">Mean Efficacy</th>
+              <th style="padding:4pt;text-align:left;">Tukey Significance Letter</th>
+            </tr>
+          </thead>
+          <tbody>${tukeyRows}</tbody>
+        </table>
+      `;
+    }
+
+    // Dunnett's test table rows
+    let dunnettHtml = '';
+    const controlName = Object.keys(anova.treatmentMeans || {}).find(f => 
+      f?.toLowerCase().includes('control') || 
+      f?.toLowerCase().includes('untreated') ||
+      f?.toLowerCase().includes('check') ||
+      f?.toLowerCase().includes('utc')
+    );
+    if (controlName && anova.significant) {
+      const primaryField = getPrimaryObservationField(categoryId);
+      const dunnett = performDunnettTest(subTrials, controlName, { metric: primaryField });
+      if (dunnett && dunnett.comparisons && !dunnett.error) {
+        const dunnettRows = dunnett.comparisons.map(c => `
+          <tr>
+            <td><b>${c.treatment}</b></td>
+            <td>${c.treatmentMean.toFixed(2)}</td>
+            <td>${c.controlMean.toFixed(2)}</td>
+            <td>${c.difference.toFixed(2)}</td>
+            <td>${c.tStatistic.toFixed(2)}</td>
+            <td style="font-weight:bold;color:${c.significant ? '#b91c1c' : '#6b7280'};">${c.significant ? 'Significant (*)' : 'ns'}</td>
+          </tr>
+        `).join('');
+        
+        dunnettHtml = `
+          <h3>Dunnett's Test vs. Control (${controlName})</h3>
+          <table style="width:100%;border-collapse:collapse;margin-bottom:12pt;font-size:9pt;">
+            <thead>
+              <tr style="background:${primaryHex};color:#fff;">
+                <th style="padding:4pt;text-align:left;">Treatment</th>
+                <th style="padding:4pt;text-align:left;">Mean</th>
+                <th style="padding:4pt;text-align:left;">Control Mean</th>
+                <th style="padding:4pt;text-align:left;">Difference</th>
+                <th style="padding:4pt;text-align:left;">t-Stat</th>
+                <th style="padding:4pt;text-align:left;">Significance (α=0.05)</th>
+              </tr>
+            </thead>
+            <tbody>${dunnettRows}</tbody>
+          </table>
+        `;
+      }
+    }
+
+    const getCvRating = (c) => {
+      if (c < 10) return 'Excellent Precision';
+      if (c <= 20) return 'Good Precision';
+      if (c <= 30) return 'Acceptable Precision';
+      return 'Poor Precision (High Variation)';
+    };
+
+    const cvVal = anova.cv ?? 0;
+    const semVal = anova.semGlobal ?? 0;
+    const cd5Val = anova.cd5 ?? 0;
+    const cd1Val = anova.cd1 ?? 0;
+    const balanceStatus = anova.balanceWarning ? 'Unbalanced Layout' : 'Balanced Layout';
+    const outlierCount = anova.detectedOutliers?.length || 0;
+    const outlierHandling = anova.detectedOutliers ? 'Flagged/Kept' : 'None';
+
+    const qualityHtml = `
+      <h3>Experimental Precision & Quality Certification</h3>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:12pt;font-size:9pt;">
+        <tr>
+          <td style="border:1px solid #cbd5e1;padding:5px 8px;font-weight:bold;background:#f8fafc;width:25%;">Coefficient of Variation (CV%)</td>
+          <td style="border:1px solid #cbd5e1;padding:5px 8px;width:25%;">${cvVal.toFixed(2)}% (${getCvRating(cvVal)})</td>
+          <td style="border:1px solid #cbd5e1;padding:5px 8px;font-weight:bold;background:#f8fafc;width:25%;">Design Balance Status</td>
+          <td style="border:1px solid #cbd5e1;padding:5px 8px;width:25%;">${balanceStatus}</td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #cbd5e1;padding:5px 8px;font-weight:bold;background:#f8fafc;">Global Standard Error (SEm±)</td>
+          <td style="border:1px solid #cbd5e1;padding:5px 8px;">± ${semVal.toFixed(4)}</td>
+          <td style="border:1px solid #cbd5e1;padding:5px 8px;font-weight:bold;background:#f8fafc;">Layout Configuration</td>
+          <td style="border:1px solid #cbd5e1;padding:5px 8px;">${anova.treatments?.length || 0} Treatments × ${Math.max(1, Math.round(subTrials.length / (anova.treatments?.length || 1)))} Reps</td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #cbd5e1;padding:5px 8px;font-weight:bold;background:#f8fafc;">CD / LSD (5% Level)</td>
+          <td style="border:1px solid #cbd5e1;padding:5px 8px;">${cd5Val.toFixed(4)}</td>
+          <td style="border:1px solid #cbd5e1;padding:5px 8px;font-weight:bold;background:#f8fafc;">Outliers Detected</td>
+          <td style="border:1px solid #cbd5e1;padding:5px 8px;">${outlierCount} plot(s)</td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #cbd5e1;padding:5px 8px;font-weight:bold;background:#f8fafc;">CD / LSD (1% Level)</td>
+          <td style="border:1px solid #cbd5e1;padding:5px 8px;">${cd1Val.toFixed(4)}</td>
+          <td style="border:1px solid #cbd5e1;padding:5px 8px;font-weight:bold;background:#f8fafc;">Outliers Status</td>
+          <td style="border:1px solid #cbd5e1;padding:5px 8px;">${outlierHandling}</td>
+        </tr>
+      </table>
+    `;
+
+    let outlierLogHtml = '';
+    if (anova.detectedOutliers && anova.detectedOutliers.length > 0) {
+      outlierLogHtml = `
+        <h3 style="font-size:12px;color:#475569;margin-top:12px;margin-bottom:6px;">Flagged Outliers Log</h3>
+        <ul style="font-size:9.5pt;margin-bottom:12px;">
+          ${anova.detectedOutliers.map(out => `<li>Treatment: <b>${out.treatment}</b> | Rep/Block: <b>${out.block}</b> | Observed Value: <b>${out.value}</b> | Residual Z-score: <b>${out.zScore.toFixed(2)}</b></li>`).join('')}
+        </ul>
+      `;
+    }
+
     return `
       <h2>Statistical Analysis Summary</h2>
       <p><strong>Analysis method:</strong> ${analysis.analysisMethod || 'ANOVA'}</p>
       <p><strong>Design:</strong> ${analysis.design || (anova.design || 'RCBD')}</p>
       <p><strong>ANOVA result:</strong> F = ${anova.fStatistic?.toFixed(2) || 'N/A'}, p = ${anova.pValue?.toFixed(4) || 'N/A'} (${anova.significant ? 'significant' : 'not significant'})</p>
-      ${postHoc ? `<p><strong>Post-hoc grouping:</strong> ${postHoc}</p>` : ''}
-      ${analysis.balanceWarning ? `<p><strong>Warning:</strong> ${analysis.balanceWarning}</p>` : ''}
-      ${analysis.missingFinalWarning ? `<p><strong>Note:</strong> ${analysis.missingFinalWarning}</p>` : ''}
+      ${analysis.balanceWarning ? `<p style="color:#9a3412"><b>Warning:</b> ${analysis.balanceWarning}</p>` : ''}
+      ${analysis.missingFinalWarning ? `<p style="color:#9a3412"><b>Note:</b> ${analysis.missingFinalWarning}</p>` : ''}
+      
+      <h3>ANOVA Table</h3>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:12pt;font-size:9pt;">
+        <thead>
+          <tr style="background:${primaryHex};color:#fff;">
+            <th style="padding:4pt;text-align:left;">Source of Variation</th>
+            <th style="padding:4pt;text-align:left;">DF</th>
+            <th style="padding:4pt;text-align:left;">SS</th>
+            <th style="padding:4pt;text-align:left;">MS</th>
+            <th style="padding:4pt;text-align:left;">F-Value</th>
+            <th style="padding:4pt;text-align:left;">P-Value</th>
+            <th style="padding:4pt;text-align:left;">Sig.</th>
+          </tr>
+        </thead>
+        <tbody>${anovaRows}</tbody>
+      </table>
+      ${qualityHtml}
+      ${outlierLogHtml}
+      ${postHocHtml}
+      ${dunnettHtml}
     `;
   })() : '';
 

@@ -254,6 +254,10 @@ function executeAction(action, payload, auth) {
             const parentFolderId = resolveEffectiveFolderId(ss, auth, p.folderId || payload.folderId);
             return uploadPhotoToDrive(parentFolderId, p);
         },
+        'uploadPhotoChunk': (p) => {
+            const parentFolderId = resolveEffectiveFolderId(ss, auth, p.folderId || payload.folderId);
+            return uploadPhotoChunk(parentFolderId, p);
+        },
                 'getImageBase64': (p) => getImageBase64(p),
         // Projects
         'addProject': (p) => addRecord(ss, sheetsConfig.projects, p, auth),
@@ -611,47 +615,7 @@ function ensureTrialFolder(ss, parentFolderId, trialPayload, auth) {
         if (!parentFolderId || !trialPayload) return null;
 
         const rootFolder = DriveApp.getFolderById(parentFolderId);
-
-        // Determine Project Name
-        let projectName = 'Ungrouped Projects';
-        let project = null;
-        const projectId = trialPayload.ProjectID || trialPayload.projectId || trialPayload.projectID;
-        if (projectId) {
-            try {
-                project = getRecordById(ss, sheetsConfig.projects, projectId);
-                if (project && project.Name) {
-                    projectName = project.Name;
-                }
-            } catch (e) {
-                Logger.log('ensureTrialFolder project lookup error: ' + e.message);
-            }
-        }
-
-        // Determine Trial Folder Name
-        const formulationName = trialPayload.FormulationName || trialPayload.formulationName || 'Unknown Formulation';
-        const rawDate = trialPayload.Date || trialPayload.date || new Date();
-        const dateObj = rawDate instanceof Date ? rawDate : new Date(rawDate);
-        const dateStr = isNaN(dateObj.getTime()) ? new Date().toISOString().split('T')[0] : dateObj.toISOString().split('T')[0];
-        const trialFolderName = (formulationName + ' (' + dateStr + ')').trim();
-
-        const rawCategory = trialPayload.Category || (project && project.Category) || 'herbicide';
-        const categoryLower = String(rawCategory).trim().toLowerCase();
-        const categoryName = categoryLower === 'herbicide' ? 'Herbicide' :
-                             categoryLower === 'fungicide' ? 'Fungicide' :
-                             categoryLower === 'pesticide' ? 'Pesticide' :
-                             categoryLower === 'nutrition' ? 'Nutrition' :
-                             categoryLower === 'biostimulant' ? 'Biostimulant' :
-                             categoryLower.charAt(0).toUpperCase() + categoryLower.slice(1);
-
-        const userName = String(
-            (auth && auth.Name) ||
-            (auth && auth.Username) ||
-            trialPayload.InvestigatorName ||
-            (project && project.Investigator) ||
-            'Default User'
-        ).trim() || 'Default User';
-
-        const folderPath = [categoryName, userName, projectName, trialFolderName];
+        const folderPath = getTrialFolderPath(ss, trialPayload, auth);
 
         let targetFolder = rootFolder;
         folderPath.forEach(name => {
@@ -743,10 +707,10 @@ function uploadPhotoToDrive(parentFolderId, payload) {
 function getTrialFolderPath(ss, trialPayload, auth) {
     if (!trialPayload) throw new Error('Trial payload missing.');
 
-    let projectName = 'Ungrouped Projects';
+    let projectName = trialPayload.projectName || trialPayload.ProjectName || 'Ungrouped Projects';
     let project = null;
     const projectId = trialPayload.ProjectID || trialPayload.projectId || trialPayload.projectID;
-    if (projectId) {
+    if (projectName === 'Ungrouped Projects' && projectId) {
         try {
             project = getRecordById(ss, sheetsConfig.projects, projectId);
             if (project && project.Name) {
@@ -763,7 +727,9 @@ function getTrialFolderPath(ss, trialPayload, auth) {
     const dateStr = isNaN(dateObj.getTime()) ? new Date().toISOString().split('T')[0] : dateObj.toISOString().split('T')[0];
     const dosage = trialPayload.Dosage || trialPayload.dosage || '';
     const dosageSuffix = dosage ? ' (' + dosage + ')' : '';
-    const trialFolderName = (formulationName + dosageSuffix + ' (' + dateStr + ')').trim();
+    const trialId = trialPayload.ID || trialPayload.id || '';
+    const idSuffix = trialId ? ' - ' + String(trialId).slice(-5) : '';
+    const trialFolderName = (formulationName + dosageSuffix + ' (' + dateStr + ')' + idSuffix).trim();
 
     const rawCategory = trialPayload.Category || (project && project.Category) || 'herbicide';
     const categoryLower = String(rawCategory).trim().toLowerCase();
@@ -828,39 +794,308 @@ function listTrialPhotosFromDrive(ss, parentFolderId, payload = {}, auth) {
     const trialId = payload.trialId || payload.ID || payload.id;
     if (!trialId) throw new Error('Trial ID is required.');
 
-    const trial = getRecordById(ss, sheetsConfig.trials, trialId);
-    if (!trial) throw new Error('Trial not found.');
-
-    const rootFolder = DriveApp.getFolderById(parentFolderId);
-    const folderPath = getTrialFolderPath(ss, trial, auth);
-    const trialFolder = findNestedFolder(rootFolder, folderPath);
-
-    if (!trialFolder) {
-        return {
-            success: true,
-            photos: [],
-            folderPath: folderPath,
-            message: 'Trial folder not found in Drive.'
+    let trial = getRecordById(ss, sheetsConfig.trials, trialId);
+    if (!trial) {
+        // Fallback: If not mirrored to sheets yet, construct mock trial object using payload fields
+        trial = {
+            ID: trialId,
+            FormulationName: payload.formulation || payload.FormulationName || 'Unknown Formulation',
+            Date: payload.date || payload.Date || new Date().toISOString(),
+            Dosage: payload.dosage || payload.Dosage || '',
+            ProjectID: payload.projectId || payload.ProjectID || '',
+            Category: payload.category || payload.Category || '',
+            ProjectName: payload.projectName || payload.ProjectName || ''
         };
     }
 
-    const allFiles = [];
-    listFilesInFolderRecursive(trialFolder, allFiles);
+    const rootFolder = DriveApp.getFolderById(parentFolderId);
+    const folderPath = getTrialFolderPath(ss, trial, auth);
+    
+    let trialFolder = null;
+    let trialIdSuffix = '';
+    if (trialId && String(trialId).length > 5) {
+        trialIdSuffix = String(trialId).slice(-5);
+        try {
+            // Search Drive globally to find the trial folder (highly accurate via suffix)
+            const folderMatches = DriveApp.searchFolders("mimeType = 'application/vnd.google-apps.folder' and title contains '" + trialIdSuffix + "'");
+            if (folderMatches.hasNext()) {
+                trialFolder = folderMatches.next();
+            }
+        } catch (err) {
+            Logger.log('Suffix folder search error: ' + err.message);
+        }
+    }
 
-    const imageMimePrefixes = ['image/'];
-    const imageExtensionRegex = /\.(jpg|jpeg|png|gif|webp|bmp|heic|heif|tif|tiff)$/i;
-    const photos = allFiles.filter(file => {
-        const mimeType = String(file.mimeType || '').toLowerCase();
-        const fileName = String(file.name || '');
-        return imageMimePrefixes.some(prefix => mimeType.indexOf(prefix) === 0) || imageExtensionRegex.test(fileName);
-    });
+    if (!trialFolder) {
+        trialFolder = findNestedFolder(rootFolder, folderPath);
+    }
+
+    const dosage = trial.Dosage || trial.dosage || '';
+    const dosageSuffix = dosage ? ' (' + dosage + ')' : '';
+    const dateObj = trial.Date ? new Date(trial.Date) : new Date();
+    const dateStr = isNaN(dateObj.getTime()) ? new Date().toISOString().split('T')[0] : dateObj.toISOString().split('T')[0];
+    
+    // Construct DD-MM-YYYY format
+    let dateStrDMY = dateStr;
+    if (!isNaN(dateObj.getTime())) {
+        const dd = String(dateObj.getDate()).padStart(2, '0');
+        const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const yyyy = dateObj.getFullYear();
+        dateStrDMY = `${dd}-${mm}-${yyyy}`;
+    }
+
+    const formulationName = trial.FormulationName || 'Unknown Formulation';
+
+    // Legacy Fallback 1: Try with YYYY-MM-DD and DD-MM-YYYY folder formats
+    if (!trialFolder) {
+        const legacyNames = [
+            (formulationName + dosageSuffix + ' (' + dateStr + ')').trim(),
+            (formulationName + dosageSuffix + ' (' + dateStrDMY + ')').trim(),
+            (formulationName + ' (' + dateStr + ')').trim(),
+            (formulationName + ' (' + dateStrDMY + ')').trim()
+        ];
+        for (let i = 0; i < legacyNames.length; i++) {
+            const legacyPath = [...folderPath.slice(0, 3), legacyNames[i]];
+            trialFolder = findNestedFolder(rootFolder, legacyPath);
+            if (trialFolder) break;
+        }
+    }
+
+    // Ultimate Fallback: If exact path fails (due to unmirrored project/category or user name mismatch),
+    // search for ANY folder inside the root directory whose name EXACTLY matches any of our target trial folder names.
+    if (!trialFolder) {
+        const trialFolderName = folderPath[3];
+        const candidateNames = [
+            trialFolderName,
+            (formulationName + dosageSuffix + ' (' + dateStr + ')').trim(),
+            (formulationName + dosageSuffix + ' (' + dateStrDMY + ')').trim(),
+            (formulationName + ' (' + dateStr + ')').trim(),
+            (formulationName + ' (' + dateStrDMY + ')').trim(),
+            formulationName
+        ].filter(Boolean);
+
+        for (let j = 0; j < candidateNames.length; j++) {
+            const nameToFind = candidateNames[j];
+            const folderMatches = rootFolder.getFoldersByName(nameToFind);
+            if (folderMatches.hasNext()) {
+                trialFolder = folderMatches.next();
+                break;
+            }
+        }
+        
+        // Fast folder search fallback using indexed Drive search
+        if (!trialFolder) {
+            const folderQueries = [];
+            candidateNames.forEach(function(name) {
+                if (name) {
+                    const escapedName = String(name).replace(/'/g, "\\'");
+                    folderQueries.push("title = '" + escapedName + "'");
+                }
+            });
+            if (folderQueries.length > 0) {
+                const folderQueryString = "mimeType = 'application/vnd.google-apps.folder' and (" + folderQueries.join(" or ") + ")";
+                try {
+                    const folderMatches = rootFolder.searchFolders(folderQueryString);
+                    if (folderMatches.hasNext()) {
+                        trialFolder = folderMatches.next();
+                    }
+                } catch (err) {
+                    // Ignore search folder error
+                }
+            }
+        }
+
+        // Broad fallback: search for folders containing formulation name
+        if (!trialFolder && formulationName && formulationName !== 'Unknown Formulation') {
+            const escapedForm = String(formulationName).replace(/'/g, "\\'");
+            const folderQueryString = "mimeType = 'application/vnd.google-apps.folder' and title contains '" + escapedForm + "'";
+            try {
+                const folderMatches = rootFolder.searchFolders(folderQueryString);
+                if (folderMatches.hasNext()) {
+                    trialFolder = folderMatches.next();
+                }
+            } catch (err) {
+                // Ignore search folder contains error
+            }
+        }
+    }
+
+    let photos = [];
+    let trialFolderId = null;
+    let trialFolderName = null;
+    let searchMessage = '';
+
+    if (trialFolder) {
+        trialFolderId = trialFolder.getId();
+        trialFolderName = trialFolder.getName();
+        const allFiles = [];
+        listFilesInFolderRecursive(trialFolder, allFiles);
+
+        const imageMimePrefixes = ['image/'];
+        const imageExtensionRegex = /\.(jpg|jpeg|png|gif|webp|bmp|heic|heif|tif|tiff)$/i;
+        photos = allFiles.filter(file => {
+            const mimeType = String(file.mimeType || '').toLowerCase();
+            const fileName = String(file.name || '');
+            return imageMimePrefixes.some(prefix => mimeType.indexOf(prefix) === 0) || imageExtensionRegex.test(fileName);
+        });
+    }
+
+    // File-level Search Fallback: If no trial folder was found, or the folder was empty,
+    // search the entire root folder recursively for files matching the trial criteria.
+    if (photos.length === 0) {
+        searchMessage = trialFolder ? 'Trial folder was empty. Running selective file search...' : 'Trial folder not found. Running selective file search...';
+        
+        // 1. Direct search by full trialId (globally across all of Drive, extremely fast and accurate since filenames contain trialId)
+        if (trialId) {
+            try {
+                const queryStr = "(mimeType contains 'image/' or title contains '.jpg' or title contains '.jpeg' or title contains '.png' or title contains '.webp' or title contains '.heic') and title contains '" + trialId + "'";
+                const searchResults = DriveApp.searchFiles(queryStr);
+                const collector = [];
+                while (searchResults.hasNext() && collector.length < 100) {
+                    const file = searchResults.next();
+                    collector.push({
+                        id: file.getId(),
+                        name: file.getName(),
+                        mimeType: file.getMimeType(),
+                        url: `https://drive.google.com/uc?export=view&id=${file.getId()}`,
+                        webViewLink: file.getUrl(),
+                        createdTime: file.getDateCreated() ? file.getDateCreated().toISOString() : '',
+                        updatedTime: file.getLastUpdated() ? file.getLastUpdated().toISOString() : ''
+                    });
+                }
+                if (collector.length > 0) {
+                    photos = collector;
+                    searchMessage += ' Found ' + photos.length + ' photo(s) matching trial ID recursively.';
+                }
+            } catch (err) {
+                Logger.log('Recursive file search by trialId error: ' + err.message);
+            }
+        }
+
+        // 2. Keyword/Date/Time selective search fallback
+        if (photos.length === 0) {
+            const searchKeywords = [];
+            if (trialId) {
+                const strId = String(trialId);
+                searchKeywords.push(strId);
+                if (strId.length > 5) {
+                    searchKeywords.push(strId.slice(-5));
+                }
+            }
+            if (formulationName && formulationName !== 'Unknown Formulation') {
+                searchKeywords.push(formulationName);
+            }
+            
+            const potLabel = payload.potLabel || payload.PotLabel || trial.PotLabel || '';
+            const potLabelLower = potLabel ? String(potLabel).toLowerCase() : '';
+
+            const collector = [];
+            const queryParts = [];
+            
+            queryParts.push("(mimeType contains 'image/' or title contains '.jpg' or title contains '.jpeg' or title contains '.png' or title contains '.webp' or title contains '.heic')");
+            
+            const dateQueries = [];
+            const brokenPhotos = payload.brokenPhotos || [];
+            
+            if (brokenPhotos.length > 0) {
+                for (let b = 0; b < brokenPhotos.length; b++) {
+                    const p = brokenPhotos[b];
+                    if (p.date) {
+                        const rawDate = String(p.date);
+                        const dateMatch = rawDate.match(/(\d{2})[-_](\d{2})[-_](\d{4})/);
+                        let dStr = '';
+                        let dStrDMY = '';
+                        if (dateMatch) {
+                            dStrDMY = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
+                            dStr = `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
+                        } else {
+                            const ymdMatch = rawDate.match(/(\d{4})[-_](\d{2})[-_](\d{2})/);
+                            if (ymdMatch) {
+                                dStr = `${ymdMatch[1]}-${ymdMatch[2]}-${ymdMatch[3]}`;
+                                dStrDMY = `${ymdMatch[3]}-${ymdMatch[2]}-${ymdMatch[1]}`;
+                            }
+                        }
+
+                        const timeMatch = rawDate.match(/(\d{2})[:_](\d{2})\s*(AM|PM|am|pm)?/);
+                        let timeParts = [];
+                        if (timeMatch) {
+                            timeParts.push(timeMatch[1] + '_' + timeMatch[2]);
+                            timeParts.push(timeMatch[1] + ':' + timeMatch[2]);
+                            if (timeMatch[3]) {
+                                timeParts.push(timeMatch[3]);
+                            }
+                        }
+
+                        const subQueries = [];
+                        if (dStr) subQueries.push("title contains '" + dStr + "'");
+                        if (dStrDMY) subQueries.push("title contains '" + dStrDMY + "'");
+                        
+                        if (timeParts.length > 0) {
+                            const timeSub = timeParts.map(function(t) { return "title contains '" + t + "'"; }).join(" or ");
+                            if (subQueries.length > 0) {
+                                dateQueries.push("((" + subQueries.join(" or ") + ") and (" + timeSub + "))");
+                            } else {
+                                dateQueries.push("(" + timeSub + ")");
+                            }
+                        } else if (subQueries.length > 0) {
+                            dateQueries.push("(" + subQueries.join(" or ") + ")");
+                        }
+                    }
+                }
+            }
+
+            if (dateQueries.length === 0) {
+                if (dateStr) dateQueries.push("title contains '" + dateStr + "'");
+                if (dateStrDMY) dateQueries.push("title contains '" + dateStrDMY + "'");
+            }
+
+            if (dateQueries.length > 0) {
+                queryParts.push("(" + dateQueries.join(" or ") + ")");
+            }
+
+            const queryString = queryParts.join(" and ");
+            
+            try {
+                const searchResults = rootFolder.searchFiles(queryString);
+                while (searchResults.hasNext() && collector.length < 100) {
+                    const file = searchResults.next();
+                    const name = String(file.getName() || '').toLowerCase();
+                    
+                    const matchesTrial = searchKeywords.some(kw => kw && name.indexOf(kw.toLowerCase()) !== -1);
+                    const matchesPot = !potLabelLower || name.indexOf(potLabelLower) !== -1;
+
+                    if (matchesTrial && matchesPot) {
+                        collector.push({
+                            id: file.getId(),
+                            name: file.getName(),
+                            mimeType: file.getMimeType(),
+                            url: `https://drive.google.com/uc?export=view&id=${file.getId()}`,
+                            webViewLink: file.getUrl(),
+                            createdTime: file.getDateCreated() ? file.getDateCreated().toISOString() : '',
+                            updatedTime: file.getLastUpdated() ? file.getLastUpdated().toISOString() : ''
+                        });
+                    }
+                }
+            } catch (searchErr) {
+                // Ignore search error
+            }
+
+            if (collector.length > 0) {
+                photos = collector;
+                searchMessage += ' Found ' + photos.length + ' photo(s) via selective file search.';
+            } else {
+                searchMessage += ' No photos matched trial keywords on date ' + (dateStrDMY || dateStr) + '.';
+            }
+        }
+    }
 
     return {
         success: true,
         photos: photos,
-        folderId: trialFolder.getId(),
-        folderName: trialFolder.getName(),
-        folderPath: folderPath
+        folderId: trialFolderId,
+        folderName: trialFolderName,
+        folderPath: folderPath,
+        message: searchMessage || 'Photos loaded successfully.'
     };
 }
 
@@ -2191,4 +2426,90 @@ function safeJsonParse(jsonString) {
 function testFolderAccess() {
   const folder = DriveApp.getFolderById("14UTh_QWhCRoaQ0JvfKeg7LZvOGZRF_rT");
   Logger.log(folder.getName());
+}
+
+function uploadPhotoChunk(parentFolderId, payload) {
+    if (!parentFolderId) throw new Error("Parent Folder ID missing.");
+    const { chunkIndex, totalChunks, uploadSessionId, fileData, fileName, mimeType, folderPath } = payload;
+    
+    const rootFolder = DriveApp.getFolderById(parentFolderId);
+    let tempFolder;
+    const tempFolderName = "temp_uploads_" + uploadSessionId;
+    const subfolders = rootFolder.getFoldersByName(tempFolderName);
+    if (subfolders.hasNext()) {
+        tempFolder = subfolders.next();
+    } else {
+        tempFolder = rootFolder.createFolder(tempFolderName);
+    }
+    
+    const validBase64 = fileData.includes('base64,') ? fileData.split('base64,')[1] : fileData;
+    const chunkBlob = Utilities.newBlob(Utilities.base64Decode(validBase64), 'application/octet-stream', 'chunk_' + chunkIndex);
+    tempFolder.createFile(chunkBlob);
+    
+    const files = tempFolder.getFiles();
+    let fileCount = 0;
+    while (files.hasNext()) {
+        files.next();
+        fileCount++;
+    }
+    
+    if (fileCount === totalChunks) {
+        var chunks = [];
+        for (var i = 0; i < totalChunks; i++) {
+            var chunkFiles = tempFolder.getFilesByName('chunk_' + i);
+            if (!chunkFiles.hasNext()) {
+                throw new Error("Missing chunk " + i);
+            }
+            var chunkFile = chunkFiles.next();
+            chunks.push(chunkFile.getBlob().getBytes());
+        }
+        
+        var base64String = chunks.map(function(c) {
+            return Utilities.base64Encode(c);
+        }).join('');
+        
+        let targetFolder = rootFolder;
+        if (folderPath && Array.isArray(folderPath)) {
+            folderPath.forEach(name => {
+                if (!name) return;
+                const sub = targetFolder.getFoldersByName(name);
+                if (sub.hasNext()) {
+                    targetFolder = sub.next();
+                } else {
+                    targetFolder = targetFolder.createFolder(name);
+                }
+            });
+        }
+        
+        const finalBlob = Utilities.newBlob(Utilities.base64Decode(base64String), mimeType, fileName);
+        const finalFile = targetFolder.createFile(finalBlob);
+        
+        // Clean up temp folder
+        tempFolder.getFiles().forEach(function(f) {
+            try { DriveApp.removeFile(f); } catch (e) { tempFolder.removeFile(f); }
+        });
+        try { DriveApp.removeFolder(tempFolder); } catch (e) { rootFolder.removeFolder(tempFolder); }
+        
+        let publicShared = true;
+        try {
+            finalFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+        } catch (shareErr) {
+            publicShared = false;
+        }
+        
+        return {
+            url: publicShared
+                ? `https://drive.google.com/uc?export=view&id=${finalFile.getId()}`
+                : `https://drive.google.com/file/d/${finalFile.getId()}/view`,
+            id: finalFile.getId(),
+            name: fileName,
+            completed: true
+        };
+    }
+    
+    return {
+        success: true,
+        completed: false,
+        chunkIndex: chunkIndex
+    };
 }

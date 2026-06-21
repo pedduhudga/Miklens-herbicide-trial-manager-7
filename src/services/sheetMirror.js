@@ -70,6 +70,9 @@ function cleanJsonArrayField(val, fieldName) {
       if (typeof itemCopy.photoUrl === 'string' && itemCopy.photoUrl.startsWith('data:image')) {
         itemCopy.photoUrl = '[base64-removed]';
       }
+      if (typeof itemCopy.url === 'string' && itemCopy.url.startsWith('data:image')) {
+        itemCopy.url = '[base64-removed]';
+      }
       if (typeof itemCopy.notes === 'string' && itemCopy.notes.length > 2000) {
         itemCopy.notes = itemCopy.notes.slice(0, 2000) + '... [truncated]';
       }

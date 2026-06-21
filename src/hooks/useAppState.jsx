@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useReducer, useEffect, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, useCallback, useRef, useState } from 'react';
 import { initFirebase, isFirebaseReady } from '../services/firebase.js';
-import { saveOfflineData, loadOfflineData, saveOfflinePhoto, loadOfflinePhoto } from '../services/offlineStorage.js';
+import { saveOfflineData, loadOfflineData, saveOfflinePhoto, loadOfflinePhoto, saveSyncQueueOffline, loadSyncQueueOffline } from '../services/offlineStorage.js';
 
 function safeJsonParse(val, fallback = []) {
   if (!val) return fallback;
@@ -137,10 +137,12 @@ function appReducer(state, action) {
       return { ...state, activeCategory: action.payload };
     }
     case 'SET_SYNC_QUEUE':
+      saveSyncQueueOffline(action.payload);
       localStorage.setItem('syncQueue', JSON.stringify(action.payload));
       return { ...state, syncQueue: action.payload };
     case 'ADD_SYNC_ITEM': {
       const newQueue = [...state.syncQueue, action.payload];
+      saveSyncQueueOffline(newQueue);
       localStorage.setItem('syncQueue', JSON.stringify(newQueue));
       return { ...state, syncQueue: newQueue };
     }
@@ -151,6 +153,7 @@ function appReducer(state, action) {
 
 export function AppStateProvider({ children }) {
   const [state, dispatch] = useReducer(appReducer, initialState);
+  const [isHydrated, setIsHydrated] = useState(false);
   const stateRef = useRef(state);
   stateRef.current = state;
 
@@ -199,10 +202,16 @@ export function AppStateProvider({ children }) {
         }
       }
 
-      const savedSyncQueue = localStorage.getItem('syncQueue');
-      if (savedSyncQueue) {
-        dispatch({ type: 'SET_STATE', payload: { syncQueue: JSON.parse(savedSyncQueue) } });
-      }
+      loadSyncQueueOffline().then(savedSyncQueue => {
+        if (savedSyncQueue && savedSyncQueue.length > 0) {
+          dispatch({ type: 'SET_STATE', payload: { syncQueue: savedSyncQueue } });
+        } else {
+          const savedSyncQueueLS = localStorage.getItem('syncQueue');
+          if (savedSyncQueueLS) {
+            dispatch({ type: 'SET_STATE', payload: { syncQueue: JSON.parse(savedSyncQueueLS) } });
+          }
+        }
+      }).catch(err => console.error('Failed to load sync queue from IndexedDB:', err));
 
       const savedAuth = localStorage.getItem('appAuth');
       if (savedAuth) {
@@ -255,7 +264,11 @@ export function AppStateProvider({ children }) {
         if (Object.keys(payload).length > 0) {
           dispatch({ type: 'SET_STATE', payload });
         }
-      }).catch(err => console.warn('Offline cache load failed:', err));
+        setIsHydrated(true);
+      }).catch(err => {
+        console.warn('Offline cache load failed:', err);
+        setIsHydrated(true);
+      });
     } catch (e) {
       console.error('Failed to parse local storage data', e);
     }
@@ -263,7 +276,8 @@ export function AppStateProvider({ children }) {
 
   // Auto-persist datasets to IndexedDB when they change in state
   useEffect(() => {
-    if (state.trials && state.trials.length > 0) {
+    if (!isHydrated) return;
+    if (state.trials) {
       const processAndSaveTrialsOffline = async () => {
         const cleanTrials = await Promise.all(state.trials.map(async t => {
           if (!t.PhotoURLs) return t;
@@ -289,31 +303,27 @@ export function AppStateProvider({ children }) {
       };
       processAndSaveTrialsOffline().catch(err => console.error('Failed to save trials offline:', err));
     }
-  }, [state.trials]);
+  }, [isHydrated, state.trials]);
 
   useEffect(() => {
-    if (state.projects && state.projects.length > 0) {
-      saveOfflineData('projects', state.projects);
-    }
-  }, [state.projects]);
+    if (!isHydrated) return;
+    saveOfflineData('projects', state.projects || []);
+  }, [isHydrated, state.projects]);
 
   useEffect(() => {
-    if (state.formulations && state.formulations.length > 0) {
-      saveOfflineData('formulations', state.formulations);
-    }
-  }, [state.formulations]);
+    if (!isHydrated) return;
+    saveOfflineData('formulations', state.formulations || []);
+  }, [isHydrated, state.formulations]);
 
   useEffect(() => {
-    if (state.ingredients && state.ingredients.length > 0) {
-      saveOfflineData('ingredients', state.ingredients);
-    }
-  }, [state.ingredients]);
+    if (!isHydrated) return;
+    saveOfflineData('ingredients', state.ingredients || []);
+  }, [isHydrated, state.ingredients]);
 
   useEffect(() => {
-    if (state.blocks && state.blocks.length > 0) {
-      saveOfflineData('blocks', state.blocks);
-    }
-  }, [state.blocks]);
+    if (!isHydrated) return;
+    saveOfflineData('blocks', state.blocks || []);
+  }, [isHydrated, state.blocks]);
 
   const updateState = useCallback((payload) => {
     dispatch({ type: 'SET_STATE', payload });

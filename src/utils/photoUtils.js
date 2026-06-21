@@ -4,17 +4,24 @@
  */
 export function resolvePhotoSrc(photo) {
   if (!photo) return null;
-  if (typeof photo === 'string' && photo.trim()) return photo.trim();
+  if (typeof photo === 'string' && photo.trim()) {
+    const s = photo.trim();
+    return s === '[base64-removed]' ? null : s;
+  }
 
   if (typeof photo !== 'object') return null;
 
   const fileData = photo.fileData;
   if (typeof fileData === 'string' && fileData.trim()) {
-    if (fileData.startsWith('data:') || fileData.startsWith('http')) return fileData.trim();
+    const fd = fileData.trim();
+    if (fd !== '[base64-removed]' && (fd.startsWith('data:') || fd.startsWith('http'))) return fd;
   }
 
-  const url = photo.url || photo.src || photo.fileUrl;
-  if (typeof url === 'string' && url.trim()) return url.trim();
+  const url = photo.url || photo.src || photo.fileUrl || photo.photoUrl;
+  if (typeof url === 'string' && url.trim()) {
+    const u = url.trim();
+    if (u !== '[base64-removed]') return u;
+  }
 
   const driveId = photo.driveId || photo.fileId || photo.driveFileId;
   if (typeof driveId === 'string' && driveId.length >= 10 && !driveId.includes('/')) {
@@ -58,6 +65,9 @@ export function stripPhotoArrayForMirror(jsonStr) {
       }
       if (typeof copy.photoUrl === 'string' && copy.photoUrl.startsWith('data:image')) {
         copy.photoUrl = '[base64-removed]';
+      }
+      if (typeof copy.url === 'string' && copy.url.startsWith('data:image')) {
+        copy.url = '[base64-removed]';
       }
       return copy;
     });

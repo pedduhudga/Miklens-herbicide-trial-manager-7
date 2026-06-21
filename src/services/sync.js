@@ -1,8 +1,20 @@
 import { apiCall } from './db.js';
+import { updateTrial } from './dataLayer.js';
 import { safeJsonParse } from '../utils/helpers.js';
 import { buildAiObservationPayload } from '../utils/categoryObservationUtils.js';
 import { getPrimaryObservationField } from '../utils/categoryConfig.js';
 import { analyzePhotoForEfficacy } from './ai.js';
+import { analyzeWeedCover } from '../utils/imageAnalysis.js';
+
+function safeRefreshRelevantUI(trialId, type) {
+    if (typeof refreshRelevantUI === 'function') {
+        refreshRelevantUI(trialId, type);
+    } else if (typeof window !== 'undefined' && typeof window.refreshRelevantUI === 'function') {
+        window.refreshRelevantUI(trialId, type);
+    } else {
+        console.log('[Sync] refreshRelevantUI is not defined, state update will trigger re-render automatically.');
+    }
+}
 
 let _isSyncProcessing = false;
 let _lastSyncAttempt = 0;
@@ -22,6 +34,86 @@ function isDrivePermissionError(msg) {
         m.includes('access denied') ||
         m.includes('triggerdrivepermissions') ||
         m.includes('execute as: me');
+}
+
+function dataURLtoBlob(dataurl) {
+    const arr = dataurl.split(',');
+    const mime = arr[0].match(/:(.*?);/)[1];
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new Blob([u8arr], { type: mime });
+}
+
+async function uploadPhotoChunked(item, folderPath, getAppState) {
+    const fileData = item.photo.fileData;
+    const mimeType = item.photo.mimeType;
+    const fileName = item.photo.fileName;
+    
+    let blob = fileData;
+    if (typeof fileData === 'string' && fileData.startsWith('data:')) {
+        blob = dataURLtoBlob(fileData);
+    }
+    
+    const chunkSize = 1024 * 1024; // 1MB chunk size
+    const totalChunks = Math.ceil(blob.size / chunkSize);
+    const uploadSessionId = item.id || `session_${Date.now()}`;
+    
+    let startChunk = item.lastUploadedChunk !== undefined ? item.lastUploadedChunk + 1 : 0;
+    
+    console.log(`[HighTechSync] Chunked upload: Total chunks = ${totalChunks}, resuming from chunk ${startChunk + 1}`);
+    
+    let result = null;
+    for (let i = startChunk; i < totalChunks; i++) {
+        const start = i * chunkSize;
+        const end = Math.min(start + chunkSize, blob.size);
+        const chunkSlice = blob.slice(start, end);
+        
+        const chunkBase64 = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(chunkSlice);
+        });
+        
+        console.log(`[HighTechSync] Uploading chunk ${i + 1}/${totalChunks}...`);
+        
+        const uploadPromise = apiCall('uploadPhotoChunk', {
+            chunkIndex: i,
+            totalChunks: totalChunks,
+            uploadSessionId: uploadSessionId,
+            fileData: chunkBase64,
+            fileName: fileName,
+            mimeType: mimeType,
+            folderPath: folderPath
+        }, false, getAppState);
+        
+        result = await Promise.race([
+            uploadPromise,
+            new Promise((_, reject) =>
+                setTimeout(() => reject(new Error(`Chunk upload timeout at chunk ${i + 1}`)), 45000)
+            )
+        ]);
+        
+        if (result && result._errType) {
+            throw new Error(`Server Error on chunk ${i + 1}: ${result.message}`);
+        }
+        
+        // Save state progress
+        item.lastUploadedChunk = i;
+        if (window.updateState && getAppState) {
+            const currentQueue = getAppState().syncQueue;
+            const updatedQueue = currentQueue.map(q => q.id === item.id ? { ...q, lastUploadedChunk: i } : q);
+            window.updateState({ syncQueue: updatedQueue });
+            const { saveSyncQueueOffline } = await import('./offlineStorage.js');
+            await saveSyncQueueOffline(updatedQueue);
+        }
+    }
+    
+    return result;
 }
 
 export async function processSyncQueue(getAppState, updateAppState, showToast, renderSyncStatus) {
@@ -57,9 +149,7 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                     if (nextPhotos.length !== photos.length) {
                         trial[field] = JSON.stringify(nextPhotos);
                         updateAppState({ trials: [...state.trials] });
-                        if (typeof refreshRelevantUI === 'function') {
-                            refreshRelevantUI(item.trialId, item.type);
-                        }
+                        safeRefreshRelevantUI(item.trialId, item.type);
                     }
                 };
 
@@ -259,24 +349,31 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                         // ADD TIMEOUT SAFETY: Prevent hanging on Google Drive API (timeout after 45s)
                         let result = null;
                         try {
-                            const uploadPromise = apiCall('uploadPhoto', {
-                                trialId: item.trialId,
-                                fileData: item.photo.fileData,
-                                mimeType: item.photo.mimeType,
-                                fileName: item.photo.fileName,
-                                isWeed: isWeed,
-                                label: item.photo.label,
-                                date: item.photo.date,
-                                folderPath: folderPath
-                            }, false, getAppState);
+                            const fileData = item.photo.fileData;
+                            const isLargeFile = (typeof fileData === 'string' && fileData.length * 0.75 > 2 * 1024 * 1024) || (fileData instanceof Blob && fileData.size > 2 * 1024 * 1024);
+                            
+                            if (isLargeFile) {
+                                result = await uploadPhotoChunked(item, folderPath, getAppState);
+                            } else {
+                                const uploadPromise = apiCall('uploadPhoto', {
+                                    trialId: item.trialId,
+                                    fileData: item.photo.fileData,
+                                    mimeType: item.photo.mimeType,
+                                    fileName: item.photo.fileName,
+                                    isWeed: isWeed,
+                                    label: item.photo.label,
+                                    date: item.photo.date,
+                                    folderPath: folderPath
+                                }, false, getAppState);
 
-                            // Timeout after 45 seconds
-                            result = await Promise.race([
-                                uploadPromise,
-                                new Promise((_, reject) =>
-                                    setTimeout(() => reject(new Error('Upload timeout after 45s - connection too slow. Will retry.')), 45000)
-                                )
-                            ]);
+                                // Timeout after 45 seconds
+                                result = await Promise.race([
+                                    uploadPromise,
+                                    new Promise((_, reject) =>
+                                        setTimeout(() => reject(new Error('Upload timeout after 45s - connection too slow. Will retry.')), 45000)
+                                    )
+                                ]);
+                            }
                         } catch (timeoutErr) {
                             if (String(timeoutErr.message).includes('timeout')) {
                                 console.error('[HighTechSync] [ERROR] Upload timeout detected:', timeoutErr.message);
@@ -329,15 +426,15 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                             const handshakeStart = Date.now();
                             console.log(`[Step 2/3] Updating Spreadsheet...`);
 
-                            await apiCall('updateTrialRecord', {
+                            await updateTrial({
                                 ID: trial.ID,
                                 [isWeed ? 'WeedPhotosJSON' : 'PhotoURLs']: trial[isWeed ? 'WeedPhotosJSON' : 'PhotoURLs']
-                            }, false, getAppState);
+                            }, getAppState);
 
                             const handshakeTime = ((Date.now() - handshakeStart) / 1000).toFixed(2);
                             console.log(`%c? Spreadsheet Handshake Complete (${handshakeTime}s)`, "color: #16a34a;");
 
-                            refreshRelevantUI(item.trialId, item.type);
+                            safeRefreshRelevantUI(item.trialId, item.type);
 
                             // 4. FIRE-AND-FORGET AI
                             console.log(`[Step 3/3] Launching Background AI Analysis (Non-blocking)...`);
@@ -345,7 +442,7 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                                 const aiStart = Date.now();
                                 try {
                                     if (isWeed) {
-                                        const ids = await identifyWeedsFromPhoto(item.photo.fileData, item.photo.mimeType);
+                                        const ids = typeof window.identifyWeedsFromPhoto === 'function' ? await window.identifyWeedsFromPhoto(item.photo.fileData, item.photo.mimeType) : [];
                                         if (ids?.length > 0) {
                                             const t = state.trials.find(x => x.ID === item.trialId);
                                             let wPhotos = safeJsonParse(t.WeedPhotosJSON);
@@ -354,28 +451,28 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                                                 wPhotos[pIdx].identifications = ids;
                                                 if (!wPhotos[pIdx].label || wPhotos[pIdx].label.includes('Synced')) wPhotos[pIdx].label = ids.map(i => i.name).join(', ');
                                                 t.WeedPhotosJSON = JSON.stringify(wPhotos);
-                                                await apiCall('updateTrialRecord', { ID: t.ID, WeedPhotosJSON: t.WeedPhotosJSON }, false, getAppState);
-                                                refreshRelevantUI(item.trialId, 'weed_upload');
+                                                await updateTrial({ ID: t.ID, WeedPhotosJSON: t.WeedPhotosJSON }, getAppState);
+                                                safeRefreshRelevantUI(item.trialId, 'weed_upload');
                                                 console.log(`[AI Background] Weed ID finished in ${((Date.now() - aiStart) / 1000).toFixed(2)}s`);
                                             }
                                         }
                                     } else {
                                         // 1. Proactive Weed ID (If missing species or first photo)
-                                        const shouldRunFirstPhotoCheck = shouldAutoIdentifyGeneralPhotoWeeds(trial, {
+                                        const shouldRunFirstPhotoCheck = typeof window.shouldAutoIdentifyGeneralPhotoWeeds === 'function' ? window.shouldAutoIdentifyGeneralPhotoWeeds(trial, {
                                             tempId: item.photo.tempId,
                                             url: publicUrl
-                                        });
+                                        }) : false;
 
                                         if (shouldRunFirstPhotoCheck) {
                                             console.log('[AI Background] Triggering proactive Weed ID for general photo...');
-                                            const ids = await analyzeGeneralPhotoWeeds(item.trialId, {
+                                            const ids = typeof window.analyzeGeneralPhotoWeeds === 'function' ? await window.analyzeGeneralPhotoWeeds(item.trialId, {
                                                 tempId: item.photo.tempId,
                                                 url: publicUrl
                                             }, {
                                                 showToast: false,
                                                 sourceFileData: item.photo.fileData,
                                                 sourceMimeType: item.photo.mimeType
-                                            });
+                                            }) : [];
                                             if (ids && ids.length > 0) {
                                                 const common = ids.flatMap(i => i.commonNames || []).join(', ');
                                                 if (common) showToast(`Identified potential weeds: ${common}`, 'info');
@@ -424,8 +521,8 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                                                 }
 
                                                 trial.EfficacyDataJSON = JSON.stringify(eData);
-                                                await apiCall('updateTrialRecord', { ID: trial.ID, EfficacyDataJSON: trial.EfficacyDataJSON }, false, getAppState);
-                                                refreshRelevantUI(item.trialId, 'general_upload');
+                                                await updateTrial({ ID: trial.ID, EfficacyDataJSON: trial.EfficacyDataJSON }, getAppState);
+                                                safeRefreshRelevantUI(item.trialId, 'general_upload');
                                                 console.log(`? WEED COVER SAVED: ${coverResult.cover}%`);
                                             }
                                         } catch (wcErr) {
@@ -457,8 +554,8 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                                                 eData.push(newObs);
                                                 t.EfficacyDataJSON = JSON.stringify(eData);
                                                 t.AISummariesJSON = '{}';
-                                                await apiCall('updateTrialRecord', { ID: t.ID, EfficacyDataJSON: t.EfficacyDataJSON, AISummariesJSON: '{}' }, false, getAppState);
-                                                refreshRelevantUI(item.trialId, 'general_upload');
+                                                await updateTrial({ ID: t.ID, EfficacyDataJSON: t.EfficacyDataJSON, AISummariesJSON: '{}' }, getAppState);
+                                                safeRefreshRelevantUI(item.trialId, 'general_upload');
                                                 console.log(`[AI Background] Full photo analysis finished in ${((Date.now() - aiStart) / 1000).toFixed(2)}s`);
 
                                                 // For herbicide, keep old grid prompt behaviour when weed cover detected
