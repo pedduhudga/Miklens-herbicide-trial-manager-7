@@ -3901,7 +3901,15 @@ Rules:
     setAiSummary('');
     try {
       const efficacy = validateEfficacyData(safeJsonParse(detailTrial.EfficacyDataJSON, []), detailTrial.Category || activeCategory);
-      const sorted = [...efficacy].sort((a, b) => (a.daa ?? 0) - (b.daa ?? 0));
+      const trialDate = detailTrial.Date || '';
+      const getDaaVal = (o) => {
+        if (o.daa !== undefined && o.daa !== null && o.daa !== '' && o.daa !== '—') {
+          const parsed = Number(o.daa);
+          if (!isNaN(parsed)) return parsed;
+        }
+        return calculateDAA(o.date, trialDate);
+      };
+      const sorted = [...efficacy].sort((a, b) => getDaaVal(a) - getDaaVal(b));
 
       const trialCat = detailTrial.Category || 'herbicide';
       const cConf = getCategoryConfig(trialCat);
@@ -3917,7 +3925,7 @@ Rules:
       const obsLines = sorted.map(o => {
         const val = getObservationPrimaryValue(trialCat, o) ?? '?';
         const speciesLine = (o.weedDetails || []).map(w => `${w.species}: ${w.cover}%`).join(', ');
-        return `  DAA ${o.daa}: total ${cConf.observationFields?.[0]?.label || 'level'} ${val}${primaryMetricUnit}${speciesLine ? ` (${speciesLine})` : ''}${o.notes ? ` — ${o.notes}` : ''}`;
+        return `  DAA ${getDaaVal(o)}: total ${cConf.observationFields?.[0]?.label || 'level'} ${val}${primaryMetricUnit}${speciesLine ? ` (${speciesLine})` : ''}${o.notes ? ` — ${o.notes}` : ''}`;
       }).join('\n');
 
       // Compute key metrics to feed the AI
@@ -4030,7 +4038,7 @@ One sentence. Start directly with the product name (no "Product X was applied" p
 
 2. Overall Efficacy Trajectory
 Exactly 3 sentences. Follow this structure precisely:
-- Sentence 1: "At DAA [first], total ${targetLabel.toLowerCase()} level was recorded at X%."
+- Sentence 1: "At DAA ${baseline ? getDaaVal(baseline) : 0}, total ${targetLabel.toLowerCase()} level was recorded at X%."
 - Sentence 2: Dynamically describe the final level and its control interpretation based on the actual data.
 - Sentence 3: Dynamically describe the presence, progression, or absence of treatment injury symptoms observed in the timeline notes.
 

@@ -5,7 +5,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import pptxgen from 'pptxgenjs';
-import { formatPhotoDate, formatDate, formatDateTime } from '../utils/dateUtils.js';
+import { formatPhotoDate, formatDate, formatDateTime, calculateDAA } from '../utils/dateUtils.js';
 import { getCategoryConfig, calculateEfficacy, getPrimaryObservationField, getObservationPrimaryValue } from '../utils/categoryConfig.js';
 import {
   performANOVA,
@@ -168,14 +168,26 @@ export function getTimelineData(efficacy, categoryId = 'herbicide', trial = null
   const config = getCategoryConfig(categoryId);
   const primaryField = getPrimaryObservationField(categoryId);
   const targetValue = trial ? (trial[config.targetField] || trial.WeedSpecies || 'Total') : 'Total';
+  const trialDate = trial?.Date || '';
 
-  // Find all observation fields that have at least one non-empty value in efficacy list
+  const getDaaVal = (o) => {
+    if (o.daa !== undefined && o.daa !== null && o.daa !== '' && o.daa !== '—') {
+      const parsed = Number(o.daa);
+      if (!isNaN(parsed)) return parsed;
+    }
+    return calculateDAA(o.date, trialDate);
+  };
+
+  // Sort efficacy chronologically before processing
+  const sortedEfficacy = [...efficacy].sort((a, b) => getDaaVal(a) - getDaaVal(b));
+
+  // Find all observation fields that have at least one non-empty value in sortedEfficacy list
   // excluding primaryField and 'weedDetails' which are handled specially
   const activeFields = [];
   if (categoryId !== 'herbicide') {
     config.observationFields?.forEach(f => {
       if (f.key !== primaryField && f.key !== 'weedDetails') {
-        const hasVal = efficacy.some(o => o[f.key] !== undefined && o[f.key] !== null && o[f.key] !== '');
+        const hasVal = sortedEfficacy.some(o => o[f.key] !== undefined && o[f.key] !== null && o[f.key] !== '');
         if (hasVal) {
           activeFields.push(f);
         }
@@ -197,18 +209,22 @@ export function getTimelineData(efficacy, categoryId = 'herbicide', trial = null
   headers.push('Status');
   
   // Add weather columns if any row has weather data!
-  const hasWeather = efficacy.some(o => o.weatherTemp || o.relative_humidity_2m || o.weatherHumidity || o.weatherWind || o.weatherRain);
+  const hasWeather = sortedEfficacy.some(o => o.weatherTemp || o.relative_humidity_2m || o.weatherHumidity || o.weatherWind || o.weatherRain);
   if (hasWeather) {
     headers.push('Temp (°C)', 'Humidity (%)', 'Wind (km/h)', 'Rain (mm)');
   }
   
   headers.push('Notes');
 
+  // Find base value from DAA 0 or the first chronological observation
+  const baseObs = sortedEfficacy.find(obs => getDaaVal(obs) === 0) || sortedEfficacy[0];
+  const baseVal = baseObs ? (getObservationPrimaryValue(categoryId, baseObs) ?? 0) : 0;
+
   // Build rows
-  const rows = efficacy.map(o => {
+  const rows = sortedEfficacy.map(o => {
     const row = [];
     // 1. DAA
-    row.push(String(o.daa ?? '—'));
+    row.push(String(getDaaVal(o)));
     
     // 2. Weed Species / Target value
     if (categoryId === 'herbicide') {
@@ -229,9 +245,6 @@ export function getTimelineData(efficacy, categoryId = 'herbicide', trial = null
     });
     
     // 5. Status
-    const sortedObs = [...efficacy].sort((a, b) => (a.daa ?? 0) - (b.daa ?? 0));
-    const baseObs = sortedObs.find(obs => (obs.daa ?? 0) === 0) || sortedObs[0];
-    const baseVal = baseObs ? (getObservationPrimaryValue(categoryId, baseObs) ?? 0) : 0;
     const status = calculateStatus(categoryId, pVal, baseVal);
     row.push(status);
     
@@ -470,17 +483,27 @@ function timelineRows(efficacy, categoryId = 'herbicide', trial = null) {
   const config = getCategoryConfig(categoryId);
   const primaryField = getPrimaryObservationField(categoryId);
   const targetValue = trial ? (trial[config.targetField] || trial.WeedSpecies || 'Total') : 'Total';
+  const trialDate = trial?.Date || '';
 
-  const sortedObs = [...efficacy].sort((a, b) => (a.daa ?? 0) - (b.daa ?? 0));
-  const baseObs = sortedObs.find(obs => (obs.daa ?? 0) === 0) || sortedObs[0];
+  const getDaaVal = (o) => {
+    if (o.daa !== undefined && o.daa !== null && o.daa !== '' && o.daa !== '—') {
+      const parsed = Number(o.daa);
+      if (!isNaN(parsed)) return parsed;
+    }
+    return calculateDAA(o.date, trialDate);
+  };
+
+  const sortedObs = [...efficacy].sort((a, b) => getDaaVal(a) - getDaaVal(b));
+  const baseObs = sortedObs.find(obs => getDaaVal(obs) === 0) || sortedObs[0];
   const baseVal = baseObs ? (getObservationPrimaryValue(categoryId, baseObs) ?? 0) : 0;
 
-  return efficacy.map(o => {
+  return sortedObs.map(o => {
+    const daaVal = getDaaVal(o);
     if (categoryId === 'herbicide') {
       const c = getObservationPrimaryValue(categoryId, o) ?? 0;
       const status = calculateStatus(categoryId, c, baseVal);
       const species = (o.weedDetails || []).map(w => w.species).filter(Boolean).join(', ') || 'Total';
-      return [String(o.daa ?? '—'), species, `${c}%`, status, o.notes || '—'];
+      return [String(daaVal), species, `${c}%`, status, o.notes || '—'];
     } else {
       const val = Number(getObservationPrimaryValue(categoryId, o) ?? 0);
       const status = calculateStatus(categoryId, val, baseVal);
@@ -494,7 +517,7 @@ function timelineRows(efficacy, categoryId = 'herbicide', trial = null) {
       });
       const detailsStr = extraDetails.length > 0 ? ` [${extraDetails.join(', ')}]` : '';
 
-      return [String(o.daa ?? '—'), targetValue, `${val}${config.primaryMetric?.unit || ''}`, status, `${o.notes || '—'}${detailsStr}`];
+      return [String(daaVal), targetValue, `${val}${config.primaryMetric?.unit || ''}`, status, `${o.notes || '—'}${detailsStr}`];
     }
   });
 }
@@ -3248,7 +3271,59 @@ export async function generateMasterComprehensivePdf(project, subTrials, options
     doc.text(tw, lx, y); y += tw.length * 5 + 5;
   }
 
-  y += 4;
+  // Calculate dynamic stats
+  let maxDaa = 0;
+  let totalObs = 0;
+  subTrials.forEach(t => {
+    const eff = safeJsonParse(t.EfficacyDataJSON, []);
+    totalObs += eff.length;
+    eff.forEach(o => {
+      const dVal = (o.daa !== undefined && o.daa !== null && o.daa !== '' && o.daa !== '—') ? Number(o.daa) : calculateDAA(o.date, t.Date);
+      if (!isNaN(dVal) && dVal > maxDaa) {
+        maxDaa = dVal;
+      }
+    });
+  });
+
+  // Preliminary Report Warning Banner
+  if (maxDaa <= 3) {
+    if (y + 26 > ph - 20) { doc.addPage(); y = 20; }
+    doc.setFillColor(254, 243, 199);
+    doc.setDrawColor(245, 158, 11);
+    doc.rect(14, y, pw - 28, 22, 'FD');
+    doc.setTextColor(146, 64, 14);
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'bold');
+    doc.text('PRELIMINARY REPORT', 18, y + 5);
+    doc.setFont(undefined, 'normal');
+    doc.setFontSize(8.5);
+    doc.text(`Observation Window: 0–${maxDaa} DAA`, 18, y + 10);
+    const bannerMsg = 'This report represents early vegetative observations. Final treatment efficacy should be interpreted after 7, 15, 30 and 45 DAA assessments.';
+    const wrappedBannerMsg = doc.splitTextToSize(bannerMsg, pw - 36);
+    doc.text(wrappedBannerMsg, 18, y + 14);
+    doc.setTextColor(0, 0, 0);
+    y += 28;
+  }
+
+  // Trial Progress Summary Box
+  if (y + 35 > ph - 20) { doc.addPage(); y = 20; }
+  doc.setFontSize(10); doc.setFont(undefined, 'bold');
+  doc.text('Trial Progress Summary', 14, y); y += 4;
+  doc.setFont(undefined, 'normal');
+  const confidence = maxDaa <= 3 ? 'Low (Early Stage)' : maxDaa <= 14 ? 'Medium (Mid Stage)' : 'High (Final Stage)';
+  const progressRows = [
+    ['Plots Evaluated', `${subTrials.length}/${subTrials.length}`, 'Total Observations', String(totalObs)],
+    ['DAA Observation Range', `0–${maxDaa} DAA`, 'Scientific Confidence', confidence]
+  ];
+  autoTable(doc, {
+    startY: y,
+    body: progressRows,
+    theme: 'striped',
+    styles: { fontSize: 8.5, cellPadding: 2.5 },
+    columnStyles: { 0: { fontStyle: 'bold', cellWidth: (pw - 28) / 4 }, 2: { fontStyle: 'bold', cellWidth: (pw - 28) / 4 } }
+  });
+  y = (doc.lastAutoTable?.finalY ?? y) + 10;
+
   let sectionCounter = 1;
   y = secHeading(doc, `${sectionCounter++}. Sub-Trials Summary`, y, ph, 14, primaryColor);
 
@@ -3294,7 +3369,10 @@ export async function generateMasterComprehensivePdf(project, subTrials, options
     doc.setFontSize(9);
     doc.text(`Analysis method: ${method}`, 14, y); y += 5;
     doc.text(`Design interpretation: ${analysis.design || (anova.design || 'RCBD')}`, 14, y); y += 5;
-    doc.text(`ANOVA: F = ${anova.fStatistic?.toFixed(2) || 'N/A'}, p = ${anova.pValue?.toFixed(4) || 'N/A'}`, 14, y); y += 5;
+    const nPlots = subTrials.length;
+    const nReplicates = [...new Set(subTrials.map(t => t.Replication || t.BlockID || 'R1'))].length;
+    const nTreatments = [...new Set(subTrials.map(t => t.FormulationName || 'Untreated Check'))].length;
+    doc.text(`ANOVA: F = ${anova.fStatistic?.toFixed(2) || 'N/A'}, p = ${anova.pValue?.toFixed(4) || 'N/A'} (n = ${nPlots} plots, ${nReplicates} replicates, ${nTreatments} treatments)`, 14, y); y += 5;
     doc.text(`${anova.significant ? 'Statistically significant differences were detected between treatments.' : 'Treatment differences were not statistically significant at α=0.05.'}`, 14, y); y += 6;
     if (analysis.postHoc?.groups) {
       const groups = Object.entries(analysis.postHoc.groups)
@@ -3421,6 +3499,59 @@ export async function generateMasterScientificReport(project, subTrials, options
   });
   y = (doc.lastAutoTable?.finalY ?? y) + 10;
 
+  // Calculate dynamic stats
+  let maxDaa = 0;
+  let totalObs = 0;
+  subTrials.forEach(t => {
+    const eff = safeJsonParse(t.EfficacyDataJSON, []);
+    totalObs += eff.length;
+    eff.forEach(o => {
+      const dVal = (o.daa !== undefined && o.daa !== null && o.daa !== '' && o.daa !== '—') ? Number(o.daa) : calculateDAA(o.date, t.Date);
+      if (!isNaN(dVal) && dVal > maxDaa) {
+        maxDaa = dVal;
+      }
+    });
+  });
+
+  // Preliminary Report Warning Banner
+  if (maxDaa <= 3) {
+    if (y + 26 > ph - 20) { doc.addPage(); y = 20; }
+    doc.setFillColor(254, 243, 199);
+    doc.setDrawColor(245, 158, 11);
+    doc.rect(14, y, pw - 28, 22, 'FD');
+    doc.setTextColor(146, 64, 14);
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'bold');
+    doc.text('PRELIMINARY REPORT', 18, y + 5);
+    doc.setFont(undefined, 'normal');
+    doc.setFontSize(8.5);
+    doc.text(`Observation Window: 0–${maxDaa} DAA`, 18, y + 10);
+    const bannerMsg = 'This report represents early vegetative observations. Final treatment efficacy should be interpreted after 7, 15, 30 and 45 DAA assessments.';
+    const wrappedBannerMsg = doc.splitTextToSize(bannerMsg, pw - 36);
+    doc.text(wrappedBannerMsg, 18, y + 14);
+    doc.setTextColor(0, 0, 0);
+    y += 28;
+  }
+
+  // Trial Progress Summary Box
+  if (y + 35 > ph - 20) { doc.addPage(); y = 20; }
+  doc.setFontSize(10); doc.setFont(undefined, 'bold');
+  doc.text('Trial Progress Summary', 14, y); y += 4;
+  doc.setFont(undefined, 'normal');
+  const confidence = maxDaa <= 3 ? 'Low (Early Stage)' : maxDaa <= 14 ? 'Medium (Mid Stage)' : 'High (Final Stage)';
+  const progressRows = [
+    ['Plots Evaluated', `${subTrials.length}/${subTrials.length}`, 'Total Observations', String(totalObs)],
+    ['DAA Observation Range', `0–${maxDaa} DAA`, 'Scientific Confidence', confidence]
+  ];
+  autoTable(doc, {
+    startY: y,
+    body: progressRows,
+    theme: 'striped',
+    styles: { fontSize: 8.5, cellPadding: 2.5 },
+    columnStyles: { 0: { fontStyle: 'bold', cellWidth: (pw - 28) / 4 }, 2: { fontStyle: 'bold', cellWidth: (pw - 28) / 4 } }
+  });
+  y = (doc.lastAutoTable?.finalY ?? y) + 10;
+
   // Executive summary
   y = secHeading(doc, 'Executive Summary', y, ph, 14, primaryColor);
   const narrative = aiSummary || `This master scientific report aggregates findings from ${subTrials.length} Sub-Trial monitoring locations evaluated within the ${project.Name} area. Localized efficacy tracking, target species distribution timelines, and photographic logs were evaluated. Overall efficacy profiles and target responses are compiled below.`;
@@ -3442,7 +3573,10 @@ export async function generateMasterScientificReport(project, subTrials, options
     doc.text(`Analysis method: ${method}`, 14, y); y += 5;
     doc.text(`Design interpretation: ${analysis.design || (anova.design || 'RCBD')}`, 14, y); y += 6;
     doc.text(`Treatments analyzed: ${analysis.treatmentSummary?.length || Object.keys(anova.treatmentMeans || {}).length}`, 14, y); y += 6;
-    doc.text(`ANOVA results: F = ${anova.fStatistic?.toFixed(2) || 'N/A'}, p = ${anova.pValue?.toFixed(4) || 'N/A'}; ${anova.significant ? 'Statistically significant treatment differences detected.' : 'No statistically significant treatment differences detected.'}`, 14, y); y += 8;
+    const nPlots = subTrials.length;
+    const nReplicates = [...new Set(subTrials.map(t => t.Replication || t.BlockID || 'R1'))].length;
+    const nTreatments = [...new Set(subTrials.map(t => t.FormulationName || 'Untreated Check'))].length;
+    doc.text(`ANOVA results: F = ${anova.fStatistic?.toFixed(2) || 'N/A'}, p = ${anova.pValue?.toFixed(4) || 'N/A'} (n = ${nPlots} plots, ${nReplicates} replicates, ${nTreatments} treatments); ${anova.significant ? 'Statistically significant treatment differences detected.' : 'No statistically significant treatment differences detected.'}`, 14, y); y += 8;
     if (analysis.postHoc?.groups) {
       const groups = Object.entries(analysis.postHoc.groups)
         .sort((a, b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]))
