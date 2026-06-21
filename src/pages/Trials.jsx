@@ -1129,7 +1129,7 @@ export default function Trials({ onMenuClick }) {
     setWeedIdResult(null);
 
     // Try to retrieve cached bounds from targetPhoto to save tokens and load instantly
-    const photos = activeTrial ? safeJsonParse(activeTrial.PhotoURLs, []) : [];
+    const photos = activeTrial ? safeJsonParse(activeTrial.PhotoURLs, []).filter(p => !p.deleted) : [];
     let targetPhoto = null;
     let targetIdx = -1;
 
@@ -1536,7 +1536,7 @@ export default function Trials({ onMenuClick }) {
 
   // ── DETAIL TRIAL DERIVATIONS ──────────────────────────────────────
   const detailEfficacy = detailTrial ? validateEfficacyData(safeJsonParse(detailTrial.EfficacyDataJSON, []), activeCategory) : [];
-  const detailPhotos = detailTrial ? safeJsonParse(detailTrial.PhotoURLs, []) : [];
+  const detailPhotos = detailTrial ? safeJsonParse(detailTrial.PhotoURLs, []).filter(p => !p.deleted) : [];
   const detailIsCompleted = detailTrial?.IsCompleted === true || detailTrial?.IsCompleted === 'true';
 
   useEffect(() => {
@@ -2092,13 +2092,28 @@ export default function Trials({ onMenuClick }) {
   const handleDeletePhoto = async (idx) => {
     if (!activeTrial || !window.confirm('Delete this photo?')) return;
     const photos = safeJsonParse(activeTrial.PhotoURLs, []);
-    const deletedPhoto = photos[idx];
-    photos.splice(idx, 1);
+    const activePhotos = photos.filter(p => !p.deleted);
+    const deletedPhoto = activePhotos[idx];
+    
+    if (deletedPhoto) {
+      const rawIdx = photos.indexOf(deletedPhoto);
+      if (rawIdx !== -1) {
+        if (typeof photos[rawIdx] === 'string') {
+          const isDrive = photos[rawIdx].includes('drive.google.com');
+          photos[rawIdx] = {
+            [isDrive ? 'url' : 'fileData']: photos[rawIdx],
+            deleted: true
+          };
+        } else {
+          photos[rawIdx].deleted = true;
+        }
+      }
+    }
 
     // Find and delete the corresponding AI-generated observation(s) linked to this photo
     let efficacyData = validateEfficacyData(safeJsonParse(activeTrial.EfficacyDataJSON, []), activeCategory);
     if (deletedPhoto) {
-      const deletedUrl = deletedPhoto.fileData || deletedPhoto.url || deletedPhoto;
+      const deletedUrl = typeof deletedPhoto === 'string' ? deletedPhoto : (deletedPhoto.fileData || deletedPhoto.url);
       if (deletedUrl) {
         efficacyData = efficacyData.filter(obs => obs.photoUrl !== deletedUrl);
       }
@@ -2537,7 +2552,7 @@ Rules:
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Scanning Google Drive for missing photos...', type: 'info' } }));
       
       const photoURLs = safeJsonParse(trial.PhotoURLs, []);
-      const brokenPhotos = photoURLs.filter(isPhotoBroken).map(p => ({
+      const brokenPhotos = photoURLs.filter(p => isPhotoBroken(p) && !p.deleted).map(p => ({
         date: p.date || '',
         label: p.label || '',
         tag: p.tag || ''
@@ -2594,7 +2609,7 @@ Rules:
       // Collect indices of broken/unavailable photos to heal sequentially
       const brokenPhotoIndices = [];
       photoURLs.forEach((p, idx) => {
-        if (isPhotoBroken(p)) {
+        if (isPhotoBroken(p) && !p.deleted) {
           brokenPhotoIndices.push(idx);
         }
       });
@@ -2642,6 +2657,9 @@ Rules:
         const webViewUrl = `https://drive.google.com/uc?export=view&id=${img.id}`;
 
         if (existingPhoto) {
+          if (existingPhoto.deleted) {
+            return; // Skip re-importing deleted photos
+          }
           // If the photo exists in the database but the URL is broken or has '[base64-removed]', restore it!
           if (isPhotoBroken(existingPhoto) || !existingPhoto.url || existingPhoto.url.includes('[base64-removed]')) {
             existingPhoto.url = webViewUrl;
@@ -2659,7 +2677,7 @@ Rules:
         // 1. Attempt to find an unmatched broken/unavailable entry that matches this photo by label
         for (let i = 0; i < photoURLs.length; i++) {
           const p = photoURLs[i];
-          if (isPhotoBroken(p)) {
+          if (isPhotoBroken(p) && !p.deleted) {
             const normExistingLabel = normalize(p.label);
             
             const isMatch = normExistingLabel && normDriveLabel && (
@@ -2775,7 +2793,7 @@ Rules:
         }));
 
         const photoURLs = safeJsonParse(trial.PhotoURLs, []);
-        const brokenPhotos = photoURLs.filter(isPhotoBroken).map(p => ({
+        const brokenPhotos = photoURLs.filter(p => isPhotoBroken(p) && !p.deleted).map(p => ({
           date: p.date || '',
           label: p.label || '',
           tag: p.tag || ''
@@ -2804,7 +2822,7 @@ Rules:
 
             const brokenPhotoIndices = [];
             photoURLs.forEach((p, idx) => {
-              if (isPhotoBroken(p)) {
+              if (isPhotoBroken(p) && !p.deleted) {
                 brokenPhotoIndices.push(idx);
               }
             });
@@ -2847,6 +2865,9 @@ Rules:
               const webViewUrl = `https://drive.google.com/uc?export=view&id=${img.id}`;
 
               if (existingPhoto) {
+                if (existingPhoto.deleted) {
+                  return; // Skip re-importing deleted photos
+                }
                 if (isPhotoBroken(existingPhoto) || !existingPhoto.url || existingPhoto.url.includes('[base64-removed]')) {
                   existingPhoto.url = webViewUrl;
                   existingPhoto.driveId = img.id;
@@ -2862,7 +2883,7 @@ Rules:
               let healed = false;
               for (let i = 0; i < photoURLs.length; i++) {
                 const p = photoURLs[i];
-                if (isPhotoBroken(p)) {
+                if (isPhotoBroken(p) && !p.deleted) {
                   const normExistingLabel = (p.label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
                   const isMatch = normExistingLabel && normDriveLabel && (
                     normExistingLabel.indexOf(normDriveLabel) !== -1 ||

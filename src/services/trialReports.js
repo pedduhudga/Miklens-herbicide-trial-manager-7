@@ -259,8 +259,19 @@ function toast(msg, type = 'success') {
 }
 function safeJsonParse(val, fallback = []) {
   if (!val) return fallback;
-  if (typeof val === 'object') return val;
-  try { return JSON.parse(val); } catch { return fallback; }
+  if (typeof val === 'object') {
+    if (Array.isArray(val)) {
+      return val.filter(item => !item || item.deleted !== true);
+    }
+    return val;
+  }
+  try {
+    const parsed = JSON.parse(val);
+    if (Array.isArray(parsed)) {
+      return parsed.filter(item => !item || item.deleted !== true);
+    }
+    return parsed;
+  } catch { return fallback; }
 }
 function validateEfficacy(data, categoryId = null) {
   if (!Array.isArray(data)) return [];

@@ -433,7 +433,7 @@ export default function LargeScaleTrials({ onMenuClick }) {
   const daaCoverage = useMemo(() => {
     if (!activeSubTrial) return { allDAAs: [], obsDAAs: [], photoDAAs: [], hasGaps: false };
     const obs = validateEfficacyData(safeJsonParse(activeSubTrial.EfficacyDataJSON, []));
-    const photos = safeJsonParse(activeSubTrial.PhotoURLs, []);
+    const photos = safeJsonParse(activeSubTrial.PhotoURLs, []).filter(p => !p.deleted);
     const obsDAAs = obs.map(o => o.daa);
     const photoDAAs = photos.map(p => {
       if (!p.date || !activeSubTrial.Date) return 0;
@@ -1501,8 +1501,22 @@ Rules:
     }
     if (!activeSubTrial || !window.confirm('Delete this photo?')) return;
     const photos = safeJsonParse(activeSubTrial.PhotoURLs, []);
-    const deletedPhoto = photos[idx];
-    photos.splice(idx, 1);
+    const activePhotos = photos.filter(p => !p.deleted);
+    const deletedPhoto = activePhotos[idx];
+    if (deletedPhoto) {
+      const rawIdx = photos.indexOf(deletedPhoto);
+      if (rawIdx !== -1) {
+        if (typeof photos[rawIdx] === 'string') {
+          const isDrive = photos[rawIdx].includes('drive.google.com');
+          photos[rawIdx] = {
+            [isDrive ? 'url' : 'fileData']: photos[rawIdx],
+            deleted: true
+          };
+        } else {
+          photos[rawIdx].deleted = true;
+        }
+      }
+    }
 
     let efficacyData = validateEfficacyData(safeJsonParse(activeSubTrial.EfficacyDataJSON, []));
     if (deletedPhoto) {
@@ -3042,10 +3056,13 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
                         </div>
                       </div>
 
-                      {safeJsonParse(activeSubTrial.PhotoURLs, []).length > 0 ? (
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                          {safeJsonParse(activeSubTrial.PhotoURLs, []).map((photo, pIdx) => {
-                            const photoSrc = photo.url || photo.fileData || photo;
+                      {(() => {
+                        const activePhotos = safeJsonParse(activeSubTrial.PhotoURLs, []).filter(p => !p.deleted);
+                        if (activePhotos.length === 0) return null;
+                        return (
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            {activePhotos.map((photo, pIdx) => {
+                              const photoSrc = photo.url || photo.fileData || photo;
                             return (
                               <div key={pIdx} className="border rounded-2xl overflow-hidden shadow-sm bg-white flex flex-col">
                                 <div className="relative h-36 bg-black">
@@ -3079,8 +3096,9 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
                               </div>
                             );
                           })}
-                        </div>
-                      ) : (
+                          </div>
+                        );
+                      })() || (
                         <div className="text-center py-8 text-slate-400 italic">No photos added yet. Snap or upload to perform AI {activeCategory === 'herbicide' ? 'Weed' : config.targetLabel} Identification.</div>
                       )}
                     </div>
