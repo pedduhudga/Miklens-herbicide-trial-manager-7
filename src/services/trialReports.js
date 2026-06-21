@@ -77,6 +77,21 @@ function calculateStatus(categoryId, pVal, baseVal = 0) {
   }
 }
 
+function cleanReportText(text, targetDaa = null) {
+  if (!text || text === '—') return text;
+  let clean = String(text);
+  if (targetDaa !== null && Number(targetDaa) > 0) {
+    // "at DAA 0", "on Day 0", etc.
+    const rxPrepDaa = new RegExp('\\b(at|on|for|from|during)\\s+(daa|day)\\s*0\\b', 'gi');
+    clean = clean.replace(rxPrepDaa, `$1 $2 ${targetDaa}`);
+    // standalone "DAA 0" or "Day 0"
+    clean = clean.replace(/\b(DAA|Day)\s*0\b/gi, `$1 ${targetDaa}`);
+  }
+  // Remove double periods
+  clean = clean.replace(/\.{2,}/g, '.').replace(/\.\s+\./g, '.');
+  return clean;
+}
+
 function getBackupProjects() {
   try {
     const backupRaw = localStorage.getItem('backupState');
@@ -236,7 +251,8 @@ export function getTimelineData(efficacy, categoryId = 'herbicide', trial = null
     
     // 3. Primary Metric Value
     const pVal = getObservationPrimaryValue(categoryId, o) ?? 0;
-    row.push(`${pVal}${config.primaryMetric?.unit || ''}`);
+    const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
+    row.push(`${pVal}${isVigor ? '/10' : (config.primaryMetric?.unit || '')}`);
     
     // 4. Secondary fields
     activeFields.forEach(f => {
@@ -260,12 +276,7 @@ export function getTimelineData(efficacy, categoryId = 'herbicide', trial = null
     // 7. Notes
     let cleanNotes = o.notes || '—';
     const obsDaa = getDaaVal(o);
-    if (obsDaa > 0 && cleanNotes !== '—') {
-      const rxDaa = new RegExp(`\\b(at|on|for|from|during)\\s+daa\\s*0\\b`, 'gi');
-      const rxDay = new RegExp(`\\b(at|on|for|from|during)\\s+day\\s*0\\b`, 'gi');
-      cleanNotes = cleanNotes.replace(rxDaa, `$1 DAA ${obsDaa}`).replace(rxDay, `$1 Day ${obsDaa}`);
-      cleanNotes = cleanNotes.replace(/\bDAA\s*0\b/g, `DAA ${obsDaa}`).replace(/\bDay\s*0\b/g, `Day ${obsDaa}`);
-    }
+    cleanNotes = cleanReportText(cleanNotes, obsDaa);
     row.push(cleanNotes);
     
     return row;
@@ -444,25 +455,29 @@ function coverSummary(efficacy, trial) {
   const config = getCategoryConfig(categoryId);
   const primaryField = getPrimaryObservationField(categoryId);
   const metricLabel = config.primaryMetric?.label || 'Efficacy';
-  const metricUnit = config.primaryMetric?.unit || '%';
   const isPositiveMetric = (categoryId === 'nutrition' || categoryId === 'biostimulant');
+  const metricUnit = isPositiveMetric ? '/10' : (config.primaryMetric?.unit || '%');
 
   const dataFields = getAllTrialDataFields(trial);
   const cropStr = dataFields.crop && dataFields.crop !== '—' ? ` on ${dataFields.crop}` : '';
   const yieldStr = dataFields.yieldValue && dataFields.yieldValue !== '—' ? `, resulting in an ultimate yield of ${dataFields.yieldValue}` : '';
 
   const s = [...efficacy].sort((a, b) => (a.daa ?? 0) - (b.daa ?? 0));
-  if (s.length < 2) return (trial.Conclusion || 'Insufficient observations for trajectory analysis.') + yieldStr;
+  if (s.length < 2) {
+    const text = (trial.Conclusion || 'Insufficient observations for trajectory analysis.') + yieldStr;
+    return cleanReportText(text);
+  }
   
   const first = Number(getObservationPrimaryValue(categoryId, s[0]) ?? 0);
   const last  = Number(getObservationPrimaryValue(categoryId, s[s.length - 1]) ?? 0);
   const valList = s.map(o => Number(getObservationPrimaryValue(categoryId, o) ?? 0));
   
+  let resText = '';
   if (isPositiveMetric) {
     const max = Math.max(...valList);
     const maxD = s.find(o => Number(getObservationPrimaryValue(categoryId, o) ?? 0) === max)?.daa ?? 0;
     const dur = (s[s.length - 1].daa ?? 0) - (s[0].daa ?? 0);
-    return `Aggregate growth/metric measured ${first}${metricUnit} at baseline to a maximum of ${max}${metricUnit} at DAA ${maxD}, and measured ${last}${metricUnit} at DAA ${s[s.length - 1].daa ?? 0}${cropStr}${yieldStr}. The ${dur}-day observation window indicates ${last >= max - 5 ? 'sustained enhancement' : 'early growth stimulus with stabilization'} following application.`;
+    resText = `Aggregate growth/metric measured ${first}${metricUnit} at baseline to a maximum of ${max}${metricUnit} at DAA ${maxD}, and measured ${last}${metricUnit} at DAA ${s[s.length - 1].daa ?? 0}${cropStr}${yieldStr}. The ${dur}-day observation window indicates ${last >= max - 5 ? 'sustained enhancement' : 'early growth stimulus with stabilization'} following application.`;
   } else {
     const min = Math.min(...valList.length ? valList : [100]);
     const minD = s.find(o => Number(getObservationPrimaryValue(categoryId, o) ?? 100) === min)?.daa ?? 0;
@@ -471,8 +486,9 @@ function coverSummary(efficacy, trial) {
     if (categoryId === 'herbicide') noun = 'weed cover';
     else if (categoryId === 'fungicide') noun = 'disease severity';
     else if (categoryId === 'pesticide') noun = 'pest population';
-    return `Aggregate ${noun} declined from ${first}${metricUnit} at baseline to a minimum of ${min}${metricUnit} at DAA ${minD}, and measured ${last}${metricUnit} at DAA ${s[s.length - 1].daa ?? 0}${cropStr}${yieldStr}. The ${dur}-day observation window indicates ${last <= min + 5 ? 'sustained suppression' : 'early knockdown with partial recovery'} following application.`;
+    resText = `Aggregate ${noun} declined from ${first}${metricUnit} at baseline to a minimum of ${min}${metricUnit} at DAA ${minD}, and measured ${last}${metricUnit} at DAA ${s[s.length - 1].daa ?? 0}${cropStr}${yieldStr}. The ${dur}-day observation window indicates ${last <= min + 5 ? 'sustained suppression' : 'early knockdown with partial recovery'} following application.`;
   }
+  return cleanReportText(resText);
 }
 function methodologySentence(trial, trialDate) {
   const p = [];
@@ -512,12 +528,7 @@ function timelineRows(efficacy, categoryId = 'herbicide', trial = null) {
       const status = calculateStatus(categoryId, c, baseVal);
       const species = (o.weedDetails || []).map(w => w.species).filter(Boolean).join(', ') || 'Total';
       let cleanNotes = o.notes || '—';
-      if (daaVal > 0 && cleanNotes !== '—') {
-        const rxDaa = new RegExp(`\\b(at|on|for|from|during)\\s+daa\\s*0\\b`, 'gi');
-        const rxDay = new RegExp(`\\b(at|on|for|from|during)\\s+day\\s*0\\b`, 'gi');
-        cleanNotes = cleanNotes.replace(rxDaa, `$1 DAA ${daaVal}`).replace(rxDay, `$1 Day ${daaVal}`);
-        cleanNotes = cleanNotes.replace(/\bDAA\s*0\b/g, `DAA ${daaVal}`).replace(/\bDay\s*0\b/g, `Day ${daaVal}`);
-      }
+      cleanNotes = cleanReportText(cleanNotes, daaVal);
       return [String(daaVal), species, `${c}%`, status, cleanNotes];
     } else {
       const val = Number(getObservationPrimaryValue(categoryId, o) ?? 0);
@@ -533,14 +544,12 @@ function timelineRows(efficacy, categoryId = 'herbicide', trial = null) {
       const detailsStr = extraDetails.length > 0 ? ` [${extraDetails.join(', ')}]` : '';
 
       let cleanNotes = o.notes || '—';
-      if (daaVal > 0 && cleanNotes !== '—') {
-        const rxDaa = new RegExp(`\\b(at|on|for|from|during)\\s+daa\\s*0\\b`, 'gi');
-        const rxDay = new RegExp(`\\b(at|on|for|from|during)\\s+day\\s*0\\b`, 'gi');
-        cleanNotes = cleanNotes.replace(rxDaa, `$1 DAA ${daaVal}`).replace(rxDay, `$1 Day ${daaVal}`);
-        cleanNotes = cleanNotes.replace(/\bDAA\s*0\b/g, `DAA ${daaVal}`).replace(/\bDay\s*0\b/g, `Day ${daaVal}`);
-      }
+      cleanNotes = cleanReportText(cleanNotes, daaVal);
 
-      return [String(daaVal), targetValue, `${val}${config.primaryMetric?.unit || ''}`, status, `${cleanNotes}${detailsStr}`];
+      const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
+      const obsUnit = isVigor ? '/10' : (config.primaryMetric?.unit || '');
+
+      return [String(daaVal), targetValue, `${val}${obsUnit}`, status, `${cleanNotes}${detailsStr}`];
     }
   });
 }
@@ -1328,10 +1337,12 @@ export async function generateComprehensivePdf(trial, options = {}) {
   const wce = calcWCE(efficacy, categoryId, trial);
   if (wce.length) {
     if (y + 30 > ph - 20) { doc.addPage(); y = 20; }
+    const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
+    const obsUnit = isVigor ? '/10' : '';
     autoTable(doc, {
       startY: y,
       head: [[repConfig.targetLabel, `Initial ${repConfig.primaryObsLabel}`, `Final ${repConfig.primaryObsLabel}`, `${repConfig.primaryMetricKey} (${repConfig.primaryMetricUnit})`]],
-      body: wce.map(w => [w.species, w.initialCover.toFixed(1), w.finalCover.toFixed(1), w.wce.toFixed(1)]),
+      body: wce.map(w => [w.species, w.initialCover.toFixed(1) + obsUnit, w.finalCover.toFixed(1) + obsUnit, w.wce.toFixed(1)]),
       headStyles: { fillColor: primaryColor }, theme: 'striped', styles: { fontSize: 9 }
     });
     y = (doc.lastAutoTable?.finalY ?? y) + 10;
@@ -1563,10 +1574,12 @@ export async function generateScientificReport(trial, options = {}) {
   y = secHeading(doc, '3. Efficacy Analysis', y, ph);
   const wce = calcWCE(efficacy, categoryId, trial);
   if (wce.length) {
+    const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
+    const obsUnit = isVigor ? '/10' : '';
     autoTable(doc, {
       startY: y,
       head: [[repConfig.targetLabel, `Initial ${repConfig.primaryObsLabel}`, `Final ${repConfig.primaryObsLabel}`, `${repConfig.primaryMetricKey} (${repConfig.primaryMetricUnit})`]],
-      body: wce.map(w => [w.species, w.initialCover.toFixed(1), w.finalCover.toFixed(1), w.wce.toFixed(1)]),
+      body: wce.map(w => [w.species, w.initialCover.toFixed(1) + obsUnit, w.finalCover.toFixed(1) + obsUnit, w.wce.toFixed(1)]),
       headStyles: { fillColor: primaryColor }, theme: 'striped', styles: { fontSize: 9 }
     });
     y = (doc.lastAutoTable?.finalY ?? y) + 10;
@@ -1725,7 +1738,9 @@ export async function generatePpt(trial) {
                  { text: `Initial ${repConfig.primaryObsLabel}`, options: { bold: true, color: 'FFFFFF', fill: { color: primaryHex } } },
                  { text: `Final ${repConfig.primaryObsLabel}`, options: { bold: true, color: 'FFFFFF', fill: { color: primaryHex } } },
                  { text: `${repConfig.primaryMetricKey} (%)`, options: { bold: true, color: 'FFFFFF', fill: { color: primaryHex } } }];
-    s3.addTable([hdr, ...wce.map(w => [w.species, w.initialCover.toFixed(1), w.finalCover.toFixed(1), w.wce.toFixed(1)])],
+    const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
+    const obsUnit = isVigor ? '/10' : '';
+    s3.addTable([hdr, ...wce.map(w => [w.species, w.initialCover.toFixed(1) + obsUnit, w.finalCover.toFixed(1) + obsUnit, w.wce.toFixed(1)])],
       { x: 0.4, y: 1.0, w: 9.2, fontSize: 13, colW: [3, 2, 2, 2.2], border: { pt: 0.5, color: 'CBD5E1' } });
   }
 
@@ -2348,11 +2363,15 @@ export function exportHtmlReport(trial, projectName = '') {
     </tr>
   `).join('');
 
-  const wceRows = wce.map(w => `<tr>
-    <td>${w.species}</td><td>${w.initialCover.toFixed(1)}${repConfig.primaryMetricUnit}</td>
-    <td>${w.finalCover.toFixed(1)}${repConfig.primaryMetricUnit}</td>
+  const wceRows = wce.map(w => {
+    const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
+    const obsUnit = isVigor ? '/10' : repConfig.primaryMetricUnit;
+    return `<tr>
+    <td>${w.species}</td><td>${w.initialCover.toFixed(1)}${obsUnit}</td>
+    <td>${w.finalCover.toFixed(1)}${obsUnit}</td>
     <td style="font-weight:700;color:${w.wce >= 80 ? '#10b981' : w.wce >= 60 ? '#3b82f6' : w.wce >= 40 ? '#f59e0b' : '#ef4444'};">${w.wce.toFixed(1)}%</td>
-  </tr>`).join('');
+  </tr>`;
+  }).join('');
 
   const soilHtml = dataFields.soil && Object.keys(dataFields.soil).length > 0 ? `
     <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:14px;margin-bottom:16px;">
@@ -2849,12 +2868,16 @@ export async function exportTrialDocx(trial, options = {}) {
       <tbody>${docxObsRowsHtml}</tbody>
     </table>` : '';
 
-  const wceRows = wce.map(w => `<tr>
+  const wceRows = wce.map(w => {
+    const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
+    const obsUnit = isVigor ? '/10' : repConfig.primaryMetricUnit;
+    return `<tr>
     <td style="border:1px solid #e2e8f0;padding:5px 8px;">${w.species}</td>
-    <td style="border:1px solid #e2e8f0;padding:5px 8px;">${w.initialCover.toFixed(1)}${repConfig.primaryMetricUnit}</td>
-    <td style="border:1px solid #e2e8f0;padding:5px 8px;">${w.finalCover.toFixed(1)}${repConfig.primaryMetricUnit}</td>
+    <td style="border:1px solid #e2e8f0;padding:5px 8px;">${w.initialCover.toFixed(1)}${obsUnit}</td>
+    <td style="border:1px solid #e2e8f0;padding:5px 8px;">${w.finalCover.toFixed(1)}${obsUnit}</td>
     <td style="border:1px solid #e2e8f0;padding:5px 8px;font-weight:bold;color:${w.wce >= 80 ? '#10b981' : w.wce >= 60 ? '#3b82f6' : w.wce >= 40 ? '#f59e0b' : '#ef4444'};">${w.wce.toFixed(1)}%</td>
-  </tr>`).join('');
+  </tr>`;
+  }).join('');
 
   const wceHtml = wce.length ? `
     <h2 style="color:${primaryHex};font-size:14pt;border-bottom:2px solid ${primaryHex};padding-bottom:4px;margin-top:24px;">${repConfig.primaryMetricLabel} (${repConfig.primaryMetricKey})</h2>
@@ -3435,7 +3458,7 @@ export async function generateMasterComprehensivePdf(project, subTrials, options
     const wces = calcWCE(eff, categoryId, st);
     wces.forEach(w => {
       const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
-      const unitSuff = isVigor ? '' : repConfig.primaryMetricUnit;
+      const unitSuff = isVigor ? '/10' : repConfig.primaryMetricUnit;
       wceRows.push([
         st.FormulationName || 'Untreated Check',
         st.Replication || 'R1',
@@ -3473,7 +3496,7 @@ export async function generateMasterComprehensivePdf(project, subTrials, options
     doc.text(`Timing: ${stFields.applicationTiming}  |  Growth Stage: ${stFields.cropStage}  |  BBCH: ${stFields.bbchCode}  |  Method: ${stFields.applicationMethod}`, 14, y); y += 6;
     doc.text(`Soil Profile: ${formatSoilProfile(stFields.soil)}`, 14, y, { maxWidth: pw - 28 }); y += 8;
     if (st.Notes) {
-      doc.text(`Notes: ${st.Notes}`, 14, y, { maxWidth: pw - 28 });
+      doc.text(`Notes: ${cleanReportText(st.Notes)}`, 14, y, { maxWidth: pw - 28 });
       y += 10;
     }
     
@@ -3602,7 +3625,8 @@ export async function generateMasterScientificReport(project, subTrials, options
 
   // Executive summary
   y = secHeading(doc, 'Executive Summary', y, ph, 14, primaryColor);
-  const narrative = aiSummary || `This master scientific report aggregates findings from ${subTrials.length} Sub-Trial monitoring locations evaluated within the ${project.Name} area. Localized efficacy tracking, target species distribution timelines, and photographic logs were evaluated. Overall efficacy profiles and target responses are compiled below.`;
+  const narrativeRaw = aiSummary || `This master scientific report aggregates findings from ${subTrials.length} Sub-Trial monitoring locations evaluated within the ${project.Name} area. Localized efficacy tracking, target species distribution timelines, and photographic logs were evaluated. Overall efficacy profiles and target responses are compiled below.`;
+  const narrative = cleanReportText(narrativeRaw);
   const narrativeLines = narrative.split('\n');
   for (const rawLine of narrativeLines) {
     const line = rawLine.trim();
@@ -3644,7 +3668,7 @@ export async function generateMasterScientificReport(project, subTrials, options
     const wces = calcWCE(eff, categoryId, st);
     wces.forEach(w => {
       const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
-      const unitSuff = isVigor ? '' : repConfig.primaryMetricUnit;
+      const unitSuff = isVigor ? '/10' : repConfig.primaryMetricUnit;
       wceRows.push([
         st.FormulationName || 'Untreated Check',
         st.Replication || 'R1',
@@ -3763,11 +3787,13 @@ export async function generateMasterPpt(project, subTrials) {
     const eff = validateEfficacy(safeJsonParse(st.EfficacyDataJSON, []));
     const wces = calcWCE(eff, categoryId, st);
     wces.forEach(w => {
+      const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
+      const obsUnit = isVigor ? '/10' : repConfig.primaryMetricUnit;
       wceRows.push([
         st.FormulationName || 'Untreated Check',
         w.species,
-        w.initialCover.toFixed(1) + repConfig.primaryMetricUnit,
-        w.finalCover.toFixed(1) + repConfig.primaryMetricUnit,
+        w.initialCover.toFixed(1) + obsUnit,
+        w.finalCover.toFixed(1) + obsUnit,
         w.wce.toFixed(1) + '%'
       ]);
     });

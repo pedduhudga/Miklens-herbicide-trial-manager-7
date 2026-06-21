@@ -14,8 +14,19 @@ if (typeof Date !== 'undefined') {
 export function parseCustomDate(str) {
     if (!str) return null;
     const s = String(str).trim();
-    // Match DD-MMM-YYYY (e.g. 19-Jun-2026 or 19-Jun-26)
     const monthMap = { jan:0, feb:1, mar:2, apr:3, may:4, jun:5, jul:6, aug:7, sep:8, oct:9, nov:10, dec:11 };
+    
+    // Match DD-MMM (e.g. 19-Jun or 17-Jun)
+    const shortMonthMatch = s.match(/^(\d{1,2})[-/]([a-z]{3})$/i);
+    if (shortMonthMatch) {
+        const day = parseInt(shortMonthMatch[1], 10);
+        const monthStr = shortMonthMatch[2].toLowerCase();
+        const month = monthMap[monthStr] !== undefined ? monthMap[monthStr] : 0;
+        const year = new Date().getFullYear();
+        return new Date(year, month, day);
+    }
+
+    // Match DD-MMM-YYYY (e.g. 19-Jun-2026 or 19-Jun-26)
     const mMatch = s.match(/^(\d{1,2})[-/]([a-z]{3})[-/](\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::\d{2})?\s*([AP]M)?)?/i);
     if (mMatch) {
         const day = parseInt(mMatch[1], 10);
