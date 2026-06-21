@@ -587,7 +587,7 @@ function secHeading(doc, text, y, ph, fs = 14, color = TEAL) {
   doc.setTextColor(0, 0, 0); doc.setFont(undefined, 'normal'); doc.setFontSize(10);
   return y + 10;
 }
-async function addPhotoGrid(doc, photos, y, ph, maxSize = 50, showDates = true) {
+async function addPhotoGrid(doc, photos, y, ph, maxSize = 50, showDates = true, trialDate = null) {
   const pw = doc.internal.pageSize.getWidth();
   let xOff = 14;
   const sortedPhotos = [...photos].sort((a, b) => {
@@ -617,7 +617,12 @@ async function addPhotoGrid(doc, photos, y, ph, maxSize = 50, showDates = true) 
       if (y + ih + 14 > ph - 20) { doc.addPage(); y = 20; xOff = 14; }
       addImgSafe(doc, imgData, xOff, y, iw, ih);
       doc.setFontSize(7);
-      const label = getCleanPhotoLabel(p, i) || (p.date ? `Photo: ${formatPhotoDate(p.date)}` : `Photo ${i + 1}`);
+      
+      let photoDaa = null;
+      if (trialDate && p.date) {
+        photoDaa = calculateDAA(p.date, trialDate);
+      }
+      const label = getCleanPhotoLabel(p, i, photoDaa) || (p.date ? `Photo: ${formatPhotoDate(p.date)}` : `Photo ${i + 1}`);
       doc.text(label, xOff, y + ih + 4, { maxWidth: iw + 8 });
       if (showDates && p.date && p.label) doc.text(formatPhotoDate(p.date), xOff, y + ih + 8, { maxWidth: iw + 8 });
       xOff += iw + 12;
@@ -1420,7 +1425,7 @@ export async function generateComprehensivePdf(trial, options = {}) {
   // Photos
   if (photos.length) {
     y = secHeading(doc, '5. Field Photo Log', y, ph);
-    y = await addPhotoGrid(doc, photos, y, ph, 50, showPhotoDates);
+    y = await addPhotoGrid(doc, photos, y, ph, 50, showPhotoDates, trial.Date);
   }
 
   // Harvest & Yield Report Section
@@ -1456,7 +1461,7 @@ export async function generateComprehensivePdf(trial, options = {}) {
       if (y + 40 > ph - 20) { doc.addPage(); y = 20; }
       doc.setFont(undefined, 'bold'); doc.setFontSize(10);
       doc.text('Harvest Photo Gallery:', 14, y); y += 6;
-      y = await addPhotoGrid(doc, harvestPhotos, y, ph, 40, false);
+      y = await addPhotoGrid(doc, harvestPhotos, y, ph, 40, false, trial.Date);
     }
   }
 
@@ -1657,7 +1662,7 @@ export async function generateScientificReport(trial, options = {}) {
   // Photos
   if (photos.length) {
     y = secHeading(doc, '5. Field Photo Log', y, ph);
-    y = await addPhotoGrid(doc, photos, y, ph, 50, showPhotoDates);
+    y = await addPhotoGrid(doc, photos, y, ph, 50, showPhotoDates, trial.Date);
   }
 
   // Harvest & Yield Report Section
@@ -1693,7 +1698,7 @@ export async function generateScientificReport(trial, options = {}) {
       if (y + 40 > ph - 20) { doc.addPage(); y = 20; }
       doc.setFont(undefined, 'bold'); doc.setFontSize(10);
       doc.text('Harvest Photo Gallery:', 14, y); y += 6;
-      y = await addPhotoGrid(doc, harvestPhotos, y, ph, 40, false);
+      y = await addPhotoGrid(doc, harvestPhotos, y, ph, 40, false, trial.Date);
     }
   }
 
@@ -3419,7 +3424,7 @@ export async function generateMasterComprehensivePdf(project, subTrials, options
   doc.setFontSize(10); doc.setFont(undefined, 'bold');
   doc.text('Trial Progress Summary', 14, y); y += 4;
   doc.setFont(undefined, 'normal');
-  const confidence = maxDaa <= 3 ? 'Preliminary (Early Stage Assessment)' : maxDaa <= 14 ? 'Medium (Mid Stage)' : 'High (Final Stage)';
+  const confidence = maxDaa <= 3 ? `Low–Moderate Confidence (Observation Window 0–${maxDaa} DAA)` : maxDaa <= 14 ? 'Medium (Mid Stage)' : 'High (Final Stage)';
   const progressRows = [
     ['Plots Evaluated', `${subTrials.length}/${subTrials.length}`, 'Total Observations (DAA Records)', String(totalObs)],
     ['DAA Observation Range', `0–${maxDaa} DAA`, 'Total Photos', String(totalPhotos)],
@@ -3659,7 +3664,7 @@ export async function generateMasterScientificReport(project, subTrials, options
   doc.setFontSize(10); doc.setFont(undefined, 'bold');
   doc.text('Trial Progress Summary', 14, y); y += 4;
   doc.setFont(undefined, 'normal');
-  const confidence = maxDaa <= 3 ? 'Preliminary (Early Stage Assessment)' : maxDaa <= 14 ? 'Medium (Mid Stage)' : 'High (Final Stage)';
+  const confidence = maxDaa <= 3 ? `Low–Moderate Confidence (Observation Window 0–${maxDaa} DAA)` : maxDaa <= 14 ? 'Medium (Mid Stage)' : 'High (Final Stage)';
   const progressRows = [
     ['Plots Evaluated', `${subTrials.length}/${subTrials.length}`, 'Total Observations (DAA Records)', String(totalObs)],
     ['DAA Observation Range', `0–${maxDaa} DAA`, 'Total Photos', String(totalPhotos)],
