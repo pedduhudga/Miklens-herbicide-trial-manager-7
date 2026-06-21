@@ -490,6 +490,46 @@ function calculateExGFromBase64(base64Str) {
   });
 }
 
+function toBase64(src, maxPx = 400) {
+  return new Promise(resolve => {
+    try {
+      const img = new Image(); img.crossOrigin = 'anonymous';
+      const t = setTimeout(() => resolve(null), 8000);
+      img.onload = () => {
+        clearTimeout(t);
+        try {
+          const r = img.width / img.height;
+          let w = img.width, h = img.height;
+          if (w > maxPx || h > maxPx) {
+            if (r > 1) { w = maxPx; h = Math.round(maxPx / r); }
+            else { h = maxPx; w = Math.round(maxPx * r); }
+          }
+          const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+          cv.getContext('2d').drawImage(img, 0, 0, w, h);
+          resolve(cv.toDataURL('image/jpeg', 0.85));
+        } catch { resolve(null); }
+      };
+      img.onerror = () => { clearTimeout(t); resolve(null); };
+      
+      if (src && !src.startsWith('data:image/')) {
+        const driveMatch = src.match(/[?&]id=([a-zA-Z0-9_-]{20,})/) ||
+                           src.match(/\/d\/([a-zA-Z0-9_-]{20,})/) ||
+                           src.match(/\/file\/d\/([a-zA-Z0-9_-]{20,})/);
+        if (driveMatch) {
+          const directUrl = `https://drive.google.com/uc?export=download&id=${driveMatch[1]}`;
+          img.src = `https://images.weserv.nl/?url=${encodeURIComponent(directUrl)}&w=${maxPx}&output=jpg`;
+        } else if (/^https?:\/\//i.test(src)) {
+          img.src = `https://images.weserv.nl/?url=${encodeURIComponent(src)}&w=${maxPx}&output=jpg`;
+        } else {
+          img.src = src;
+        }
+      } else {
+        img.src = src;
+      }
+    } catch { resolve(null); }
+  });
+}
+
 export class AdvancedReportGenerator {
   constructor(trialOrTrials, category = 'nutrition') {
     this.category = category;
@@ -1490,7 +1530,6 @@ export class AdvancedReportGenerator {
     };
   }
 
-  // 11. Photos Sheet
   async createPhotosSheet() {
     const ws = this.workbook.addWorksheet('Photos');
     ws.views = [{ showGridLines: true }];
@@ -1503,11 +1542,18 @@ export class AdvancedReportGenerator {
       return;
     }
 
-    // Embed photos as image files if available as local fileData
+    // Embed photos as image files if available as local fileData or remote URLs
     let row = 3;
     for (let i = 0; i < this.photos.length; i++) {
       const p = this.photos[i];
-      const data = p.fileData || p.url || p.src;
+      const src = p.fileData || p.url || p.src;
+      if (!src) continue;
+      
+      let data = src;
+      if (!src.startsWith('data:image/')) {
+        data = await toBase64(src, 600);
+      }
+      
       if (data && data.startsWith('data:image/')) {
         try {
           const imageId = this.workbook.addImage({

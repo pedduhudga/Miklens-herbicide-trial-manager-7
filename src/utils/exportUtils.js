@@ -109,11 +109,12 @@ export async function exportScientificReportAsDOC(scope, state, options = {}) {
                         let photoGrid = photoArray.map((p, idx) => {
                             const label = p.label || `Photo ${idx + 1}`;
                             const dateStr = p.date ? new Date(p.date).toLocaleDateString() : '';
+                            const imgSrc = p.fileData || p.url || p.src || '';
                             return `
-                                <div style="display: inline-block; width: 45%; margin: 2%; border: 1px solid #ccc; padding: 5px; text-align: center;">
+                                <div style="display: inline-block; width: 45%; margin: 2%; border: 1px solid #ccc; padding: 5px; text-align: center; vertical-align: top;">
                                     <p style="font-size: 9pt; font-weight: bold; margin: 5px 0;">${label}</p>
                                     <p style="font-size: 8pt; color: #666; margin: 0 0 5px 0;">Captured: ${dateStr}</p>
-                                    ${p.url ? `<p style="font-size: 8pt; color: #0d9488;"><a href="${p.url}" target="_blank">View High-Res Image</a></p>` : ''}
+                                    ${imgSrc ? `<img src="${imgSrc}" style="max-width: 100%; max-height: 180px; display: block; margin: 5px auto;" />` : ''}
                                 </div>
                             `;
                         }).join('');
@@ -290,6 +291,38 @@ export async function exportRegulatoryReportAsDOC(project, state, options = {}) 
                 <tr><td><strong>With Photos:</strong></td><td>${projectTrials.filter(t => (JSON.parse(t.PhotoURLs || '[]')).length > 0).length}</td></tr>
                 <tr><td><strong>With Efficacy Data:</strong></td><td>${projectTrials.filter(t => (JSON.parse(t.EfficacyDataJSON || '[]')).length > 0).length}</td></tr>
             </table>
+
+            ${(() => {
+                const allPhotos = [];
+                projectTrials.forEach(t => {
+                    const pList = JSON.parse(t.PhotoURLs || '[]');
+                    pList.forEach(p => {
+                        allPhotos.push({
+                            ...p,
+                            trialName: t.FormulationName || 'Untreated Control',
+                            rep: t.Replication || 'R1'
+                        });
+                    });
+                });
+                if (allPhotos.length === 0) return '';
+                return `
+                    <h2>7. Photographic Evidence Log</h2>
+                    <div style="width: 100%;">
+                        ${allPhotos.map((p, idx) => {
+                            const label = p.label ? `[${p.trialName} - ${p.rep}] ${p.label}` : `Plot - ${p.trialName} - ${p.rep} - Image ${idx + 1}`;
+                            const dateStr = p.date ? new Date(p.date).toLocaleDateString() : '';
+                            const imgSrc = p.fileData || p.url || p.src || '';
+                            return `
+                                <div style="display: inline-block; width: 45%; margin: 2%; border: 1px solid #ccc; padding: 5px; text-align: center; vertical-align: top;">
+                                    <p style="font-size: 9pt; font-weight: bold; margin: 5px 0;">${label}</p>
+                                    <p style="font-size: 8pt; color: #666; margin: 0 0 5px 0;">Captured: ${dateStr}</p>
+                                    ${imgSrc ? `<img src="${imgSrc}" style="max-width: 100%; max-height: 180px; display: block; margin: 5px auto;" />` : ''}
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                `;
+            })()}
 
             <hr/>
             <p class="center" style="font-size: 9pt; color: #666;">
@@ -527,6 +560,27 @@ export async function exportTrialToPPTX(trial, options = {}) {
     if (trial.Conclusion) {
         notesSlide.addText('Conclusion:', { x: 0.5, y: 3.8, w: '90%', h: 0.3, fontSize: 14, bold: true, color: colors.primary });
         notesSlide.addText(trial.Conclusion, { x: 0.5, y: 4.2, w: '90%', h: 1.5, fontSize: 11 });
+    }
+
+    // Slide 6: Photographic Log
+    const photosList = JSON.parse(trial.PhotoURLs || '[]');
+    if (photosList.length > 0) {
+        const photoSlide = pptx.addSlide();
+        photoSlide.addText('Field Photo Log', { x: 0.5, y: 0.5, w: '90%', h: 0.5, fontSize: 20, bold: true, color: colors.primary });
+        
+        const pos = [[0.5, 1.2, 4.2, 3.0], [5.1, 1.2, 4.2, 3.0], [0.5, 4.5, 4.2, 3.0], [5.1, 4.5, 4.2, 3.0]];
+        for (let i = 0; i < Math.min(photosList.length, 4); i++) {
+            const p = photosList[i];
+            const src = p.fileData || p.url || p.src;
+            if (!src) continue;
+            try {
+                const [px, py, pw2, ph2] = pos[i];
+                photoSlide.addImage({ data: src, x: px, y: py, w: pw2, h: ph2 });
+                photoSlide.addText(p.label || `Photo ${i + 1}`, { x: px, y: py + ph2 + 0.1, w: pw2, h: 0.3, fontSize: 9, color: '6B7280' });
+            } catch (e) {
+                console.warn("Failed to embed image in PPTX:", e);
+            }
+        }
     }
 
     // Save

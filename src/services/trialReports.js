@@ -4266,6 +4266,27 @@ export function exportMasterDocx(project, subTrials, options = {}) {
     </tr>`;
   }).join('');
 
+  const photoLogHtml = subTrials.map(st => {
+    const photos = safeJsonParse(st.PhotoURLs, []);
+    if (!photos.length) return '';
+    const imgGrid = photos.map((p, idx) => {
+      const label = p.label ? `[${st.FormulationName}] ${p.label}` : `Plot ${st.PlotNumber || ''} - ${st.FormulationName} - Photo ${idx + 1}`;
+      const dateStr = p.date ? new Date(p.date).toLocaleDateString() : '';
+      const imgSrc = p.fileData || p.url || p.src || '';
+      if (!imgSrc) return '';
+      return `
+        <div style="display:inline-block;width:45%;margin:2%;border:1px solid #ccc;padding:5px;text-align:center;vertical-align:top;">
+          <p style="font-size:9pt;font-weight:bold;margin:5px 0;">${label}</p>
+          <p style="font-size:8pt;color:#666;margin:0 0 5px 0;">Captured: ${dateStr}</p>
+          <img src="${imgSrc}" style="max-width:100%;max-height:180px;display:block;margin:5px auto;" />
+        </div>
+      `;
+    }).join('');
+    return imgGrid ? `<h3>Photos for ${st.FormulationName || 'Untreated Check'} (${st.Replication || 'R1'})</h3><div style="width:100%;">${imgGrid}</div>` : '';
+  }).filter(Boolean).join('');
+
+  const photoSection = photoLogHtml ? `<h2>Photographic Log</h2>${photoLogHtml}` : '';
+
   const wordHtml = `<!DOCTYPE html>
 <html xmlns:o="urn:schemas-microsoft-com:office:office"
       xmlns:w="urn:schemas-microsoft-com:office:word"
@@ -4308,6 +4329,7 @@ export function exportMasterDocx(project, subTrials, options = {}) {
   </table>
   ${aiSummaryHtml}
   ${analysisHtml}
+  ${photoSection}
 </body></html>`;
 
   dlBlob(new Blob([wordHtml], { type: 'application/msword' }), `Master_Report_${safeName(project.Name)}.doc`);
