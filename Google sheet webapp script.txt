@@ -415,7 +415,7 @@ function serveReportCard(trialId, spreadsheetId) {
 
             photoArray = (Array.isArray(photoArray) ? photoArray : []).map(item =>
                 (typeof item === 'string' ? { url: item } : (item || {}))
-            ).filter(item => item.url || item.fileData);
+            ).filter(item => (item.url || item.fileData) && item.deleted !== true);
 
             if (photoArray.length > 0) {
                 // Helper: extract Drive file ID from any Drive URL format
@@ -2418,7 +2418,10 @@ function safeJsonParse(jsonString) {
     if (!jsonString || jsonString === "" || jsonString === "null") return [];
     try {
         const parsed = JSON.parse(jsonString);
-        return Array.isArray(parsed) ? parsed : [];
+        if (Array.isArray(parsed)) {
+            return parsed.filter(item => !item || item.deleted !== true);
+        }
+        return [];
     } catch (e) {
         return [];
     }
