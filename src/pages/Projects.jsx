@@ -1003,9 +1003,10 @@ export default function Projects({ onMenuClick }) {
     if (!activeProjectId) return;
     setIsAnalyzing(true);
     try {
-      const engine = new AnalysisEngine(activeProjectId, state, getAppState);
+      const currentState = getAppState();
+      const engine = new AnalysisEngine(activeProjectId, currentState, getAppState);
       // Detect primary metric: prefer yield if any trial has yield data, otherwise use category's primary observation field
-      const hasYield = (state.trials || []).filter(t => String(t.ProjectID) === String(activeProjectId)).some(t => parseFloat(t.Yield || t.YieldValue) > 0);
+      const hasYield = (currentState.trials || []).filter(t => String(t.ProjectID) === String(activeProjectId)).some(t => parseFloat(t.Yield || t.YieldValue) > 0);
       const primaryMetric = hasYield ? 'yield' : getPrimaryObservationField(activeCategory);
       const results = await engine.analyze(primaryMetric, null, null, { postHoc: method, persist: true });
       setAnalysisResults(results);
@@ -1014,7 +1015,7 @@ export default function Projects({ onMenuClick }) {
     } finally {
       setIsAnalyzing(false);
     }
-  }, [activeProjectId, state, postHocMethod, activeCategory]);
+  }, [activeProjectId, getAppState, postHocMethod, activeCategory]);
 
   // Auto-run analysis when project opens
   useEffect(() => {
