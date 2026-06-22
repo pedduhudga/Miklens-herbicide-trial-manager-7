@@ -51,8 +51,8 @@ importers:
         specifier: ^0.3.1
         version: 0.3.1
       html2canvas:
-        specifier: ^1.4.1
-        version: 1.4.1
+        specifier: npm:html2canvas-oklch@^1.5.0-alpha.0
+        version: html2canvas-oklch@1.5.0-alpha.0
       jspdf:
         specifier: ^4.2.1
         version: 4.2.1
@@ -1432,6 +1432,10 @@ packages:
 
   html-docx-js@0.3.1:
     resolution: {integrity: sha512-QSrMiRhxesqxYCa3f+2Z3ttIHPzSjDOL1tCOmIDIEET7HdabxXND6tAbsFMXAgRG4RADQ3wbl74ydMmjidaDPA==}
+
+  html2canvas-oklch@1.5.0-alpha.0:
+    resolution: {integrity: sha512-7cp1ODcbd+lkwi+t3igDIMf7TzV8YIRgG7Nt3XzjSkVCxUDUB94m/RPtb/wO2/EhX80tUTFFbVf0Ap75uQQx8w==}
+    engines: {node: '>=8.0.0'}
 
   html2canvas@1.4.1:
     resolution: {integrity: sha512-fPU6BHNpsyIhr8yyMpTLLxAbkaK8ArIBcmZIRiBLiDhjeqvXolaEmDGmELFuX9I4xDcaKKcJl+TKZLqruBbmWA==}
@@ -3930,10 +3934,16 @@ snapshots:
       lodash.escape: 3.2.0
       lodash.merge: 3.3.2
 
+  html2canvas-oklch@1.5.0-alpha.0:
+    dependencies:
+      css-line-break: 2.1.0
+      text-segmentation: 1.0.3
+
   html2canvas@1.4.1:
     dependencies:
       css-line-break: 2.1.0
       text-segmentation: 1.0.3
+    optional: true
 
   http-parser-js@0.5.10: {}
 
