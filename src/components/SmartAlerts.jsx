@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 
 export default function SmartAlerts({ onViewTrial, compact = false }) {
-  const { state } = useAppState();
+  const { state, getAppState } = useAppState();
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all'); // all, critical, rescue, observation
@@ -24,7 +24,8 @@ export default function SmartAlerts({ onViewTrial, compact = false }) {
   useEffect(() => {
     const loadAlerts = () => {
       setLoading(true);
-      const allAlerts = generateAllAlerts(state);
+      const currentState = getAppState();
+      const allAlerts = generateAllAlerts(currentState);
       setAlerts(allAlerts);
       setLoading(false);
     };
@@ -34,7 +35,7 @@ export default function SmartAlerts({ onViewTrial, compact = false }) {
     // Refresh every 5 minutes
     const interval = setInterval(loadAlerts, 5 * 60 * 1000);
     return () => clearInterval(interval);
-  }, [state]);
+  }, [state.trials, state.projects, state.activeCategory, getAppState]);
 
   // Get alert counts
   const counts = useMemo(() => getAlertCounts(alerts), [alerts]);
