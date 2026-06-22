@@ -2036,8 +2036,8 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
 
       toast('Generating Greenhouse Layout PDF...', 'info');
 
-      // Import html2canvas and jsPDF
-      const html2canvasModule = await import('html2canvas');
+      // Import html2canvas-oklch and jsPDF
+      const html2canvasModule = await import('html2canvas-oklch');
       const html2canvas = html2canvasModule.default || html2canvasModule;
       const jsPDFModule = await import('jspdf');
       const { jsPDF } = jsPDFModule;
