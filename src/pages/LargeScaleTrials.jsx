@@ -190,7 +190,7 @@ import {
   exportMasterDocx
 } from '../services/trialReports.js';
 
-const L = window.L;
+import L from 'leaflet';
 
 const emptySubTrialForm = () => ({
   FormulationName: '',
@@ -1824,16 +1824,20 @@ Rules:
 
   // Initialise Leaflet Map
   useEffect(() => {
-    if (!L || !mapContainerRef.current) return;
+    if (dashboardTab !== 'map' || !L || !mapContainerRef.current) return;
 
     // If a map instance already exists, but the container was unmounted/re-created in DOM,
     // we must clean up the old instance to prevent holding onto a detached DOM element.
     if (mapRef.current) {
-      mapRef.current.remove();
+      try {
+        mapRef.current.remove();
+      } catch (err) {
+        console.warn('[LargeScaleTrials] Error removing old map instance:', err);
+      }
       mapRef.current = null;
     }
 
-    if (!mapRef.current) {
+    try {
       mapRef.current = L.map(mapContainerRef.current, { maxZoom: 22 }).setView([20.5937, 78.9629], 5);
       L.tileLayer('http://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
         maxZoom: 22,
@@ -1844,13 +1848,25 @@ Rules:
       markersGroupRef.current = L.layerGroup().addTo(mapRef.current);
 
       setTimeout(() => {
-        if (mapRef.current) mapRef.current.invalidateSize();
+        if (mapRef.current) {
+          try {
+            mapRef.current.invalidateSize();
+          } catch (err) {
+            console.warn('[LargeScaleTrials] Error invalidating map size:', err);
+          }
+        }
       }, 400);
+    } catch (err) {
+      console.error('[LargeScaleTrials] Error initializing map:', err);
     }
 
     return () => {
       if (mapRef.current) {
-        mapRef.current.remove();
+        try {
+          mapRef.current.remove();
+        } catch (err) {
+          console.warn('[LargeScaleTrials] Error removing map in cleanup:', err);
+        }
         mapRef.current = null;
       }
     };
@@ -1858,41 +1874,45 @@ Rules:
 
   // Draw sub-trial markers on Map
   useEffect(() => {
-    if (!mapRef.current || !markersGroupRef.current) return;
+    if (dashboardTab !== 'map' || !mapRef.current || !markersGroupRef.current) return;
 
-    markersGroupRef.current.clearLayers();
-    const coords = [];
+    try {
+      markersGroupRef.current.clearLayers();
+      const coords = [];
 
-    subTrials.forEach(st => {
-      const lat = parseFloat(st.Lat);
-      const lon = parseFloat(st.Lon);
-      if (isNaN(lat) || isNaN(lon)) return;
+      subTrials.forEach(st => {
+        const lat = parseFloat(st.Lat);
+        const lon = parseFloat(st.Lon);
+        if (isNaN(lat) || isNaN(lon)) return;
 
-      coords.push([lat, lon]);
+        coords.push([lat, lon]);
 
-      const marker = L.marker([lat, lon], {
-        icon: L.divIcon({
-          className: 'custom-subtrial-pin',
-          html: `<div class="w-8 h-8 rounded-full ${theme.bgSecondary} border-2 border-white flex items-center justify-center text-white font-bold text-xs shadow-lg ${theme.hoverBg} transition-colors">${st.Replication || 'ST'}</div>`,
-          iconSize: [32, 32],
-          iconAnchor: [16, 16]
-        })
+        const marker = L.marker([lat, lon], {
+          icon: L.divIcon({
+            className: 'custom-subtrial-pin',
+            html: `<div class="w-8 h-8 rounded-full ${theme.bgSecondary} border-2 border-white flex items-center justify-center text-white font-bold text-xs shadow-lg ${theme.hoverBg} transition-colors">${st.Replication || 'ST'}</div>`,
+            iconSize: [32, 32],
+            iconAnchor: [16, 16]
+          })
+        });
+
+        marker.bindPopup(`
+          <div class="p-2.5 font-sans text-xs min-w-[140px]">
+            <h4 class="font-bold text-slate-800">${st.FormulationName || 'Untreated Spot'}</h4>
+            <p class="text-slate-500 font-medium mt-0.5">Rep: ${st.Replication} | Plot: ${st.PlotNumber || 'N/A'}</p>
+            <p class="text-slate-400 mt-1">${lat.toFixed(6)}, ${lon.toFixed(6)}</p>
+            <button onclick="window.dispatchEvent(new CustomEvent('app:select-subtrial', {detail: '${st.ID}'}))" class="mt-2 w-full px-2 py-1 ${theme.bg} text-white font-bold rounded text-[10px] text-center border-none cursor-pointer">Inspect Spot</button>
+          </div>
+        `);
+
+        marker.addTo(markersGroupRef.current);
       });
 
-      marker.bindPopup(`
-        <div class="p-2.5 font-sans text-xs min-w-[140px]">
-          <h4 class="font-bold text-slate-800">${st.FormulationName || 'Untreated Spot'}</h4>
-          <p class="text-slate-500 font-medium mt-0.5">Rep: ${st.Replication} | Plot: ${st.PlotNumber || 'N/A'}</p>
-          <p class="text-slate-400 mt-1">${lat.toFixed(6)}, ${lon.toFixed(6)}</p>
-          <button onclick="window.dispatchEvent(new CustomEvent('app:select-subtrial', {detail: '${st.ID}'}))" class="mt-2 w-full px-2 py-1 ${theme.bg} text-white font-bold rounded text-[10px] text-center border-none cursor-pointer">Inspect Spot</button>
-        </div>
-      `);
-
-      marker.addTo(markersGroupRef.current);
-    });
-
-    if (coords.length > 0) {
-      mapRef.current.fitBounds(L.latLngBounds(coords).pad(0.25));
+      if (coords.length > 0) {
+        mapRef.current.fitBounds(L.latLngBounds(coords).pad(0.25));
+      }
+    } catch (err) {
+      console.warn('[LargeScaleTrials] Error updating map markers:', err);
     }
   }, [subTrials, dashboardTab, activeProjectId, selectedSubTrialId, viewMode]);
 
