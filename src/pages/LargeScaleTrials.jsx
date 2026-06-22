@@ -525,7 +525,7 @@ export default function LargeScaleTrials({ onMenuClick }) {
     setProjectAnalysis(baseline);
 
     let isMounted = true;
-    const engine = new AnalysisEngine(activeProjectId, state, getAppState);
+    const engine = new AnalysisEngine(activeProjectId, getAppState(), getAppState);
     const primaryMetric = analysisTrials.some(t => parseFloat(t.YieldValue || t.Yield) > 0) ? 'yield' : primaryObsField;
 
     const runAnalysis = async () => {
@@ -559,7 +559,7 @@ export default function LargeScaleTrials({ onMenuClick }) {
 
     runAnalysis();
     return () => { isMounted = false; };
-  }, [activeProjectId, activeCategory, subTrials, activeProject, projectDesign, projectWarnings, projectTreatmentSummary, state, getAppState]);
+  }, [activeProjectId, activeCategory, subTrials, activeProject, projectDesign, projectWarnings, projectTreatmentSummary, getAppState]);
 
   // Color mappings matching TrialCard
   const RESULT_COLORS = {
