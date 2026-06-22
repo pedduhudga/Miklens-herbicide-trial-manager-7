@@ -19407,7 +19407,7 @@ Total Trials: ${(state.trials || []).length} | Total Projects: ${(state.projects
                     if (!cards.length) throw new Error('No card nodes found for PDF export');
 
                     const doc = createPdfDoc({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-                    const html2canvasModule = await import('html2canvas-oklch');
+                    const html2canvasModule = await import('html2canvas');
                     const html2canvas = html2canvasModule.default || html2canvasModule;
                     const pageW = 210;
                     const pageH = 297;
