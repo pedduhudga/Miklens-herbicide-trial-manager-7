@@ -6,7 +6,7 @@ import TopBar from '../components/TopBar.jsx';
 import Modal from '../components/Modal.jsx';
 import { addProject, deleteProject, addBlock, deleteBlock, updateProject, addBatchTrials, deleteTrial } from '../services/dataLayer.js';
 import {
-  Plus, Trash2, Layers, Beaker, Activity, ChevronRight, ArrowLeft,
+  Plus, Trash2, Edit, Layers, Beaker, Activity, ChevronRight, ArrowLeft,
   Lock, Unlock, Download, FileText, RefreshCw, BarChart2, Shuffle,
   ClipboardList, Package, Sparkles, Save, Loader2, CheckCircle2,
   AlertTriangle, AlertCircle, ShieldAlert, LayoutGrid, TrendingUp,
