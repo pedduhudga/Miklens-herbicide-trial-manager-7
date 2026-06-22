@@ -115,7 +115,7 @@ export default function Login() {
             Advancing Agricultural Research
           </span>
           <h1 className="text-5xl font-extrabold leading-tight text-white mt-6">
-            Miklens Herbicide <br />
+            Miklens <br />
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-cyan-400">
               Trial Manager
             </span>
@@ -173,7 +173,7 @@ export default function Login() {
           </h2>
 
           <p className="text-center text-slate-400 mt-2 text-sm">
-            Sign in to manage your herbicide trials
+            Sign in to manage your trials.
           </p>
 
           <form onSubmit={handleLogin} className="mt-8 space-y-5">
