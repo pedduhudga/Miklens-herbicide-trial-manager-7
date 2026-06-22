@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import PlotScanner from './pages/PlotScanner.jsx';
 import DataManagement from './pages/DataManagement.jsx';
 import Settings from './pages/Settings.jsx';
@@ -51,6 +51,7 @@ import { getCategoryConfig } from './utils/categoryConfig.js';
 import PermissionGuard from './components/PermissionGuard.jsx';
 
 function AppLayout() {
+  const location = useLocation(); // Subscribe to location changes to force update of nested routes
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const toggleSidebar = () => setSidebarOpen(!sidebarOpen);
 
