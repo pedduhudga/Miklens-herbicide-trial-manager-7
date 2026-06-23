@@ -2385,101 +2385,157 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       });
 
       // ── Group Elements Into Clean Page Sets (To prevent page-break cutoffs) ──
-      const children = Array.from(clone.children);
-      let colHeadersRow = null;
-      let currentBlockIndex = 0; // 0: Block 1, 1: Block 2, 2: Block 3
+      // Find the scrollable wrapper containing the rows
+      const scrollableWrapper = Array.from(clone.querySelectorAll('div')).find(div => 
+        Array.from(div.children).some(child => child.textContent.includes('BLOCK 1'))
+      );
 
-      const page1Elements = [];
-      const page2Elements = [];
-      const page3Elements = [];
+      // Find the column headers row (the one containing C1 and C2 text, outside the wrapper)
+      const colHeadersRow = Array.from(clone.children).find(child => 
+        child.textContent.includes('C1') && child.textContent.includes('C2')
+      );
 
-      children.forEach((child, index) => {
-        // Find column headers row (C1, C2...)
-        if (child.textContent.includes('C1') && child.textContent.includes('C2')) {
-          colHeadersRow = child;
-          page1Elements.push(child);
-          return;
+      // Find the header elements (custom header, summary card, size badge row)
+      const beforeGridElements = [];
+      const childrenOfClone = Array.from(clone.children);
+      const wrapperIndex = scrollableWrapper ? childrenOfClone.indexOf(scrollableWrapper) : -1;
+      
+      childrenOfClone.forEach((child, idx) => {
+        // Everything before the column headers or wrapper goes into page 1 header elements
+        if (wrapperIndex !== -1 && idx < wrapperIndex && child !== colHeadersRow) {
+          beforeGridElements.push(child);
         }
+      });
 
-        // Detect Block sections
+      // Legend is the treatments legend div
+      const legendRow = childrenOfClone.find(child => child.textContent.includes('Treatments Legend'));
+
+      // Now, group the grid elements inside scrollableWrapper
+      const gridElements = scrollableWrapper ? Array.from(scrollableWrapper.children) : [];
+      let currentBlockIndex = 0;
+      
+      const block1Items = [];
+      const block2Items = [];
+      const block3Items = [];
+
+      gridElements.forEach(child => {
         if (child.textContent.includes('BLOCK 1')) {
           currentBlockIndex = 0;
-          page1Elements.push(child);
+          block1Items.push(child);
           return;
         }
         if (child.textContent.includes('BLOCK 2')) {
           currentBlockIndex = 1;
-          page2Elements.push(child);
+          block2Items.push(child);
           return;
         }
         if (child.textContent.includes('BLOCK 3')) {
           currentBlockIndex = 2;
-          page3Elements.push(child);
+          block3Items.push(child);
           return;
         }
 
-        // Before col headers go to Page 1
-        if (colHeadersRow && index < children.indexOf(colHeadersRow)) {
-          page1Elements.push(child);
-          return;
-        }
-        if (!colHeadersRow && index < 3) {
-          page1Elements.push(child);
-          return;
-        }
-
-        // Legend goes to Page 3
-        if (child.textContent.includes('Treatments Legend')) {
-          page3Elements.push(child);
-          return;
-        }
-
-        // Distribute grid rows
         if (currentBlockIndex === 0) {
-          page1Elements.push(child);
+          block1Items.push(child);
         } else if (currentBlockIndex === 1) {
-          page2Elements.push(child);
+          block2Items.push(child);
         } else {
-          page3Elements.push(child);
+          block3Items.push(child);
         }
       });
 
-      const pagesData = [page1Elements];
-      if (page2Elements.length > 0) pagesData.push(page2Elements);
-      if (page3Elements.length > 0) pagesData.push(page3Elements);
-
-      // Create Page containers
+      // Construct Page Containers
       const pageContainers = [];
-      pagesData.forEach((elements, idx) => {
-        const container = document.createElement('div');
-        container.style.width = element.offsetWidth + 'px';
-        container.style.backgroundColor = '#ffffff';
-        container.style.padding = '24px';
-        container.style.boxSizing = 'border-box';
-        container.style.display = 'flex';
-        container.style.flexDirection = 'column';
-        container.style.gap = '16px';
 
-        // Prepend column headers for Block 2 & 3 for professional readability
-        if (idx > 0 && colHeadersRow) {
-          container.appendChild(colHeadersRow.cloneNode(true));
+      // PAGE 1: Header elements, Col Headers, Block 1, and Legend if single page
+      const p1 = document.createElement('div');
+      p1.style.width = element.offsetWidth + 'px';
+      p1.style.backgroundColor = '#ffffff';
+      p1.style.padding = '24px';
+      p1.style.boxSizing = 'border-box';
+      p1.style.display = 'flex';
+      p1.style.flexDirection = 'column';
+      p1.style.gap = '16px';
+
+      // Add top elements
+      beforeGridElements.forEach(el => p1.appendChild(el.cloneNode(true)));
+      if (colHeadersRow) p1.appendChild(colHeadersRow.cloneNode(true));
+      
+      // Add Block 1 grid rows wrapped in a clean container
+      const w1 = document.createElement('div');
+      w1.style.display = 'flex';
+      w1.style.flexDirection = 'column';
+      w1.style.gap = '8px';
+      block1Items.forEach(el => w1.appendChild(el.cloneNode(true)));
+      p1.appendChild(w1);
+      
+      // If there are no other blocks, append legend to Page 1
+      if (block2Items.length === 0 && legendRow) {
+        p1.appendChild(legendRow.cloneNode(true));
+      }
+
+      pageContainers.push(p1);
+
+      // PAGE 2: Col Headers, Block 2
+      if (block2Items.length > 0) {
+        const p2 = document.createElement('div');
+        p2.style.width = element.offsetWidth + 'px';
+        p2.style.backgroundColor = '#ffffff';
+        p2.style.padding = '24px';
+        p2.style.boxSizing = 'border-box';
+        p2.style.display = 'flex';
+        p2.style.flexDirection = 'column';
+        p2.style.gap = '16px';
+
+        if (colHeadersRow) p2.appendChild(colHeadersRow.cloneNode(true));
+        
+        const w2 = document.createElement('div');
+        w2.style.display = 'flex';
+        w2.style.flexDirection = 'column';
+        w2.style.gap = '8px';
+        block2Items.forEach(el => w2.appendChild(el.cloneNode(true)));
+        p2.appendChild(w2);
+
+        pageContainers.push(p2);
+      }
+
+      // PAGE 3: Col Headers, Block 3, Legend
+      if (block3Items.length > 0) {
+        const p3 = document.createElement('div');
+        p3.style.width = element.offsetWidth + 'px';
+        p3.style.backgroundColor = '#ffffff';
+        p3.style.padding = '24px';
+        p3.style.boxSizing = 'border-box';
+        p3.style.display = 'flex';
+        p3.style.flexDirection = 'column';
+        p3.style.gap = '16px';
+
+        if (colHeadersRow) p3.appendChild(colHeadersRow.cloneNode(true));
+        
+        const w3 = document.createElement('div');
+        w3.style.display = 'flex';
+        w3.style.flexDirection = 'column';
+        w3.style.gap = '8px';
+        block3Items.forEach(el => w3.appendChild(el.cloneNode(true)));
+        p3.appendChild(w3);
+
+        if (legendRow) {
+          p3.appendChild(legendRow.cloneNode(true));
         }
 
-        elements.forEach(el => {
-          container.appendChild(el.cloneNode(true));
-        });
+        pageContainers.push(p3);
+      }
 
-        // Position offscreen
+      // Append containers to document body off-screen
+      pageContainers.forEach(container => {
         container.style.position = 'fixed';
         container.style.top = '0';
         container.style.left = '-9999px';
         container.style.zIndex = '-1';
-
         document.body.appendChild(container);
-        pageContainers.push(container);
       });
 
-      // Remove original clone
+      // Remove original clone from body
       document.body.removeChild(clone);
 
       // ── Render each Page container to Canvas ──────────────────────────────
