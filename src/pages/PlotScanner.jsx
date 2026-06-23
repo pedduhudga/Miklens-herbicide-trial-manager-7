@@ -28,6 +28,7 @@ import {
 } from "../services/dataLayer.js";
 import { getCategoryConfig } from "../utils/categoryConfig.js";
 import { compressImage } from "../utils/imageCompression.js";
+import { toDatetimeLocal } from "../utils/dateUtils.js";
 
 function parseQrData(raw) {
   if (!raw) return null;
@@ -404,6 +405,7 @@ export default function PlotScanner({ onMenuClick }) {
   const [cameraModal, setCameraModal] = useState(null); // { mode, trialId }
   const [history, setHistory] = useState([]);
   const [uploadStatus, setUploadStatus] = useState(null); // { msg, type }
+  const [pendingPhotoSetup, setPendingPhotoSetup] = useState(null); // { dataUrl, mimeType, trialId, mode, date, tag, label }
   const pendingGalleryTrialRef = useRef(null);
   const pendingGalleryModeRef = useRef("general");
 
@@ -472,7 +474,7 @@ export default function PlotScanner({ onMenuClick }) {
 
   // ── Photo upload (add to trial state + queue sync) ────────────────────────
   const handlePhotoUpload = useCallback(
-    async (dataUrl, mimeType, trialId, mode) => {
+    async (dataUrl, mimeType, trialId, mode, customDate, customTag, customLabel) => {
       setUploadStatus({ msg: "Saving photo…", type: "info" });
       
       let finalDataUrl = dataUrl;
@@ -493,9 +495,10 @@ export default function PlotScanner({ onMenuClick }) {
       }
 
       const isWeed = mode === "weed";
-      const now = new Date().toISOString();
-      const photoDate = now.split("T")[0];
-      const photoLabel = `Scan capture — ${new Date().toLocaleString()}`;
+      // YYYY-MM-DD date format
+      const photoDate = customDate ? customDate.split("T")[0] : new Date().toISOString().split("T")[0];
+      const photoLabel = customLabel || (isWeed ? "Weed Photo" : "Field Observation");
+      const photoTagValue = customTag || "";
       const photoKey = isWeed ? "WeedPhotosJSON" : "PhotoURLs";
       const existing = (() => {
         try {
@@ -511,6 +514,7 @@ export default function PlotScanner({ onMenuClick }) {
         mimeType: finalMimeType,
         date: photoDate,
         label: photoLabel,
+        tag: photoTagValue,
       };
 
       const optimisticList = [...existing, optimisticEntry];
@@ -534,6 +538,7 @@ export default function PlotScanner({ onMenuClick }) {
             isWeed,
             label: photoLabel,
             date: photoDate,
+            tag: photoTagValue,
           },
           getAppState,
         );
@@ -543,8 +548,8 @@ export default function PlotScanner({ onMenuClick }) {
 
         const driveUrl = driveResult?.url || driveResult?.fileUrl || null;
         const finalEntry = driveUrl
-          ? { url: driveUrl, date: photoDate, label: photoLabel }
-          : { fileData: finalDataUrl, mimeType: finalMimeType, date: photoDate, label: photoLabel };
+          ? { url: driveUrl, date: photoDate, label: photoLabel, tag: photoTagValue, identifications: [] }
+          : { fileData: finalDataUrl, mimeType: finalMimeType, date: photoDate, label: photoLabel, tag: photoTagValue, identifications: [] };
         const finalList = existing.concat(finalEntry);
         const persistedTrial = {
           ...trial,
@@ -592,9 +597,18 @@ export default function PlotScanner({ onMenuClick }) {
       setCameraModal(null);
       if (!trialId) return;
 
-      await handlePhotoUpload(dataUrl, "image/jpeg", trialId, mode);
+      const defaultLabel = mode === 'weed' ? 'Weed Photo' : 'Field Observation';
+      setPendingPhotoSetup({
+        dataUrl,
+        mimeType: "image/jpeg",
+        trialId,
+        mode,
+        date: toDatetimeLocal(new Date()),
+        tag: "",
+        label: defaultLabel
+      });
     },
-    [cameraModal, handlePhotoUpload],
+    [cameraModal],
   );
 
   // ── Gallery selection ─────────────────────────────────────────────────────
@@ -609,16 +623,20 @@ export default function PlotScanner({ onMenuClick }) {
 
       const reader = new FileReader();
       reader.onload = async (ev) => {
-        await handlePhotoUpload(
-          ev.target.result,
-          file.type || "image/jpeg",
+        const defaultLabel = mode === 'weed' ? 'Weed Photo' : 'Field Observation';
+        setPendingPhotoSetup({
+          dataUrl: ev.target.result,
+          mimeType: file.type || "image/jpeg",
           trialId,
           mode,
-        );
+          date: toDatetimeLocal(new Date()),
+          tag: "",
+          label: defaultLabel
+        });
       };
       reader.readAsDataURL(file);
     },
-    [handlePhotoUpload],
+    [],
   );
 
   const handleRescan = useCallback(
@@ -807,6 +825,122 @@ export default function PlotScanner({ onMenuClick }) {
           activeCategory={activeCategory}
         />
       )}
+
+      {/* Photo Details Setup Modal */}
+      {pendingPhotoSetup && (() => {
+        const targetTrial = state.trials?.find(t => t.ID === pendingPhotoSetup.trialId);
+        const proj = state.projects?.find(p => String(p.ID) === String(targetTrial?.ProjectID));
+        const isPotTrial = (targetTrial?.TrialDesign === 'PotTrial') || (proj?.Design === 'PotTrial');
+        
+        const SCIENTIFIC_FOCUS_TAGS = [
+          { value: 'Whole Canopy (Standard)', label: 'Whole Canopy (Standard)', hint: 'Hold the camera parallel to the ground to avoid perspective bias for ground cover.' },
+          { value: 'Leaf Close-up (Top / Adaxial)', label: 'Leaf Close-up (Top / Adaxial)', hint: 'Ensure leaf is centered and in focus. Avoid casting shadows.' },
+          { value: 'Leaf Close-up (Underside / Abaxial)', label: 'Leaf Close-up (Underside / Abaxial)', hint: 'Turn the leaf over to check for rust, spores, eggs, or pests.' },
+          { value: 'Leaf Close-up (New Growth)', label: 'Leaf Close-up (New Growth)', hint: 'Capture young leaves at the top of the plant to detect immobile deficiencies.' },
+          { value: 'Leaf Close-up (Old Growth)', label: 'Leaf Close-up (Old Growth)', hint: 'Capture mature leaves near the bottom to detect mobile deficiencies.' },
+          { value: 'Stem / Meristem Close-up', label: 'Stem / Meristem Close-up', hint: 'Focus directly on stems or node junctions.' },
+          { value: 'Fruit / Produce Close-up', label: 'Fruit / Produce Close-up', hint: 'Focus closely on fruit/produce.' }
+        ];
+
+        const defaultTag = isPotTrial ? 'Plant 1 (Pot A) - Whole Canopy (Standard)' : 'Whole Canopy (Standard)';
+        const currentTag = pendingPhotoSetup.tag || defaultTag;
+
+        return (
+          <div className="fixed inset-0 z-[10002] flex items-center justify-center bg-black/60 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4 animate-in fade-in zoom-in duration-200">
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                  Photo details & setup
+                </h3>
+                <button onClick={() => setPendingPhotoSetup(null)} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4" /></button>
+              </div>
+              
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Photo Date</label>
+                <input 
+                  type="datetime-local"
+                  value={pendingPhotoSetup.date}
+                  onChange={e => setPendingPhotoSetup(p => ({ ...p, date: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" 
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Description / Title</label>
+                <input 
+                  type="text"
+                  value={pendingPhotoSetup.label}
+                  onChange={e => setPendingPhotoSetup(p => ({ ...p, label: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" 
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Photo Tag / Focus Type</label>
+                <select
+                  value={currentTag}
+                  onChange={e => setPendingPhotoSetup(p => ({ ...p, tag: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white text-slate-800 font-medium"
+                >
+                  {(() => {
+                    if (!isPotTrial) {
+                      return SCIENTIFIC_FOCUS_TAGS.map(f => (
+                        <option key={f.value} value={f.value}>{f.label}</option>
+                      ));
+                    }
+                    
+                    const potObsMode = proj?.PotObsMode || targetTrial?.PotObsMode || 'row-wise';
+                    let potCount = 3;
+                    if (potObsMode === 'column-wise' && proj) {
+                      const blocksCount = parseInt(proj.PotBlocks) || 3;
+                      potCount = Math.floor((parseInt(proj.PotRows) || 9) / blocksCount);
+                    } else if (potObsMode === 'row-wise' && proj) {
+                      potCount = parseInt(proj.PotCols) || 4;
+                    } else if (targetTrial?.PotLabel) {
+                      const m = targetTrial.PotLabel.match(/(\d+)\s*Pots?/i);
+                      if (m) potCount = parseInt(m[1], 10);
+                    }
+                    
+                    const options = [];
+                    for (let idx = 0; idx < potCount; idx++) {
+                      const potLetter = String.fromCharCode(65 + idx); // A, B, C...
+                      SCIENTIFIC_FOCUS_TAGS.forEach(f => {
+                        const val = `Plant ${idx + 1} (Pot ${potLetter}) - ${f.value}`;
+                        options.push(
+                          <option key={val} value={val}>
+                            Plant {idx + 1} (Pot {potLetter}) - {f.label}
+                          </option>
+                        );
+                      });
+                    }
+                    return options;
+                  })()}
+                </select>
+              </div>
+
+              {targetTrial?.Date && pendingPhotoSetup.date ? (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-xs text-emerald-800">
+                  DAA: <strong>{Math.max(0, Math.round((new Date(pendingPhotoSetup.date) - new Date(targetTrial.Date)) / 86400000))}</strong> days after application
+                </div>
+              ) : null}
+
+              <div className="flex justify-end gap-3 pt-2 border-t">
+                <button onClick={() => setPendingPhotoSetup(null)} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg font-medium">Cancel</button>
+                <button
+                  onClick={() => {
+                    const { dataUrl, mimeType, trialId, mode, date, tag, label } = pendingPhotoSetup;
+                    setPendingPhotoSetup(null);
+                    handlePhotoUpload(dataUrl, mimeType, trialId, mode, date, tag || defaultTag, label);
+                  }}
+                  className="px-5 py-2 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 flex items-center gap-2"
+                >
+                  Save & Upload
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
