@@ -2212,6 +2212,22 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       const downloadBtn = clone.querySelector('[data-pdf-download-btn]');
       if (downloadBtn) downloadBtn.remove();
 
+      // Remove Spatial Heatmap Overlay section from clone
+      clone.querySelectorAll('h4').forEach(h4 => {
+        if (h4.textContent.includes('Spatial Heatmap Overlay')) {
+          const container = h4.parentElement?.parentElement;
+          if (container) container.remove();
+        }
+      });
+
+      // Remove Greenhouse Layout Visualization title and description from clone
+      clone.querySelectorAll('h3').forEach(h3 => {
+        if (h3.textContent.includes('Greenhouse Layout Visualization')) {
+          const textContainer = h3.parentElement;
+          if (textContainer) textContainer.remove();
+        }
+      });
+
       // Remove hover tooltips (hidden divs that shouldn't render)
       clone.querySelectorAll('.group-hover\\:block, [class*="group-hover"]').forEach(el => el.remove());
 
@@ -2354,6 +2370,40 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       }
 
       clone.prepend(headerDiv);
+
+      // Fix clipped/cut-in-half text inside pot grid cells for the PDF clone
+      clone.querySelectorAll('div').forEach(div => {
+        const firstSpan = div.querySelector('span');
+        if (firstSpan && /^R\d+C\d+$/.test(firstSpan.textContent)) {
+          // This is a pot grid cell
+          div.style.display = 'flex';
+          div.style.flexDirection = 'column';
+          div.style.justifyContent = 'space-evenly';
+          div.style.alignItems = 'center';
+          div.style.padding = '5px';
+          div.style.boxSizing = 'border-box';
+          div.style.overflow = 'visible';
+
+          let spanIndex = 0;
+          div.querySelectorAll('span').forEach(span => {
+            span.style.lineHeight = '1.2';
+            span.style.overflow = 'visible';
+            span.style.whiteSpace = 'normal';
+            span.style.wordBreak = 'break-word';
+            span.style.textAlign = 'center';
+            span.style.maxHeight = 'none';
+
+            if (spanIndex === 0) {
+              span.style.fontSize = '9px'; // e.g. R1C1
+            } else if (spanIndex === 1) {
+              span.style.fontSize = '7px'; // e.g. Block 1
+            } else {
+              span.style.fontSize = '8px'; // e.g. Treatment Name
+            }
+            spanIndex++;
+          });
+        }
+      });
 
 
       // ── Expand ALL scrollable containers AFTER style copy ────────────────
