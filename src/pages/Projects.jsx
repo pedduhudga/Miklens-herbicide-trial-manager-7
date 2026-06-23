@@ -2278,16 +2278,12 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       `;
       grid.appendChild(col1);
 
-      // Col 2: Crop & Target Weed
+      // Col 2: Crop
       const col2 = document.createElement('div');
       col2.innerHTML = `
-        <div style="margin-bottom: 12px;">
+        <div>
           <div style="color: #64748b; font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Crop</div>
           <div style="font-size: 14px; color: #1e293b; font-weight: 600; margin-top: 2px;">${activeProject?.Crop || 'N/A'}</div>
-        </div>
-        <div>
-          <div style="color: #64748b; font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Target Weed</div>
-          <div style="font-size: 14px; color: #1e293b; font-weight: 600; margin-top: 2px;">${activeProject?.TargetWeed || 'N/A'}</div>
         </div>
       `;
       grid.appendChild(col2);
