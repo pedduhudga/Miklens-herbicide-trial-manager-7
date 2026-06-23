@@ -10,6 +10,9 @@ import {
 import { useAppState } from '../hooks/useAppState.jsx';
 import { useAuth } from '../hooks/useAuth.js';
 import { CATEGORIES, getCategoryConfig, hasAccess } from '../utils/categoryConfig.js';
+import { getFirebaseAuth } from '../services/firebase.js';
+import { signInWithEmailAndPassword, updatePassword } from 'firebase/auth';
+import { fbUpdateUserProfile } from '../services/firebaseAuth.js';
 
 const ICON_MAP = {
   Leaf, Shield, Bug, Beaker, Sprout,
@@ -96,9 +99,7 @@ export default function Sidebar({ isOpen, onClose }) {
 
     setChangeLoading(true);
     try {
-      const { getFirebaseAuth } = await import('../services/firebase.js');
-      const { signInWithEmailAndPassword, updatePassword } = await import('firebase/auth');
-      const { fbUpdateUserProfile } = await import('../services/firebaseAuth.js');
+      // Firebase auth methods are statically imported at the top
 
       const auth = getFirebaseAuth();
       const userEmail = auth.currentUser?.email;

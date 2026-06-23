@@ -13,6 +13,8 @@ import {
   Sigma, Printer, MapPin, Thermometer, Droplets, CloudRain, Image, Share2
 } from 'lucide-react';
 import Chart from 'chart.js/auto';
+import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
 import { safeJsonParse } from '../utils/helpers.js';
 import { AnalysisEngine } from '../utils/analysisUtils.js';
 import PlotMap from '../components/PlotMap.jsx';
@@ -1904,7 +1906,7 @@ export default function Projects({ onMenuClick }) {
     try {
       await deleteBlock({ ID: blockId }, getAppState, true); // Keep overlay for the single block deletion itself
       // Also delete associated trials from Firebase in parallel without overlays
-      const { deleteTrial } = await import('../services/dataLayer.js');
+      // Also delete associated trials from Firebase in parallel without overlays
       await Promise.all(
         blockTrials.map(t => deleteTrial({ ID: t.ID }, getAppState, false).catch(() => {}))
       );
@@ -2037,11 +2039,7 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
 
       toast('Generating Greenhouse Layout PDF...', 'info');
 
-      // Import html2canvas and jsPDF
-      const html2canvasModule = await import('html2canvas');
-      const html2canvas = html2canvasModule.default || html2canvasModule;
-      const jsPDFModule = await import('jspdf');
-      const { jsPDF } = jsPDFModule;
+      // html2canvas and jsPDF are statically imported at the top
 
       // ── OKLCH / OKLAB → RGB conversion math ─────────────────────────────
       const parseOklch = (colorStr) => {
@@ -4010,7 +4008,7 @@ ${photosHtml}
       await deleteProject({ ID: id }, getAppState);
       
       // Delete associated blocks and trials in parallel without blocking screen overlays
-      const { deleteTrial } = await import('../services/dataLayer.js');
+      // Delete associated blocks and trials in parallel without blocking screen overlays
       await Promise.all([
         ...projectBlocks.map(b => deleteBlock({ ID: b.ID }, getAppState, false).catch(err => console.error('Failed to delete block', b.ID, err))),
         ...projectTrials.map(t => deleteTrial({ ID: t.ID }, getAppState, false).catch(err => console.error('Failed to delete trial', t.ID, err)))

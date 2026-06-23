@@ -6,6 +6,7 @@
 import * as fbDB from './firebaseDB.js';
 import * as sheetDB from './db.js';
 import { mirrorWrite } from './sheetMirror.js';
+import { fbGetAllUsers, fbUpdateUserProfile } from './firebaseAuth.js';
 
 // ─── helper ──────────────────────────────────────────────────────────────────
 
@@ -443,7 +444,7 @@ export async function deleteOrganisation(payload, getAppState) {
 export async function getUsers(payload, getAppState) {
   const { useFirebase } = getConfig(getAppState);
   if (useFirebase) {
-    const { fbGetAllUsers } = await import('./firebaseAuth.js');
+    // fbGetAllUsers is statically imported at the top
     return fbGetAllUsers();
   }
   return sheetDB.getUsers(payload, getAppState);
@@ -452,7 +453,7 @@ export async function getUsers(payload, getAppState) {
 export async function updateUser(payload, getAppState) {
   const { useFirebase } = getConfig(getAppState);
   if (useFirebase) {
-    const { fbUpdateUserProfile } = await import('./firebaseAuth.js');
+    // fbUpdateUserProfile is statically imported at the top
     const uid = payload.uid || payload.ID || payload.id;
     return fbUpdateUserProfile(uid, payload);
   }

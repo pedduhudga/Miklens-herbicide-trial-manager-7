@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import TopBar from "../components/TopBar.jsx";
 import { useAppState } from "../hooks/useAppState.jsx";
 import { useAuth } from "../hooks/useAuth.js";
-import { initFirebase, isFirebaseReady } from "../services/firebase.js";
+import { initFirebase, isFirebaseReady, getFirebaseDB } from "../services/firebase.js";
 import { getDBStats, clearAllStores } from "../services/offlineDB.js";
 import {
   fbSaveUserSettings,
@@ -509,7 +509,7 @@ export default function Settings({ onMenuClick }) {
     try {
       initFirebase(s.firebaseConfig || {});
       // Simple connectivity check: try to access Firestore
-      const { getFirebaseDB } = await import("../services/firebase.js");
+      // getFirebaseDB is statically imported at the top
       getFirebaseDB();
       setFbTestResult({ ok: true, msg: "Firebase connected successfully!" });
       toast("Firebase connected ✓");
