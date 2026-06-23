@@ -2044,20 +2044,60 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
 
       // Clone the element for manipulation without affecting the UI
       const clone = element.cloneNode(true);
+      
+      // Adjust scrollable/max-height wrapper inside the clone to render completely
+      const scrollableDiv = clone.querySelector('.overflow-y-auto');
+      if (scrollableDiv) {
+        scrollableDiv.style.maxHeight = 'none';
+        scrollableDiv.style.overflow = 'visible';
+      }
+
       clone.style.width = element.offsetWidth + 'px';
-      clone.style.height = element.offsetHeight + 'px';
+      clone.style.height = 'auto';
       clone.style.position = 'absolute';
       clone.style.top = '-9999px';
       clone.style.left = '-9999px';
       clone.style.backgroundColor = '#ffffff';
-      
-      // Remove the download button from the clone
+
+      // Helper function to recursively copy computed styles from original elements to cloned elements
+      // This is crucial to bypass Tailwind CSS variables which html2canvas fails to parse (causing black blocks)
+      const copyComputedStyles = (src, dest) => {
+        const srcStyles = window.getComputedStyle(src);
+        
+        // Copy critical style properties that html2canvas struggles with
+        dest.style.backgroundColor = srcStyles.backgroundColor;
+        dest.style.color = srcStyles.color;
+        dest.style.borderColor = srcStyles.borderColor;
+        dest.style.borderWidth = srcStyles.borderWidth;
+        dest.style.borderStyle = srcStyles.borderStyle;
+        dest.style.borderRadius = srcStyles.borderRadius;
+        dest.style.fontSize = srcStyles.fontSize;
+        dest.style.fontWeight = srcStyles.fontWeight;
+        dest.style.fontFamily = srcStyles.fontFamily;
+        dest.style.opacity = srcStyles.opacity;
+        dest.style.boxShadow = srcStyles.boxShadow;
+        
+        // Process child elements
+        const srcChildren = src.children;
+        const destChildren = dest.children;
+        if (srcChildren && destChildren) {
+          for (let i = 0; i < srcChildren.length; i++) {
+            if (destChildren[i]) {
+              copyComputedStyles(srcChildren[i], destChildren[i]);
+            }
+          }
+        }
+      };
+
+      // Append clone to body first so it has layout for styling/rendering, then copy computed styles
+      document.body.appendChild(clone);
+      copyComputedStyles(element, clone);
+
+      // Now remove the download button from the clone (so it doesn't appear in the PDF)
       const downloadBtn = clone.querySelector('[data-pdf-download-btn]');
       if (downloadBtn) {
         downloadBtn.remove();
       }
-      
-      document.body.appendChild(clone);
 
       // Render the clone with html2canvas
       const canvas = await html2canvas(clone, {
@@ -2066,7 +2106,7 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
         backgroundColor: '#ffffff',
         logging: false,
         windowWidth: clone.offsetWidth,
-        windowHeight: clone.offsetHeight
+        windowHeight: clone.scrollHeight || clone.offsetHeight
       });
 
       // Clean up the clone
