@@ -1726,6 +1726,7 @@ export default function Projects({ onMenuClick }) {
         rowCells.push(
           <div 
             key={`${r}-${c}`}
+            data-pdf-pot-cell="true"
             onClick={() => trial && navigate(`/trials?focus=${trial.ID}`)}
             style={heatmapMode !== 'none' && trial ? heatmapStyle : {}}
             className={`flex-1 aspect-square rounded-lg border-2 flex flex-col items-center justify-center p-1.5 cursor-pointer shadow-sm relative group transition-all duration-300 ${heatmapMode !== 'none' && trial ? '' : colorClasses} ${
@@ -2372,37 +2373,34 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       clone.prepend(headerDiv);
 
       // Fix clipped/cut-in-half text inside pot grid cells for the PDF clone
-      clone.querySelectorAll('div').forEach(div => {
-        const firstSpan = div.querySelector('span');
-        if (firstSpan && /^R\d+C\d+$/.test(firstSpan.textContent)) {
-          // This is a pot grid cell
-          div.style.display = 'flex';
-          div.style.flexDirection = 'column';
-          div.style.justifyContent = 'space-evenly';
-          div.style.alignItems = 'center';
-          div.style.padding = '5px';
-          div.style.boxSizing = 'border-box';
-          div.style.overflow = 'visible';
+      clone.querySelectorAll('[data-pdf-pot-cell]').forEach(div => {
+        // This is a pot grid cell
+        div.style.display = 'flex';
+        div.style.flexDirection = 'column';
+        div.style.justifyContent = 'space-evenly';
+        div.style.alignItems = 'center';
+        div.style.padding = '5px';
+        div.style.boxSizing = 'border-box';
+        div.style.overflow = 'visible';
 
-          let spanIndex = 0;
-          div.querySelectorAll('span').forEach(span => {
-            span.style.lineHeight = '1.2';
-            span.style.overflow = 'visible';
-            span.style.whiteSpace = 'normal';
-            span.style.wordBreak = 'break-word';
-            span.style.textAlign = 'center';
-            span.style.maxHeight = 'none';
+        let spanIndex = 0;
+        div.querySelectorAll('span').forEach(span => {
+          span.style.lineHeight = '1.2';
+          span.style.overflow = 'visible';
+          span.style.whiteSpace = 'normal';
+          span.style.wordBreak = 'break-word';
+          span.style.textAlign = 'center';
+          span.style.maxHeight = 'none';
 
-            if (spanIndex === 0) {
-              span.style.fontSize = '9px'; // e.g. R1C1
-            } else if (spanIndex === 1) {
-              span.style.fontSize = '7px'; // e.g. Block 1
-            } else {
-              span.style.fontSize = '8px'; // e.g. Treatment Name
-            }
-            spanIndex++;
-          });
-        }
+          if (spanIndex === 0) {
+            span.style.fontSize = '9px'; // e.g. R1C1
+          } else if (spanIndex === 1) {
+            span.style.fontSize = '7px'; // e.g. Block 1
+          } else {
+            span.style.fontSize = '8px'; // e.g. Treatment Name
+          }
+          spanIndex++;
+        });
       });
 
 
