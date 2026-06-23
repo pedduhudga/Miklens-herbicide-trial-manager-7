@@ -2059,19 +2059,45 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       clone.style.left = '-9999px';
       clone.style.backgroundColor = '#ffffff';
 
+      // Helper function to convert any CSS color format (like oklch or oklab) into standard HEX/RGB using canvas
+      const convertColorToRgb = (colorStr) => {
+        if (!colorStr) return '';
+        const trimmed = colorStr.trim().toLowerCase();
+        if (trimmed === 'transparent' || trimmed === 'rgba(0, 0, 0, 0)' || trimmed === 'initial' || trimmed === 'inherit') {
+          return 'transparent';
+        }
+        if (trimmed.startsWith('rgb(') || trimmed.startsWith('rgba(') || (trimmed.startsWith('#') && trimmed.length >= 4)) {
+          return colorStr;
+        }
+        
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = 1;
+          canvas.height = 1;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.fillStyle = colorStr;
+            return ctx.fillStyle;
+          }
+        } catch (e) {
+          console.error('Failed to convert color:', colorStr, e);
+        }
+        return colorStr;
+      };
+
       // Helper function to recursively copy computed colors from original elements to cloned elements
       // This is crucial to bypass Tailwind CSS variables which html2canvas fails to parse
       const copyComputedColors = (src, dest) => {
         const srcStyles = window.getComputedStyle(src);
         
         // Copy standard RGB colors so html2canvas doesn't fail or fallback to black
-        dest.style.backgroundColor = srcStyles.backgroundColor;
-        dest.style.color = srcStyles.color;
-        dest.style.borderColor = srcStyles.borderColor;
-        dest.style.borderTopColor = srcStyles.borderTopColor;
-        dest.style.borderRightColor = srcStyles.borderRightColor;
-        dest.style.borderBottomColor = srcStyles.borderBottomColor;
-        dest.style.borderLeftColor = srcStyles.borderLeftColor;
+        dest.style.backgroundColor = convertColorToRgb(srcStyles.backgroundColor);
+        dest.style.color = convertColorToRgb(srcStyles.color);
+        dest.style.borderColor = convertColorToRgb(srcStyles.borderColor);
+        dest.style.borderTopColor = convertColorToRgb(srcStyles.borderTopColor);
+        dest.style.borderRightColor = convertColorToRgb(srcStyles.borderRightColor);
+        dest.style.borderBottomColor = convertColorToRgb(srcStyles.borderBottomColor);
+        dest.style.borderLeftColor = convertColorToRgb(srcStyles.borderLeftColor);
         
         // Process child elements
         const srcChildren = src.children;
