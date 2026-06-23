@@ -412,6 +412,56 @@ export default function Trials({ onMenuClick }) {
     );
   };
 
+  // --- CRASH DRAFT RECOVERY ---
+  const [recoveryDraft, setRecoveryDraft] = useState(null);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('trial_draft_recovery');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.formData) {
+          setRecoveryDraft(parsed);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to parse recovery draft:', e);
+    }
+  }, []);
+
+  const handleRestoreRecoveryDraft = () => {
+    if (recoveryDraft) {
+      setFormData(recoveryDraft.formData);
+      setEditingTrial(recoveryDraft.editingTrial);
+      setIsModalOpen(true);
+      localStorage.removeItem('trial_draft_recovery');
+      setRecoveryDraft(null);
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Draft restored successfully!', type: 'success' } }));
+    }
+  };
+
+  const handleDismissRecoveryDraft = () => {
+    localStorage.removeItem('trial_draft_recovery');
+    setRecoveryDraft(null);
+    window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Recovered draft discarded', type: 'info' } }));
+  };
+
+  useEffect(() => {
+    if (isModalOpen && formData) {
+      window.currentTrialDraft = {
+        formData,
+        editingTrial,
+        activeCategory,
+        timestamp: Date.now()
+      };
+    } else {
+      window.currentTrialDraft = null;
+    }
+    return () => {
+      window.currentTrialDraft = null;
+    };
+  }, [isModalOpen, formData, editingTrial, activeCategory]);
+
   // ── ROUTING EFFECT ─────────────────────────────────────────────────
   useEffect(() => {
     const searchParams = new URLSearchParams(location.search);
@@ -4369,6 +4419,34 @@ If none are present, write "None".`;
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
       <TopBar title="Trials" onMenuClick={onMenuClick} />
+
+      {recoveryDraft && (
+        <div className="bg-amber-50 border-b border-amber-200/60 px-4 py-3 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 bg-amber-100 rounded-lg text-amber-800">
+              <Activity className="w-4 h-4 text-amber-600 animate-pulse" />
+            </div>
+            <div className="text-left">
+              <p className="text-xs font-semibold text-slate-800">Recovered Trial Draft Detected</p>
+              <p className="text-[10px] text-slate-500">We found progress on your unsaved draft of: <span className="font-semibold text-slate-700">{recoveryDraft.formData?.FormulationName || 'Unnamed Formulation'}</span></p>
+            </div>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            <button
+              onClick={handleRestoreRecoveryDraft}
+              className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[10px] font-semibold transition"
+            >
+              Restore Progress
+            </button>
+            <button
+              onClick={handleDismissRecoveryDraft}
+              className="px-2.5 py-1.5 hover:bg-slate-200/50 text-slate-500 rounded-lg text-[10px] font-medium transition"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto">
         {/* ── TOOLBAR ── */}

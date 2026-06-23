@@ -5,7 +5,7 @@ import {
   ListChecks, FileBox, ShoppingBag, Sparkles, BarChartBig,
   MapPin, Search, Database, Settings, Users, LogOut, Calculator, Bell,
   TrendingDown, ShieldAlert, Flame, Compass, ChevronDown,
-  Leaf, Shield, Bug, Beaker, Sprout, Grid3x3, Key, Lock, Eye, EyeOff, X, CheckCircle
+  Leaf, Shield, Bug, Beaker, Sprout, Grid3x3, Key, Lock, Eye, EyeOff, X, CheckCircle, RefreshCw
 } from 'lucide-react';
 import { useAppState } from '../hooks/useAppState.jsx';
 import { useAuth } from '../hooks/useAuth.js';
@@ -82,6 +82,19 @@ export default function Sidebar({ isOpen, onClose }) {
   const [changeLoading, setChangeLoading] = useState(false);
   const [changeError, setChangeError] = useState('');
   const [changeSuccess, setChangeSuccess] = useState('');
+
+  const queueLength = state.syncQueue?.length || 0;
+  const [prevQueueLength, setPrevQueueLength] = useState(0);
+  const [maxQueueLength, setMaxQueueLength] = useState(0);
+
+  if (queueLength !== prevQueueLength) {
+    setPrevQueueLength(queueLength);
+    if (queueLength === 0) {
+      setMaxQueueLength(0);
+    } else if (queueLength > maxQueueLength) {
+      setMaxQueueLength(queueLength);
+    }
+  }
 
   const handleChangePasswordSubmit = async (e) => {
     e.preventDefault();
@@ -314,6 +327,25 @@ export default function Sidebar({ isOpen, onClose }) {
 
         {user && (
           <div className="mt-auto p-4 border-t border-slate-200/50 bg-white/50">
+            {state.syncQueue && state.syncQueue.length > 0 && (
+              <div className="mb-4 p-3 bg-slate-50 border border-slate-100 rounded-xl space-y-1.5">
+                <div className="flex justify-between items-center text-[10px]">
+                  <span className="font-semibold text-slate-600 flex items-center gap-1">
+                    <RefreshCw className="w-3 h-3 animate-spin text-emerald-500" />
+                    {maxQueueLength > 0 ? `Syncing ${Math.min(maxQueueLength, maxQueueLength - queueLength + 1)}/${maxQueueLength}...` : 'Syncing...'}
+                  </span>
+                  <span className="text-slate-400 font-bold">
+                    {Math.round(maxQueueLength > 0 ? ((maxQueueLength - queueLength) / maxQueueLength) * 100 : 0)}%
+                  </span>
+                </div>
+                <div className="w-full bg-slate-200 rounded-full h-1 overflow-hidden">
+                  <div
+                    className="bg-emerald-500 h-1 rounded-full transition-all duration-300"
+                    style={{ width: `${maxQueueLength > 0 ? ((maxQueueLength - queueLength) / maxQueueLength) * 100 : 0}%` }}
+                  />
+                </div>
+              </div>
+            )}
             <div className="flex items-center gap-3 mb-4 px-2">
               <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold uppercase" style={{ background: catConfig.color.hexLight, color: catConfig.color.hex }}>
                 {displayUname[0] || 'U'}

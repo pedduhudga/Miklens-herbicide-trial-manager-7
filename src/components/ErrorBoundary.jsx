@@ -13,6 +13,14 @@ export default class ErrorBoundary extends React.Component {
 
   componentDidCatch(error, errorInfo) {
     console.error('[ErrorBoundary] Caught error:', error, errorInfo);
+    try {
+      if (typeof window !== 'undefined' && window.currentTrialDraft) {
+        localStorage.setItem('trial_draft_recovery', JSON.stringify(window.currentTrialDraft));
+        console.log('[ErrorBoundary] Cached trial draft to localStorage for recovery.');
+      }
+    } catch (e) {
+      console.error('[ErrorBoundary] Failed to cache draft on crash:', e);
+    }
   }
 
   handleReload = () => {

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useReducer, useEffect, useCallback, useRef, useState, useMemo } from 'react';
-import { initFirebase, isFirebaseReady } from '../services/firebase.js';
+import { initFirebase } from '../services/firebase.js';
 import { saveOfflineData, loadOfflineData, saveOfflinePhoto, loadOfflinePhoto, saveSyncQueueOffline, loadSyncQueueOffline } from '../services/offlineStorage.js';
 import { fbGetUserSettings } from '../services/firebaseDB.js';
 
