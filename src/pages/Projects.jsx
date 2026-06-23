@@ -2462,9 +2462,13 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       const contentWidth = pageWidth - (margin * 2);
       const contentHeight = pageHeight - (margin * 2);
 
-      // Scale height proportionally to fit printable width (190mm)
-      const ratio = contentWidth / canvasWidthMm;
-      const scaledHeight = canvasHeightMm * ratio;
+      // Determine the best scale factor to fit the entire layout on a single A4 page
+      const widthRatio = contentWidth / canvasWidthMm;
+      const heightRatio = contentHeight / canvasHeightMm;
+      const fitRatio = Math.min(widthRatio, heightRatio); // Scale to fit both width and height
+
+      const scaledWidth = canvasWidthMm * fitRatio;
+      const scaledHeight = canvasHeightMm * fitRatio;
 
       const pdf = new jsPDF({
         orientation: 'portrait',
@@ -2474,20 +2478,11 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
 
       const imgData = canvas.toDataURL('image/png', 1.0);
       
-      let heightLeft = scaledHeight;
-      let yOffset = margin;
+      // Center the scaled image horizontally and vertically in the printable area
+      const xOffset = margin + (contentWidth - scaledWidth) / 2;
+      const yOffset = margin + (contentHeight - scaledHeight) / 2;
 
-      // Add first page
-      pdf.addImage(imgData, 'PNG', margin, yOffset, contentWidth, scaledHeight);
-      heightLeft -= contentHeight;
-
-      // Add extra pages if content is taller than A4 printable area
-      while (heightLeft > 0) {
-        yOffset = margin - (scaledHeight - heightLeft);
-        pdf.addPage();
-        pdf.addImage(imgData, 'PNG', margin, yOffset, contentWidth, scaledHeight);
-        heightLeft -= contentHeight;
-      }
+      pdf.addImage(imgData, 'PNG', xOffset, yOffset, scaledWidth, scaledHeight);
       
       const fileName = `${activeProject?.Name || 'Project'}-greenhouse-layout.pdf`;
       pdf.save(fileName);
