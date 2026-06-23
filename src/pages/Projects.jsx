@@ -2375,8 +2375,8 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
 
       // Shrink spans inside the pot cells slightly to prevent text clipping (span-only changes, keeping layouts intact)
       clone.querySelectorAll('[data-pdf-pot-cell] span').forEach(span => {
-        span.style.fontSize = '7.5px';
-        span.style.lineHeight = '1.1';
+        span.style.fontSize = '8px';
+        span.style.lineHeight = '1.2';
         span.style.marginTop = '1px';
         span.style.marginBottom = '0px';
         span.style.whiteSpace = 'normal';
@@ -2384,106 +2384,189 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
         span.style.overflow = 'visible';
       });
 
-      // ── Expand ALL scrollable containers AFTER style copy ────────────────
-      // This must run after copySelectedComputedStyles, because that function
-      // copies the original element's overflow/maxHeight (e.g. overflow:auto,
-      // max-height:500px) which would re-constrain the clone.
-      clone.querySelectorAll('*').forEach(el => {
-        const isScrollable = el.scrollHeight > el.clientHeight ||
-          el.style.overflow === 'auto' || el.style.overflow === 'scroll' ||
-          el.style.overflowY === 'auto' || el.style.overflowY === 'scroll' ||
-          el.style.maxHeight !== 'none';
-        if (isScrollable) {
-          el.style.maxHeight = 'none';
-          el.style.height = 'auto';
-          el.style.overflow = 'visible';
-          el.style.overflowY = 'visible';
-          el.style.overflowX = 'visible';
+      // ── Group Elements Into Clean Page Sets (To prevent page-break cutoffs) ──
+      const children = Array.from(clone.children);
+      let colHeadersRow = null;
+      let currentBlockIndex = 0; // 0: Block 1, 1: Block 2, 2: Block 3
+
+      const page1Elements = [];
+      const page2Elements = [];
+      const page3Elements = [];
+
+      children.forEach((child, index) => {
+        // Find column headers row (C1, C2...)
+        if (child.textContent.includes('C1') && child.textContent.includes('C2')) {
+          colHeadersRow = child;
+          page1Elements.push(child);
+          return;
+        }
+
+        // Detect Block sections
+        if (child.textContent.includes('BLOCK 1')) {
+          currentBlockIndex = 0;
+          page1Elements.push(child);
+          return;
+        }
+        if (child.textContent.includes('BLOCK 2')) {
+          currentBlockIndex = 1;
+          page2Elements.push(child);
+          return;
+        }
+        if (child.textContent.includes('BLOCK 3')) {
+          currentBlockIndex = 2;
+          page3Elements.push(child);
+          return;
+        }
+
+        // Before col headers go to Page 1
+        if (colHeadersRow && index < children.indexOf(colHeadersRow)) {
+          page1Elements.push(child);
+          return;
+        }
+        if (!colHeadersRow && index < 3) {
+          page1Elements.push(child);
+          return;
+        }
+
+        // Legend goes to Page 3
+        if (child.textContent.includes('Treatments Legend')) {
+          page3Elements.push(child);
+          return;
+        }
+
+        // Distribute grid rows
+        if (currentBlockIndex === 0) {
+          page1Elements.push(child);
+        } else if (currentBlockIndex === 1) {
+          page2Elements.push(child);
+        } else {
+          page3Elements.push(child);
         }
       });
 
-      // Expand the root clone itself to its full content size
-      clone.style.position = 'absolute';
-      clone.style.top = '0';
-      clone.style.left = '0';
-      clone.style.zIndex = '99999';
-      clone.style.backgroundColor = '#ffffff';
-      clone.style.overflow = 'visible';
-      clone.style.maxHeight = 'none';
-      clone.style.height = clone.scrollHeight + 'px';
+      const pagesData = [page1Elements];
+      if (page2Elements.length > 0) pagesData.push(page2Elements);
+      if (page3Elements.length > 0) pagesData.push(page3Elements);
 
-      console.log('[PDF Export] Scroll Height:', clone.scrollHeight);
-      console.log('[PDF Export] Client Height:', clone.clientHeight);
+      // Create Page containers
+      const pageContainers = [];
+      pagesData.forEach((elements, idx) => {
+        const container = document.createElement('div');
+        container.style.width = element.offsetWidth + 'px';
+        container.style.backgroundColor = '#ffffff';
+        container.style.padding = '24px';
+        container.style.boxSizing = 'border-box';
+        container.style.display = 'flex';
+        container.style.flexDirection = 'column';
+        container.style.gap = '16px';
 
-      // ── Capture with html2canvas ────────────────────────────────────────
-      console.log('[PDF Export] Starting html2canvas capture...');
-      const canvas = await html2canvas(clone, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#ffffff',
-        logging: true,
-        windowWidth: clone.scrollWidth,
-        windowHeight: clone.scrollHeight
+        // Prepend column headers for Block 2 & 3 for professional readability
+        if (idx > 0 && colHeadersRow) {
+          container.appendChild(colHeadersRow.cloneNode(true));
+        }
+
+        elements.forEach(el => {
+          container.appendChild(el.cloneNode(true));
+        });
+
+        // Position offscreen
+        container.style.position = 'fixed';
+        container.style.top = '0';
+        container.style.left = '-9999px';
+        container.style.zIndex = '-1';
+
+        document.body.appendChild(container);
+        pageContainers.push(container);
       });
-      console.log(`[PDF Export] Canvas captured: ${canvas.width}x${canvas.height}`);
 
-      // Clean up the clone
+      // Remove original clone
       document.body.removeChild(clone);
 
-      // ── Verify canvas has colors (not all black) ────────────────────────
-      const ctx = canvas.getContext('2d');
-      const sampleData = ctx.getImageData(
-        Math.floor(canvas.width / 2), Math.floor(canvas.height / 2), 10, 10
-      ).data;
-      let hasColor = false;
-      for (let i = 0; i < sampleData.length; i += 4) {
-        const r = sampleData[i], g = sampleData[i + 1], b = sampleData[i + 2];
-        // Check if any pixel is not pure black and not pure white
-        if (!((r === 0 && g === 0 && b === 0) || (r === 255 && g === 255 && b === 255))) {
-          hasColor = true;
-          break;
-        }
+      // ── Render each Page container to Canvas ──────────────────────────────
+      const canvases = [];
+      for (const container of pageContainers) {
+        // Expand scrollables
+        container.querySelectorAll('*').forEach(el => {
+          const isScrollable = el.scrollHeight > el.clientHeight ||
+            el.style.overflow === 'auto' || el.style.overflow === 'scroll' ||
+            el.style.overflowY === 'auto' || el.style.overflowY === 'scroll' ||
+            el.style.maxHeight !== 'none';
+          if (isScrollable) {
+            el.style.maxHeight = 'none';
+            el.style.height = 'auto';
+            el.style.overflow = 'visible';
+            el.style.overflowY = 'visible';
+            el.style.overflowX = 'visible';
+          }
+        });
+
+        container.style.position = 'absolute';
+        container.style.top = '0';
+        container.style.left = '0';
+        container.style.zIndex = '99999';
+        container.style.overflow = 'visible';
+        container.style.maxHeight = 'none';
+        container.style.height = container.scrollHeight + 'px';
+
+        console.log('[PDF Export] Rendering page container with scroll height:', container.scrollHeight);
+
+        const canvas = await html2canvas(container, {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          logging: true,
+          windowWidth: container.scrollWidth,
+          windowHeight: container.scrollHeight
+        });
+        canvases.push(canvas);
+
+        document.body.removeChild(container);
       }
-      console.log(`[PDF Export] Canvas color check: ${hasColor ? 'PASS - colors detected' : 'WARNING - only black/white detected'}`);
 
       // ── Generate PDF ────────────────────────────────────────────────────
-      const imgWidth = canvas.width;
-      const imgHeight = canvas.height;
-      
-      const scaleFactor = 2;
-      const pxPerMm = (96 * scaleFactor) / 25.4; // 96 DPI * scale / mm-per-inch
-      const canvasWidthMm = imgWidth / pxPerMm;
-      const canvasHeightMm = imgHeight / pxPerMm;
-      
-      // Standard A4 dimensions
-      const pageWidth = 210;
-      const pageHeight = 297;
-      const margin = 10;
-      const contentWidth = pageWidth - (margin * 2);
-      const contentHeight = pageHeight - (margin * 2);
-
-      // Determine the best scale factor to fit the entire layout on a single A4 page
-      const widthRatio = contentWidth / canvasWidthMm;
-      const heightRatio = contentHeight / canvasHeightMm;
-      const fitRatio = Math.min(widthRatio, heightRatio); // Scale to fit both width and height
-
-      const scaledWidth = canvasWidthMm * fitRatio;
-      const scaledHeight = canvasHeightMm * fitRatio;
-
       const pdf = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',
         format: 'a4'
       });
 
-      const imgData = canvas.toDataURL('image/png', 1.0);
-      
-      // Center the scaled image horizontally and vertically in the printable area
-      const xOffset = margin + (contentWidth - scaledWidth) / 2;
-      const yOffset = margin + (contentHeight - scaledHeight) / 2;
+      const pageWidth = 210;
+      const pageHeight = 297;
+      const margin = 10;
+      const contentWidth = pageWidth - (margin * 2);
+      const contentHeight = pageHeight - (margin * 2);
+      const scaleFactor = 2;
+      const pxPerMm = (96 * scaleFactor) / 25.4; // 96 DPI * scale / mm-per-inch
 
-      pdf.addImage(imgData, 'PNG', xOffset, yOffset, scaledWidth, scaledHeight);
-      
+      canvases.forEach((canvas, idx) => {
+        const imgWidth = canvas.width;
+        const imgHeight = canvas.height;
+        const canvasWidthMm = imgWidth / pxPerMm;
+        const canvasHeightMm = imgHeight / pxPerMm;
+
+        // Scale to fit content width (190mm)
+        const ratio = contentWidth / canvasWidthMm;
+        let finalWidth = contentWidth;
+        let finalHeight = canvasHeightMm * ratio;
+
+        // If height exceeds printable content height, scale down to fit height exactly
+        if (finalHeight > contentHeight) {
+          const fitRatio = contentHeight / finalHeight;
+          finalWidth = finalWidth * fitRatio;
+          finalHeight = contentHeight;
+        }
+
+        if (idx > 0) {
+          pdf.addPage();
+        }
+
+        const imgData = canvas.toDataURL('image/png', 1.0);
+        const xOffset = margin + (contentWidth - finalWidth) / 2;
+        const yOffset = margin;
+
+        pdf.addImage(imgData, 'PNG', xOffset, yOffset, finalWidth, finalHeight);
+      });
+
       const fileName = `${activeProject?.Name || 'Project'}-greenhouse-layout.pdf`;
       pdf.save(fileName);
       toast('Greenhouse layout PDF downloaded successfully!', 'success');
