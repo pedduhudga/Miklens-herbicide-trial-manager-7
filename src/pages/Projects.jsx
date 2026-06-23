@@ -2123,9 +2123,10 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
 
       // Render the clone with html2canvas
       const canvas = await html2canvas(clone, {
-        scale: 2,
+        scale: 3,
         useCORS: true,
         backgroundColor: '#ffffff',
+        foreignObjectRendering: true,
         logging: false,
         windowWidth: clone.offsetWidth,
         windowHeight: clone.scrollHeight || clone.offsetHeight
