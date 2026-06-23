@@ -637,15 +637,24 @@ export default function LiveTrialPage() {
                       />
                     </div>
                     <div className="p-2 flex flex-col justify-between flex-1 min-h-[52px]">
-                      {p.label ? (
-                        <p className="text-xs font-semibold text-slate-700 leading-snug line-clamp-2">
-                          {p.label}
-                        </p>
+                      {p.label || p.tag ? (
+                        <div className="space-y-1">
+                          {p.label && (
+                            <p className="text-xs font-semibold text-slate-700 leading-snug">
+                              {p.label}
+                            </p>
+                          )}
+                          {p.tag && (
+                            <span className="inline-block text-[10px] bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded font-medium border border-emerald-100">
+                              {p.tag}
+                            </span>
+                          )}
+                        </div>
                       ) : (
                         <p className="text-xs text-slate-400 italic">No description</p>
                       )}
                       {p.date && (
-                        <p className="text-[10px] text-slate-400 mt-1">
+                        <p className="text-[10px] text-slate-400 mt-1.5">
                           {fmtDate(p.date)}
                         </p>
                       )}
