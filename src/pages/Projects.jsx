@@ -2042,24 +2042,7 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       const jsPDFModule = await import('jspdf');
       const { jsPDF } = jsPDFModule;
 
-      // Clone the element for manipulation without affecting the UI
-      const clone = element.cloneNode(true);
-      
-      // Adjust scrollable/max-height wrapper inside the clone to render completely
-      const scrollableDiv = clone.querySelector('.overflow-y-auto');
-      if (scrollableDiv) {
-        scrollableDiv.style.maxHeight = 'none';
-        scrollableDiv.style.overflow = 'visible';
-      }
-
-      clone.style.width = element.offsetWidth + 'px';
-      clone.style.height = 'auto';
-      clone.style.position = 'absolute';
-      clone.style.top = '-9999px';
-      clone.style.left = '-9999px';
-      clone.style.backgroundColor = '#ffffff';
-
-      // Mathematical parser and converter helpers for oklch and oklab
+      // ── OKLCH / OKLAB → RGB conversion math ─────────────────────────────
       const parseOklch = (colorStr) => {
         const match = colorStr.match(/oklch\(\s*([\d%.]+)\s+([\d%.]+)\s+([\d%.]+)(?:\s*\/\s*([\d%.]+))?\s*\)/i);
         if (!match) return null;
@@ -2089,137 +2072,228 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
 
       const oklchToOklab = (L, C, H) => {
         const hRad = (H * Math.PI) / 180;
-        const a = C * Math.cos(hRad);
-        const b = C * Math.sin(hRad);
-        return { L, a, b };
+        return { L, a: C * Math.cos(hRad), b: C * Math.sin(hRad) };
       };
 
       const oklabToLms = (L, a, b) => {
         const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
         const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
         const s_ = L - 0.0894841775 * a - 1.2914855480 * b;
-        const l = Math.pow(Math.max(0, l_), 3);
-        const m = Math.pow(Math.max(0, m_), 3);
-        const s = Math.pow(Math.max(0, s_), 3);
-        return { l, m, s };
+        return {
+          l: Math.pow(Math.max(0, l_), 3),
+          m: Math.pow(Math.max(0, m_), 3),
+          s: Math.pow(Math.max(0, s_), 3)
+        };
       };
 
-      const lmsToLinearSrgb = (l, m, s) => {
-        const r = +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
-        const g = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
-        const b = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s;
-        return { r, g, b };
-      };
+      const lmsToLinearSrgb = (l, m, s) => ({
+        r: +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+        g: -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+        b: -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s
+      });
 
-      const linearToSrgb = (c) => {
-        return c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
-      };
+      const linearToSrgb = (c) =>
+        c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
 
       const clamp = (val) => Math.max(0, Math.min(255, Math.round(val)));
 
-      let firstUnsupportedLogged = false;
-      const logUnsupported = (colorValue, element) => {
-        if (!firstUnsupportedLogged) {
-          firstUnsupportedLogged = true;
-          const identifier = element.id ? `#${element.id}` : (element.className ? `.${element.className.split(' ')[0]}` : element.tagName.toLowerCase());
-          console.log('First unsupported color element:', element, 'Selector:', identifier);
-        }
-        console.log('Unsupported color found:', colorValue);
-      };
+      // Convert a single oklch(...) or oklab(...) occurrence to rgb()/rgba()
+      const convertSingleColorFn = (fnStr) => {
+        const trimmed = fnStr.trim().toLowerCase();
 
-      // Helper function to convert oklch/oklab computed colors to standard Hex/RGB
-      const convertColorToRgb = (colorStr, element) => {
-        if (!colorStr) return '';
-        const trimmed = colorStr.trim().toLowerCase();
-        
-        if (trimmed.includes('oklch(')) {
-          logUnsupported(colorStr, element);
-          const parsed = parseOklch(colorStr);
+        if (trimmed.startsWith('oklch(')) {
+          const parsed = parseOklch(fnStr);
           if (parsed) {
             const { L, C, H, A } = parsed;
             const { a, b } = oklchToOklab(L, C, H);
             const { l, m, s } = oklabToLms(L, a, b);
-            const linear = lmsToLinearSrgb(l, m, s);
-            const r = clamp(linearToSrgb(linear.r) * 255);
-            const g = clamp(linearToSrgb(linear.g) * 255);
-            const b = clamp(linearToSrgb(linear.b) * 255);
-            return A === 1 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${A})`;
+            const lin = lmsToLinearSrgb(l, m, s);
+            const R = clamp(linearToSrgb(lin.r) * 255);
+            const G = clamp(linearToSrgb(lin.g) * 255);
+            const B = clamp(linearToSrgb(lin.b) * 255);
+            return A === 1 ? `rgb(${R}, ${G}, ${B})` : `rgba(${R}, ${G}, ${B}, ${A})`;
           }
         }
-        
-        if (trimmed.includes('oklab(')) {
-          logUnsupported(colorStr, element);
-          const parsed = parseOklab(colorStr);
+
+        if (trimmed.startsWith('oklab(')) {
+          const parsed = parseOklab(fnStr);
           if (parsed) {
             const { L, a, b, A } = parsed;
             const { l, m, s } = oklabToLms(L, a, b);
-            const linear = lmsToLinearSrgb(l, m, s);
-            const r = clamp(linearToSrgb(linear.r) * 255);
-            const g = clamp(linearToSrgb(linear.g) * 255);
-            const b = clamp(linearToSrgb(linear.b) * 255);
-            return A === 1 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${A})`;
+            const lin = lmsToLinearSrgb(l, m, s);
+            const R = clamp(linearToSrgb(lin.r) * 255);
+            const G = clamp(linearToSrgb(lin.g) * 255);
+            const B = clamp(linearToSrgb(lin.b) * 255);
+            return A === 1 ? `rgb(${R}, ${G}, ${B})` : `rgba(${R}, ${G}, ${B}, ${A})`;
           }
         }
-        
-        return colorStr;
+
+        return fnStr; // unchanged
       };
 
-      // Helper function to recursively copy computed colors from original elements to cloned elements
-      // This is crucial to bypass Tailwind CSS variables which html2canvas fails to parse
-      const copyComputedColors = (src, dest) => {
-        const srcStyles = window.getComputedStyle(src);
-        
-        // Copy standard RGB colors so html2canvas doesn't fail or fallback to black
-        dest.style.backgroundColor = convertColorToRgb(srcStyles.backgroundColor, src);
-        dest.style.color = convertColorToRgb(srcStyles.color, src);
-        dest.style.borderColor = convertColorToRgb(srcStyles.borderColor, src);
-        dest.style.borderTopColor = convertColorToRgb(srcStyles.borderTopColor, src);
-        dest.style.borderRightColor = convertColorToRgb(srcStyles.borderRightColor, src);
-        dest.style.borderBottomColor = convertColorToRgb(srcStyles.borderBottomColor, src);
-        dest.style.borderLeftColor = convertColorToRgb(srcStyles.borderLeftColor, src);
-        
-        // Process child elements
+      // Convert ALL oklch()/oklab() occurrences in a compound CSS value string
+      // e.g. "0px 4px 6px oklch(0.5 0.1 200), inset 0px 0px 0px oklch(0.9 0.05 120)"
+      const convertAllColorsInValue = (value) => {
+        if (!value) return value;
+        if (!value.includes('oklch(') && !value.includes('oklab(')) return value;
+        // Replace each oklch(...) or oklab(...) occurrence (including nested parens for / alpha)
+        return value.replace(/ok(?:lch|lab)\([^)]*\)/gi, (match) => convertSingleColorFn(match));
+      };
+
+      // ── Curated list of CSS properties to copy inline ───────────────────
+      const VISUAL_PROPS = [
+        'background', 'backgroundColor',
+        'color',
+        'border', 'borderColor', 'borderWidth', 'borderStyle', 'borderRadius',
+        'borderTopColor', 'borderRightColor', 'borderBottomColor', 'borderLeftColor',
+        'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
+        'borderTopStyle', 'borderRightStyle', 'borderBottomStyle', 'borderLeftStyle',
+        'boxShadow',
+        'outline', 'outlineColor',
+        'textDecoration', 'textDecorationColor',
+        'font', 'fontFamily', 'fontSize', 'fontWeight', 'lineHeight',
+        'letterSpacing', 'textAlign', 'textTransform', 'whiteSpace', 'wordBreak',
+        'display', 'flex', 'flexDirection', 'flexWrap', 'flexGrow', 'flexShrink',
+        'justifyContent', 'alignItems', 'alignSelf',
+        'gap', 'rowGap', 'columnGap',
+        'padding', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+        'margin', 'marginTop', 'marginRight', 'marginBottom', 'marginLeft',
+        'width', 'height', 'minWidth', 'minHeight', 'maxWidth', 'maxHeight',
+        'position', 'top', 'left', 'right', 'bottom',
+        'overflow', 'overflowX', 'overflowY',
+        'opacity', 'transform',
+        'zIndex', 'visibility',
+        'aspectRatio', 'boxSizing',
+        'verticalAlign', 'cursor'
+      ];
+
+      let convertedCount = 0;
+
+      // Recursively copy selected computed styles from src (original) → dest (clone)
+      const copySelectedComputedStyles = (src, dest) => {
+        const computed = window.getComputedStyle(src);
+
+        for (const prop of VISUAL_PROPS) {
+          try {
+            // getComputedStyle returns camelCase values via property access
+            let value = computed[prop];
+            if (value === undefined || value === '') continue;
+
+            // Convert any oklch/oklab values in this property
+            if (typeof value === 'string' && (value.includes('oklch(') || value.includes('oklab('))) {
+              const original = value;
+              value = convertAllColorsInValue(value);
+              convertedCount++;
+              console.log('Element with unsupported color:', src.tagName + (src.id ? '#' + src.id : ''), 'Property:', prop);
+              console.log('Original value:', original);
+              console.log('Converted value:', value);
+            }
+
+            dest.style[prop] = value;
+          } catch (e) {
+            // Some shorthand properties may not be readable; skip silently
+          }
+        }
+
+        // Recurse into child elements
         const srcChildren = src.children;
         const destChildren = dest.children;
-        if (srcChildren && destChildren) {
-          for (let i = 0; i < srcChildren.length; i++) {
-            if (destChildren[i]) {
-              copyComputedColors(srcChildren[i], destChildren[i]);
-            }
+        for (let i = 0; i < srcChildren.length; i++) {
+          if (destChildren[i]) {
+            copySelectedComputedStyles(srcChildren[i], destChildren[i]);
           }
         }
       };
 
-      // Append clone to body first so it has layout for styling/rendering, then copy computed styles
-      document.body.appendChild(clone);
-      copyComputedColors(element, clone);
+      // ── Build the export clone ──────────────────────────────────────────
+      const clone = element.cloneNode(true);
 
-      // Now remove the download button from the clone (so it doesn't appear in the PDF)
+      // Remove the download button from the clone (so it doesn't appear in the PDF)
       const downloadBtn = clone.querySelector('[data-pdf-download-btn]');
-      if (downloadBtn) {
-        downloadBtn.remove();
-      }
+      if (downloadBtn) downloadBtn.remove();
 
-      // Render the clone with html2canvas
+      // Remove hover tooltips (hidden divs that shouldn't render)
+      clone.querySelectorAll('.group-hover\\:block, [class*="group-hover"]').forEach(el => el.remove());
+
+      // Append clone to body so getComputedStyle works on the original element
+      // Position off-screen but keep it in flow for correct layout computation
+      clone.style.position = 'fixed';
+      clone.style.top = '0';
+      clone.style.left = '-9999px';
+      clone.style.width = element.offsetWidth + 'px';
+      clone.style.height = 'auto';
+      clone.style.zIndex = '-1';
+      clone.style.backgroundColor = '#ffffff';
+      document.body.appendChild(clone);
+
+      // Expand any scrollable containers so the full grid is captured
+      clone.querySelectorAll('*').forEach(el => {
+        if (el.style.maxHeight || el.style.overflow === 'auto' || el.style.overflow === 'scroll' ||
+            el.className?.includes?.('overflow-y-auto') || el.className?.includes?.('overflow-auto')) {
+          el.style.maxHeight = 'none';
+          el.style.overflow = 'visible';
+          el.style.overflowY = 'visible';
+        }
+      });
+
+      // ── Copy computed styles from original → clone ──────────────────────
+      console.log('[PDF Export] Starting computed style copy...');
+      copySelectedComputedStyles(element, clone);
+      console.log(`[PDF Export] Converted ${convertedCount} oklch/oklab color values to RGB.`);
+
+      // ── Strip ALL class attributes so html2canvas never resolves Tailwind CSS ─
+      clone.removeAttribute('class');
+      clone.querySelectorAll('*').forEach(el => {
+        el.removeAttribute('class');
+      });
+      console.log('[PDF Export] Stripped all class attributes from clone.');
+
+      // Force the clone container to be visible and white for capture
+      clone.style.position = 'absolute';
+      clone.style.top = '0';
+      clone.style.left = '0';
+      clone.style.zIndex = '99999';
+      clone.style.backgroundColor = '#ffffff';
+      clone.style.overflow = 'visible';
+
+      // ── Capture with html2canvas ────────────────────────────────────────
+      console.log('[PDF Export] Starting html2canvas capture...');
       const canvas = await html2canvas(clone, {
-        scale: 3,
+        scale: 2,
         useCORS: true,
         backgroundColor: '#ffffff',
-        logging: false,
-        windowWidth: clone.offsetWidth,
-        windowHeight: clone.scrollHeight || clone.offsetHeight
+        logging: true
       });
+      console.log(`[PDF Export] Canvas captured: ${canvas.width}x${canvas.height}`);
 
       // Clean up the clone
       document.body.removeChild(clone);
 
-      // Create PDF with appropriate dimensions
+      // ── Verify canvas has colors (not all black) ────────────────────────
+      const ctx = canvas.getContext('2d');
+      const sampleData = ctx.getImageData(
+        Math.floor(canvas.width / 2), Math.floor(canvas.height / 2), 10, 10
+      ).data;
+      let hasColor = false;
+      for (let i = 0; i < sampleData.length; i += 4) {
+        const r = sampleData[i], g = sampleData[i + 1], b = sampleData[i + 2];
+        // Check if any pixel is not pure black and not pure white
+        if (!((r === 0 && g === 0 && b === 0) || (r === 255 && g === 255 && b === 255))) {
+          hasColor = true;
+          break;
+        }
+      }
+      console.log(`[PDF Export] Canvas color check: ${hasColor ? 'PASS - colors detected' : 'WARNING - only black/white detected'}`);
+
+      // ── Generate PDF ────────────────────────────────────────────────────
       const imgWidth = canvas.width;
       const imgHeight = canvas.height;
       
-      // Calculate PDF dimensions (convert px to mm for better printing)
-      const pdfWidth = imgWidth / 3.78; // 96 DPI conversion
-      const pdfHeight = imgHeight / 3.78;
+      // Convert px to mm for PDF (at scale=2, effective DPI ≈ 192, so ÷ 7.56 for mm)
+      const scaleFactor = 2;
+      const pxPerMm = (96 * scaleFactor) / 25.4; // 96 DPI * scale / mm-per-inch
+      const pdfWidth = imgWidth / pxPerMm;
+      const pdfHeight = imgHeight / pxPerMm;
       
       const pdf = new jsPDF({
         orientation: imgWidth > imgHeight ? 'landscape' : 'portrait',
@@ -2234,10 +2308,11 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       pdf.save(fileName);
       toast('Greenhouse layout PDF downloaded successfully!', 'success');
     } catch (error) {
-      console.error('Failed to generate PDF:', error);
+      console.error('[PDF Export] Failed to generate PDF:', error);
       toast('Failed to generate PDF: ' + error.message, 'error');
     }
   };
+
 
   // ── Randomize Layout ────────────────────────────────────────────────────
   const [isRandomizeModalOpen, setIsRandomizeModalOpen] = useState(false);
