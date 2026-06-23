@@ -103,6 +103,8 @@ export default function LiveTrialPage() {
   const { id } = useParams();
   const [trial, setTrial] = useState(null);
   const [formulation, setFormulation] = useState(null);
+  const [project, setProject] = useState(null);
+  const [block, setBlock] = useState(null);
   const [globalQRSettings, setGlobalQRSettings] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -225,6 +227,27 @@ export default function LiveTrialPage() {
         } else {
           setFormulation(null);
         }
+
+        const resolvedCategory = data.Category || qCat || "herbicide";
+        const projectsCol = getCategoryCollection(resolvedCategory, "projects");
+        const blocksCol = getCategoryCollection(resolvedCategory, "blocks");
+
+        if (data.ProjectID) {
+          try {
+            const projectData = await fbGetById(projectsCol, data.ProjectID);
+            setProject(projectData);
+          } catch (projErr) {
+            console.warn("Failed to load project info:", projErr);
+          }
+        }
+        if (data.BlockID) {
+          try {
+            const blockData = await fbGetById(blocksCol, data.BlockID);
+            setBlock(blockData);
+          } catch (blockErr) {
+            console.warn("Failed to load block info:", blockErr);
+          }
+        }
       } catch (e) {
         console.error("LiveTrialPage loading error:", e);
         setError(e.message || "Failed to load trial.");
@@ -300,6 +323,22 @@ export default function LiveTrialPage() {
       </div>
     );
 
+  const categoryId = trial.Category || "herbicide";
+  const targetLabel = 
+    categoryId === "herbicide" ? "Target Weeds" :
+    categoryId === "fungicide" ? "Target Diseases" :
+    categoryId === "pesticide" ? "Target Pests" :
+    categoryId === "nutrition" ? "Nutrient Target" :
+    categoryId === "biostimulant" ? "Biostimulant Focus" :
+    "Target / Focus";
+  const targetValue = 
+    trial.WeedSpecies || 
+    trial.DiseaseTarget || 
+    trial.PestTarget || 
+    trial.NutrientType || 
+    trial.BiostimulantType || 
+    "—";
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-teal-50 font-sans">
       {/* Header */}
@@ -338,13 +377,33 @@ export default function LiveTrialPage() {
           <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wide mb-3">
             Trial Details
           </h2>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
             {[
               ["Trial ID", trial.ID, true],
               [
-                "Product",
+                "Product / Treatment",
                 trial.FormulationName || "—",
                 show.showFormulationName,
+              ],
+              [
+                "Project Workspace",
+                project?.Name || "—",
+                !!trial.ProjectID,
+              ],
+              [
+                "Block Name",
+                block?.Name || "—",
+                !!trial.BlockID,
+              ],
+              [
+                "Plot Number",
+                trial.PlotNumber || "—",
+                !!trial.PlotNumber,
+              ],
+              [
+                "Replication",
+                trial.Replication || block?.ReplicationNum || "—",
+                show.showReplication || !!block?.ReplicationNum,
               ],
               [
                 "Investigator",
@@ -354,9 +413,8 @@ export default function LiveTrialPage() {
               ["Application Date", fmtDate(trial.Date), show.showDate],
               ["Dosage", trial.Dosage || "—", show.showDosage],
               ["Location", trial.Location || "—", show.showLocation],
-              ["Target Weeds", trial.WeedSpecies || "—", show.showWeedSpecies],
-              ["Replication", trial.Replication || "—", show.showReplication],
-              ["Result", trial.Result || "—", show.showResult],
+              [targetLabel, targetValue, show.showWeedSpecies],
+              ["Result Rating", trial.Result || "—", show.showResult],
               ["Status", isActive ? "Active" : "Completed", true],
             ]
               .filter(([, , visible]) => visible)
