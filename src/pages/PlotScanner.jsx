@@ -61,6 +61,14 @@ function parseQrData(raw) {
     }
   }
 
+  // Handle offline plain-text trial QR
+  if (str.includes('MIKLENS-TRIAL') || str.includes('ID:')) {
+    const match = str.match(/ID:([^\s\n]+)/);
+    if (match && match[1]) {
+      return { type: "id", data: match[1].trim() };
+    }
+  }
+
   // Plain trial ID
   return { type: "id", data: str };
 }

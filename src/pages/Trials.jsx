@@ -48,6 +48,7 @@ import { detectOutliers } from '../utils/statsUtils.js';
 import AppSharingModal from '../components/AppSharingModal.jsx';
 import SprayCalculatorModal from '../components/SprayCalculatorModal.jsx';
 import TrialDesignGuideModal from '../components/TrialDesignGuideModal.jsx';
+import QRCodeLib from 'qrcode';
 
 const RESULT_COLORS = {
   'Excellent': 'bg-emerald-100 text-emerald-700',

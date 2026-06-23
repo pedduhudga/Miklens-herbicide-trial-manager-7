@@ -191,6 +191,7 @@ import {
 } from '../services/trialReports.js';
 
 import L from 'leaflet';
+import QRCodeLib from 'qrcode';
 
 const emptySubTrialForm = () => ({
   FormulationName: '',
