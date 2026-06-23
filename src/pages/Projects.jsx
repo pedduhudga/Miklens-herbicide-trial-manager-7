@@ -2059,29 +2059,108 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       clone.style.left = '-9999px';
       clone.style.backgroundColor = '#ffffff';
 
-      // Helper function to convert any CSS color format (like oklch or oklab) into standard HEX/RGB using canvas
-      const convertColorToRgb = (colorStr) => {
+      // Mathematical parser and converter helpers for oklch and oklab
+      const parseOklch = (colorStr) => {
+        const match = colorStr.match(/oklch\(\s*([\d%.]+)\s+([\d%.]+)\s+([\d%.]+)(?:\s*\/\s*([\d%.]+))?\s*\)/i);
+        if (!match) return null;
+        let L = parseFloat(match[1]);
+        if (match[1].endsWith('%')) L = parseFloat(match[1]) / 100;
+        let C = parseFloat(match[2]);
+        if (match[2].endsWith('%')) C = parseFloat(match[2]) / 100;
+        let H = parseFloat(match[3]);
+        let A = match[4] !== undefined ? parseFloat(match[4]) : 1;
+        if (match[4] && match[4].endsWith('%')) A = parseFloat(match[4]) / 100;
+        return { L, C, H, A };
+      };
+
+      const parseOklab = (colorStr) => {
+        const match = colorStr.match(/oklab\(\s*([\d%.]+)\s+([\d%.+-]+)\s+([\d%.+-]+)(?:\s*\/\s*([\d%.]+))?\s*\)/i);
+        if (!match) return null;
+        let L = parseFloat(match[1]);
+        if (match[1].endsWith('%')) L = parseFloat(match[1]) / 100;
+        let a = parseFloat(match[2]);
+        if (match[2].endsWith('%')) a = parseFloat(match[2]) / 100;
+        let b = parseFloat(match[3]);
+        if (match[3].endsWith('%')) b = parseFloat(match[3]) / 100;
+        let A = match[4] !== undefined ? parseFloat(match[4]) : 1;
+        if (match[4] && match[4].endsWith('%')) A = parseFloat(match[4]) / 100;
+        return { L, a, b, A };
+      };
+
+      const oklchToOklab = (L, C, H) => {
+        const hRad = (H * Math.PI) / 180;
+        const a = C * Math.cos(hRad);
+        const b = C * Math.sin(hRad);
+        return { L, a, b };
+      };
+
+      const oklabToLms = (L, a, b) => {
+        const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+        const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+        const s_ = L - 0.0894841775 * a - 1.2914855480 * b;
+        const l = Math.pow(Math.max(0, l_), 3);
+        const m = Math.pow(Math.max(0, m_), 3);
+        const s = Math.pow(Math.max(0, s_), 3);
+        return { l, m, s };
+      };
+
+      const lmsToLinearSrgb = (l, m, s) => {
+        const r = +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
+        const g = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
+        const b = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s;
+        return { r, g, b };
+      };
+
+      const linearToSrgb = (c) => {
+        return c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+      };
+
+      const clamp = (val) => Math.max(0, Math.min(255, Math.round(val)));
+
+      let firstUnsupportedLogged = false;
+      const logUnsupported = (colorValue, element) => {
+        if (!firstUnsupportedLogged) {
+          firstUnsupportedLogged = true;
+          const identifier = element.id ? `#${element.id}` : (element.className ? `.${element.className.split(' ')[0]}` : element.tagName.toLowerCase());
+          console.log('First unsupported color element:', element, 'Selector:', identifier);
+        }
+        console.log('Unsupported color found:', colorValue);
+      };
+
+      // Helper function to convert oklch/oklab computed colors to standard Hex/RGB
+      const convertColorToRgb = (colorStr, element) => {
         if (!colorStr) return '';
         const trimmed = colorStr.trim().toLowerCase();
-        if (trimmed === 'transparent' || trimmed === 'rgba(0, 0, 0, 0)' || trimmed === 'initial' || trimmed === 'inherit') {
-          return 'transparent';
-        }
-        if (trimmed.startsWith('rgb(') || trimmed.startsWith('rgba(') || (trimmed.startsWith('#') && trimmed.length >= 4)) {
-          return colorStr;
+        
+        if (trimmed.includes('oklch(')) {
+          logUnsupported(colorStr, element);
+          const parsed = parseOklch(colorStr);
+          if (parsed) {
+            const { L, C, H, A } = parsed;
+            const { a, b } = oklchToOklab(L, C, H);
+            const { l, m, s } = oklabToLms(L, a, b);
+            const linear = lmsToLinearSrgb(l, m, s);
+            const r = clamp(linearToSrgb(linear.r) * 255);
+            const g = clamp(linearToSrgb(linear.g) * 255);
+            const b = clamp(linearToSrgb(linear.b) * 255);
+            return A === 1 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${A})`;
+          }
         }
         
-        try {
-          const canvas = document.createElement('canvas');
-          canvas.width = 1;
-          canvas.height = 1;
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.fillStyle = colorStr;
-            return ctx.fillStyle;
+        if (trimmed.includes('oklab(')) {
+          logUnsupported(colorStr, element);
+          const parsed = parseOklab(colorStr);
+          if (parsed) {
+            const { L, a, b, A } = parsed;
+            const { l, m, s } = oklabToLms(L, a, b);
+            const linear = lmsToLinearSrgb(l, m, s);
+            const r = clamp(linearToSrgb(linear.r) * 255);
+            const g = clamp(linearToSrgb(linear.g) * 255);
+            const b = clamp(linearToSrgb(linear.b) * 255);
+            return A === 1 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${A})`;
           }
-        } catch (e) {
-          console.error('Failed to convert color:', colorStr, e);
         }
+        
         return colorStr;
       };
 
@@ -2091,13 +2170,13 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
         const srcStyles = window.getComputedStyle(src);
         
         // Copy standard RGB colors so html2canvas doesn't fail or fallback to black
-        dest.style.backgroundColor = convertColorToRgb(srcStyles.backgroundColor);
-        dest.style.color = convertColorToRgb(srcStyles.color);
-        dest.style.borderColor = convertColorToRgb(srcStyles.borderColor);
-        dest.style.borderTopColor = convertColorToRgb(srcStyles.borderTopColor);
-        dest.style.borderRightColor = convertColorToRgb(srcStyles.borderRightColor);
-        dest.style.borderBottomColor = convertColorToRgb(srcStyles.borderBottomColor);
-        dest.style.borderLeftColor = convertColorToRgb(srcStyles.borderLeftColor);
+        dest.style.backgroundColor = convertColorToRgb(srcStyles.backgroundColor, src);
+        dest.style.color = convertColorToRgb(srcStyles.color, src);
+        dest.style.borderColor = convertColorToRgb(srcStyles.borderColor, src);
+        dest.style.borderTopColor = convertColorToRgb(srcStyles.borderTopColor, src);
+        dest.style.borderRightColor = convertColorToRgb(srcStyles.borderRightColor, src);
+        dest.style.borderBottomColor = convertColorToRgb(srcStyles.borderBottomColor, src);
+        dest.style.borderLeftColor = convertColorToRgb(srcStyles.borderLeftColor, src);
         
         // Process child elements
         const srcChildren = src.children;
