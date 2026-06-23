@@ -1,9 +1,12 @@
 // src/services/db.js
+import { saveSyncQueueOffline } from './offlineStorage.js';
 
 const OFFLINE_ACTIONS = [
     'addTrial', 'createTrialRecord', 'updateTrialRecord', 'updateTrialStatus',
     'addFormulation', 'addIngredient', 'finalizeTrial', 'addBatchTrials',
-    'updateProject', 'addBlock'
+    'updateProject', 'addBlock',
+    'deleteTrialRecord', 'deleteFormulation', 'deleteProject', 'deleteBlock',
+    'deleteOrganisation', 'deleteIngredient'
 ];
 
 export async function apiCall(action, payload = {}, showOverlay = true, getAppState) {
@@ -14,7 +17,7 @@ export async function apiCall(action, payload = {}, showOverlay = true, getAppSt
         return { _errType: 'config', message: 'Application settings not configured.' };
     }
 
-    const queueItem = (errType, msg) => {
+    const queueItem = async (errType, msg) => {
         if (OFFLINE_ACTIONS.includes(action)) {
             const queuedAction = {
                 id: `sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -30,22 +33,23 @@ export async function apiCall(action, payload = {}, showOverlay = true, getAppSt
                 const isDup = queue.some(item => item.action === action && JSON.stringify(item.payload) === JSON.stringify(payload));
                 if (!isDup) {
                     queue.push(queuedAction);
+
+                    // PERSIST TO INDEXEDDB FIRST (primary storage - no quota limit)
+                    try {
+                        await saveSyncQueueOffline(queue);
+                    } catch (idbErr) {
+                        console.error('[OfflineQueue] IndexedDB write failed:', idbErr);
+                    }
+
+                    // THEN attempt localStorage (secondary fallback)
                     try {
                         localStorage.setItem('syncQueue', JSON.stringify(queue));
-                    } catch (quotaErr) {
-                        if (quotaErr?.name === 'QuotaExceededError' || String(quotaErr).includes('QuotaExceededError')) {
-                            console.warn('[OfflineQueue] localStorage quota exceeded — pruning oldest items');
-                            const pruned = queue.slice(Math.ceil(queue.length / 2));
-                            try {
-                                localStorage.setItem('syncQueue', JSON.stringify(pruned));
-                            } catch {
-                                console.error('[OfflineQueue] Still full after pruning — clearing syncQueue');
-                                localStorage.removeItem('syncQueue');
-                            }
-                        } else {
-                            throw quotaErr;
-                        }
+                    } catch (lsErr) {
+                        console.error('[OfflineQueue] localStorage write failed:', lsErr);
+                        // Item is SAFE in IndexedDB - no data loss
                     }
+
+                    // Update React state (triggers reducer's IndexedDB save)
                     if (window.updateState) {
                         window.updateState({ syncQueue: queue });
                     }

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useReducer, useEffect, useCallback, useRef, useState, useMemo } from 'react';
-import { initFirebase, isFirebaseReady } from '../services/firebase.js';
+import { initFirebase } from '../services/firebase.js';
 import { saveOfflineData, loadOfflineData, saveOfflinePhoto, loadOfflinePhoto, saveSyncQueueOffline, loadSyncQueueOffline } from '../services/offlineStorage.js';
+import { fbGetUserSettings } from '../services/firebaseDB.js';
 
 function safeJsonParse(val, fallback = []) {
   if (!val) return fallback;
@@ -479,7 +480,7 @@ export function AppStateProvider({ children }) {
         // Proactively fetch global/user settings from Firestore if Firebase Auth is active
         const uid = parsedAuth.uid || parsedAuth.user?.uid || parsedAuth.user?.ID;
         if (uid && parsedAuth.authProvider === 'firebase') {
-          import('../services/firebaseDB.js').then(async ({ fbGetUserSettings }) => {
+          (async () => {
             try {
               const fbSettings = await fbGetUserSettings(uid);
               if (fbSettings) {
@@ -497,7 +498,7 @@ export function AppStateProvider({ children }) {
             } catch (err) {
               console.warn('[Firestore] Failed to synchronize settings:', err.message);
             }
-          });
+          })();
         }
       }
 

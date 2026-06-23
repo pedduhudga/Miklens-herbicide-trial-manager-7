@@ -48,9 +48,10 @@ export function useAuth() {
       const tokenValue = response?.token || response?.Token || response?.user?.token || response?.user?.Token || username;
 
       if (userData && (userData.ID || userData.Username || userData.username)) {
+        // SECURITY: Don't store password in localStorage - only keep in memory for session
         dispatch({
           type: 'SET_AUTH',
-          payload: { user: userData, token: tokenValue, username, password, authProvider: 'sheet' }
+          payload: { user: userData, token: tokenValue, username, authProvider: 'sheet' }
         });
         return { success: true, user: userData };
       }
