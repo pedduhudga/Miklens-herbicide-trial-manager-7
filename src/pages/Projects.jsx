@@ -2450,20 +2450,44 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       const imgWidth = canvas.width;
       const imgHeight = canvas.height;
       
-      // Convert px to mm for PDF (at scale=2, effective DPI ≈ 192, so ÷ 7.56 for mm)
       const scaleFactor = 2;
       const pxPerMm = (96 * scaleFactor) / 25.4; // 96 DPI * scale / mm-per-inch
-      const pdfWidth = imgWidth / pxPerMm;
-      const pdfHeight = imgHeight / pxPerMm;
+      const canvasWidthMm = imgWidth / pxPerMm;
+      const canvasHeightMm = imgHeight / pxPerMm;
       
+      // Standard A4 dimensions
+      const pageWidth = 210;
+      const pageHeight = 297;
+      const margin = 10;
+      const contentWidth = pageWidth - (margin * 2);
+      const contentHeight = pageHeight - (margin * 2);
+
+      // Scale height proportionally to fit printable width (190mm)
+      const ratio = contentWidth / canvasWidthMm;
+      const scaledHeight = canvasHeightMm * ratio;
+
       const pdf = new jsPDF({
-        orientation: imgWidth > imgHeight ? 'landscape' : 'portrait',
+        orientation: 'portrait',
         unit: 'mm',
-        format: [pdfWidth, pdfHeight]
+        format: 'a4'
       });
 
       const imgData = canvas.toDataURL('image/png', 1.0);
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      
+      let heightLeft = scaledHeight;
+      let yOffset = margin;
+
+      // Add first page
+      pdf.addImage(imgData, 'PNG', margin, yOffset, contentWidth, scaledHeight);
+      heightLeft -= contentHeight;
+
+      // Add extra pages if content is taller than A4 printable area
+      while (heightLeft > 0) {
+        yOffset = margin - (scaledHeight - heightLeft);
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', margin, yOffset, contentWidth, scaledHeight);
+        heightLeft -= contentHeight;
+      }
       
       const fileName = `${activeProject?.Name || 'Project'}-greenhouse-layout.pdf`;
       pdf.save(fileName);
