@@ -2058,6 +2058,8 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
         'width', 'height', 'minWidth', 'minHeight', 'maxWidth', 'maxHeight',
         'flex', 'flexDirection', 'flexWrap', 'flexGrow', 'flexShrink',
         'alignItems', 'justifyContent', 'alignSelf', 'gap',
+        'gridTemplateColumns', 'gridTemplateRows', 'gridColumnStart', 'gridColumnEnd', 'gridRowStart', 'gridRowEnd', 'gridArea',
+        'aspectRatio',
         'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
         'marginTop', 'marginRight', 'marginBottom', 'marginLeft',
         'backgroundColor', 'color', 
@@ -2095,9 +2097,13 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       // Adjust scrollable/max-height wrapper inside the clone AFTER copying styles so it stays expanded
       const scrollableDiv = clone.querySelector('.overflow-y-auto');
       if (scrollableDiv) {
+        scrollableDiv.style.height = 'auto';
         scrollableDiv.style.maxHeight = 'none';
         scrollableDiv.style.overflow = 'visible';
       }
+      clone.style.height = 'auto';
+      clone.style.maxHeight = 'none';
+      clone.style.overflow = 'visible';
 
       // Now remove the download button from the clone (so it doesn't appear in the PDF)
       const downloadBtn = clone.querySelector('[data-pdf-download-btn]');
@@ -2105,19 +2111,14 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
         downloadBtn.remove();
       }
 
-      // Disable all stylesheets temporarily to prevent html2canvas oklab/oklch parser crashes
-      const disabledSheets = [];
-      for (let i = 0; i < document.styleSheets.length; i++) {
-        const sheet = document.styleSheets[i];
-        try {
-          if (!sheet.disabled) {
-            sheet.disabled = true;
-            disabledSheets.push(sheet);
-          }
-        } catch (e) {
-          // Ignore security errors for cross-origin sheets
-        }
-      }
+      // Temporarily physically detach all stylesheets from the DOM to bypass html2canvas stylesheet parsing
+      const styleElements = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'));
+      const styleParents = styleElements.map(el => ({
+        element: el,
+        parent: el.parentNode,
+        nextSibling: el.nextSibling
+      }));
+      styleElements.forEach(el => el.remove());
 
       // Render the clone with html2canvas
       let canvas;
@@ -2131,11 +2132,11 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
           windowHeight: clone.scrollHeight || clone.offsetHeight
         });
       } finally {
-        // Re-enable all temporarily disabled stylesheets
-        disabledSheets.forEach(sheet => {
-          try {
-            sheet.disabled = false;
-          } catch (e) {}
+        // Restore all temporarily detached stylesheets immediately
+        styleParents.forEach(item => {
+          if (item.parent) {
+            item.parent.insertBefore(item.element, item.nextSibling);
+          }
         });
         // Clean up the clone from the DOM
         document.body.removeChild(clone);
