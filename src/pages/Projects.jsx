@@ -2226,15 +2226,7 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       clone.style.backgroundColor = '#ffffff';
       document.body.appendChild(clone);
 
-      // Expand any scrollable containers so the full grid is captured
-      clone.querySelectorAll('*').forEach(el => {
-        if (el.style.maxHeight || el.style.overflow === 'auto' || el.style.overflow === 'scroll' ||
-            el.className?.includes?.('overflow-y-auto') || el.className?.includes?.('overflow-auto')) {
-          el.style.maxHeight = 'none';
-          el.style.overflow = 'visible';
-          el.style.overflowY = 'visible';
-        }
-      });
+
 
       // ── Copy computed styles from original → clone ──────────────────────
       console.log('[PDF Export] Starting computed style copy...');
@@ -2248,13 +2240,36 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       });
       console.log('[PDF Export] Stripped all class attributes from clone.');
 
-      // Force the clone container to be visible and white for capture
+      // ── Expand ALL scrollable containers AFTER style copy ────────────────
+      // This must run after copySelectedComputedStyles, because that function
+      // copies the original element's overflow/maxHeight (e.g. overflow:auto,
+      // max-height:500px) which would re-constrain the clone.
+      clone.querySelectorAll('*').forEach(el => {
+        const isScrollable = el.scrollHeight > el.clientHeight ||
+          el.style.overflow === 'auto' || el.style.overflow === 'scroll' ||
+          el.style.overflowY === 'auto' || el.style.overflowY === 'scroll' ||
+          el.style.maxHeight !== 'none';
+        if (isScrollable) {
+          el.style.maxHeight = 'none';
+          el.style.height = 'auto';
+          el.style.overflow = 'visible';
+          el.style.overflowY = 'visible';
+          el.style.overflowX = 'visible';
+        }
+      });
+
+      // Expand the root clone itself to its full content size
       clone.style.position = 'absolute';
       clone.style.top = '0';
       clone.style.left = '0';
       clone.style.zIndex = '99999';
       clone.style.backgroundColor = '#ffffff';
       clone.style.overflow = 'visible';
+      clone.style.maxHeight = 'none';
+      clone.style.height = clone.scrollHeight + 'px';
+
+      console.log('[PDF Export] Scroll Height:', clone.scrollHeight);
+      console.log('[PDF Export] Client Height:', clone.clientHeight);
 
       // ── Capture with html2canvas ────────────────────────────────────────
       console.log('[PDF Export] Starting html2canvas capture...');
@@ -2262,7 +2277,9 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
         scale: 2,
         useCORS: true,
         backgroundColor: '#ffffff',
-        logging: true
+        logging: true,
+        windowWidth: clone.scrollWidth,
+        windowHeight: clone.scrollHeight
       });
       console.log(`[PDF Export] Canvas captured: ${canvas.width}x${canvas.height}`);
 
