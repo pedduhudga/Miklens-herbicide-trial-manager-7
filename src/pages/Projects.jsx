@@ -1726,7 +1726,6 @@ export default function Projects({ onMenuClick }) {
         rowCells.push(
           <div 
             key={`${r}-${c}`}
-            data-pdf-pot-cell="true"
             onClick={() => trial && navigate(`/trials?focus=${trial.ID}`)}
             style={heatmapMode !== 'none' && trial ? heatmapStyle : {}}
             className={`flex-1 aspect-square rounded-lg border-2 flex flex-col items-center justify-center p-1.5 cursor-pointer shadow-sm relative group transition-all duration-300 ${heatmapMode !== 'none' && trial ? '' : colorClasses} ${
@@ -2213,22 +2212,6 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       const downloadBtn = clone.querySelector('[data-pdf-download-btn]');
       if (downloadBtn) downloadBtn.remove();
 
-      // Remove Spatial Heatmap Overlay section from clone
-      clone.querySelectorAll('h4').forEach(h4 => {
-        if (h4.textContent.includes('Spatial Heatmap Overlay')) {
-          const container = h4.parentElement?.parentElement;
-          if (container) container.remove();
-        }
-      });
-
-      // Remove Greenhouse Layout Visualization title and description from clone
-      clone.querySelectorAll('h3').forEach(h3 => {
-        if (h3.textContent.includes('Greenhouse Layout Visualization')) {
-          const textContainer = h3.parentElement;
-          if (textContainer) textContainer.remove();
-        }
-      });
-
       // Remove hover tooltips (hidden divs that shouldn't render)
       clone.querySelectorAll('.group-hover\\:block, [class*="group-hover"]').forEach(el => el.remove());
 
@@ -2256,153 +2239,6 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
         el.removeAttribute('class');
       });
       console.log('[PDF Export] Stripped all class attributes from clone.');
-
-      // ── Prepend a Beautifully Styled Header for the PDF ──────────────────
-      const headerDiv = document.createElement('div');
-      headerDiv.style.padding = '24px';
-      headerDiv.style.marginBottom = '25px';
-      headerDiv.style.borderBottom = '2px solid #e2e8f0';
-      headerDiv.style.fontFamily = 'system-ui, -apple-system, sans-serif';
-      headerDiv.style.backgroundColor = '#ffffff';
-
-      // Title Section
-      const title = document.createElement('h1');
-      title.innerText = activeProject?.Name || 'Greenhouse Trial Layout';
-      title.style.fontSize = '24px';
-      title.style.fontWeight = '800';
-      title.style.color = '#0f172a';
-      title.style.margin = '0 0 16px 0';
-      headerDiv.appendChild(title);
-
-      // Info Grid
-      const grid = document.createElement('div');
-      grid.style.display = 'grid';
-      grid.style.gridTemplateColumns = 'repeat(3, 1fr)';
-      grid.style.gap = '20px';
-      grid.style.marginBottom = '20px';
-
-      // Col 1: Investigator & Location
-      const col1 = document.createElement('div');
-      col1.innerHTML = `
-        <div style="margin-bottom: 12px;">
-          <div style="color: #64748b; font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Investigator</div>
-          <div style="font-size: 14px; color: #1e293b; font-weight: 600; margin-top: 2px;">${activeProject?.Investigator || 'N/A'}</div>
-        </div>
-        <div>
-          <div style="color: #64748b; font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Location</div>
-          <div style="font-size: 14px; color: #1e293b; font-weight: 600; margin-top: 2px;">${activeProject?.Location || 'N/A'}</div>
-        </div>
-      `;
-      grid.appendChild(col1);
-
-      // Col 2: Crop
-      const col2 = document.createElement('div');
-      col2.innerHTML = `
-        <div>
-          <div style="color: #64748b; font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Crop</div>
-          <div style="font-size: 14px; color: #1e293b; font-weight: 600; margin-top: 2px;">${activeProject?.Crop || 'N/A'}</div>
-        </div>
-      `;
-      grid.appendChild(col2);
-
-      // Col 3: Design & Metric
-      const col3 = document.createElement('div');
-      col3.innerHTML = `
-        <div style="margin-bottom: 12px;">
-          <div style="color: #64748b; font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Design / Layout</div>
-          <div style="font-size: 14px; color: #1e293b; font-weight: 600; margin-top: 2px;">
-            ${activeProject?.Design === 'PotTrial' ? 'Pot Trial' : 'RCBD Pot Trial'} (${projectBlocks?.length || 0} Blocks)
-          </div>
-        </div>
-        <div>
-          <div style="color: #64748b; font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Evaluation Metric</div>
-          <div style="font-size: 14px; color: #1e293b; font-weight: 600; margin-top: 2px;">${activeProject?.Metric || 'Weed Control Efficiency'}</div>
-        </div>
-      `;
-      grid.appendChild(col3);
-
-      headerDiv.appendChild(grid);
-
-      // Treatment Details list
-      const uniqueTreatmentsMap = new Map();
-      projectTrials.forEach(t => {
-        if (!t.FormulationName) return;
-        const key = `${t.FormulationName} (Dosage: ${t.Dosage || 'Default'})`;
-        uniqueTreatmentsMap.set(key, { name: t.FormulationName, dosage: t.Dosage, isControl: String(t.IsControl).toLowerCase() === 'true' });
-      });
-
-      if (uniqueTreatmentsMap.size > 0) {
-        const trSection = document.createElement('div');
-        trSection.style.marginTop = '16px';
-        trSection.style.paddingTop = '16px';
-        trSection.style.borderTop = '1px dashed #e2e8f0';
-
-        const trTitle = document.createElement('div');
-        trTitle.innerText = 'Treatment Details';
-        trTitle.style.color = '#64748b';
-        trTitle.style.fontSize = '10px';
-        trTitle.style.fontWeight = '700';
-        trTitle.style.letterSpacing = '0.05em';
-        trTitle.style.textTransform = 'uppercase';
-        trTitle.style.marginBottom = '10px';
-        trSection.appendChild(trTitle);
-
-        const trList = document.createElement('div');
-        trList.style.display = 'flex';
-        trList.style.flexWrap = 'wrap';
-        trList.style.gap = '8px';
-
-        uniqueTreatmentsMap.forEach((tr) => {
-          const badge = document.createElement('span');
-          badge.style.display = 'inline-block';
-          badge.style.padding = '5px 10px';
-          badge.style.backgroundColor = tr.isControl ? '#f8fafc' : '#f0fdf4';
-          badge.style.border = tr.isControl ? '1px solid #cbd5e1' : '1px solid #bbf7d0';
-          badge.style.color = tr.isControl ? '#475569' : '#166534';
-          badge.style.borderRadius = '8px';
-          badge.style.fontSize = '12px';
-          badge.style.fontWeight = '600';
-          badge.innerText = `${tr.name}${tr.dosage ? ` (${tr.dosage})` : ''}`;
-          trList.appendChild(badge);
-        });
-
-        trSection.appendChild(trList);
-        headerDiv.appendChild(trSection);
-      }
-
-      clone.prepend(headerDiv);
-
-      // Fix clipped/cut-in-half text inside pot grid cells for the PDF clone
-      clone.querySelectorAll('[data-pdf-pot-cell]').forEach(div => {
-        // This is a pot grid cell
-        div.style.display = 'flex';
-        div.style.flexDirection = 'column';
-        div.style.justifyContent = 'space-evenly';
-        div.style.alignItems = 'center';
-        div.style.padding = '5px';
-        div.style.boxSizing = 'border-box';
-        div.style.overflow = 'visible';
-
-        let spanIndex = 0;
-        div.querySelectorAll('span').forEach(span => {
-          span.style.lineHeight = '1.2';
-          span.style.overflow = 'visible';
-          span.style.whiteSpace = 'normal';
-          span.style.wordBreak = 'break-word';
-          span.style.textAlign = 'center';
-          span.style.maxHeight = 'none';
-
-          if (spanIndex === 0) {
-            span.style.fontSize = '9px'; // e.g. R1C1
-          } else if (spanIndex === 1) {
-            span.style.fontSize = '7px'; // e.g. Block 1
-          } else {
-            span.style.fontSize = '8px'; // e.g. Treatment Name
-          }
-          spanIndex++;
-        });
-      });
-
 
       // ── Expand ALL scrollable containers AFTER style copy ────────────────
       // This must run after copySelectedComputedStyles, because that function
