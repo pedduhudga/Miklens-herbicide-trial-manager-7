@@ -2089,9 +2089,51 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
         }
       };
 
+      // Helper function to remove Tailwind color classes from the clone.
+      // This prevents html2canvas from matching those classes to stylesheet rules containing unresolved CSS variables.
+      const cleanColorClasses = (el) => {
+        if (el.className && typeof el.className === 'string') {
+          el.className = el.className.split(' ').filter(c => {
+            // Remove hover/focus/etc. variants if they contain bg/text/border
+            if (c.includes(':')) {
+              const parts = c.split(':');
+              const last = parts[parts.length - 1];
+              if (last.startsWith('bg-') || last.startsWith('border-') || (last.startsWith('text-') && !['xs', 'sm', 'md', 'lg', 'xl', '2xl', '3xl', 'left', 'right', 'center', 'justify', 'bold', 'normal'].includes(last.substring(5)) && !last.substring(5).startsWith('['))) {
+                return false;
+              }
+            }
+            
+            // Standard color classes
+            if (c.startsWith('bg-')) {
+              return false;
+            }
+            if (c.startsWith('border-')) {
+              return false;
+            }
+            if (c.startsWith('text-')) {
+              const suffix = c.substring(5);
+              if (['xs', 'sm', 'md', 'lg', 'xl', '2xl', '3xl', 'left', 'right', 'center', 'justify', 'bold', 'normal'].includes(suffix) || suffix.startsWith('[')) {
+                return true;
+              }
+              return false;
+            }
+            return true;
+          }).join(' ');
+        }
+        
+        // Recurse children
+        const children = el.children;
+        if (children) {
+          for (let i = 0; i < children.length; i++) {
+            cleanColorClasses(children[i]);
+          }
+        }
+      };
+
       // Append clone to body first so it has layout for styling/rendering, then copy computed styles
       document.body.appendChild(clone);
       copyComputedStyles(element, clone);
+      cleanColorClasses(clone);
 
       // Now remove the download button from the clone (so it doesn't appear in the PDF)
       const downloadBtn = clone.querySelector('[data-pdf-download-btn]');
