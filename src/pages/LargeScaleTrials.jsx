@@ -191,6 +191,7 @@ import {
 } from '../services/trialReports.js';
 
 import L from 'leaflet';
+import QRCodeLib from 'qrcode';
 
 const emptySubTrialForm = () => ({
   FormulationName: '',
@@ -1564,6 +1565,7 @@ Rules:
   const buildPrintableTrialUrl = (trial) => {
     const appBase = window.location.origin + window.location.pathname;
     const settings = state.settings;
+    const trialCategory = trial.Category || activeCategory || 'herbicide';
     if (settings?.firebaseEnabled && settings?.firebaseConfig?.apiKey) {
       const config = settings.firebaseConfig;
       const params = new URLSearchParams({
@@ -1572,11 +1574,12 @@ Rules:
         projectId: config.projectId || '',
         storageBucket: config.storageBucket || '',
         messagingSenderId: config.messagingSenderId || '',
-        appId: config.appId || ''
+        appId: config.appId || '',
+        cat: trialCategory
       }).toString();
       return `${appBase}#/live/${trial.ID}?${params}`;
     }
-    return `${appBase}#/live/${trial.ID}`;
+    return `${appBase}#/live/${trial.ID}?cat=${trialCategory}`;
   };
 
   const buildQrText = (trial, mode) => {

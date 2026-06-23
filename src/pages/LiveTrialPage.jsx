@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { initFirebase } from "../services/firebase.js";
+import { initFirebase, getCategoryCollection } from "../services/firebase.js";
 import { getObservationPrimaryValue } from '../utils/categoryConfig.js';
 import { fbGetById, fbGetGlobalQRSettings } from "../services/firebaseDB.js";
 
@@ -103,6 +103,8 @@ export default function LiveTrialPage() {
   const { id } = useParams();
   const [trial, setTrial] = useState(null);
   const [formulation, setFormulation] = useState(null);
+  const [project, setProject] = useState(null);
+  const [block, setBlock] = useState(null);
   const [globalQRSettings, setGlobalQRSettings] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -123,6 +125,7 @@ export default function LiveTrialPage() {
       
     const qApiKey = searchParams.get("apiKey");
     const qProjectId = searchParams.get("projectId");
+    const qCat = searchParams.get("cat");
 
     let firebaseConfig = null;
     if (qApiKey && qProjectId) {
@@ -178,11 +181,32 @@ export default function LiveTrialPage() {
       try {
         initFirebase(firebaseConfig);
 
-        // Fetch trial data + global QR visibility settings in parallel
-        const [data, globalQR] = await Promise.all([
-          fbGetById("trials", id),
-          fbGetGlobalQRSettings(), // reads settings/globalQR from Firestore
-        ]);
+        // Fetch global QR settings
+        const globalQR = await fbGetGlobalQRSettings(); // reads settings/globalQR from Firestore
+
+        // Fetch trial data (support category-specific collections and fallback loop)
+        const categories = ["herbicide", "fungicide", "pesticide", "nutrition", "biostimulant"];
+        let data = null;
+
+        if (qCat && categories.includes(qCat)) {
+          const colName = getCategoryCollection(qCat, "trials");
+          data = await fbGetById(colName, id);
+        }
+
+        if (!data) {
+          for (const cat of categories) {
+            const colName = getCategoryCollection(cat, "trials");
+            try {
+              const res = await fbGetById(colName, id);
+              if (res) {
+                data = res;
+                break;
+              }
+            } catch (err) {
+              /* ignore individual search errors */
+            }
+          }
+        }
 
         if (!data) throw new Error("Trial not found in database.");
         setTrial(data);
@@ -193,13 +217,36 @@ export default function LiveTrialPage() {
         }
 
         if (data.FormulationID) {
+          const resolvedCategory = data.Category || qCat || "herbicide";
+          const formulationCol = getCategoryCollection(resolvedCategory, "formulations");
           const formulationData = await fbGetById(
-            "formulations",
+            formulationCol,
             data.FormulationID,
           );
           setFormulation(formulationData);
         } else {
           setFormulation(null);
+        }
+
+        const resolvedCategory = data.Category || qCat || "herbicide";
+        const projectsCol = getCategoryCollection(resolvedCategory, "projects");
+        const blocksCol = getCategoryCollection(resolvedCategory, "blocks");
+
+        if (data.ProjectID) {
+          try {
+            const projectData = await fbGetById(projectsCol, data.ProjectID);
+            setProject(projectData);
+          } catch (projErr) {
+            console.warn("Failed to load project info:", projErr);
+          }
+        }
+        if (data.BlockID) {
+          try {
+            const blockData = await fbGetById(blocksCol, data.BlockID);
+            setBlock(blockData);
+          } catch (blockErr) {
+            console.warn("Failed to load block info:", blockErr);
+          }
         }
       } catch (e) {
         console.error("LiveTrialPage loading error:", e);
@@ -276,6 +323,22 @@ export default function LiveTrialPage() {
       </div>
     );
 
+  const categoryId = trial.Category || "herbicide";
+  const targetLabel = 
+    categoryId === "herbicide" ? "Target Weeds" :
+    categoryId === "fungicide" ? "Target Diseases" :
+    categoryId === "pesticide" ? "Target Pests" :
+    categoryId === "nutrition" ? "Nutrient Target" :
+    categoryId === "biostimulant" ? "Biostimulant Focus" :
+    "Target / Focus";
+  const targetValue = 
+    trial.WeedSpecies || 
+    trial.DiseaseTarget || 
+    trial.PestTarget || 
+    trial.NutrientType || 
+    trial.BiostimulantType || 
+    "—";
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-teal-50 font-sans">
       {/* Header */}
@@ -314,13 +377,33 @@ export default function LiveTrialPage() {
           <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wide mb-3">
             Trial Details
           </h2>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
             {[
               ["Trial ID", trial.ID, true],
               [
-                "Product",
+                "Product / Treatment",
                 trial.FormulationName || "—",
                 show.showFormulationName,
+              ],
+              [
+                "Project Workspace",
+                project?.Name || "—",
+                !!trial.ProjectID,
+              ],
+              [
+                "Block Name",
+                block?.Name || "—",
+                !!trial.BlockID,
+              ],
+              [
+                "Plot Number",
+                trial.PlotNumber || "—",
+                !!trial.PlotNumber,
+              ],
+              [
+                "Replication",
+                trial.Replication || block?.ReplicationNum || "—",
+                show.showReplication || !!block?.ReplicationNum,
               ],
               [
                 "Investigator",
@@ -330,9 +413,8 @@ export default function LiveTrialPage() {
               ["Application Date", fmtDate(trial.Date), show.showDate],
               ["Dosage", trial.Dosage || "—", show.showDosage],
               ["Location", trial.Location || "—", show.showLocation],
-              ["Target Weeds", trial.WeedSpecies || "—", show.showWeedSpecies],
-              ["Replication", trial.Replication || "—", show.showReplication],
-              ["Result", trial.Result || "—", show.showResult],
+              [targetLabel, targetValue, show.showWeedSpecies],
+              ["Result Rating", trial.Result || "—", show.showResult],
               ["Status", isActive ? "Active" : "Completed", true],
             ]
               .filter(([, , visible]) => visible)
@@ -533,7 +615,7 @@ export default function LiveTrialPage() {
             <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wide mb-3">
               Field Photos
             </h2>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-3">
               {photos.map((p, i) => {
                 const rawSrc = p.url || p.fileData;
                 if (!rawSrc) return null;
@@ -544,19 +626,39 @@ export default function LiveTrialPage() {
                 return (
                   <div
                     key={i}
-                    className="rounded-xl overflow-hidden border border-slate-100 aspect-square bg-slate-100"
+                    className="rounded-xl overflow-hidden border border-slate-100 bg-white flex flex-col shadow-sm"
                   >
-                    <img
-                      src={src}
-                      alt={p.label || `Photo ${i + 1}`}
-                      className="w-full h-full object-cover"
-                      loading="lazy"
-                    />
-                    {p.label && (
-                      <p className="text-xs text-slate-500 text-center py-1 truncate px-1">
-                        {p.label}
-                      </p>
-                    )}
+                    <div className="w-full aspect-square overflow-hidden bg-slate-100">
+                      <img
+                        src={src}
+                        alt={p.label || `Photo ${i + 1}`}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                    </div>
+                    <div className="p-2 flex flex-col justify-between flex-1 min-h-[52px]">
+                      {p.label || p.tag ? (
+                        <div className="space-y-1">
+                          {p.label && (
+                            <p className="text-xs font-semibold text-slate-700 leading-snug">
+                              {p.label}
+                            </p>
+                          )}
+                          {p.tag && (
+                            <span className="inline-block text-[10px] bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded font-medium border border-emerald-100">
+                              {p.tag}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-400 italic">No description</p>
+                      )}
+                      {p.date && (
+                        <p className="text-[10px] text-slate-400 mt-1.5">
+                          {fmtDate(p.date)}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 );
               })}

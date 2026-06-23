@@ -5,6 +5,7 @@ import { buildAiObservationPayload } from '../utils/categoryObservationUtils.js'
 import { getPrimaryObservationField } from '../utils/categoryConfig.js';
 import { analyzePhotoForEfficacy } from './ai.js';
 import { analyzeWeedCover } from '../utils/imageAnalysis.js';
+import { saveSyncQueueOffline } from './offlineStorage.js';
 
 function safeRefreshRelevantUI(trialId, type) {
     if (typeof refreshRelevantUI === 'function') {
@@ -108,7 +109,6 @@ async function uploadPhotoChunked(item, folderPath, getAppState) {
             const currentQueue = getAppState().syncQueue;
             const updatedQueue = currentQueue.map(q => q.id === item.id ? { ...q, lastUploadedChunk: i } : q);
             window.updateState({ syncQueue: updatedQueue });
-            const { saveSyncQueueOffline } = await import('./offlineStorage.js');
             await saveSyncQueueOffline(updatedQueue);
         }
     }

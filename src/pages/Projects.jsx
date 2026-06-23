@@ -13,6 +13,8 @@ import {
   Sigma, Printer, MapPin, Thermometer, Droplets, CloudRain, Image, Share2
 } from 'lucide-react';
 import Chart from 'chart.js/auto';
+import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
 import { safeJsonParse } from '../utils/helpers.js';
 import { AnalysisEngine } from '../utils/analysisUtils.js';
 import PlotMap from '../components/PlotMap.jsx';
@@ -1726,6 +1728,7 @@ export default function Projects({ onMenuClick }) {
         rowCells.push(
           <div 
             key={`${r}-${c}`}
+            data-pdf-pot-cell="true"
             onClick={() => trial && navigate(`/trials?focus=${trial.ID}`)}
             style={heatmapMode !== 'none' && trial ? heatmapStyle : {}}
             className={`flex-1 aspect-square rounded-lg border-2 flex flex-col items-center justify-center p-1.5 cursor-pointer shadow-sm relative group transition-all duration-300 ${heatmapMode !== 'none' && trial ? '' : colorClasses} ${
@@ -1903,7 +1906,7 @@ export default function Projects({ onMenuClick }) {
     try {
       await deleteBlock({ ID: blockId }, getAppState, true); // Keep overlay for the single block deletion itself
       // Also delete associated trials from Firebase in parallel without overlays
-      const { deleteTrial } = await import('../services/dataLayer.js');
+      // Also delete associated trials from Firebase in parallel without overlays
       await Promise.all(
         blockTrials.map(t => deleteTrial({ ID: t.ID }, getAppState, false).catch(() => {}))
       );
@@ -2036,67 +2039,597 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
 
       toast('Generating Greenhouse Layout PDF...', 'info');
 
-      // Import html2canvas and jsPDF
-      const html2canvasModule = await import('html2canvas');
-      const html2canvas = html2canvasModule.default || html2canvasModule;
-      const jsPDFModule = await import('jspdf');
-      const { jsPDF } = jsPDFModule;
+      // html2canvas and jsPDF are statically imported at the top
 
-      // Clone the element for manipulation without affecting the UI
+      // ── OKLCH / OKLAB → RGB conversion math ─────────────────────────────
+      const parseOklch = (colorStr) => {
+        const match = colorStr.match(/oklch\(\s*([\d%.]+)\s+([\d%.]+)\s+([\d%.]+)(?:\s*\/\s*([\d%.]+))?\s*\)/i);
+        if (!match) return null;
+        let L = parseFloat(match[1]);
+        if (match[1].endsWith('%')) L = parseFloat(match[1]) / 100;
+        let C = parseFloat(match[2]);
+        if (match[2].endsWith('%')) C = parseFloat(match[2]) / 100;
+        let H = parseFloat(match[3]);
+        let A = match[4] !== undefined ? parseFloat(match[4]) : 1;
+        if (match[4] && match[4].endsWith('%')) A = parseFloat(match[4]) / 100;
+        return { L, C, H, A };
+      };
+
+      const parseOklab = (colorStr) => {
+        const match = colorStr.match(/oklab\(\s*([\d%.]+)\s+([\d%.+-]+)\s+([\d%.+-]+)(?:\s*\/\s*([\d%.]+))?\s*\)/i);
+        if (!match) return null;
+        let L = parseFloat(match[1]);
+        if (match[1].endsWith('%')) L = parseFloat(match[1]) / 100;
+        let a = parseFloat(match[2]);
+        if (match[2].endsWith('%')) a = parseFloat(match[2]) / 100;
+        let b = parseFloat(match[3]);
+        if (match[3].endsWith('%')) b = parseFloat(match[3]) / 100;
+        let A = match[4] !== undefined ? parseFloat(match[4]) : 1;
+        if (match[4] && match[4].endsWith('%')) A = parseFloat(match[4]) / 100;
+        return { L, a, b, A };
+      };
+
+      const oklchToOklab = (L, C, H) => {
+        const hRad = (H * Math.PI) / 180;
+        return { L, a: C * Math.cos(hRad), b: C * Math.sin(hRad) };
+      };
+
+      const oklabToLms = (L, a, b) => {
+        const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+        const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+        const s_ = L - 0.0894841775 * a - 1.2914855480 * b;
+        return {
+          l: Math.pow(Math.max(0, l_), 3),
+          m: Math.pow(Math.max(0, m_), 3),
+          s: Math.pow(Math.max(0, s_), 3)
+        };
+      };
+
+      const lmsToLinearSrgb = (l, m, s) => ({
+        r: +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+        g: -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+        b: -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s
+      });
+
+      const linearToSrgb = (c) =>
+        c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+
+      const clamp = (val) => Math.max(0, Math.min(255, Math.round(val)));
+
+      // Convert a single oklch(...) or oklab(...) occurrence to rgb()/rgba()
+      const convertSingleColorFn = (fnStr) => {
+        const trimmed = fnStr.trim().toLowerCase();
+
+        if (trimmed.startsWith('oklch(')) {
+          const parsed = parseOklch(fnStr);
+          if (parsed) {
+            const { L, C, H, A } = parsed;
+            const { a, b } = oklchToOklab(L, C, H);
+            const { l, m, s } = oklabToLms(L, a, b);
+            const lin = lmsToLinearSrgb(l, m, s);
+            const R = clamp(linearToSrgb(lin.r) * 255);
+            const G = clamp(linearToSrgb(lin.g) * 255);
+            const B = clamp(linearToSrgb(lin.b) * 255);
+            return A === 1 ? `rgb(${R}, ${G}, ${B})` : `rgba(${R}, ${G}, ${B}, ${A})`;
+          }
+        }
+
+        if (trimmed.startsWith('oklab(')) {
+          const parsed = parseOklab(fnStr);
+          if (parsed) {
+            const { L, a, b, A } = parsed;
+            const { l, m, s } = oklabToLms(L, a, b);
+            const lin = lmsToLinearSrgb(l, m, s);
+            const R = clamp(linearToSrgb(lin.r) * 255);
+            const G = clamp(linearToSrgb(lin.g) * 255);
+            const B = clamp(linearToSrgb(lin.b) * 255);
+            return A === 1 ? `rgb(${R}, ${G}, ${B})` : `rgba(${R}, ${G}, ${B}, ${A})`;
+          }
+        }
+
+        return fnStr; // unchanged
+      };
+
+      // Convert ALL oklch()/oklab() occurrences in a compound CSS value string
+      // e.g. "0px 4px 6px oklch(0.5 0.1 200), inset 0px 0px 0px oklch(0.9 0.05 120)"
+      const convertAllColorsInValue = (value) => {
+        if (!value) return value;
+        if (!value.includes('oklch(') && !value.includes('oklab(')) return value;
+        // Replace each oklch(...) or oklab(...) occurrence (including nested parens for / alpha)
+        return value.replace(/ok(?:lch|lab)\([^)]*\)/gi, (match) => convertSingleColorFn(match));
+      };
+
+      // ── Curated list of CSS properties to copy inline ───────────────────
+      const VISUAL_PROPS = [
+        'background', 'backgroundColor',
+        'color',
+        'border', 'borderColor', 'borderWidth', 'borderStyle', 'borderRadius',
+        'borderTopColor', 'borderRightColor', 'borderBottomColor', 'borderLeftColor',
+        'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
+        'borderTopStyle', 'borderRightStyle', 'borderBottomStyle', 'borderLeftStyle',
+        'boxShadow',
+        'outline', 'outlineColor',
+        'textDecoration', 'textDecorationColor',
+        'font', 'fontFamily', 'fontSize', 'fontWeight', 'lineHeight',
+        'letterSpacing', 'textAlign', 'textTransform', 'whiteSpace', 'wordBreak',
+        'display', 'flex', 'flexDirection', 'flexWrap', 'flexGrow', 'flexShrink',
+        'justifyContent', 'alignItems', 'alignSelf',
+        'gap', 'rowGap', 'columnGap',
+        'padding', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+        'margin', 'marginTop', 'marginRight', 'marginBottom', 'marginLeft',
+        'width', 'height', 'minWidth', 'minHeight', 'maxWidth', 'maxHeight',
+        'position', 'top', 'left', 'right', 'bottom',
+        'overflow', 'overflowX', 'overflowY',
+        'opacity', 'transform',
+        'zIndex', 'visibility',
+        'aspectRatio', 'boxSizing',
+        'verticalAlign', 'cursor'
+      ];
+
+      let convertedCount = 0;
+
+      // Recursively copy selected computed styles from src (original) → dest (clone)
+      const copySelectedComputedStyles = (src, dest) => {
+        const computed = window.getComputedStyle(src);
+
+        for (const prop of VISUAL_PROPS) {
+          try {
+            // getComputedStyle returns camelCase values via property access
+            let value = computed[prop];
+            if (value === undefined || value === '') continue;
+
+            // Convert any oklch/oklab values in this property
+            if (typeof value === 'string' && (value.includes('oklch(') || value.includes('oklab('))) {
+              const original = value;
+              value = convertAllColorsInValue(value);
+              convertedCount++;
+              console.log('Element with unsupported color:', src.tagName + (src.id ? '#' + src.id : ''), 'Property:', prop);
+              console.log('Original value:', original);
+              console.log('Converted value:', value);
+            }
+
+            dest.style[prop] = value;
+          } catch (e) {
+            // Some shorthand properties may not be readable; skip silently
+          }
+        }
+
+        // Recurse into child elements
+        const srcChildren = src.children;
+        const destChildren = dest.children;
+        for (let i = 0; i < srcChildren.length; i++) {
+          if (destChildren[i]) {
+            copySelectedComputedStyles(srcChildren[i], destChildren[i]);
+          }
+        }
+      };
+
+      // ── Build the export clone ──────────────────────────────────────────
       const clone = element.cloneNode(true);
-      clone.style.width = element.offsetWidth + 'px';
-      clone.style.height = element.offsetHeight + 'px';
-      clone.style.position = 'absolute';
-      clone.style.top = '-9999px';
-      clone.style.left = '-9999px';
-      clone.style.backgroundColor = '#ffffff';
-      
-      // Remove the download button from the clone
+
+      // Remove the download button from the clone (so it doesn't appear in the PDF)
       const downloadBtn = clone.querySelector('[data-pdf-download-btn]');
-      if (downloadBtn) {
-        downloadBtn.remove();
-      }
-      
+      if (downloadBtn) downloadBtn.remove();
+
+      // Remove hover tooltips (hidden divs that shouldn't render)
+      clone.querySelectorAll('.group-hover\\:block, [class*="group-hover"]').forEach(el => el.remove());
+
+      // Append clone to body so getComputedStyle works on the original element
+      // Position off-screen but keep it in flow for correct layout computation
+      clone.style.position = 'fixed';
+      clone.style.top = '0';
+      clone.style.left = '-9999px';
+      clone.style.width = element.offsetWidth + 'px';
+      clone.style.height = 'auto';
+      clone.style.zIndex = '-1';
+      clone.style.backgroundColor = '#ffffff';
       document.body.appendChild(clone);
 
-      // Render the clone with html2canvas
-      const canvas = await html2canvas(clone, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#ffffff',
-        logging: false,
-        windowWidth: clone.offsetWidth,
-        windowHeight: clone.offsetHeight
+
+
+      // ── Copy computed styles from original → clone ──────────────────────
+      console.log('[PDF Export] Starting computed style copy...');
+      copySelectedComputedStyles(element, clone);
+      console.log(`[PDF Export] Converted ${convertedCount} oklch/oklab color values to RGB.`);
+
+      // ── Strip ALL class attributes so html2canvas never resolves Tailwind CSS ─
+      clone.removeAttribute('class');
+      clone.querySelectorAll('*').forEach(el => {
+        el.removeAttribute('class');
+      });
+      console.log('[PDF Export] Stripped all class attributes from clone.');
+
+      // ── Remove Unwanted Sections AFTER style copy (preserving indices during copy) ──
+      // Remove Spatial Heatmap Overlay section from clone
+      clone.querySelectorAll('h4').forEach(h4 => {
+        if (h4.textContent.includes('Spatial Heatmap Overlay')) {
+          const container = h4.parentElement?.parentElement;
+          if (container) container.remove();
+        }
       });
 
-      // Clean up the clone
+      // Remove Greenhouse Layout Visualization title and description from clone
+      clone.querySelectorAll('h3').forEach(h3 => {
+        if (h3.textContent.includes('Greenhouse Layout Visualization')) {
+          const textContainer = h3.parentElement;
+          if (textContainer) textContainer.remove();
+        }
+      });
+
+      // ── Prepend a Beautifully Styled Header for the PDF ──────────────────
+      const headerDiv = document.createElement('div');
+      headerDiv.style.padding = '24px';
+      headerDiv.style.marginBottom = '25px';
+      headerDiv.style.borderBottom = '2px solid #e2e8f0';
+      headerDiv.style.fontFamily = 'system-ui, -apple-system, sans-serif';
+      headerDiv.style.backgroundColor = '#ffffff';
+
+      // Title Section
+      const title = document.createElement('h1');
+      title.innerText = activeProject?.Name || 'Greenhouse Trial Layout';
+      title.style.fontSize = '24px';
+      title.style.fontWeight = '800';
+      title.style.color = '#0f172a';
+      title.style.margin = '0 0 16px 0';
+      headerDiv.appendChild(title);
+
+      // Info Grid
+      const grid = document.createElement('div');
+      grid.style.display = 'grid';
+      grid.style.gridTemplateColumns = 'repeat(3, 1fr)';
+      grid.style.gap = '20px';
+      grid.style.marginBottom = '20px';
+
+      // Col 1: Investigator & Location
+      const col1 = document.createElement('div');
+      col1.innerHTML = `
+        <div style="margin-bottom: 12px;">
+          <div style="color: #64748b; font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Investigator</div>
+          <div style="font-size: 14px; color: #1e293b; font-weight: 600; margin-top: 2px;">${activeProject?.Investigator || 'N/A'}</div>
+        </div>
+        <div>
+          <div style="color: #64748b; font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Location</div>
+          <div style="font-size: 14px; color: #1e293b; font-weight: 600; margin-top: 2px;">${activeProject?.Location || 'N/A'}</div>
+        </div>
+      `;
+      grid.appendChild(col1);
+
+      // Col 2: Crop
+      const col2 = document.createElement('div');
+      col2.innerHTML = `
+        <div>
+          <div style="color: #64748b; font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Crop</div>
+          <div style="font-size: 14px; color: #1e293b; font-weight: 600; margin-top: 2px;">${activeProject?.Crop || 'N/A'}</div>
+        </div>
+      `;
+      grid.appendChild(col2);
+
+      // Col 3: Design & Metric
+      const col3 = document.createElement('div');
+      col3.innerHTML = `
+        <div style="margin-bottom: 12px;">
+          <div style="color: #64748b; font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Design / Layout</div>
+          <div style="font-size: 14px; color: #1e293b; font-weight: 600; margin-top: 2px;">
+            ${activeProject?.Design === 'PotTrial' ? 'Pot Trial' : 'RCBD Pot Trial'} (${projectBlocks?.length || 0} Blocks)
+          </div>
+        </div>
+        <div>
+          <div style="color: #64748b; font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">Evaluation Metric</div>
+          <div style="font-size: 14px; color: #1e293b; font-weight: 600; margin-top: 2px;">${activeProject?.Metric || 'Weed Control Efficiency'}</div>
+        </div>
+      `;
+      grid.appendChild(col3);
+
+      headerDiv.appendChild(grid);
+
+      // Treatment Details list
+      const uniqueTreatmentsMap = new Map();
+      projectTrials.forEach(t => {
+        if (!t.FormulationName) return;
+        const key = `${t.FormulationName} (Dosage: ${t.Dosage || 'Default'})`;
+        uniqueTreatmentsMap.set(key, { name: t.FormulationName, dosage: t.Dosage, isControl: String(t.IsControl).toLowerCase() === 'true' });
+      });
+
+      if (uniqueTreatmentsMap.size > 0) {
+        const trSection = document.createElement('div');
+        trSection.style.marginTop = '16px';
+        trSection.style.paddingTop = '16px';
+        trSection.style.borderTop = '1px dashed #e2e8f0';
+
+        const trTitle = document.createElement('div');
+        trTitle.innerText = 'Treatment Details';
+        trTitle.style.color = '#64748b';
+        trTitle.style.fontSize = '10px';
+        trTitle.style.fontWeight = '700';
+        trTitle.style.letterSpacing = '0.05em';
+        trTitle.style.textTransform = 'uppercase';
+        trTitle.style.marginBottom = '10px';
+        trSection.appendChild(trTitle);
+
+        const trList = document.createElement('div');
+        trList.style.display = 'flex';
+        trList.style.flexWrap = 'wrap';
+        trList.style.gap = '8px';
+
+        uniqueTreatmentsMap.forEach((tr) => {
+          const badge = document.createElement('span');
+          badge.style.display = 'inline-block';
+          badge.style.padding = '5px 10px';
+          badge.style.backgroundColor = tr.isControl ? '#f8fafc' : '#f0fdf4';
+          badge.style.border = tr.isControl ? '1px solid #cbd5e1' : '1px solid #bbf7d0';
+          badge.style.color = tr.isControl ? '#475569' : '#166534';
+          badge.style.borderRadius = '8px';
+          badge.style.fontSize = '12px';
+          badge.style.fontWeight = '600';
+          badge.innerText = `${tr.name}${tr.dosage ? ` (${tr.dosage})` : ''}`;
+          trList.appendChild(badge);
+        });
+
+        trSection.appendChild(trList);
+        headerDiv.appendChild(trSection);
+      }
+
+      clone.prepend(headerDiv);
+
+      // Shrink spans inside the pot cells slightly to prevent text clipping (span-only changes, keeping layouts intact)
+      clone.querySelectorAll('[data-pdf-pot-cell] span').forEach(span => {
+        span.style.fontSize = '8px';
+        span.style.lineHeight = '1.2';
+        span.style.marginTop = '1px';
+        span.style.marginBottom = '0px';
+        span.style.whiteSpace = 'normal';
+        span.style.wordBreak = 'break-word';
+        span.style.overflow = 'visible';
+      });
+
+      // ── Group Elements Into Clean Page Sets (To prevent page-break cutoffs) ──
+      // Find the scrollable wrapper containing the rows
+      const scrollableWrapper = Array.from(clone.querySelectorAll('div')).find(div => 
+        Array.from(div.children).some(child => child.textContent.includes('BLOCK 1'))
+      );
+
+      // Find the column headers row (the one containing C1 and C2 text, outside the wrapper)
+      const colHeadersRow = Array.from(clone.children).find(child => 
+        child.textContent.includes('C1') && child.textContent.includes('C2')
+      );
+
+      // Find the header elements (custom header, summary card, size badge row)
+      const beforeGridElements = [];
+      const childrenOfClone = Array.from(clone.children);
+      const wrapperIndex = scrollableWrapper ? childrenOfClone.indexOf(scrollableWrapper) : -1;
+      
+      childrenOfClone.forEach((child, idx) => {
+        // Everything before the column headers or wrapper goes into page 1 header elements
+        if (wrapperIndex !== -1 && idx < wrapperIndex && child !== colHeadersRow) {
+          beforeGridElements.push(child);
+        }
+      });
+
+      // Legend is the treatments legend div
+      const legendRow = childrenOfClone.find(child => child.textContent.includes('Treatments Legend'));
+
+      // Now, group the grid elements inside scrollableWrapper
+      const gridElements = scrollableWrapper ? Array.from(scrollableWrapper.children) : [];
+      let currentBlockIndex = 0;
+      
+      const block1Items = [];
+      const block2Items = [];
+      const block3Items = [];
+
+      gridElements.forEach(child => {
+        if (child.textContent.includes('BLOCK 1')) {
+          currentBlockIndex = 0;
+          block1Items.push(child);
+          return;
+        }
+        if (child.textContent.includes('BLOCK 2')) {
+          currentBlockIndex = 1;
+          block2Items.push(child);
+          return;
+        }
+        if (child.textContent.includes('BLOCK 3')) {
+          currentBlockIndex = 2;
+          block3Items.push(child);
+          return;
+        }
+
+        if (currentBlockIndex === 0) {
+          block1Items.push(child);
+        } else if (currentBlockIndex === 1) {
+          block2Items.push(child);
+        } else {
+          block3Items.push(child);
+        }
+      });
+
+      // Construct Page Containers
+      const pageContainers = [];
+
+      // PAGE 1: Header elements, Col Headers, Block 1, and Legend if single page
+      const p1 = document.createElement('div');
+      p1.style.width = element.offsetWidth + 'px';
+      p1.style.backgroundColor = '#ffffff';
+      p1.style.padding = '24px';
+      p1.style.boxSizing = 'border-box';
+      p1.style.display = 'flex';
+      p1.style.flexDirection = 'column';
+      p1.style.gap = '16px';
+
+      // Add top elements
+      beforeGridElements.forEach(el => p1.appendChild(el.cloneNode(true)));
+      if (colHeadersRow) p1.appendChild(colHeadersRow.cloneNode(true));
+      
+      // Add Block 1 grid rows wrapped in a clean container
+      const w1 = document.createElement('div');
+      w1.style.display = 'flex';
+      w1.style.flexDirection = 'column';
+      w1.style.gap = '8px';
+      block1Items.forEach(el => w1.appendChild(el.cloneNode(true)));
+      p1.appendChild(w1);
+      
+      // If there are no other blocks, append legend to Page 1
+      if (block2Items.length === 0 && legendRow) {
+        p1.appendChild(legendRow.cloneNode(true));
+      }
+
+      pageContainers.push(p1);
+
+      // PAGE 2: Col Headers, Block 2
+      if (block2Items.length > 0) {
+        const p2 = document.createElement('div');
+        p2.style.width = element.offsetWidth + 'px';
+        p2.style.backgroundColor = '#ffffff';
+        p2.style.padding = '24px';
+        p2.style.boxSizing = 'border-box';
+        p2.style.display = 'flex';
+        p2.style.flexDirection = 'column';
+        p2.style.gap = '16px';
+
+        if (colHeadersRow) p2.appendChild(colHeadersRow.cloneNode(true));
+        
+        const w2 = document.createElement('div');
+        w2.style.display = 'flex';
+        w2.style.flexDirection = 'column';
+        w2.style.gap = '8px';
+        block2Items.forEach(el => w2.appendChild(el.cloneNode(true)));
+        p2.appendChild(w2);
+
+        pageContainers.push(p2);
+      }
+
+      // PAGE 3: Col Headers, Block 3, Legend
+      if (block3Items.length > 0) {
+        const p3 = document.createElement('div');
+        p3.style.width = element.offsetWidth + 'px';
+        p3.style.backgroundColor = '#ffffff';
+        p3.style.padding = '24px';
+        p3.style.boxSizing = 'border-box';
+        p3.style.display = 'flex';
+        p3.style.flexDirection = 'column';
+        p3.style.gap = '16px';
+
+        if (colHeadersRow) p3.appendChild(colHeadersRow.cloneNode(true));
+        
+        const w3 = document.createElement('div');
+        w3.style.display = 'flex';
+        w3.style.flexDirection = 'column';
+        w3.style.gap = '8px';
+        block3Items.forEach(el => w3.appendChild(el.cloneNode(true)));
+        p3.appendChild(w3);
+
+        if (legendRow) {
+          p3.appendChild(legendRow.cloneNode(true));
+        }
+
+        pageContainers.push(p3);
+      }
+
+      // Append containers to document body off-screen
+      pageContainers.forEach(container => {
+        container.style.position = 'fixed';
+        container.style.top = '0';
+        container.style.left = '-9999px';
+        container.style.zIndex = '-1';
+        document.body.appendChild(container);
+      });
+
+      // Remove original clone from body
       document.body.removeChild(clone);
 
-      // Create PDF with appropriate dimensions
-      const imgWidth = canvas.width;
-      const imgHeight = canvas.height;
-      
-      // Calculate PDF dimensions (convert px to mm for better printing)
-      const pdfWidth = imgWidth / 3.78; // 96 DPI conversion
-      const pdfHeight = imgHeight / 3.78;
-      
+      // ── Render each Page container to Canvas ──────────────────────────────
+      const canvases = [];
+      for (const container of pageContainers) {
+        // Expand scrollables
+        container.querySelectorAll('*').forEach(el => {
+          const isScrollable = el.scrollHeight > el.clientHeight ||
+            el.style.overflow === 'auto' || el.style.overflow === 'scroll' ||
+            el.style.overflowY === 'auto' || el.style.overflowY === 'scroll' ||
+            el.style.maxHeight !== 'none';
+          if (isScrollable) {
+            el.style.maxHeight = 'none';
+            el.style.height = 'auto';
+            el.style.overflow = 'visible';
+            el.style.overflowY = 'visible';
+            el.style.overflowX = 'visible';
+          }
+        });
+
+        container.style.position = 'absolute';
+        container.style.top = '0';
+        container.style.left = '0';
+        container.style.zIndex = '99999';
+        container.style.overflow = 'visible';
+        container.style.maxHeight = 'none';
+        container.style.height = container.scrollHeight + 'px';
+
+        console.log('[PDF Export] Rendering page container with scroll height:', container.scrollHeight);
+
+        const canvas = await html2canvas(container, {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          logging: true,
+          windowWidth: container.scrollWidth,
+          windowHeight: container.scrollHeight
+        });
+        canvases.push(canvas);
+
+        document.body.removeChild(container);
+      }
+
+      // ── Generate PDF ────────────────────────────────────────────────────
       const pdf = new jsPDF({
-        orientation: imgWidth > imgHeight ? 'landscape' : 'portrait',
+        orientation: 'portrait',
         unit: 'mm',
-        format: [pdfWidth, pdfHeight]
+        format: 'a4'
       });
 
-      const imgData = canvas.toDataURL('image/png', 1.0);
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-      
+      const pageWidth = 210;
+      const pageHeight = 297;
+      const margin = 10;
+      const contentWidth = pageWidth - (margin * 2);
+      const contentHeight = pageHeight - (margin * 2);
+      const scaleFactor = 2;
+      const pxPerMm = (96 * scaleFactor) / 25.4; // 96 DPI * scale / mm-per-inch
+
+      canvases.forEach((canvas, idx) => {
+        const imgWidth = canvas.width;
+        const imgHeight = canvas.height;
+        const canvasWidthMm = imgWidth / pxPerMm;
+        const canvasHeightMm = imgHeight / pxPerMm;
+
+        // Scale to fit content width (190mm)
+        const ratio = contentWidth / canvasWidthMm;
+        let finalWidth = contentWidth;
+        let finalHeight = canvasHeightMm * ratio;
+
+        // If height exceeds printable content height, scale down to fit height exactly
+        if (finalHeight > contentHeight) {
+          const fitRatio = contentHeight / finalHeight;
+          finalWidth = finalWidth * fitRatio;
+          finalHeight = contentHeight;
+        }
+
+        if (idx > 0) {
+          pdf.addPage();
+        }
+
+        const imgData = canvas.toDataURL('image/png', 1.0);
+        const xOffset = margin + (contentWidth - finalWidth) / 2;
+        const yOffset = margin;
+
+        pdf.addImage(imgData, 'PNG', xOffset, yOffset, finalWidth, finalHeight);
+      });
+
       const fileName = `${activeProject?.Name || 'Project'}-greenhouse-layout.pdf`;
       pdf.save(fileName);
       toast('Greenhouse layout PDF downloaded successfully!', 'success');
     } catch (error) {
-      console.error('Failed to generate PDF:', error);
+      console.error('[PDF Export] Failed to generate PDF:', error);
       toast('Failed to generate PDF: ' + error.message, 'error');
     }
   };
+
 
   // ── Randomize Layout ────────────────────────────────────────────────────
   const [isRandomizeModalOpen, setIsRandomizeModalOpen] = useState(false);
@@ -3475,7 +4008,7 @@ ${photosHtml}
       await deleteProject({ ID: id }, getAppState);
       
       // Delete associated blocks and trials in parallel without blocking screen overlays
-      const { deleteTrial } = await import('../services/dataLayer.js');
+      // Delete associated blocks and trials in parallel without blocking screen overlays
       await Promise.all([
         ...projectBlocks.map(b => deleteBlock({ ID: b.ID }, getAppState, false).catch(err => console.error('Failed to delete block', b.ID, err))),
         ...projectTrials.map(t => deleteTrial({ ID: t.ID }, getAppState, false).catch(err => console.error('Failed to delete trial', t.ID, err)))

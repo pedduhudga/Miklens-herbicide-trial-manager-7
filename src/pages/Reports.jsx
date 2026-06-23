@@ -6,6 +6,7 @@ import { FileBox, Download, LayoutTemplate, GripVertical, Plus, Trash2, ChevronR
 import { exportScientificReportAsDOC, exportTrialCardsPDF } from '../utils/exportUtils.js';
 import { getCategoryConfig } from '../utils/categoryConfig.js';
 import { AdvancedReportGenerator } from '../services/advancedReportGenerator.js';
+import { exportToARM } from '../services/armExporter.js';
 
 export default function Reports({ onMenuClick }) {
   const { state } = useAppState();
@@ -216,7 +217,6 @@ export default function Reports({ onMenuClick }) {
     window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Generating ARM exchange file...', type: 'info' } }));
     
     try {
-      const { exportToARM } = await import('../services/armExporter.js');
       const blob = exportToARM(projectTrials, activeCategory, project);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');

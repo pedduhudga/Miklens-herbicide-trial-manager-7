@@ -5,6 +5,7 @@
 
 import { safeJsonParse } from './helpers.js';
 import { getObservationPrimaryValue } from './categoryConfig.js';
+import jStat from 'jstat';
 
 /**
  * Calculate basic statistics: mean, variance, std dev
@@ -2212,14 +2213,19 @@ export function performSplitPlotANOVA(trials, options = {}) {
     subPlotMeans[key] = subPlots[key].reduce((a, b) => a + b, 0) / subPlots[key].length;
   });
   
+  const msSub = ssSub / (a - 1);
+  const msSubError = (ssTotal - ssMain - ssSub) / (dfTotal - dfMain - (a - 1));
+  const fSub = msSubError > 0 ? msSub / msSubError : 0;
+  const pSub = approximatePValue(fSub, a - 1, dfTotal - dfMain - (a - 1));
+  
   return {
     anovaTable: {
       source: ['Main Plot (Treatment)', 'Main Plot Error', 'Sub Plot', 'Sub Plot Error', 'Total'],
       ss: [ssMain, ssTotal - ssMain, ssSub, ssTotal - ssMain - ssSub, ssTotal],
       df: [dfMain, dfSub, a - 1, dfTotal - dfMain - (a - 1), dfTotal],
-      ms: [msMain, msError, msSub / (a - 1), (ssTotal - ssMain - ssSub) / (dfTotal - dfMain - (a - 1)), null],
-      f: [fMain, null, (ssSub / (a - 1)) / ((ssTotal - ssMain - ssSub) / (dfTotal - dfMain - (a - 1))), null, null],
-      p: [pMain, null, approximatePValue(ssSub / (a - 1) / ((ssTotal - ssMain - ssSub) / (dfTotal - dfMain - (a - 1))), a - 1, dfTotal - dfMain - (a - 1)), null, null]
+      ms: [msMain, msError, msSub, msSubError, null],
+      f: [fMain, null, fSub, null, null],
+      p: [pMain, null, pSub, null, null]
     },
     fMainPlot: fMain,
     pMainPlot: pMain,
@@ -2441,6 +2447,9 @@ export function performMixedModel(trials, options = {}) {
   
   const grandMean = allValues.reduce((a, b) => a + b, 0) / allValues.length;
   const N = allValues.length;
+  
+  let ssTotal = 0;
+  allValues.forEach(v => ssTotal += Math.pow(v - grandMean, 2));
   
   // Calculate variance components (REML-like approximation)
   // Between-group variance (treatment)

@@ -4,6 +4,7 @@ import { useAppState } from '../hooks/useAppState.jsx';
 import { useAuth } from '../hooks/useAuth.js';
 import { Users, ShieldAlert, CheckCircle, XCircle, Plus, Pencil, Trash2, X, UserCog, Leaf, Shield, Bug, Beaker, Sprout, Eye, EyeOff } from 'lucide-react';
 import { CATEGORIES, DEFAULT_CATEGORY_ACCESS, ADMIN_CATEGORY_ACCESS } from '../utils/categoryConfig.js';
+import { fbGetAllUsers, fbUpdateUserProfile, fbRegisterUser, fbAdminUpdateUserPassword, fbResetPassword } from '../services/firebaseAuth.js';
 
 const ICON_MAP = { Leaf, Shield, Bug, Beaker, Sprout };
 
@@ -53,7 +54,7 @@ export default function UserManagement({ onMenuClick }) {
     if (!firebaseEnabled) return;
     setLoading(true);
     try {
-      const { fbGetAllUsers } = await import('../services/firebaseAuth.js');
+      // fbGetAllUsers is statically imported at the top
       const list = await fbGetAllUsers();
       const mapped = list.map(u => ({
         id: u.uid || u.ID,
@@ -130,7 +131,7 @@ export default function UserManagement({ onMenuClick }) {
         if (firebaseEnabled) {
           setLoading(true);
           try {
-            const { fbUpdateUserProfile } = await import('../services/firebaseAuth.js');
+            // fbUpdateUserProfile is statically imported at the top
             const roleName = form.role === 'admin' ? 'Admin' : form.role === 'viewer' ? 'Viewer' : form.role === 'developer' ? 'Developer' : 'User';
             const res = await fbUpdateUserProfile(existingUser.id, {
               Username: form.username.trim(),
@@ -176,7 +177,7 @@ export default function UserManagement({ onMenuClick }) {
     if (firebaseEnabled) {
       setLoading(true);
       try {
-        const { fbRegisterUser, fbUpdateUserProfile } = await import('../services/firebaseAuth.js');
+        // fbRegisterUser and fbUpdateUserProfile are statically imported at the top
         const roleName = form.role === 'admin' ? 'Admin' : form.role === 'viewer' ? 'Viewer' : form.role === 'developer' ? 'Developer' : 'User';
         const profileData = {
           role: roleName,
@@ -190,7 +191,7 @@ export default function UserManagement({ onMenuClick }) {
           const currentPass = editingUser.password;
           if (newPass && newPass !== currentPass) {
             if (currentPass && currentPass !== '••••••') {
-              const { fbAdminUpdateUserPassword } = await import('../services/firebaseAuth.js');
+              // fbAdminUpdateUserPassword is statically imported at the top
               const authRes = await fbAdminUpdateUserPassword(form.username.trim(), currentPass, newPass);
               if (!authRes.success) {
                 toast('Failed to update Firebase Auth password: ' + authRes.message, 'error');
@@ -298,7 +299,7 @@ export default function UserManagement({ onMenuClick }) {
     if (firebaseEnabled) {
       setLoading(true);
       try {
-        const { fbUpdateUserProfile } = await import('../services/firebaseAuth.js');
+        // fbUpdateUserProfile is statically imported at the top
         const res = await fbUpdateUserProfile(id, {
           IsActive: false,
           categoryAccess: deactivatedAccess,
@@ -331,7 +332,7 @@ export default function UserManagement({ onMenuClick }) {
     if (firebaseEnabled) {
       setLoading(true);
       try {
-        const { fbUpdateUserProfile } = await import('../services/firebaseAuth.js');
+        // fbUpdateUserProfile is statically imported at the top
         const targetUser = users.find(u => u.id === id);
         const nextDisabledState = !targetUser.disabled;
         const res = await fbUpdateUserProfile(id, { IsActive: !nextDisabledState });
@@ -631,7 +632,7 @@ export default function UserManagement({ onMenuClick }) {
                         const email = prompt("Enter the user's email to send a password reset link:");
                         if (email) {
                             try {
-                                const { fbResetPassword } = await import('../services/firebaseAuth.js');
+                                // fbResetPassword is statically imported at the top
                                 const res = await fbResetPassword(email);
                                 if (res.success) toast('Password reset email sent!', 'success');
                                 else toast(res.message, 'error');

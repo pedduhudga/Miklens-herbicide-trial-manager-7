@@ -7,6 +7,8 @@ import { Sparkles, Loader2, Activity, ArrowLeft, CheckCircle, X, Download, FileT
 import { exportComparisonCsv, exportComparisonHtml, exportComparisonPdf } from '../services/compareReports.js';
 import { generateTextWithAI } from '../services/multiProviderAI.js';
 import { useAuth } from '../hooks/useAuth.js';
+import { getCategoryConfig, getPrimaryObservationField } from '../utils/categoryConfig.js';
+import { updateTrial } from '../services/dataLayer.js';
 
 const RESULT_BADGE = {
   Excellent: 'bg-emerald-100 text-emerald-700',
@@ -64,7 +66,6 @@ export default function CompareTrials({ onMenuClick }) {
             // Sync to global app state to re-trigger calculations
             updateState({ trials: (state.trials || []).map(trial => trial.ID === t.ID ? updated : trial) });
             // Save to server
-            const { updateTrial } = await import('../services/dataLayer.js');
             await updateTrial({ 
               ID: updated.ID, 
               Temperature: updated.Temperature,
