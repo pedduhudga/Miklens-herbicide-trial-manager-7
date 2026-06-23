@@ -2045,6 +2045,13 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       // Clone the element for manipulation without affecting the UI
       const clone = element.cloneNode(true);
       
+      // Adjust scrollable/max-height wrapper inside the clone to render completely
+      const scrollableDiv = clone.querySelector('.overflow-y-auto');
+      if (scrollableDiv) {
+        scrollableDiv.style.maxHeight = 'none';
+        scrollableDiv.style.overflow = 'visible';
+      }
+
       clone.style.width = element.offsetWidth + 'px';
       clone.style.height = 'auto';
       clone.style.position = 'absolute';
@@ -2052,39 +2059,27 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       clone.style.left = '-9999px';
       clone.style.backgroundColor = '#ffffff';
 
-      // Properties to copy to ensure layout and style are preserved without external stylesheets
-      const propertiesToCopy = [
-        'display', 'position', 'top', 'left', 'right', 'bottom',
-        'width', 'height', 'minWidth', 'minHeight', 'maxWidth', 'maxHeight',
-        'flex', 'flexDirection', 'flexWrap', 'flexGrow', 'flexShrink',
-        'alignItems', 'justifyContent', 'alignSelf', 'gap',
-        'gridTemplateColumns', 'gridTemplateRows', 'gridColumnStart', 'gridColumnEnd', 'gridRowStart', 'gridRowEnd', 'gridArea',
-        'aspectRatio',
-        'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
-        'marginTop', 'marginRight', 'marginBottom', 'marginLeft',
-        'backgroundColor', 'color', 
-        'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
-        'borderTopStyle', 'borderRightStyle', 'borderBottomStyle', 'borderLeftStyle',
-        'borderTopColor', 'borderRightColor', 'borderBottomColor', 'borderLeftColor',
-        'borderTopLeftRadius', 'borderTopRightRadius', 'borderBottomLeftRadius', 'borderBottomRightRadius',
-        'fontSize', 'fontWeight', 'fontFamily', 'lineHeight', 'textAlign', 'textTransform',
-        'opacity', 'boxShadow', 'overflow', 'overflowX', 'overflowY'
-      ];
-
-      // Helper function to recursively copy computed styles from original elements to cloned elements
-      const copyAllComputedStyles = (src, dest) => {
+      // Helper function to recursively copy computed colors from original elements to cloned elements
+      // This is crucial to bypass Tailwind CSS variables which html2canvas fails to parse
+      const copyComputedColors = (src, dest) => {
         const srcStyles = window.getComputedStyle(src);
         
-        propertiesToCopy.forEach(prop => {
-          dest.style[prop] = srcStyles[prop];
-        });
+        // Copy standard RGB colors so html2canvas doesn't fail or fallback to black
+        dest.style.backgroundColor = srcStyles.backgroundColor;
+        dest.style.color = srcStyles.color;
+        dest.style.borderColor = srcStyles.borderColor;
+        dest.style.borderTopColor = srcStyles.borderTopColor;
+        dest.style.borderRightColor = srcStyles.borderRightColor;
+        dest.style.borderBottomColor = srcStyles.borderBottomColor;
+        dest.style.borderLeftColor = srcStyles.borderLeftColor;
         
+        // Process child elements
         const srcChildren = src.children;
         const destChildren = dest.children;
         if (srcChildren && destChildren) {
           for (let i = 0; i < srcChildren.length; i++) {
             if (destChildren[i]) {
-              copyAllComputedStyles(srcChildren[i], destChildren[i]);
+              copyComputedColors(srcChildren[i], destChildren[i]);
             }
           }
         }
@@ -2092,18 +2087,7 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
 
       // Append clone to body first so it has layout for styling/rendering, then copy computed styles
       document.body.appendChild(clone);
-      copyAllComputedStyles(element, clone);
-
-      // Adjust scrollable/max-height wrapper inside the clone AFTER copying styles so it stays expanded
-      const scrollableDiv = clone.querySelector('.overflow-y-auto');
-      if (scrollableDiv) {
-        scrollableDiv.style.height = 'auto';
-        scrollableDiv.style.maxHeight = 'none';
-        scrollableDiv.style.overflow = 'visible';
-      }
-      clone.style.height = 'auto';
-      clone.style.maxHeight = 'none';
-      clone.style.overflow = 'visible';
+      copyComputedColors(element, clone);
 
       // Now remove the download button from the clone (so it doesn't appear in the PDF)
       const downloadBtn = clone.querySelector('[data-pdf-download-btn]');
@@ -2111,36 +2095,18 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
         downloadBtn.remove();
       }
 
-      // Temporarily physically detach all stylesheets from the DOM to bypass html2canvas stylesheet parsing
-      const styleElements = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'));
-      const styleParents = styleElements.map(el => ({
-        element: el,
-        parent: el.parentNode,
-        nextSibling: el.nextSibling
-      }));
-      styleElements.forEach(el => el.remove());
-
       // Render the clone with html2canvas
-      let canvas;
-      try {
-        canvas = await html2canvas(clone, {
-          scale: 2,
-          useCORS: true,
-          backgroundColor: '#ffffff',
-          logging: false,
-          windowWidth: clone.offsetWidth,
-          windowHeight: clone.scrollHeight || clone.offsetHeight
-        });
-      } finally {
-        // Restore all temporarily detached stylesheets immediately
-        styleParents.forEach(item => {
-          if (item.parent) {
-            item.parent.insertBefore(item.element, item.nextSibling);
-          }
-        });
-        // Clean up the clone from the DOM
-        document.body.removeChild(clone);
-      }
+      const canvas = await html2canvas(clone, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        logging: false,
+        windowWidth: clone.offsetWidth,
+        windowHeight: clone.scrollHeight || clone.offsetHeight
+      });
+
+      // Clean up the clone
+      document.body.removeChild(clone);
 
       // Create PDF with appropriate dimensions
       const imgWidth = canvas.width;
