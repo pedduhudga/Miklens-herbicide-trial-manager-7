@@ -2126,7 +2126,6 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
         scale: 3,
         useCORS: true,
         backgroundColor: '#ffffff',
-        foreignObjectRendering: true,
         logging: false,
         windowWidth: clone.offsetWidth,
         windowHeight: clone.scrollHeight || clone.offsetHeight
