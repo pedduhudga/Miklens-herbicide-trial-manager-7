@@ -3411,6 +3411,7 @@ Rules:
   const buildPrintableTrialUrl = useCallback((trial) => {
     const appBase = window.location.origin + window.location.pathname;
     const settings = state.settings;
+    const trialCategory = trial.Category || activeCategory || 'herbicide';
     if (settings?.firebaseEnabled && settings?.firebaseConfig?.apiKey) {
       const config = settings.firebaseConfig;
       const params = new URLSearchParams({
@@ -3419,12 +3420,13 @@ Rules:
         projectId: config.projectId || '',
         storageBucket: config.storageBucket || '',
         messagingSenderId: config.messagingSenderId || '',
-        appId: config.appId || ''
+        appId: config.appId || '',
+        cat: trialCategory
       }).toString();
       return `${appBase}#/live/${trial.ID}?${params}`;
     }
-    return `${appBase}#/live/${trial.ID}`;
-  }, [state.settings]);
+    return `${appBase}#/live/${trial.ID}?cat=${trialCategory}`;
+  }, [state.settings, activeCategory]);
 
   const syncTrialToQrScript = useCallback(async (trialPatch) => {
     const scriptUrl = String(state.settings?.scriptUrl || '').trim();

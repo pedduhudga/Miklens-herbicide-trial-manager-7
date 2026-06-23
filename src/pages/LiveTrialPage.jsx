@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { initFirebase } from "../services/firebase.js";
+import { initFirebase, getCategoryCollection } from "../services/firebase.js";
 import { getObservationPrimaryValue } from '../utils/categoryConfig.js';
 import { fbGetById, fbGetGlobalQRSettings } from "../services/firebaseDB.js";
 
@@ -123,6 +123,7 @@ export default function LiveTrialPage() {
       
     const qApiKey = searchParams.get("apiKey");
     const qProjectId = searchParams.get("projectId");
+    const qCat = searchParams.get("cat");
 
     let firebaseConfig = null;
     if (qApiKey && qProjectId) {
@@ -178,11 +179,32 @@ export default function LiveTrialPage() {
       try {
         initFirebase(firebaseConfig);
 
-        // Fetch trial data + global QR visibility settings in parallel
-        const [data, globalQR] = await Promise.all([
-          fbGetById("trials", id),
-          fbGetGlobalQRSettings(), // reads settings/globalQR from Firestore
-        ]);
+        // Fetch global QR settings
+        const globalQR = await fbGetGlobalQRSettings(); // reads settings/globalQR from Firestore
+
+        // Fetch trial data (support category-specific collections and fallback loop)
+        const categories = ["herbicide", "fungicide", "pesticide", "nutrition", "biostimulant"];
+        let data = null;
+
+        if (qCat && categories.includes(qCat)) {
+          const colName = getCategoryCollection(qCat, "trials");
+          data = await fbGetById(colName, id);
+        }
+
+        if (!data) {
+          for (const cat of categories) {
+            const colName = getCategoryCollection(cat, "trials");
+            try {
+              const res = await fbGetById(colName, id);
+              if (res) {
+                data = res;
+                break;
+              }
+            } catch (err) {
+              /* ignore individual search errors */
+            }
+          }
+        }
 
         if (!data) throw new Error("Trial not found in database.");
         setTrial(data);
@@ -193,8 +215,10 @@ export default function LiveTrialPage() {
         }
 
         if (data.FormulationID) {
+          const resolvedCategory = data.Category || qCat || "herbicide";
+          const formulationCol = getCategoryCollection(resolvedCategory, "formulations");
           const formulationData = await fbGetById(
-            "formulations",
+            formulationCol,
             data.FormulationID,
           );
           setFormulation(formulationData);
