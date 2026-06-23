@@ -615,7 +615,7 @@ export default function LiveTrialPage() {
             <h2 className="text-sm font-bold text-slate-500 uppercase tracking-wide mb-3">
               Field Photos
             </h2>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-3">
               {photos.map((p, i) => {
                 const rawSrc = p.url || p.fileData;
                 if (!rawSrc) return null;
@@ -626,19 +626,30 @@ export default function LiveTrialPage() {
                 return (
                   <div
                     key={i}
-                    className="rounded-xl overflow-hidden border border-slate-100 aspect-square bg-slate-100"
+                    className="rounded-xl overflow-hidden border border-slate-100 bg-white flex flex-col shadow-sm"
                   >
-                    <img
-                      src={src}
-                      alt={p.label || `Photo ${i + 1}`}
-                      className="w-full h-full object-cover"
-                      loading="lazy"
-                    />
-                    {p.label && (
-                      <p className="text-xs text-slate-500 text-center py-1 truncate px-1">
-                        {p.label}
-                      </p>
-                    )}
+                    <div className="w-full aspect-square overflow-hidden bg-slate-100">
+                      <img
+                        src={src}
+                        alt={p.label || `Photo ${i + 1}`}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                    </div>
+                    <div className="p-2 flex flex-col justify-between flex-1 min-h-[52px]">
+                      {p.label ? (
+                        <p className="text-xs font-semibold text-slate-700 leading-snug line-clamp-2">
+                          {p.label}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-slate-400 italic">No description</p>
+                      )}
+                      {p.date && (
+                        <p className="text-[10px] text-slate-400 mt-1">
+                          {fmtDate(p.date)}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 );
               })}
