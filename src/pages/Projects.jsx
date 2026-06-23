@@ -2213,22 +2213,6 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       const downloadBtn = clone.querySelector('[data-pdf-download-btn]');
       if (downloadBtn) downloadBtn.remove();
 
-      // Remove Spatial Heatmap Overlay section from clone
-      clone.querySelectorAll('h4').forEach(h4 => {
-        if (h4.textContent.includes('Spatial Heatmap Overlay')) {
-          const container = h4.parentElement?.parentElement;
-          if (container) container.remove();
-        }
-      });
-
-      // Remove Greenhouse Layout Visualization title and description from clone
-      clone.querySelectorAll('h3').forEach(h3 => {
-        if (h3.textContent.includes('Greenhouse Layout Visualization')) {
-          const textContainer = h3.parentElement;
-          if (textContainer) textContainer.remove();
-        }
-      });
-
       // Remove hover tooltips (hidden divs that shouldn't render)
       clone.querySelectorAll('.group-hover\\:block, [class*="group-hover"]').forEach(el => el.remove());
 
@@ -2256,6 +2240,23 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
         el.removeAttribute('class');
       });
       console.log('[PDF Export] Stripped all class attributes from clone.');
+
+      // ── Remove Unwanted Sections AFTER style copy (preserving indices during copy) ──
+      // Remove Spatial Heatmap Overlay section from clone
+      clone.querySelectorAll('h4').forEach(h4 => {
+        if (h4.textContent.includes('Spatial Heatmap Overlay')) {
+          const container = h4.parentElement?.parentElement;
+          if (container) container.remove();
+        }
+      });
+
+      // Remove Greenhouse Layout Visualization title and description from clone
+      clone.querySelectorAll('h3').forEach(h3 => {
+        if (h3.textContent.includes('Greenhouse Layout Visualization')) {
+          const textContainer = h3.parentElement;
+          if (textContainer) textContainer.remove();
+        }
+      });
 
       // ── Prepend a Beautifully Styled Header for the PDF ──────────────────
       const headerDiv = document.createElement('div');
