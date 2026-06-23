@@ -2045,13 +2045,6 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       // Clone the element for manipulation without affecting the UI
       const clone = element.cloneNode(true);
       
-      // Adjust scrollable/max-height wrapper inside the clone to render completely
-      const scrollableDiv = clone.querySelector('.overflow-y-auto');
-      if (scrollableDiv) {
-        scrollableDiv.style.maxHeight = 'none';
-        scrollableDiv.style.overflow = 'visible';
-      }
-
       clone.style.width = element.offsetWidth + 'px';
       clone.style.height = 'auto';
       clone.style.position = 'absolute';
@@ -2059,81 +2052,52 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       clone.style.left = '-9999px';
       clone.style.backgroundColor = '#ffffff';
 
+      // Properties to copy to ensure layout and style are preserved without external stylesheets
+      const propertiesToCopy = [
+        'display', 'position', 'top', 'left', 'right', 'bottom',
+        'width', 'height', 'minWidth', 'minHeight', 'maxWidth', 'maxHeight',
+        'flex', 'flexDirection', 'flexWrap', 'flexGrow', 'flexShrink',
+        'alignItems', 'justifyContent', 'alignSelf', 'gap',
+        'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+        'marginTop', 'marginRight', 'marginBottom', 'marginLeft',
+        'backgroundColor', 'color', 
+        'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
+        'borderTopStyle', 'borderRightStyle', 'borderBottomStyle', 'borderLeftStyle',
+        'borderTopColor', 'borderRightColor', 'borderBottomColor', 'borderLeftColor',
+        'borderTopLeftRadius', 'borderTopRightRadius', 'borderBottomLeftRadius', 'borderBottomRightRadius',
+        'fontSize', 'fontWeight', 'fontFamily', 'lineHeight', 'textAlign', 'textTransform',
+        'opacity', 'boxShadow', 'overflow', 'overflowX', 'overflowY'
+      ];
+
       // Helper function to recursively copy computed styles from original elements to cloned elements
-      // This is crucial to bypass Tailwind CSS variables which html2canvas fails to parse (causing black blocks)
-      const copyComputedStyles = (src, dest) => {
+      const copyAllComputedStyles = (src, dest) => {
         const srcStyles = window.getComputedStyle(src);
         
-        // Copy critical style properties that html2canvas struggles with
-        dest.style.backgroundColor = srcStyles.backgroundColor;
-        dest.style.color = srcStyles.color;
-        dest.style.borderColor = srcStyles.borderColor;
-        dest.style.borderWidth = srcStyles.borderWidth;
-        dest.style.borderStyle = srcStyles.borderStyle;
-        dest.style.borderRadius = srcStyles.borderRadius;
-        dest.style.fontSize = srcStyles.fontSize;
-        dest.style.fontWeight = srcStyles.fontWeight;
-        dest.style.fontFamily = srcStyles.fontFamily;
-        dest.style.opacity = srcStyles.opacity;
-        dest.style.boxShadow = srcStyles.boxShadow;
+        propertiesToCopy.forEach(prop => {
+          dest.style[prop] = srcStyles[prop];
+        });
         
-        // Process child elements
         const srcChildren = src.children;
         const destChildren = dest.children;
         if (srcChildren && destChildren) {
           for (let i = 0; i < srcChildren.length; i++) {
             if (destChildren[i]) {
-              copyComputedStyles(srcChildren[i], destChildren[i]);
+              copyAllComputedStyles(srcChildren[i], destChildren[i]);
             }
-          }
-        }
-      };
-
-      // Helper function to remove Tailwind color classes from the clone.
-      // This prevents html2canvas from matching those classes to stylesheet rules containing unresolved CSS variables.
-      const cleanColorClasses = (el) => {
-        if (el.className && typeof el.className === 'string') {
-          el.className = el.className.split(' ').filter(c => {
-            // Remove hover/focus/etc. variants if they contain bg/text/border
-            if (c.includes(':')) {
-              const parts = c.split(':');
-              const last = parts[parts.length - 1];
-              if (last.startsWith('bg-') || last.startsWith('border-') || (last.startsWith('text-') && !['xs', 'sm', 'md', 'lg', 'xl', '2xl', '3xl', 'left', 'right', 'center', 'justify', 'bold', 'normal'].includes(last.substring(5)) && !last.substring(5).startsWith('['))) {
-                return false;
-              }
-            }
-            
-            // Standard color classes
-            if (c.startsWith('bg-')) {
-              return false;
-            }
-            if (c.startsWith('border-')) {
-              return false;
-            }
-            if (c.startsWith('text-')) {
-              const suffix = c.substring(5);
-              if (['xs', 'sm', 'md', 'lg', 'xl', '2xl', '3xl', 'left', 'right', 'center', 'justify', 'bold', 'normal'].includes(suffix) || suffix.startsWith('[')) {
-                return true;
-              }
-              return false;
-            }
-            return true;
-          }).join(' ');
-        }
-        
-        // Recurse children
-        const children = el.children;
-        if (children) {
-          for (let i = 0; i < children.length; i++) {
-            cleanColorClasses(children[i]);
           }
         }
       };
 
       // Append clone to body first so it has layout for styling/rendering, then copy computed styles
       document.body.appendChild(clone);
-      copyComputedStyles(element, clone);
-      cleanColorClasses(clone);
+      copyAllComputedStyles(element, clone);
+
+      // Adjust scrollable/max-height wrapper inside the clone AFTER copying styles so it stays expanded
+      const scrollableDiv = clone.querySelector('.overflow-y-auto');
+      if (scrollableDiv) {
+        scrollableDiv.style.maxHeight = 'none';
+        scrollableDiv.style.overflow = 'visible';
+      }
 
       // Now remove the download button from the clone (so it doesn't appear in the PDF)
       const downloadBtn = clone.querySelector('[data-pdf-download-btn]');
@@ -2141,18 +2105,41 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
         downloadBtn.remove();
       }
 
-      // Render the clone with html2canvas
-      const canvas = await html2canvas(clone, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#ffffff',
-        logging: false,
-        windowWidth: clone.offsetWidth,
-        windowHeight: clone.scrollHeight || clone.offsetHeight
-      });
+      // Disable all stylesheets temporarily to prevent html2canvas oklab/oklch parser crashes
+      const disabledSheets = [];
+      for (let i = 0; i < document.styleSheets.length; i++) {
+        const sheet = document.styleSheets[i];
+        try {
+          if (!sheet.disabled) {
+            sheet.disabled = true;
+            disabledSheets.push(sheet);
+          }
+        } catch (e) {
+          // Ignore security errors for cross-origin sheets
+        }
+      }
 
-      // Clean up the clone
-      document.body.removeChild(clone);
+      // Render the clone with html2canvas
+      let canvas;
+      try {
+        canvas = await html2canvas(clone, {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          logging: false,
+          windowWidth: clone.offsetWidth,
+          windowHeight: clone.scrollHeight || clone.offsetHeight
+        });
+      } finally {
+        // Re-enable all temporarily disabled stylesheets
+        disabledSheets.forEach(sheet => {
+          try {
+            sheet.disabled = false;
+          } catch (e) {}
+        });
+        // Clean up the clone from the DOM
+        document.body.removeChild(clone);
+      }
 
       // Create PDF with appropriate dimensions
       const imgWidth = canvas.width;
