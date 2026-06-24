@@ -2108,6 +2108,9 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
 
   const handleDownloadGreenhousePDF = async () => {
     try {
+      const potRows = activeProject?.PotRows ? parseInt(activeProject.PotRows) : 9;
+      const potCols = activeProject?.PotCols ? parseInt(activeProject.PotCols) : 4;
+
       const element = document.getElementById('greenhouse-layout-container');
       if (!element) {
         toast('Greenhouse layout container not found.', 'error');
