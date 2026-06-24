@@ -120,6 +120,47 @@ const TrialCard = memo(function TrialCard({
     return { blockNum, colors, potsPerColumn, isColumnWise: project?.PotObsMode === 'column-wise' || (trial.PotRow === null && trial.PotCol != null) };
   }, [trial.TrialDesign, trial.Replication, trial.PotLabel, trial.PotRow, trial.PotCol, project]);
 
+  const posVal = useMemo(() => {
+    if (trial.TrialDesign !== 'PotTrial') return '';
+    const rowVal = String(trial.PotRow || '').trim();
+    const colVal = String(trial.PotCol || '').trim();
+    
+    let colClean = colVal.replace(/^Col\s*/i, '').replace(/^C/i, '').trim();
+    if (colClean && !colClean.startsWith('C') && !isNaN(colClean)) {
+      colClean = 'C' + colClean;
+    }
+    
+    let rowClean = rowVal.replace(/^Row\s*/i, '').replace(/^R/i, '').trim();
+    if (rowClean && !rowClean.startsWith('R') && !isNaN(rowClean)) {
+      rowClean = 'R' + rowClean;
+    }
+
+    if (rowClean && colClean) {
+      return `${rowClean}${colClean}`;
+    } else if (rowClean) {
+      if (project) {
+        const potCols = parseInt(project.PotCols) || 4;
+        return `${rowClean} (C1-C${potCols})`;
+      }
+      return rowClean;
+    } else if (colClean) {
+      if (project) {
+        const potRows = parseInt(project.PotRows) || 9;
+        const blocksCount = parseInt(project.PotBlocks || project.BlocksCount || (project.ReplicationsJSON ? JSON.parse(project.ReplicationsJSON).length : 3)) || 3;
+        const rowsPerBlock = Math.floor(potRows / blocksCount) || 1;
+        const repNum = parseInt(trial.Replication) || 1;
+        const startRow = (repNum - 1) * rowsPerBlock + 1;
+        const endRow = Math.min(repNum * rowsPerBlock, potRows);
+        if (blocksCount > 1) {
+          return `${colClean} (R${startRow}-R${endRow})`;
+        }
+        return colClean;
+      }
+      return colClean;
+    }
+    return '';
+  }, [trial.PotRow, trial.PotCol, trial.TrialDesign, trial.Replication, project]);
+
   // Control days calculation
   const controlDays = useMemo(() => {
     if (trial.FinalControlDuration) return parseInt(trial.FinalControlDuration, 10);
@@ -323,7 +364,7 @@ const TrialCard = memo(function TrialCard({
           </span>
           {trial.PotLabel && (
             <span className={`ml-auto text-[10px] font-semibold ${blockInfo.colors.text} opacity-70`}>
-              Pot: {trial.PotCol && (trial.PotRow === 1 || trial.PotRow === null) && !trial.PotLabel.toLowerCase().includes('pots') ? `${trial.PotCol} (${trial.PotLabel})` : trial.PotLabel}
+              Pot: {trial.PotLabel} {posVal && posVal !== trial.PotLabel ? ` | Pos: ${posVal}` : ''}
             </span>
           )}
         </div>
