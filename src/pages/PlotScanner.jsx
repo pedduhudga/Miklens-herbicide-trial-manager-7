@@ -1257,7 +1257,7 @@ Rules:
       {/* Quick Action Modal */}
       {quickModal && (
         <QuickActionModal
-          trial={quickModal.trial}
+          trial={state.trials?.find(t => String(t.ID) === String(quickModal.trial?.ID)) || quickModal.trial}
           rawQr={quickModal.raw}
           onClose={() => setQuickModal(null)}
           onAction={handleAction}

@@ -1755,9 +1755,24 @@ Provide a 2-sentence summary of expected efficacy based on typical performance p
 
         {/* ── Sync Queue ── */}
         <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
-          <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-            <Activity className="w-4 h-4 text-slate-500" /> Synchronisation Queue
-          </h3>
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="font-bold text-slate-800 flex items-center gap-2">
+              <Activity className="w-4 h-4 text-slate-500" /> Synchronisation Queue
+            </h3>
+            {state.syncQueue && state.syncQueue.length > 0 && (
+              <button
+                onClick={() => {
+                  if (window.confirm("Are you sure you want to clear the entire sync queue? Pending uploads/changes will be deleted.")) {
+                    updateState({ syncQueue: [] });
+                    localStorage.setItem('syncQueue', JSON.stringify([]));
+                  }
+                }}
+                className="text-xs text-red-600 hover:text-red-700 font-semibold px-2 py-1 bg-red-50 hover:bg-red-100 rounded-lg transition"
+              >
+                Clear Queue
+              </button>
+            )}
+          </div>
           {state.syncQueue && state.syncQueue.length > 0 ? (
             <div className="space-y-2">
               <p className="text-sm text-amber-600 font-semibold mb-3">{state.syncQueue.length} item{state.syncQueue.length !== 1 ? 's' : ''} pending sync</p>
@@ -1765,10 +1780,21 @@ Provide a 2-sentence summary of expected efficacy based on typical performance p
                 <div key={i} className="flex items-center gap-3 px-3 py-2 bg-amber-50 border border-amber-100 rounded-lg">
                   <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-slate-700 truncate">{item.action || 'Unknown action'}</p>
+                    <p className="text-xs font-semibold text-slate-700 truncate">{item.action || item.type || 'Unknown action'}</p>
                     <p className="text-xs text-slate-400">{item.timestamp ? new Date(item.timestamp).toLocaleString() : '—'}</p>
                   </div>
                   <span className="text-xs font-bold text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full">Pending</span>
+                  <button
+                    onClick={() => {
+                      const nextQueue = state.syncQueue.filter((_, idx) => idx !== i);
+                      updateState({ syncQueue: nextQueue });
+                      localStorage.setItem('syncQueue', JSON.stringify(nextQueue));
+                    }}
+                    className="p-1 hover:bg-amber-200 rounded text-amber-700 shrink-0 transition"
+                    title="Remove item from queue"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               ))}
               {state.syncQueue.length > 10 && (
@@ -1782,6 +1808,7 @@ Provide a 2-sentence summary of expected efficacy based on typical performance p
             </div>
           )}
         </div>
+
 
         {/* ── Recalculate Efficacy Ratings ── */}
         <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100 space-y-4">
