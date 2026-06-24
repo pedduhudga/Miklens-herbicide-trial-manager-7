@@ -3,7 +3,6 @@ import { Calendar, MapPin, FlaskConical, Activity, Image as ImageIcon, ChevronLe
 import { safeJsonParse } from '../utils/helpers.js';
 import { formatDateTime } from '../utils/dateUtils.js';
 import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryValue } from '../utils/categoryConfig.js';
-import { validateEfficacyData } from '../utils/analysisUtils.js';
 import { useAuth } from '../hooks/useAuth.js';
 
 const RESULT_COLORS = {
@@ -90,8 +89,13 @@ const TrialCard = memo(function TrialCard({
   }, [trial.PhotoURLs]);
   const efficacyData = useMemo(() => {
     const parsed = safeJsonParse(trial.EfficacyDataJSON, []);
-    return validateEfficacyData(parsed, categoryId);
-  }, [trial.EfficacyDataJSON, categoryId]);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(obs => {
+      if (!obs || typeof obs !== 'object') return false;
+      const daa = parseFloat(obs.daa);
+      return !isNaN(daa) && daa >= 0;
+    });
+  }, [trial.EfficacyDataJSON]);
   const isLive = String(trial.IsLive) !== 'false';
   const isCompleted = trial.IsCompleted === true || trial.IsCompleted === 'true';
 
