@@ -3665,17 +3665,28 @@ Rules:
       const blockName = trial.BlockID ? (blocks?.find(b => String(b.ID) === String(trial.BlockID))?.Name || '') : '';
       const designType = trial.TrialDesign || 'RCBD';
       
-      let bannerTitle = `${blockEmoji} ${blockName || 'Trial Card'}`;
-      if (designType === 'PotTrial') {
-        bannerTitle = `🏺 Pot Trial`;
-      }
+      const bannerTitle = blockName ? `${blockEmoji} ${blockName}` : 'Trial Card';
       
       let designMarkup = '';
       if (fields.designDetails) {
         const items = [];
         if (designType === 'PotTrial') {
-          if (trial.PotLabel) items.push(`<strong>Pot</strong><span>${sanitizePrintHtml(trial.PotLabel)}</span>`);
-          if (trial.PotRow || trial.PotCol) items.push(`<strong>Pos</strong><span>R${sanitizePrintHtml(trial.PotRow)} C${sanitizePrintHtml(trial.PotCol)}</span>`);
+          if (trial.PotLabel) {
+            items.push(`<strong>Pot</strong><span>${sanitizePrintHtml(trial.PotLabel)}</span>`);
+          }
+          let posVal = '';
+          const rowVal = String(trial.PotRow || '').trim();
+          const colVal = String(trial.PotCol || '').trim();
+          if (rowVal && colVal) {
+            posVal = `R${rowVal.replace(/^R/i, '')} C${colVal.replace(/^C/i, '')}`;
+          } else if (rowVal) {
+            posVal = `Row ${rowVal}`;
+          } else if (colVal) {
+            posVal = `Col ${colVal}`;
+          }
+          if (posVal) {
+            items.push(`<strong>Pos</strong><span>${sanitizePrintHtml(posVal)}</span>`);
+          }
         } else {
           if (blockName) items.push(`<strong>Block</strong><span>${sanitizePrintHtml(blockName)}</span>`);
           if (trial.Replication) items.push(`<strong>Rep</strong><span>${sanitizePrintHtml(trial.Replication)}</span>`);
@@ -3745,6 +3756,13 @@ Rules:
 
     window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Generating print layout...', type: 'info' } }));
 
+    const firstTrial = selectedTrials[0];
+    const proj = state.projects?.find(p => p.ID === firstTrial?.ProjectID);
+    const titleName = proj ? proj.Name : (firstTrial?.FormulationName || 'Trials');
+    const cleanTitle = titleName.replace(/[^a-zA-Z0-9_\-\s]/g, '').trim() || 'Trial_Cards';
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const documentTitle = `Trial_Cards_${cleanTitle.replace(/\s+/g, '_')}_${dateStr}`;
+
     const { cardWidth, cardHeight, label } = getTrialCardPrintSettings();
     const companyLogo = state.settings?.logoBase64 || '';
     const cardsMarkup = await buildTrialCardsMarkup(selectedTrials, companyLogo, qrFields, state.blocks);
@@ -3754,7 +3772,7 @@ Rules:
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Print Trial Cards</title>
+  <title>${documentTitle}</title>
   <style>${cardsCss}</style>
 </head>
 <body>
@@ -3771,7 +3789,7 @@ Rules:
       printWindow.print();
       printWindow.close();
     }, 500);
-  }, [buildTrialCardsCss, buildTrialCardsMarkup, getTrialCardPrintSettings, selectedForBulk, state.settings?.logoBase64, trials, qrFields, state.blocks]);
+  }, [buildTrialCardsCss, buildTrialCardsMarkup, getTrialCardPrintSettings, selectedForBulk, state.settings?.logoBase64, trials, qrFields, state.blocks, state.projects]);
 
   const ResultBadge = ({ result }) => {
     if (!result) return null;
