@@ -23,7 +23,7 @@ if (typeof window !== 'undefined') {
 import { useAuth } from '../hooks/useAuth.js';
 
 export default function DataManagement({ onMenuClick }) {
-  const { state, updateState, getAppState } = useAppState();
+  const { state, updateState, getAppState, dispatch } = useAppState();
   const { isViewer, user } = useAuth();
   const canDownload = user?.tabPermissions?.['Allow Downloads'] !== false;
   const activeCategory = state.activeCategory || 'herbicide';
@@ -1763,8 +1763,7 @@ Provide a 2-sentence summary of expected efficacy based on typical performance p
               <button
                 onClick={() => {
                   if (window.confirm("Are you sure you want to clear the entire sync queue? Pending uploads/changes will be deleted.")) {
-                    updateState({ syncQueue: [] });
-                    localStorage.setItem('syncQueue', JSON.stringify([]));
+                    dispatch({ type: 'SET_SYNC_QUEUE', payload: [] });
                   }
                 }}
                 className="text-xs text-red-600 hover:text-red-700 font-semibold px-2 py-1 bg-red-50 hover:bg-red-100 rounded-lg transition"
@@ -1787,8 +1786,7 @@ Provide a 2-sentence summary of expected efficacy based on typical performance p
                   <button
                     onClick={() => {
                       const nextQueue = state.syncQueue.filter((_, idx) => idx !== i);
-                      updateState({ syncQueue: nextQueue });
-                      localStorage.setItem('syncQueue', JSON.stringify(nextQueue));
+                      dispatch({ type: 'SET_SYNC_QUEUE', payload: nextQueue });
                     }}
                     className="p-1 hover:bg-amber-200 rounded text-amber-700 shrink-0 transition"
                     title="Remove item from queue"
