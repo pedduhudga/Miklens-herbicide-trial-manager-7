@@ -1145,7 +1145,7 @@ export default function Trials({ onMenuClick }) {
     
     peers.forEach(p => {
       const eff = validateEfficacyData(safeJsonParse(p.EfficacyDataJSON, []), activeCategory);
-      const match = eff.find(o => o.daa === daa);
+      const match = eff.find(o => Number(o.daa) === Number(daa));
       if (match) {
         const val = parseFloat(match[primaryObsField]);
         if (!isNaN(val)) {
@@ -1634,7 +1634,7 @@ export default function Trials({ onMenuClick }) {
     const baseVal = parseFloat(baseline?.[primaryObsField] ?? 100) || 100;
     const wceRows = sorted.map(obs => {
       const val = parseFloat(obs[primaryObsField] ?? 0) || 0;
-      const wce = obs.daa === baseline?.daa ? null : calculateEfficacy(activeCategory, val, baseVal);
+      const wce = Number(obs.daa) === Number(baseline?.daa) ? null : calculateEfficacy(activeCategory, val, baseVal);
       let rating = 'Baseline';
       if (wce !== null) {
         if (activeCategory === 'nutrition' || activeCategory === 'biostimulant') {
@@ -2393,7 +2393,7 @@ export default function Trials({ onMenuClick }) {
       });
     }
 
-    const existingIdx = efficacyData.findIndex(o => o.daa === Number(daa));
+    const existingIdx = efficacyData.findIndex(o => Number(o.daa) === Number(daa));
     if (existingIdx >= 0) {
       const existing = efficacyData[existingIdx];
       const count = Number(existing.sampleCount || 1);
