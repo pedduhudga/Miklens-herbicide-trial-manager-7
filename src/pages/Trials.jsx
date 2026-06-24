@@ -340,6 +340,17 @@ export default function Trials({ onMenuClick }) {
   const [qrCardSize, setQrCardSize] = useState(
     state.settings?.cardSize === 'A4' ? 'a4' : state.settings?.cardSize === 'A6' ? 'a6' : 'id-card'
   );
+  const [qrFields, setQrFields] = useState({
+    formulationName: true,
+    investigator: true,
+    date: true,
+    dosage: true,
+    targetField: true,
+    location: true,
+    designDetails: true,
+    trialId: true,
+    logo: true,
+  });
   const bulkQrRef = useRef(null);
 
   // --- Harvest & Yield ---
@@ -3507,11 +3518,15 @@ Rules:
   }, []);
 
   const buildTrialCardsCss = useCallback((cardWidth, cardHeight) => `
+      @page {
+        size: auto;
+        margin: 0mm;
+      }
       @media print {
         body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         .no-print { display: none !important; }
       }
-      body { margin: 0.5cm; font-family: sans-serif; background: #ffffff; }
+      body { margin: 10mm; font-family: system-ui, -apple-system, sans-serif; background: #ffffff; }
       .print-header {
         margin-bottom: 0.5cm;
         padding: 0.35cm 0.45cm;
@@ -3530,9 +3545,9 @@ Rules:
       .card {
         width: ${cardWidth}cm;
         height: ${cardHeight}cm;
-        border: 1px solid #ccc;
-        border-radius: 4px;
-        padding: 0.4cm;
+        border: 1px dashed #cbd5e1;
+        border-radius: 8px;
+        padding: 0.35cm;
         box-sizing: border-box;
         display: flex;
         flex-direction: column;
@@ -3541,48 +3556,113 @@ Rules:
         overflow: hidden;
         position: relative;
         background: #ffffff;
+        border-left: 4px solid #0d9488;
       }
-      .card-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.3cm; }
+      .card-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.2cm; }
       .card-header h3 {
-        font-size: 12pt;
+        font-size: 11pt;
         margin: 0;
-        font-weight: bold;
-        color: #2c5282;
-        max-width: 65%;
+        font-weight: 700;
+        color: #0f172a;
+        max-width: 70%;
         line-height: 1.2;
       }
-      .logo { max-width: 2.5cm; max-height: 1.2cm; object-fit: contain; flex-shrink: 0; }
-      .card-body { padding-right: 2.9cm; }
-      .card-body p { font-size: 9pt; margin: 0.1cm 0; }
+      .logo { max-width: 2.2cm; max-height: 1cm; object-fit: contain; flex-shrink: 0; }
+      .card-body { padding-right: 2.7cm; flex-grow: 1; display: flex; flex-direction: column; justify-content: center; }
+      .card-body p { font-size: 8pt; margin: 0.05cm 0; color: #475569; }
+      .card-body p strong { color: #1e293b; }
       .card-footer {
         position: absolute;
-        right: 0.4cm;
-        bottom: 0.4cm;
+        right: 0.35cm;
+        bottom: 0.35cm;
         text-align: right;
       }
-      .qr-code { width: 2.5cm; height: 2.5cm; display: block; }
+      .qr-code { width: 2.2cm; height: 2.2cm; display: block; border: 1px solid #f1f5f9; border-radius: 4px; padding: 2px; }
+      .trial-id { font-size: 7.5px; color: #94a3b8; margin-top: 3px; font-family: monospace; }
+      .coord-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 4px;
+        margin-top: 6px;
+        max-width: 80%;
+      }
+      .coord-item {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 4px;
+        padding: 3px 5px;
+        font-size: 7.5pt;
+        color: #334155;
+        line-height: 1.1;
+      }
+      .coord-item strong {
+        color: #475569;
+        font-size: 6.5pt;
+        text-transform: uppercase;
+        display: block;
+        margin-bottom: 1px;
+      }
     `, []);
 
-  const buildTrialCardsMarkup = useCallback(async (selectedTrials, companyLogo) => {
+  const buildTrialCardsMarkup = useCallback(async (selectedTrials, companyLogo, fields, blocks) => {
     const cards = [];
     for (const trial of selectedTrials) {
       const qrCodeUrl = await generateQrCodeDataUrl(buildPrintableTrialUrl(trial));
       const formattedDate = formatDateTime(trial.Date);
+      
+      const trialCat = trial.Category || 'herbicide';
+      const cConf = getCategoryConfig(trialCat);
+      const targetLabel = cConf.targetLabel || 'Weed Species';
+      const targetValue = trial[cConf.targetField] || trial.WeedSpecies || '';
+
+      let designMarkup = '';
+      if (fields.designDetails) {
+        const designType = trial.TrialDesign || 'RCBD';
+        const blockName = trial.BlockID ? (blocks?.find(b => String(b.ID) === String(trial.BlockID))?.Name || '') : '';
+        const items = [];
+        
+        if (designType === 'PotTrial') {
+          if (trial.PotLabel) items.push(`<strong>Pot</strong>${sanitizePrintHtml(trial.PotLabel)}`);
+          if (trial.PotRow || trial.PotCol) items.push(`<strong>Pos</strong>R${sanitizePrintHtml(trial.PotRow)} C${sanitizePrintHtml(trial.PotCol)}`);
+        } else {
+          if (blockName) items.push(`<strong>Block</strong>${sanitizePrintHtml(blockName)}`);
+          if (trial.Replication) items.push(`<strong>Rep</strong>${sanitizePrintHtml(trial.Replication)}`);
+          if (trial.PlotNumber) items.push(`<strong>Plot</strong>#${sanitizePrintHtml(trial.PlotNumber)}`);
+          if (trial.SubBlockID) items.push(`<strong>Sub-Blk</strong>${sanitizePrintHtml(trial.SubBlockID)}`);
+          if (trial.MainFactor) items.push(`<strong>Main Fac</strong>${sanitizePrintHtml(trial.MainFactor)}`);
+          if (trial.SubFactor) items.push(`<strong>Sub Fac</strong>${sanitizePrintHtml(trial.SubFactor)}`);
+        }
+        
+        if (items.length > 0) {
+          designMarkup = `
+            <div class="coord-grid">
+              ${items.map(item => `<div class="coord-item">${item}</div>`).join('')}
+            </div>
+          `;
+        }
+      }
+
       cards.push(`
         <div class="card">
-          <div>
-            <div class="card-header">
-              <h3>${sanitizePrintHtml(trial.FormulationName || 'Untitled Trial')}</h3>
-              ${companyLogo ? `<img src="${companyLogo}" class="logo" alt="Logo">` : ''}
-            </div>
-            <div class="card-body">
-              <p><strong>Investigator:</strong> ${sanitizePrintHtml(trial.InvestigatorName || '')}</p>
-              <p><strong>Date:</strong> ${sanitizePrintHtml(formattedDate)}</p>
-              <p><strong>Dosage:</strong> ${sanitizePrintHtml(trial.Dosage || '')}</p>
+          <div style="height: 100%; display: flex; flex-direction: column; justify-content: space-between;">
+            <div>
+              <div class="card-header">
+                <h3>${fields.formulationName ? sanitizePrintHtml(trial.FormulationName || 'Untitled Trial') : 'Trial Card'}</h3>
+                ${fields.logo && companyLogo ? `<img src="${companyLogo}" class="logo" alt="Logo">` : ''}
+              </div>
+              <div class="card-body">
+                ${fields.investigator && trial.InvestigatorName ? `<p><strong>Investigator:</strong> ${sanitizePrintHtml(trial.InvestigatorName)}</p>` : ''}
+                ${fields.date && trial.Date ? `<p><strong>Date:</strong> ${sanitizePrintHtml(formattedDate)}</p>` : ''}
+                ${fields.dosage && trial.Dosage ? `<p><strong>Dosage:</strong> ${sanitizePrintHtml(trial.Dosage)}</p>` : ''}
+                ${fields.location && trial.Location ? `<p><strong>Location:</strong> ${sanitizePrintHtml(trial.Location)}</p>` : ''}
+                ${fields.targetField && targetValue ? `<p><strong>${targetLabel}:</strong> ${sanitizePrintHtml(targetValue)}</p>` : ''}
+                ${designMarkup}
+              </div>
             </div>
           </div>
           <div class="card-footer">
             ${qrCodeUrl ? `<img src="${qrCodeUrl}" class="qr-code" alt="QR Code">` : ''}
+            ${fields.trialId ? `<div class="trial-id">ID: ${trial.ID.slice(-10)}</div>` : ''}
           </div>
         </div>
       `);
@@ -3604,7 +3684,7 @@ Rules:
 
     const { cardWidth, cardHeight, label } = getTrialCardPrintSettings();
     const companyLogo = state.settings?.logoBase64 || '';
-    const cardsMarkup = await buildTrialCardsMarkup(selectedTrials, companyLogo);
+    const cardsMarkup = await buildTrialCardsMarkup(selectedTrials, companyLogo, qrFields, state.blocks);
     const cardsCss = buildTrialCardsCss(cardWidth, cardHeight);
 
     printWindow.document.write(`<!DOCTYPE html>
@@ -3628,7 +3708,7 @@ Rules:
       printWindow.print();
       printWindow.close();
     }, 500);
-  }, [buildTrialCardsCss, buildTrialCardsMarkup, getTrialCardPrintSettings, selectedForBulk, state.settings?.logoBase64, trials]);
+  }, [buildTrialCardsCss, buildTrialCardsMarkup, getTrialCardPrintSettings, selectedForBulk, state.settings?.logoBase64, trials, qrFields, state.blocks]);
 
   const ResultBadge = ({ result }) => {
     if (!result) return null;
@@ -8143,14 +8223,31 @@ If none are present, write "None".`;
                 </div>
               </div>
 
-              <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600">
-                <p className="font-semibold mb-1">Each card includes:</p>
-                <ul className="space-y-0.5 list-disc list-inside">
-                  <li>QR code linked to the trial report</li>
-                  <li>Formulation name</li>
-                  <li>Investigator and date</li>
-                  <li>Dosage and optional company logo</li>
-                </ul>
+              <div className="bg-slate-50 rounded-lg p-3 space-y-2">
+                <label className="block text-xs font-semibold text-slate-600 uppercase">Include Parameters</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { key: 'formulationName', label: 'Formulation Name' },
+                    { key: 'investigator', label: 'Investigator' },
+                    { key: 'date', label: 'Trial Date' },
+                    { key: 'dosage', label: 'Dosage' },
+                    { key: 'targetField', label: 'Target Value' },
+                    { key: 'location', label: 'Location' },
+                    { key: 'designDetails', label: 'Layout (Block/Plot/Pot)' },
+                    { key: 'trialId', label: 'Trial ID' },
+                    { key: 'logo', label: 'Company Logo' },
+                  ].map(field => (
+                    <label key={field.key} className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer hover:text-emerald-700">
+                      <input
+                        type="checkbox"
+                        checked={qrFields[field.key]}
+                        onChange={(e) => setQrFields(prev => ({ ...prev, [field.key]: e.target.checked }))}
+                        className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5"
+                      />
+                      <span>{field.label}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
 
               <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
