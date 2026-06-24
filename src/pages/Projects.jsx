@@ -2465,19 +2465,24 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       // If single row with many columns, make it wrap for the PDF so it fits the page width
       if (potRows === 1 && potCols > 10) {
         clone.querySelectorAll('div').forEach(container => {
-          // Check if this is the flex row container holding the pot cells
-          if (container.classList?.contains('flex-1') && container.classList?.contains('flex') && container.querySelector('[data-pdf-pot-cell]')) {
+          // Check if this container is the direct parent of a pot cell
+          const firstCell = container.querySelector('[data-pdf-pot-cell="true"]');
+          if (firstCell && firstCell.parentElement === container) {
             container.style.display = 'flex';
+            container.style.flexDirection = 'row';
             container.style.flexWrap = 'wrap';
             container.style.gap = '8px';
             container.style.width = '100%';
+            container.style.maxWidth = '100%';
+            container.style.overflow = 'visible';
             
-            container.querySelectorAll('[data-pdf-pot-cell]').forEach(cell => {
+            container.querySelectorAll('[data-pdf-pot-cell="true"]').forEach(cell => {
               cell.style.flex = '0 0 calc(10% - 8px)';
               cell.style.width = 'calc(10% - 8px)';
               cell.style.aspectRatio = '1/1';
               cell.style.minWidth = '0';
               cell.style.minHeight = '0';
+              cell.style.boxSizing = 'border-box';
             });
           }
         });
