@@ -2459,16 +2459,49 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
         span.style.overflow = 'visible';
       });
 
+      // If single row with many columns, make it wrap for the PDF so it fits the page width
+      if (potRows === 1 && potCols > 10) {
+        clone.querySelectorAll('div').forEach(container => {
+          // Check if this is the flex row container holding the pot cells
+          if (container.classList?.contains('flex-1') && container.classList?.contains('flex') && container.querySelector('[data-pdf-pot-cell]')) {
+            container.style.display = 'flex';
+            container.style.flexWrap = 'wrap';
+            container.style.gap = '8px';
+            container.style.width = '100%';
+            
+            container.querySelectorAll('[data-pdf-pot-cell]').forEach(cell => {
+              cell.style.flex = '0 0 calc(10% - 8px)';
+              cell.style.width = 'calc(10% - 8px)';
+              cell.style.aspectRatio = '1/1';
+              cell.style.minWidth = '0';
+              cell.style.minHeight = '0';
+            });
+          }
+        });
+      }
+
       // ── Group Elements Into Clean Page Sets (To prevent page-break cutoffs) ──
       // Find the scrollable wrapper containing the rows
-      const scrollableWrapper = Array.from(clone.querySelectorAll('div')).find(div => 
-        Array.from(div.children).some(child => child.textContent.includes('BLOCK 1'))
+      let scrollableWrapper = Array.from(clone.querySelectorAll('div')).find(div => 
+        Array.from(div.children).some(child => child.textContent.toUpperCase().includes('BLOCK 1'))
       );
+
+      // Fallback: Find by checking if any child contains "R1" (the first row label)
+      if (!scrollableWrapper) {
+        scrollableWrapper = Array.from(clone.querySelectorAll('div')).find(div => 
+          Array.from(div.children).some(child => child.textContent.trim().startsWith('R1'))
+        );
+      }
 
       // Find the column headers row (the one containing C1 and C2 text, outside the wrapper)
       const colHeadersRow = Array.from(clone.children).find(child => 
         child.textContent.includes('C1') && child.textContent.includes('C2')
       );
+
+      // If single row with many columns, hide the overflowing top-level C1..C30 row
+      if (potRows === 1 && potCols > 10 && colHeadersRow) {
+        colHeadersRow.style.display = 'none';
+      }
 
       // Find the header elements (custom header, summary card, size badge row)
       const beforeGridElements = [];
@@ -2494,17 +2527,18 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       const block3Items = [];
 
       gridElements.forEach(child => {
-        if (child.textContent.includes('BLOCK 1')) {
+        const text = child.textContent.toUpperCase();
+        if (text.includes('BLOCK 1')) {
           currentBlockIndex = 0;
           block1Items.push(child);
           return;
         }
-        if (child.textContent.includes('BLOCK 2')) {
+        if (text.includes('BLOCK 2')) {
           currentBlockIndex = 1;
           block2Items.push(child);
           return;
         }
-        if (child.textContent.includes('BLOCK 3')) {
+        if (text.includes('BLOCK 3')) {
           currentBlockIndex = 2;
           block3Items.push(child);
           return;
