@@ -3664,6 +3664,7 @@ Rules:
       
       const blockName = trial.BlockID ? (blocks?.find(b => String(b.ID) === String(trial.BlockID))?.Name || '') : '';
       const designType = trial.TrialDesign || 'RCBD';
+      const designLabel = designType === 'PotTrial' ? 'Pot Trials' : designType;
       
       const bannerTitle = blockName ? `${blockEmoji} ${blockName}` : 'Trial Card';
       
@@ -3748,7 +3749,7 @@ Rules:
         <div class="card">
           <div class="card-banner ${blockThemeClass}">
             <span>${sanitizePrintHtml(bannerTitle)}</span>
-            <span>${sanitizePrintHtml(designType)}</span>
+            <span>${sanitizePrintHtml(designLabel)}</span>
           </div>
           <div class="card-content">
             <div>
