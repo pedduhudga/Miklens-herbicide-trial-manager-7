@@ -890,6 +890,7 @@ export default function Projects({ onMenuClick }) {
   // ── Design completeness ─────────────────────────────────────────────────
   const designCheck = useMemo(() => {
     if (!activeProject) return null;
+    if (activeProject.Design === 'PotTrial') return null;
     const blocks = (state.blocks || []).filter(b => String(b.ProjectID) === String(activeProject.ID));
     const trials = (state.trials || []).filter(t => String(t.ProjectID) === String(activeProject.ID));
     const treatmentKeys = [...new Set(trials.map(t => t.FormulationName || t.FormulationID || 'Unknown'))];
