@@ -3577,38 +3577,81 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
             trialsToSave.push(tToSave);
           });
         } else {
-          const isHorizontal = String(potStripeDirection).toLowerCase().includes('horizontal');
-          let rowColAssignments = {};
+          if (potRows === 1) {
+            const numTrts = trtList.length || 1;
+            const potsPerTrt = Math.floor(potCols / numTrts) || 1;
 
-          if (potLayout === 'stripe') {
-            const numUnits = isHorizontal ? potRows : potCols;
-            for (let i = 1; i <= numUnits; i++) {
-              rowColAssignments[i] = trtList[(i - 1) % trtList.length];
+            let orderedTrts = [...trtList];
+            if (potLayout === 'randomized-row' || potLayout === 'balanced-pot') {
+              for (let i = orderedTrts.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [orderedTrts[i], orderedTrts[j]] = [orderedTrts[j], orderedTrts[i]];
+              }
             }
-          } else if (potLayout === 'randomized-row') {
-            const numUnits = isHorizontal ? potRows : potCols;
-            const baseList = [];
-            while (baseList.length < numUnits) {
-              trtList.forEach(t => {
-                if (baseList.length < numUnits) {
-                  baseList.push(t);
+
+            const blockTrts = [];
+            orderedTrts.forEach(t => {
+              for (let p = 0; p < potsPerTrt; p++) {
+                if (blockTrts.length < potCols) {
+                  blockTrts.push(t);
                 }
-              });
+              }
+            });
+            while (blockTrts.length < potCols) {
+              blockTrts.push(trtList[blockTrts.length % trtList.length]);
             }
-            for (let i = baseList.length - 1; i > 0; i--) {
-              const j = Math.floor(Math.random() * (i + 1));
-              [baseList[i], baseList[j]] = [baseList[j], baseList[i]];
-            }
-            for (let i = 1; i <= numUnits; i++) {
-              rowColAssignments[i] = baseList[i - 1];
-            }
-          }
 
-          let plotIndex = 1;
-          for (let r = 1; r <= potRows; r++) {
-            let rowTreatments = [];
-            if (potLayout === 'balanced-pot') {
-              const numUnits = potCols;
+            let plotIndex = 1;
+            for (let c = 1; c <= potCols; c++) {
+              const t = blockTrts[c - 1];
+              const trialId = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
+              const targetField = config.targetField || 'WeedSpecies';
+              const label = randomizeForm.potIdentifierFormat === 'sequential' 
+                ? `P${String(c).padStart(3, '0')}` 
+                : `R1C${c}`;
+              const plotNum = 100 + c;
+
+              const tToSave = {
+                ID: trialId,
+                ProjectID: activeProject.ID,
+                BlockID: block.ID,
+                FormulationID: t.fid,
+                FormulationName: t.name,
+                InvestigatorName: randomizeForm.investigatorName || '',
+                Dosage: t.dosage || randomizeForm.dosage || '',
+                Date: randomizeForm.date || new Date().toISOString().split('T')[0],
+                Replication: '1',
+                RandomizationOrder: plotIndex,
+                IsControl: t.role === 'control',
+                IsStandardCheck: t.role === 'standard',
+                Status: 'Draft',
+                IsLive: true,
+                EfficacyDataJSON: '[]',
+                PhotoURLs: '[]',
+                WeedPhotosJSON: '[]',
+                PlotNumber: plotNum,
+                AISummariesJSON: JSON.stringify({ plotNum, label, row: 1, col: c }),
+                Category: activeCategory,
+                TrialDesign: 'PotTrial',
+                PotRow: 1,
+                PotCol: c,
+                PotLabel: label,
+                [targetField]: randomizeForm.weedSpecies || ''
+              };
+              trialsToSave.push(tToSave);
+              plotIndex++;
+            }
+          } else {
+            const isHorizontal = String(potStripeDirection).toLowerCase().includes('horizontal');
+            let rowColAssignments = {};
+
+            if (potLayout === 'stripe') {
+              const numUnits = isHorizontal ? potRows : potCols;
+              for (let i = 1; i <= numUnits; i++) {
+                rowColAssignments[i] = trtList[(i - 1) % trtList.length];
+              }
+            } else if (potLayout === 'randomized-row') {
+              const numUnits = isHorizontal ? potRows : potCols;
               const baseList = [];
               while (baseList.length < numUnits) {
                 trtList.forEach(t => {
@@ -3621,54 +3664,77 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
                 const j = Math.floor(Math.random() * (i + 1));
                 [baseList[i], baseList[j]] = [baseList[j], baseList[i]];
               }
-              rowTreatments = baseList;
+              for (let i = 1; i <= numUnits; i++) {
+                rowColAssignments[i] = baseList[i - 1];
+              }
             }
 
-            for (let c = 1; c <= potCols; c++) {
-              let t;
+            let plotIndex = 1;
+            for (let r = 1; r <= potRows; r++) {
+              let rowTreatments = [];
               if (potLayout === 'balanced-pot') {
-                t = rowTreatments[c - 1];
-              } else {
-                const unitKey = isHorizontal ? r : c;
-                t = rowColAssignments[unitKey];
+                const numUnits = potCols;
+                const baseList = [];
+                while (baseList.length < numUnits) {
+                  trtList.forEach(t => {
+                    if (baseList.length < numUnits) {
+                      baseList.push(t);
+                    }
+                  });
+                }
+                for (let i = baseList.length - 1; i > 0; i--) {
+                  const j = Math.floor(Math.random() * (i + 1));
+                  [baseList[i], baseList[j]] = [baseList[j], baseList[i]];
+                }
+                rowTreatments = baseList;
               }
 
-              const trialId = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
-              const targetField = config.targetField || 'WeedSpecies';
-              const label = randomizeForm.potIdentifierFormat === 'sequential' 
-                ? `P${String((r - 1) * potCols + c).padStart(3, '0')}` 
-                : `R${r}C${c}`;
-              const plotNum = r * 100 + c;
+              for (let c = 1; c <= potCols; c++) {
+                let t;
+                if (potLayout === 'balanced-pot') {
+                  t = rowTreatments[c - 1];
+                } else {
+                  const unitKey = isHorizontal ? r : c;
+                  t = rowColAssignments[unitKey];
+                }
 
-              const tToSave = {
-                ID: trialId,
-                ProjectID: activeProject.ID,
-                BlockID: block.ID,
-                FormulationID: t.fid,
-                FormulationName: t.name,
-                InvestigatorName: randomizeForm.investigatorName || '',
-                Dosage: t.dosage || randomizeForm.dosage || '',
-                Date: randomizeForm.date || new Date().toISOString().split('T')[0],
-                Replication: String(plotNum),
-                RandomizationOrder: plotIndex,
-                IsControl: t.role === 'control',
-                IsStandardCheck: t.role === 'standard',
-                Status: 'Draft',
-                IsLive: true,
-                EfficacyDataJSON: '[]',
-                PhotoURLs: '[]',
-                WeedPhotosJSON: '[]',
-                PlotNumber: plotNum,
-                AISummariesJSON: JSON.stringify({ plotNum, label, row: r, col: c }),
-                Category: activeCategory,
-                TrialDesign: 'PotTrial',
-                PotRow: r,
-                PotCol: c,
-                PotLabel: label,
-                [targetField]: randomizeForm.weedSpecies || ''
-              };
-              trialsToSave.push(tToSave);
-              plotIndex++;
+                const trialId = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
+                const targetField = config.targetField || 'WeedSpecies';
+                const label = randomizeForm.potIdentifierFormat === 'sequential' 
+                  ? `P${String((r - 1) * potCols + c).padStart(3, '0')}` 
+                  : `R${r}C${c}`;
+                const plotNum = r * 100 + c;
+
+                const tToSave = {
+                  ID: trialId,
+                  ProjectID: activeProject.ID,
+                  BlockID: block.ID,
+                  FormulationID: t.fid,
+                  FormulationName: t.name,
+                  InvestigatorName: randomizeForm.investigatorName || '',
+                  Dosage: t.dosage || randomizeForm.dosage || '',
+                  Date: randomizeForm.date || new Date().toISOString().split('T')[0],
+                  Replication: String(plotNum),
+                  RandomizationOrder: plotIndex,
+                  IsControl: t.role === 'control',
+                  IsStandardCheck: t.role === 'standard',
+                  Status: 'Draft',
+                  IsLive: true,
+                  EfficacyDataJSON: '[]',
+                  PhotoURLs: '[]',
+                  WeedPhotosJSON: '[]',
+                  PlotNumber: plotNum,
+                  AISummariesJSON: JSON.stringify({ plotNum, label, row: r, col: c }),
+                  Category: activeCategory,
+                  TrialDesign: 'PotTrial',
+                  PotRow: r,
+                  PotCol: c,
+                  PotLabel: label,
+                  [targetField]: randomizeForm.weedSpecies || ''
+                };
+                trialsToSave.push(tToSave);
+                plotIndex++;
+              }
             }
           }
         }
