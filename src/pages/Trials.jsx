@@ -569,6 +569,23 @@ export default function Trials({ onMenuClick }) {
         const dateDiff = new Date(b.Date || 0) - new Date(a.Date || 0);
         if (dateDiff !== 0) return dateDiff;
 
+        // For pot trials with same date, sort by replication block, then row, then column/pot number
+        const aIsPot = a.TrialDesign === 'PotTrial' || a.PotLabel;
+        const bIsPot = b.TrialDesign === 'PotTrial' || b.PotLabel;
+        if (aIsPot && bIsPot) {
+          const aRep = parseInt(a.Replication) || 0;
+          const bRep = parseInt(b.Replication) || 0;
+          if (aRep !== bRep) return aRep - bRep;
+
+          const aRow = parseInt(a.PotRow) || 0;
+          const bRow = parseInt(b.PotRow) || 0;
+          if (aRow !== bRow) return aRow - bRow;
+
+          const aCol = parseInt(a.PotCol) || 0;
+          const bCol = parseInt(b.PotCol) || 0;
+          return aCol - bCol;
+        }
+
         // Secondary sort for same date: newest DateUpdatedAt / CreatedAt on top
         const aTime = new Date(a.DateUpdatedAt || a.CreatedAt || a._createdAt?.toDate?.() || 0).getTime();
         const bTime = new Date(b.DateUpdatedAt || b.CreatedAt || b._createdAt?.toDate?.() || 0).getTime();
@@ -578,6 +595,23 @@ export default function Trials({ onMenuClick }) {
       if (sortBy === 'date-asc') {
         const dateDiff = new Date(a.Date || 0) - new Date(b.Date || 0);
         if (dateDiff !== 0) return dateDiff;
+
+        // For pot trials with same date, sort by replication block, then row, then column/pot number
+        const aIsPot = a.TrialDesign === 'PotTrial' || a.PotLabel;
+        const bIsPot = b.TrialDesign === 'PotTrial' || b.PotLabel;
+        if (aIsPot && bIsPot) {
+          const aRep = parseInt(a.Replication) || 0;
+          const bRep = parseInt(b.Replication) || 0;
+          if (aRep !== bRep) return aRep - bRep;
+
+          const aRow = parseInt(a.PotRow) || 0;
+          const bRow = parseInt(b.PotRow) || 0;
+          if (aRow !== bRow) return aRow - bRow;
+
+          const aCol = parseInt(a.PotCol) || 0;
+          const bCol = parseInt(b.PotCol) || 0;
+          return aCol - bCol;
+        }
 
         // Secondary sort for same date: oldest DateUpdatedAt / CreatedAt on top
         const aTime = new Date(a.DateUpdatedAt || a.CreatedAt || a._createdAt?.toDate?.() || 0).getTime();
