@@ -323,7 +323,7 @@ const TrialCard = memo(function TrialCard({
           </span>
           {trial.PotLabel && (
             <span className={`ml-auto text-[10px] font-semibold ${blockInfo.colors.text} opacity-70`}>
-              Pot: {trial.PotLabel}
+              Pot: {trial.PotCol && (trial.PotRow === 1 || trial.PotRow === null) ? `${trial.PotCol} (${trial.PotLabel})` : trial.PotLabel}
             </span>
           )}
         </div>
