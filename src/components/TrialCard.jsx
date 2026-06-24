@@ -315,15 +315,15 @@ const TrialCard = memo(function TrialCard({
       )}
 
       {/* Block Badge for RCBD Pot Trial */}
-      {blockInfo && blockInfo.isColumnWise && (
+      {blockInfo && (
         <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-t-xl ${blockInfo.colors.bg} border-b ${blockInfo.colors.border}`}>
           <span className="text-sm leading-none">{blockInfo.colors.emoji}</span>
           <span className={`text-[11px] font-extrabold uppercase tracking-wide ${blockInfo.colors.text}`}>
             Block {blockInfo.blockNum}
           </span>
-          {blockInfo.potsPerColumn && (
+          {trial.PotLabel && (
             <span className={`ml-auto text-[10px] font-semibold ${blockInfo.colors.text} opacity-70`}>
-              Represents {blockInfo.potsPerColumn} Pots
+              Pot: {trial.PotLabel}
             </span>
           )}
         </div>
@@ -331,16 +331,16 @@ const TrialCard = memo(function TrialCard({
 
 
 
-      <div className={`p-4 ${(blockInfo && blockInfo.isColumnWise) ? 'pt-3' : 'pt-10'} flex-1 flex flex-col`}>
+      <div className={`p-4 ${blockInfo ? 'pt-3' : 'pt-10'} flex-1 flex flex-col`}>
         <div className="flex items-start justify-between gap-3 mb-2">
           <div className="min-w-0">
-            <h3 className="font-bold text-slate-800 truncate" title={blockInfo && blockInfo.isColumnWise ? `Block ${blockInfo.blockNum} - ${trial.FormulationName}` : trial.FormulationName}>
+            <h3 className="font-bold text-slate-800 truncate" title={blockInfo ? `Block ${blockInfo.blockNum} - ${trial.FormulationName}` : trial.FormulationName}>
               {subTrialLabel && (
                 <span className="bg-emerald-600 text-white text-[10px] font-extrabold px-1.5 py-0.5 rounded-md mr-1.5 align-middle shadow-sm">
                   {subTrialLabel}
                 </span>
               )}
-              {blockInfo && blockInfo.isColumnWise && (
+              {blockInfo && (
                 <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded-md mr-1.5 align-middle shadow-sm ${blockInfo.colors.bg} ${blockInfo.colors.text} border ${blockInfo.colors.border}`}>
                   B{blockInfo.blockNum}
                 </span>

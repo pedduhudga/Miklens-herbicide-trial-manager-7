@@ -1700,7 +1700,7 @@ export default function Projects({ onMenuClick }) {
 
     const gridRows = [];
     for (let r = 1; r <= potRows; r++) {
-      if (potLayout === 'rcbd-pot') {
+      if (potLayout === 'rcbd-pot' && potRows > 1) {
         const isBlockStart = (r - 1) % rowsPerBlock === 0;
         if (isBlockStart) {
           const blockNum = Math.floor((r - 1) / rowsPerBlock) + 1;
@@ -1724,7 +1724,9 @@ export default function Projects({ onMenuClick }) {
         let trial;
         const blockNum = Math.floor((r - 1) / rowsPerBlock) + 1;
         if (potLayout === 'rcbd-pot') {
-          if (potObsMode === 'column-wise') {
+          if (potRows === 1) {
+            trial = projectTrials.find(t => String(t.PotCol) === String(c));
+          } else if (potObsMode === 'column-wise') {
             trial = projectTrials.find(t => String(t.Replication) === String(blockNum) && String(t.PotCol) === String(c));
           } else if (potObsMode === 'row-wise') {
             trial = projectTrials.find(t => String(t.Replication) === String(blockNum) && String(t.PotRow) === String(r));
