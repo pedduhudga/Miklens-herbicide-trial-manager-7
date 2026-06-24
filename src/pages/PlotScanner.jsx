@@ -22,6 +22,8 @@ import { useNavigate } from "react-router-dom";
 import QRScanner from "../components/QRScanner.jsx";
 import TopBar from "../components/TopBar.jsx";
 import { useAppState } from "../hooks/useAppState.jsx";
+import CameraCapture from "../components/CameraCapture.jsx";
+import CropperModal from "../components/CropperModal.jsx";
 import {
   uploadPhoto as uploadPhotoToDrive,
   updateTrial,
@@ -253,107 +255,7 @@ function QuickActionModal({ trial, rawQr, onClose, onAction, activeCategory = 'h
   );
 }
 
-// ─── Camera Capture Modal (inline, for "Add Photo" / "Identify Weeds") ────────
-
-function CameraModal({ mode, onClose, onCapture, activeCategory = 'herbicide' }) {
-  const videoRef = useRef(null);
-  const [stream, setStream] = useState(null);
-  const [capturing, setCapturing] = useState(false);
-  const [error, setError] = useState(null);
-  const catConfig = getCategoryConfig(activeCategory);
-
-  React.useEffect(() => {
-    let s = null;
-    (async () => {
-      try {
-        s = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: "environment" },
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
-          },
-        });
-        setStream(s);
-        if (videoRef.current) {
-          videoRef.current.srcObject = s;
-          videoRef.current.setAttribute("playsinline", true);
-          videoRef.current.play();
-        }
-      } catch {
-        setError("Camera access denied or unavailable.");
-      }
-    })();
-    return () => {
-      if (s) s.getTracks().forEach((t) => t.stop());
-    };
-  }, []);
-
-  const capture = useCallback(() => {
-    if (!videoRef.current || capturing) return;
-    setCapturing(true);
-    const video = videoRef.current;
-    const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext("2d").drawImage(video, 0, 0);
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
-    if (stream) stream.getTracks().forEach((t) => t.stop());
-    onCapture(dataUrl, mode);
-  }, [capturing, stream, mode, onCapture]);
-
-  return (
-    <div className="fixed inset-0 bg-black z-[10001] flex flex-col">
-      <button
-        onClick={onClose}
-        className="absolute top-4 right-4 w-10 h-10 rounded-full bg-black/50 flex items-center justify-center z-10 text-white"
-      >
-        <X className="w-6 h-6" />
-      </button>
-      <div className="absolute top-4 left-4 z-10">
-        <span
-          className={`px-3 py-1 rounded-full text-xs font-bold text-white ${mode === "weed" ? "bg-emerald-500" : "bg-blue-500"}`}
-        >
-          {mode === "weed" ? `🌿 ${catConfig.targetLabel} Photo` : "📷 Trial Photo"}
-        </span>
-      </div>
-      {error ? (
-        <div className="flex-1 flex items-center justify-center text-white text-center p-6">
-          <div>
-            <AlertTriangle className="w-12 h-12 text-red-400 mx-auto mb-3" />
-            <p>{error}</p>
-            <button
-              onClick={onClose}
-              className="mt-4 px-6 py-2 bg-white/10 rounded-full text-sm"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      ) : (
-        <>
-          <video
-            ref={videoRef}
-            className="flex-1 w-full object-cover"
-            playsInline
-          />
-          <div className="absolute bottom-10 left-0 right-0 flex justify-center">
-            <button
-              onClick={capture}
-              disabled={capturing}
-              className="w-20 h-20 rounded-full border-4 border-white flex items-center justify-center bg-white/20 backdrop-blur-sm active:scale-95 transition-transform disabled:opacity-50"
-            >
-              {capturing ? (
-                <Loader2 className="w-8 h-8 text-white animate-spin" />
-              ) : (
-                <div className="w-14 h-14 rounded-full bg-white" />
-              )}
-            </button>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
+// CameraModal removed in favor of standard CameraCapture component
 
 // ─── Scan History Item ─────────────────────────────────────────────────────────
 
@@ -408,6 +310,26 @@ export default function PlotScanner({ onMenuClick }) {
   const [pendingPhotoSetup, setPendingPhotoSetup] = useState(null); // { dataUrl, mimeType, trialId, mode, date, tag, label }
   const pendingGalleryTrialRef = useRef(null);
   const pendingGalleryModeRef = useRef("general");
+
+  // Cropper modal state variables
+  const [cropperOpen, setCropperOpen] = useState(false);
+  const [cropSource, setCropSource] = useState(null);
+  const cropCallbackRef = useRef(null);
+
+  const openCropperFor = (dataUrl, callback) => {
+    setCropSource(dataUrl);
+    cropCallbackRef.current = callback;
+    setCropperOpen(true);
+  };
+
+  const handleCropComplete = (croppedUrl) => {
+    setCropperOpen(false);
+    setCropSource(null);
+    if (cropCallbackRef.current) {
+      cropCallbackRef.current(croppedUrl);
+      cropCallbackRef.current = null;
+    }
+  };
 
   // ── Scan result handler ───────────────────────────────────────────────────
   const handleScan = useCallback(
@@ -598,14 +520,16 @@ export default function PlotScanner({ onMenuClick }) {
       if (!trialId) return;
 
       const defaultLabel = mode === 'weed' ? 'Weed Photo' : 'Field Observation';
-      setPendingPhotoSetup({
-        dataUrl,
-        mimeType: "image/jpeg",
-        trialId,
-        mode,
-        date: toDatetimeLocal(new Date()),
-        tag: "",
-        label: defaultLabel
+      openCropperFor(dataUrl, (croppedUrl) => {
+        setPendingPhotoSetup({
+          dataUrl: croppedUrl,
+          mimeType: "image/jpeg",
+          trialId,
+          mode,
+          date: toDatetimeLocal(new Date()),
+          tag: "",
+          label: defaultLabel
+        });
       });
     },
     [cameraModal],
@@ -624,14 +548,16 @@ export default function PlotScanner({ onMenuClick }) {
       const reader = new FileReader();
       reader.onload = async (ev) => {
         const defaultLabel = mode === 'weed' ? 'Weed Photo' : 'Field Observation';
-        setPendingPhotoSetup({
-          dataUrl: ev.target.result,
-          mimeType: file.type || "image/jpeg",
-          trialId,
-          mode,
-          date: toDatetimeLocal(new Date()),
-          tag: "",
-          label: defaultLabel
+        openCropperFor(ev.target.result, (croppedUrl) => {
+          setPendingPhotoSetup({
+            dataUrl: croppedUrl,
+            mimeType: "image/jpeg",
+            trialId,
+            mode,
+            date: toDatetimeLocal(new Date()),
+            tag: "",
+            label: defaultLabel
+          });
         });
       };
       reader.readAsDataURL(file);
@@ -817,14 +743,24 @@ export default function PlotScanner({ onMenuClick }) {
 
       {/* Camera Modal for photo capture */}
       {cameraModal && (
-        <CameraModal
-          mode={cameraModal.mode}
-          trialId={cameraModal.trialId}
+        <CameraCapture
+          onCapture={(dataUrl) => handleCapture(dataUrl, cameraModal.mode)}
           onClose={() => setCameraModal(null)}
-          onCapture={handleCapture}
-          activeCategory={activeCategory}
+          initialAspectRatio="3:4"
         />
       )}
+
+      {/* Cropper Modal */}
+      <CropperModal
+        isOpen={cropperOpen}
+        imageSrc={cropSource}
+        onClose={() => {
+          setCropperOpen(false);
+          setCropSource(null);
+          cropCallbackRef.current = null;
+        }}
+        onCropComplete={handleCropComplete}
+      />
 
       {/* Photo Details Setup Modal */}
       {pendingPhotoSetup && (() => {
