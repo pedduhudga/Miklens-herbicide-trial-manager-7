@@ -312,7 +312,7 @@ export default function Trials({ onMenuClick }) {
   const [aiLoading, setAiLoading] = useState(false);
   const [syncingPhotos, setSyncingPhotos] = useState(false);
   const [syncingAllPhotos, setSyncingAllPhotos] = useState(false);
-  const [syncHealOnly, setSyncHealOnly] = useState(false);
+  const [syncHealOnly, setSyncHealOnly] = useState(true);
 
   // --- AI weed cover detection ---
   const [detectingCover, setDetectingCover] = useState(false);
