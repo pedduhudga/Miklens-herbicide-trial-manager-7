@@ -1775,26 +1775,50 @@ Provide a 2-sentence summary of expected efficacy based on typical performance p
           {state.syncQueue && state.syncQueue.length > 0 ? (
             <div className="space-y-2">
               <p className="text-sm text-amber-600 font-semibold mb-3">{state.syncQueue.length} item{state.syncQueue.length !== 1 ? 's' : ''} pending sync</p>
-              {state.syncQueue.slice(0, 10).map((item, i) => (
-                <div key={i} className="flex items-center gap-3 px-3 py-2 bg-amber-50 border border-amber-100 rounded-lg">
-                  <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-slate-700 truncate">{item.action || item.type || 'Unknown action'}</p>
-                    <p className="text-xs text-slate-400">{item.timestamp ? new Date(item.timestamp).toLocaleString() : '—'}</p>
+              {state.syncQueue.slice(0, 10).map((item, i) => {
+                let actionText = item.action || item.type || 'Sync action';
+                let detailsText = '';
+                
+                const trialId = item.trialId || item.payload?.ID || item.payload?.id;
+                const relatedTrial = trialId ? state.trials?.find(t => String(t.ID) === String(trialId)) : null;
+                const trialName = relatedTrial ? (relatedTrial.FormulationName || `Trial #${String(trialId).slice(-5)}`) : '';
+                
+                if (item.action === 'updateTrialRecord' && item.payload) {
+                  const updatedFields = Object.keys(item.payload).filter(k => k !== 'ID' && k !== 'id');
+                  actionText = `Update Trial: ${trialName || 'Record'}`;
+                  detailsText = `Modifying fields: ${updatedFields.join(', ')}`;
+                } else if (item.type === 'weed_upload' || item.type === 'general_upload') {
+                  const label = item.photo?.label || (item.type === 'weed_upload' ? 'Weed Photo' : 'Observation Photo');
+                  actionText = `Upload Photo: ${label}`;
+                  detailsText = `Trial: ${trialName || 'Unknown'} (File: ${item.photo?.fileName || 'image.jpg'})`;
+                } else if (item.action) {
+                  actionText = `${item.action.replace(/Record$/, '')} Record`;
+                  if (trialName) detailsText = `Trial: ${trialName}`;
+                }
+
+                return (
+                  <div key={i} className="flex items-start gap-3 px-3 py-2.5 bg-amber-50 border border-amber-100 rounded-lg">
+                    <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-bold text-slate-700 truncate">{actionText}</p>
+                      {detailsText && <p className="text-[10px] text-slate-500 truncate mt-0.5">{detailsText}</p>}
+                      <p className="text-[9px] text-slate-400 mt-1">{item.timestamp ? new Date(item.timestamp).toLocaleString() : '—'}</p>
+                    </div>
+                    <span className="text-[10px] font-bold text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full shrink-0">Pending</span>
+                    <button
+                      onClick={() => {
+                        const nextQueue = state.syncQueue.filter((_, idx) => idx !== i);
+                        dispatch({ type: 'SET_SYNC_QUEUE', payload: nextQueue });
+                      }}
+                      className="p-1 hover:bg-amber-200 rounded text-amber-700 shrink-0 transition"
+                      title="Remove item from queue"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
-                  <span className="text-xs font-bold text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full">Pending</span>
-                  <button
-                    onClick={() => {
-                      const nextQueue = state.syncQueue.filter((_, idx) => idx !== i);
-                      dispatch({ type: 'SET_SYNC_QUEUE', payload: nextQueue });
-                    }}
-                    className="p-1 hover:bg-amber-200 rounded text-amber-700 shrink-0 transition"
-                    title="Remove item from queue"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))}
+                );
+              })}
+
               {state.syncQueue.length > 10 && (
                 <p className="text-xs text-slate-400 text-center">+{state.syncQueue.length - 10} more items…</p>
               )}
