@@ -30,6 +30,7 @@ import { performANOVA, performTwoWayANOVA, performTukeyHSD } from '../utils/stat
 import { EPPO_CODES, BBCH_STAGES, lookupEPPO } from '../utils/eppoBBCHData.js';
 import { exportToARM, importARMCSV } from '../services/armExporter.js';
 import { fetchWeather as fetchWeatherService, fetchSoilData } from '../services/weather.js';
+import { fbGetLargeScaleData } from '../services/largeScaleService.js';
 
 function computeSummaryStats(values) {
   const n = values.length;
@@ -190,6 +191,13 @@ import {
   exportMasterDocx
 } from '../services/trialReports.js';
 
+import ReportConfigPanel from '../components/ReportConfigPanel.jsx';
+import ReportProgressModal from '../components/ReportProgressModal.jsx';
+import { buildReportData } from '../services/reportDataBuilder.js';
+import { generateProjectPDF } from '../services/pdfReportRenderer.js';
+import { generateProjectExcel } from '../services/excelReportRenderer.js';
+import { generateProjectDocx } from '../services/docxReportRenderer.js';
+
 import L from 'leaflet';
 import QRCodeLib from 'qrcode';
 
@@ -274,6 +282,12 @@ export default function LargeScaleTrials({ onMenuClick }) {
   const [isVisitModalOpen, setIsVisitModalOpen] = useState(false);
   const [editingSubTrial, setEditingSubTrial] = useState(null);
   const [editingVisitIdx, setEditingVisitIdx] = useState(null);
+
+  // Professional Report state
+  const [proReportModalOpen, setProReportModalOpen] = useState(false);
+  const [proReportProgress, setProReportProgress] = useState(false);
+  const [proReportSteps, setProReportSteps] = useState([]);
+  const [proReportPercent, setProReportPercent] = useState(0);
 
   // Forms
   const [projectForm, setProjectForm] = useState({ Name: '', Crop: '', Location: '', Investigator: '', TargetWeed: '', GPSBounds: '' });
@@ -1437,7 +1451,16 @@ Rules:
     const t = parseFloat(temp), w = parseFloat(wind), r = parseFloat(rain);
     if (isFinite(t)) {
       if (t > 30) risks.push({ type: 'warning', msg: `Heat stress risk (${t}°C > 30°C) — may reduce efficacy.` });
-      if (t < 5)  risks.push({ type: 'info',    msg: `Cold conditions (${t}°C) — slow herbicide uptake.` });
+      if (t < 5)  {
+        const cat = activeSubTrial?.Category || state?.activeCategory || 'herbicide';
+        const msg = cat === 'herbicide' ? 'slow herbicide uptake.' :
+                    cat === 'fungicide' ? 'slow fungicide absorption & disease latency.' :
+                    cat === 'pesticide' ? 'reduced insect activity & pesticide contact.' :
+                    cat === 'nutrition' ? 'reduced plant nutrient absorption.' :
+                    cat === 'biostimulant' ? 'sluggish physiological response to biostimulants.' :
+                    'slow chemical uptake.';
+        risks.push({ type: 'info', msg: `Cold conditions (${t}°C) — ${msg}` });
+      }
     }
     if (isFinite(w)) {
       if (w > 15) risks.push({ type: 'danger',  msg: `High wind (${w} km/h) — severe spray drift risk.` });
@@ -1445,7 +1468,7 @@ Rules:
     }
     if (isFinite(r) && r > 0) risks.push({ type: 'danger', msg: `Rain (${r} mm) — wash-off risk if not rain-fast.` });
     return risks;
-  }, []);
+  }, [activeSubTrial?.Category, state?.activeCategory]);
 
   const fetchObsWeather = useCallback(async (date) => {
     if (!activeSubTrial?.Lat || !activeSubTrial?.Lon) return;
@@ -2550,6 +2573,70 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
     }
   };
 
+  const handleGenerateProReport = async (reportOptions) => {
+    if (!canDownload) {
+      toast('Download permission is disabled for your account.', 'error');
+      return;
+    }
+    if (!activeProjectId) {
+      toast('Please select a project first.', 'warning');
+      return;
+    }
+
+    setProReportModalOpen(false);
+    const steps = [
+      { label: 'Aggregating treatment data', status: 'pending' },
+      { label: 'Running statistical analysis', status: 'pending' },
+      { label: `Generating ${reportOptions.format.toUpperCase()} report`, status: 'pending' },
+      { label: 'Preparing download', status: 'pending' },
+    ];
+    setProReportSteps(steps);
+    setProReportPercent(0);
+    setProReportProgress(true);
+
+    try {
+      setProReportSteps(prev => prev.map((s, i) => i === 0 ? { ...s, status: 'active' } : s));
+      setProReportPercent(10);
+
+      const reportData = await buildReportData(
+        activeProjectId,
+        subTrials,
+        {
+          ...reportOptions,
+          project: activeProject,
+          category: activeCategory,
+          // PI-5: pass LargeScale spatial data so reportDataBuilder can enrich
+          // the report with sector codes, GPS coordinates, and spatial CV%.
+          // Best-effort: if the fetch fails the report still works without spatial data.
+          largeScaleData: await fbGetLargeScaleData(activeProjectId).catch(() => null),
+        },
+        getAppState()
+      );
+
+      setProReportSteps(prev => prev.map((s, i) => i === 0 ? { ...s, status: 'done' } : i === 2 ? { ...s, status: 'active' } : s));
+      setProReportPercent(60);
+
+      if (reportOptions.format === 'pdf') {
+        await generateProjectPDF(reportData, reportOptions);
+      } else if (reportOptions.format === 'excel') {
+        await generateProjectExcel(reportData, reportOptions);
+      } else {
+        await generateProjectDocx(reportData, reportOptions);
+      }
+
+      setProReportSteps(prev => prev.map((s, i) => (i === 2 || i === 3) ? { ...s, status: 'done' } : s));
+      setProReportPercent(100);
+
+      setTimeout(() => setProReportProgress(false), 1500);
+      toast('Professional report generated successfully!', 'success');
+    } catch (error) {
+      console.error('[LargeScaleTrials] Pro report failed:', error);
+      setProReportSteps(prev => prev.map(s => s.status === 'active' ? { ...s, status: 'error' } : s));
+      setProReportProgress(false);
+      toast(`Report generation failed: ${error.message}`, 'error');
+    }
+  };
+
   const handleBulkDeleteSubTrials = async () => {
     if (isViewer) {
       toast('Viewer role cannot delete sub-trials.', 'error');
@@ -2763,7 +2850,7 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
                 <div className="flex border-b bg-white overflow-x-auto whitespace-nowrap scrollbar-none mb-6">
                   {[['info','Info'],['observations','Obs'],['harvest','Harvest & Yield'],['photos','Photos'],['weather','Weather'],['chart','Chart'],['statistics','Stats'],['qr','QR'],['export','Export']].map(([k, label]) => {
                     const obsCount = obsData.sorted.length;
-                    const photosCount = safeJsonParse(activeSubTrial.PhotoURLs, []).length;
+                    const photosCount = safeJsonParse(activeSubTrial.PhotoURLs, []).filter(p => !p.deleted).length;
                     const harvestPhotos = safeJsonParse(activeSubTrial.HarvestDataJSON, {}).photos || [];
                     return (
                       <button
@@ -2813,7 +2900,17 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
                             );
                             config.specificFields.forEach(f => {
                               if (f.key !== config.targetField && f.key !== 'YieldValue') {
-                                subInfoFields.push([f.label, activeSubTrial[f.key] || '—', Leaf]);
+                                let val = activeSubTrial[f.key];
+                                if (!val || val === '—') {
+                                  const latestObs = obsData.sorted.slice().sort((a,b) => (parseFloat(b.daa) || 0) - (parseFloat(a.daa) || 0))[0];
+                                  if (latestObs) {
+                                    const obsKey = Object.keys(latestObs).find(k => k.toLowerCase() === f.key.toLowerCase());
+                                    if (obsKey && latestObs[obsKey] !== undefined && latestObs[obsKey] !== null && latestObs[obsKey] !== '') {
+                                      val = latestObs[obsKey];
+                                    }
+                                  }
+                                }
+                                subInfoFields.push([f.label, val || '—', Leaf]);
                               }
                             });
                           }
@@ -4092,6 +4189,18 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
                           >
                             <BookOpen className="w-4 h-4 text-indigo-600" /> Word Document
                           </button>
+                          <button
+                            onClick={() => {
+                              if (!canDownload) { toast('Download permission is disabled.', 'error'); return; }
+                              if (!activeProjectId) { toast('Please select a project first.', 'warning'); return; }
+                              setProReportModalOpen(true);
+                            }}
+                            disabled={!activeProjectId}
+                            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white font-semibold rounded-xl hover:bg-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                          >
+                            <Download className="w-4 h-4" />
+                            Project Report (Professional)
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -4876,6 +4985,32 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
           onCapture={handleQuickPhotoCapture}
         />
       )}
+
+      {/* Professional Report Config Modal */}
+      {proReportModalOpen && (
+        <Modal
+          isOpen={proReportModalOpen}
+          onClose={() => setProReportModalOpen(false)}
+          title="Generate Professional Project Report"
+          size="lg"
+        >
+          <ReportConfigPanel
+            project={activeProject}
+            subTrials={subTrials}
+            activeCategory={activeCategory}
+            onGenerate={handleGenerateProReport}
+            canDownload={canDownload}
+          />
+        </Modal>
+      )}
+
+      {/* Professional Report Progress Modal */}
+      <ReportProgressModal
+        isOpen={proReportProgress}
+        steps={proReportSteps}
+        percent={proReportPercent}
+        onCancel={() => setProReportProgress(false)}
+      />
 
       {/* Cropper Modal */}
       {cropperOpen && (

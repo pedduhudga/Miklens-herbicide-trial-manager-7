@@ -78,13 +78,28 @@ const TrialCard = memo(function TrialCard({
   const ownUid = user?.uid || user?.ID || user?.id;
   const isOwnData = isAdmin || !trial.CreatedBy || trial.CreatedBy === ownUid;
   const isShared = !!(trial.CreatedBy && trial.CreatedBy !== ownUid);
+  // Task 57: Baseline indicator
+  const hasBaseline = useMemo(() => {
+    return efficacyData.some(o => Number(o.daa) === 0);
+  }, [efficacyData]);
   const isSharedEdit = Array.isArray(trial.SharedWithEdit) && trial.SharedWithEdit.includes(ownUid);
   const hasBeenShared = !isShared && Array.isArray(trial.SharedWith) && trial.SharedWith.length > 0;
   const isEditable = !isViewer && (isOwnData || isSharedEdit);
   const canDownloadTrial = !isViewer && isOwnData && user?.tabPermissions?.['Allow Downloads'] !== false;
   const [activePhotoIdx, setActivePhotoIdx] = useState(0);
-  const photos = useMemo(() => safeJsonParse(trial.PhotoURLs, []), [trial.PhotoURLs]);
-  const efficacyData = useMemo(() => safeJsonParse(trial.EfficacyDataJSON, []), [trial.EfficacyDataJSON]);
+  const photos = useMemo(() => {
+    const parsed = safeJsonParse(trial.PhotoURLs, []);
+    return Array.isArray(parsed) ? parsed.filter(p => !p.deleted) : [];
+  }, [trial.PhotoURLs]);
+  const efficacyData = useMemo(() => {
+    const parsed = safeJsonParse(trial.EfficacyDataJSON, []);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(obs => {
+      if (!obs || typeof obs !== 'object') return false;
+      const daa = parseFloat(obs.daa);
+      return !isNaN(daa) && daa >= 0;
+    });
+  }, [trial.EfficacyDataJSON]);
   const isLive = String(trial.IsLive) !== 'false';
   const isCompleted = trial.IsCompleted === true || trial.IsCompleted === 'true';
 
@@ -108,6 +123,47 @@ const TrialCard = memo(function TrialCard({
     }
     return { blockNum, colors, potsPerColumn, isColumnWise: project?.PotObsMode === 'column-wise' || (trial.PotRow === null && trial.PotCol != null) };
   }, [trial.TrialDesign, trial.Replication, trial.PotLabel, trial.PotRow, trial.PotCol, project]);
+
+  const posVal = useMemo(() => {
+    if (trial.TrialDesign !== 'PotTrial') return '';
+    const rowVal = String(trial.PotRow || '').trim();
+    const colVal = String(trial.PotCol || '').trim();
+    
+    let colClean = colVal.replace(/^Col\s*/i, '').replace(/^C/i, '').trim();
+    if (colClean && !colClean.startsWith('C') && !isNaN(colClean)) {
+      colClean = 'C' + colClean;
+    }
+    
+    let rowClean = rowVal.replace(/^Row\s*/i, '').replace(/^R/i, '').trim();
+    if (rowClean && !rowClean.startsWith('R') && !isNaN(rowClean)) {
+      rowClean = 'R' + rowClean;
+    }
+
+    if (rowClean && colClean) {
+      return `${rowClean}${colClean}`;
+    } else if (rowClean) {
+      if (project) {
+        const potCols = parseInt(project.PotCols) || 4;
+        return `${rowClean} (C1-C${potCols})`;
+      }
+      return rowClean;
+    } else if (colClean) {
+      if (project) {
+        const potRows = parseInt(project.PotRows) || 9;
+        const blocksCount = parseInt(project.PotBlocks || project.BlocksCount || (project.ReplicationsJSON ? JSON.parse(project.ReplicationsJSON).length : 3)) || 3;
+        const rowsPerBlock = Math.floor(potRows / blocksCount) || 1;
+        const repNum = parseInt(trial.Replication) || 1;
+        const startRow = (repNum - 1) * rowsPerBlock + 1;
+        const endRow = Math.min(repNum * rowsPerBlock, potRows);
+        if (blocksCount > 1) {
+          return `${colClean} (R${startRow}-R${endRow})`;
+        }
+        return colClean;
+      }
+      return colClean;
+    }
+    return '';
+  }, [trial.PotRow, trial.PotCol, trial.TrialDesign, trial.Replication, project]);
 
   // Control days calculation
   const controlDays = useMemo(() => {
@@ -304,15 +360,15 @@ const TrialCard = memo(function TrialCard({
       )}
 
       {/* Block Badge for RCBD Pot Trial */}
-      {blockInfo && blockInfo.isColumnWise && (
+      {blockInfo && (
         <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-t-xl ${blockInfo.colors.bg} border-b ${blockInfo.colors.border}`}>
           <span className="text-sm leading-none">{blockInfo.colors.emoji}</span>
           <span className={`text-[11px] font-extrabold uppercase tracking-wide ${blockInfo.colors.text}`}>
             Block {blockInfo.blockNum}
           </span>
-          {blockInfo.potsPerColumn && (
+          {trial.PotLabel && (
             <span className={`ml-auto text-[10px] font-semibold ${blockInfo.colors.text} opacity-70`}>
-              Represents {blockInfo.potsPerColumn} Pots
+              Pot: {trial.PotLabel} {posVal && posVal !== trial.PotLabel ? ` | Pos: ${posVal}` : ''}
             </span>
           )}
         </div>
@@ -320,16 +376,16 @@ const TrialCard = memo(function TrialCard({
 
 
 
-      <div className={`p-4 ${(blockInfo && blockInfo.isColumnWise) ? 'pt-3' : 'pt-10'} flex-1 flex flex-col`}>
+      <div className={`p-4 ${blockInfo ? 'pt-3' : 'pt-10'} flex-1 flex flex-col`}>
         <div className="flex items-start justify-between gap-3 mb-2">
           <div className="min-w-0">
-            <h3 className="font-bold text-slate-800 truncate" title={blockInfo && blockInfo.isColumnWise ? `Block ${blockInfo.blockNum} - ${trial.FormulationName}` : trial.FormulationName}>
+            <h3 className="font-bold text-slate-800 truncate" title={blockInfo ? `Block ${blockInfo.blockNum} - ${trial.FormulationName}` : trial.FormulationName}>
               {subTrialLabel && (
                 <span className="bg-emerald-600 text-white text-[10px] font-extrabold px-1.5 py-0.5 rounded-md mr-1.5 align-middle shadow-sm">
                   {subTrialLabel}
                 </span>
               )}
-              {blockInfo && blockInfo.isColumnWise && (
+              {blockInfo && (
                 <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded-md mr-1.5 align-middle shadow-sm ${blockInfo.colors.bg} ${blockInfo.colors.text} border ${blockInfo.colors.border}`}>
                   B{blockInfo.blockNum}
                 </span>
@@ -340,6 +396,12 @@ const TrialCard = memo(function TrialCard({
               {trial.IsControl && <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">Control</span>}
               {trial.IsStandardCheck && <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">Standard</span>}
               {trial.IsCompleted && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded">Finalized</span>}
+              {/* Task 57: Baseline indicator */}
+              {efficacyData.length > 0 && (
+                hasBaseline
+                  ? <span className="text-[10px] bg-emerald-50 text-emerald-600 border border-emerald-200 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5" title="Pre-spray baseline recorded"><CheckCircle className="w-2.5 h-2.5" /> Baseline</span>
+                  : <span className="text-[10px] bg-amber-50 text-amber-600 border border-amber-200 px-1.5 py-0.5 rounded font-bold" title="No pre-spray baseline">⚠ No Baseline</span>
+              )}
               {hasBeenShared && (
                 <span className="text-[10px] bg-teal-50 text-teal-700 border border-teal-200 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5" title={`Shared with ${trial.SharedWith.length} user(s)`}>
                   <Share2 className="w-2.5 h-2.5" /> Shared ({trial.SharedWith.length})
@@ -436,19 +498,26 @@ const TrialCard = memo(function TrialCard({
 
         <div className="space-y-1.5 text-xs text-slate-500">
           <div className="flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5 shrink-0" /><span>{formatDateTime(trial.Date) || '—'}</span></div>
-          {trial.Lat && trial.Lon ? (
-            <div className="flex items-center gap-1.5 font-mono text-slate-500">
-              <MapPin className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
-              <span>{parseFloat(trial.Lat).toFixed(6)}, {parseFloat(trial.Lon).toFixed(6)}</span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{trial.Location || '—'}</span></div>
-          )}
-          {trial.Lat && trial.Lon && trial.Location && (
-            <div className="flex items-center gap-1.5 text-slate-400 pl-5 text-[11px] -mt-0.5">
-              <span className="truncate">{trial.Location}</span>
-            </div>
-          )}
+          {(() => {
+            const trialLocation = trial.Location || project?.Location;
+            return (
+              <>
+                {trial.Lat && trial.Lon ? (
+                  <div className="flex items-center gap-1.5 font-mono text-slate-500">
+                    <MapPin className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
+                    <span>{parseFloat(trial.Lat).toFixed(6)}, {parseFloat(trial.Lon).toFixed(6)}</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{trialLocation || '—'}</span></div>
+                )}
+                {trial.Lat && trial.Lon && trialLocation && (
+                  <div className="flex items-center gap-1.5 text-slate-400 pl-5 text-[11px] -mt-0.5">
+                    <span className="truncate">{trialLocation}</span>
+                  </div>
+                )}
+              </>
+            );
+          })()}
           <div className="flex items-center gap-1.5"><FlaskConical className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{trial.Dosage || '—'}</span></div>
           {trial.WeedSpecies && <div className="flex items-center gap-1.5"><Activity className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{trial.WeedSpecies}</span></div>}
           {trial.TrialDesign === 'Split-Plot' && (trial.MainFactor || trial.SubFactor) && (

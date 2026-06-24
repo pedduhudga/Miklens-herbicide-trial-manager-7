@@ -4,7 +4,13 @@ import { getPrimaryObservationField, getObservationPrimaryValue, getCategoryConf
 import { normalizeObservation } from './categoryObservationUtils.js';
 import jStat from 'jstat';
 import { apiCall } from '../services/db.js';
-import { performANOVA, performTwoWayANOVA, detectOutliers } from './statsUtils.js';
+import {
+  performANOVA, performTwoWayANOVA, detectOutliers,
+  performSNKTest, performBonferroniTest, performBartlettsTest,
+  calculateResidualsDiagnostics as statsCalculateResidualsDiagnostics
+} from './statsUtils.js';
+
+export { performBartlettsTest as calculateBartlettsTest };
 
 
 
@@ -965,13 +971,48 @@ export class AnalysisEngine {
                     const alpha = (typeof options.alpha === 'number' && isFinite(options.alpha)) ? options.alpha : 0.05;
                     const postHoc = this.getLetterGrouping(means, anovaResults.msError, anovaResults.dfError, counts, { method: postHocMethod, alpha });
 
+                    // Route SNK and Bonferroni post-hoc tests
+                    if (options.postHoc === 'snk') {
+                        const snkResult = performSNKTest(this.trials, { ...options, metric, species, daa, anova: anovaResults });
+                        const ar = {
+                            means, efficacy, anova: anovaResults,
+                            postHoc: { ...snkResult, method: 'snk' },
+                            snkResults: snkResult,
+                            bartlett: calculateBartlettsTestLegacy(anovaData),
+                            normality: calculateResidualsDiagnostics(this.trials, dataMap, means, anovaResults),
+                            grouping: (snkResult.groups ? Object.entries(snkResult.groups).map(([name, g]) => ({ name, mean: means[name], grouping: g })) : []).sort((a, b) => b.mean - a.mean),
+                            raw: dataMap,
+                            balance: { isBalanced: (new Set(Object.values(counts))).size === 1, counts },
+                            outliers, timestamp: new Date().toISOString(), metric
+                        };
+                        ar.residualDiagnostics = statsCalculateResidualsDiagnostics(ar);
+                        return ar;
+                    }
+
+                    if (options.postHoc === 'bonferroni') {
+                        const bonferroniResult = performBonferroniTest(this.trials, { ...options, metric, species, daa, anova: anovaResults });
+                        const ar = {
+                            means, efficacy, anova: anovaResults,
+                            postHoc: { ...bonferroniResult, method: 'bonferroni' },
+                            bonferroniResults: bonferroniResult,
+                            bartlett: calculateBartlettsTestLegacy(anovaData),
+                            normality: calculateResidualsDiagnostics(this.trials, dataMap, means, anovaResults),
+                            grouping: (bonferroniResult.groups ? Object.entries(bonferroniResult.groups).map(([name, g]) => ({ name, mean: means[name], grouping: g })) : []).sort((a, b) => b.mean - a.mean),
+                            raw: dataMap,
+                            balance: { isBalanced: (new Set(Object.values(counts))).size === 1, counts },
+                            outliers, timestamp: new Date().toISOString(), metric
+                        };
+                        ar.residualDiagnostics = statsCalculateResidualsDiagnostics(ar);
+                        return ar;
+                    }
+
                     const formattedGrouping = treatments.map(t => ({
                          name: t,
                          mean: means[t],
                          grouping: postHoc.letters[t] || '-'
                     })).sort((a, b) => b.mean - a.mean);
 
-                    const bartlettResult = calculateBartlettsTest(anovaData);
+                    const bartlettResult = calculateBartlettsTestLegacy(anovaData);
                     const normalityResult = calculateResidualsDiagnostics(this.trials, dataMap, means, anovaResults);
                     const repsCount = this.trials.length / (treatments.length || 1);
                     const blockingEff = (isPotTrial && potLayout !== 'rcbd-pot') ? 1.0 : calculateBlockingEfficiency(anovaResults, repsCount);
@@ -1017,6 +1058,8 @@ export class AnalysisEngine {
                         timestamp: new Date().toISOString(),
                         metric: metric
                     };
+
+                    results.residualDiagnostics = statsCalculateResidualsDiagnostics(results);
 
                     // PERSIST RESULTS TO BACKEND (Asynchronously in background to keep UI fast!)
                     if (options.persist !== false && this.getAppState && this.getAppState()?.settings?.scriptUrl) {
@@ -1354,6 +1397,31 @@ export class AnalysisEngine {
                     treatmentStats.forEach(ts => { letters[ts.treatmentId] = ts.rank; });
                     return { method: 'lsd', alpha, lsd: lsdRef, value: lsdRef, letters };
                 }
+
+                /**
+                 * Batch analysis: runs analyze() for each paramKey and returns a map of results.
+                 * Errors per parameter are caught and stored as { error: string } without throwing.
+                 *
+                 * @param {string[]} paramKeys - List of observation parameter keys to analyze
+                 * @param {object}   options   - Forwarded to analyze(); supports .daa, .postHoc ('lsd'|'tukey'|'duncan'), .alpha, etc.
+                 * @returns {Promise<{ [paramKey]: AnalysisResult | { error: string } }>}
+                 */
+                async analyzeAllParameters(paramKeys, options = {}) {
+                    const results = {};
+                    for (const key of paramKeys) {
+                        try {
+                            const result = await this.analyze(key, null, options.daa, options);
+                            // Normalize postHoc.letters so callers always find letters under that key
+                            if (result && result.postHoc && !result.postHoc.letters) {
+                                result.postHoc.letters = result.postHoc.groups || result.postHoc.cld || {};
+                            }
+                            results[key] = result;
+                        } catch (e) {
+                            results[key] = { error: e.message || String(e) };
+                        }
+                    }
+                    return results;
+                }
             }
 
             function assignCLDByComparator(treatmentStats, isNonSignificant) {
@@ -1389,7 +1457,7 @@ export class AnalysisEngine {
                 });
             }
 
-export function calculateBartlettsTest(groups) {
+export function calculateBartlettsTestLegacy(groups) {
   const k = groups.length;
   if (k < 2) return null;
 

@@ -4,10 +4,15 @@ import {
   performANOVA, performTukeyHSD, performDunnettTest, performDuncanMRT, 
   performANCOVA, performMetaAnalysis, performTypeIIIANOVA, performKruskalWallis,
   calculateEffectSizes, calculateConfidenceIntervals, calculatePower,
-  performSplitPlotANOVA, performRepeatedMeasuresANOVA, performMixedModel
+  performSplitPlotANOVA, performRepeatedMeasuresANOVA, performMixedModel,
+  performSNKTest, performBonferroniTest,
+  performShapiroWilk, performBartlettsTest
 } from '../utils/statsUtils.js';
 import { performDoseResponseAnalysis } from '../utils/doseResponseUtils.js';
 import { safeJsonParse } from '../utils/helpers.js';
+import { exportStatsPDF, exportStatsExcel } from '../services/statsExporter.js';
+import { computeTreatmentMeans } from '../services/reportDataBuilder.js';
+import PowerAnalysisPanel from '../components/PowerAnalysisPanel.jsx';
 import { 
   BarChart3, Calculator, ChevronDown, Download, 
   AlertCircle, CheckCircle, Info, Table2, TrendingUp, 
@@ -34,6 +39,14 @@ export default function Statistics() {
   const [excludeOutliers, setExcludeOutliers] = useState(false);
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [exportingPDF, setExportingPDF] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState(false);
+
+  // Power analysis local state
+  const [powerK, setPowerK] = useState(4);
+  const [powerN, setPowerN] = useState(4);
+  const [powerEffectSize, setPowerEffectSize] = useState(0.4);
+  const [powerTargetPower, setPowerTargetPower] = useState(0.80);
 
   // Sync metric default when activeCategory changes
   useEffect(() => {
@@ -60,7 +73,13 @@ export default function Statistics() {
       return (trials || []).filter(t => selectedMetaProjects.includes(t.ProjectID));
     }
     if (!selectedProject) return [];
-    return (trials || []).filter(t => t.ProjectID === selectedProject);
+    return (trials || [])
+      .filter(t => t.ProjectID === selectedProject)
+      .sort((a, b) => {
+        const pnA = parseInt(a.PlotNumber || 0);
+        const pnB = parseInt(b.PlotNumber || 0);
+        return pnA - pnB;
+      });
   }, [trials, selectedProject, selectedMetaProjects, test]);
 
   // Available DAA values
@@ -125,6 +144,12 @@ export default function Statistics() {
         case 'kruskal':
           result = performKruskalWallis(projectTrials, options);
           break;
+        case 'snk':
+          result = performSNKTest(projectTrials, options);
+          break;
+        case 'bonferroni':
+          result = performBonferroniTest(projectTrials, options);
+          break;
         // NEW: Advanced tests
         case 'splitplot':
           result = performSplitPlotANOVA(projectTrials, { ...options, mainFactor: 'FormulationName', subFactor: 'BlockID' });
@@ -149,9 +174,37 @@ export default function Statistics() {
       }
       
       // Add effect sizes and confidence intervals for applicable tests
-      if (result && !result.error && ['anova', 'typeIII', 'tukey', 'dunnett', 'splitplot', 'repeated', 'mixed'].includes(test)) {
+      if (result && !result.error && ['anova', 'typeIII', 'tukey', 'dunnett', 'snk', 'bonferroni', 'splitplot', 'repeated', 'mixed'].includes(test)) {
         result.effectSizes = calculateEffectSizes(result);
         result.confidenceIntervals = calculateConfidenceIntervals(result, alpha);
+      }
+
+      // Task 19: attach Shapiro-Wilk and Bartlett's for ANOVA-based tests
+      if (result && !result.error && result.assumptions && ['anova', 'typeIII', 'tukey', 'dunnett', 'snk', 'bonferroni', 'splitplot', 'repeated', 'mixed'].includes(test)) {
+        // Shapiro-Wilk on residuals
+        if (result.residuals && result.residuals.length >= 3) {
+          result.assumptions.shapiroWilkResult = performShapiroWilk(result.residuals, alpha);
+        }
+        // Bartlett's on treatment groups
+        if (result.treatmentMeans) {
+          const groups = {};
+          const treatmentNames = Object.keys(result.treatmentMeans);
+          treatmentNames.forEach(trt => { groups[trt] = []; });
+          projectTrials.forEach(trial => {
+            const trtName = trial.FormulationName;
+            if (!groups[trtName]) return;
+            const efficacy = safeJsonParse(trial.EfficacyDataJSON, []);
+            const filtered = daa ? efficacy.filter(e => (e.daa || e.daysAfterApplication) === parseInt(daa)) : efficacy;
+            filtered.forEach(obs => {
+              const val = obs[metric] ?? obs.controlPct;
+              if (val != null && !isNaN(val)) groups[trtName].push(Number(val));
+            });
+          });
+          const nonEmpty = Object.fromEntries(Object.entries(groups).filter(([, v]) => v.length >= 2));
+          if (Object.keys(nonEmpty).length >= 2) {
+            result.assumptions.bartlettsResult = performBartlettsTest(nonEmpty, alpha);
+          }
+        }
       }
       
       setResults(result);
@@ -198,6 +251,69 @@ export default function Statistics() {
     a.click();
     URL.revokeObjectURL(url);
   }, [results, test, metric, alpha, activeProject]);
+
+  // Task 17: Export PDF handler
+  const handleExportPDF = useCallback(async () => {
+    if (!results || results.error) return;
+    setExportingPDF(true);
+    try {
+      await exportStatsPDF(results, {
+        projectName: activeProject?.Name || 'Project',
+        metric,
+        alpha,
+        daa,
+        test,
+      });
+    } finally {
+      setExportingPDF(false);
+    }
+  }, [results, activeProject, metric, alpha, daa, test]);
+
+  // Task 17: Export Excel handler
+  const handleExportExcel = useCallback(async () => {
+    if (!results || results.error) return;
+    setExportingExcel(true);
+    try {
+      await exportStatsExcel(results, {
+        projectName: activeProject?.Name || 'Project',
+        metric,
+        alpha,
+        daa,
+        test,
+      });
+    } finally {
+      setExportingExcel(false);
+    }
+  }, [results, activeProject, metric, alpha, daa, test]);
+
+  // Task 21: Tier classification helper
+  function getTier(mean, metricKey) {
+    const pctMetrics = ['controlPct', 'weedCover', 'diseaseSeverity', 'pestCount'];
+    if (!pctMetrics.some(m => metricKey?.toLowerCase().includes(m.toLowerCase()))) return null;
+    if (mean >= 80) return { label: 'Excellent', color: 'bg-emerald-100 text-emerald-700' };
+    if (mean >= 60) return { label: 'Good',      color: 'bg-yellow-100 text-yellow-700' };
+    if (mean >= 40) return { label: 'Fair',       color: 'bg-orange-100 text-orange-700' };
+    return { label: 'Poor', color: 'bg-red-100 text-red-700' };
+  }
+
+  // Task 22: Pearson correlation helper
+  function pearsonR(xs, ys) {
+    const n = xs.length;
+    if (n < 3) return { r: null, p: null };
+    const mx = xs.reduce((a, b) => a + b, 0) / n;
+    const my = ys.reduce((a, b) => a + b, 0) / n;
+    const num = xs.reduce((s, x, i) => s + (x - mx) * (ys[i] - my), 0);
+    const dx = Math.sqrt(xs.reduce((s, x) => s + (x - mx) ** 2, 0));
+    const dy = Math.sqrt(ys.reduce((s, y) => s + (y - my) ** 2, 0));
+    if (dx === 0 || dy === 0) return { r: null, p: null };
+    const r = num / (dx * dy);
+    // t-statistic for significance
+    const t = r * Math.sqrt((n - 2) / Math.max(1e-12, 1 - r * r));
+    // two-tailed p via normal approximation for large n
+    const z = Math.abs(t) / Math.sqrt(1 + t * t / (n - 2));
+    const p = 2 * (1 - (0.5 * (1 + Math.erf ? Math.erf(z / Math.SQRT2) : (1 - Math.exp(-0.717 * z - 0.416 * z * z)))));
+    return { r: Math.max(-1, Math.min(1, r)), p: Math.max(0, Math.min(1, p)) };
+  }
 
   const handleMetaProjectToggle = (id) => {
     setSelectedMetaProjects(prev => 
@@ -279,6 +395,8 @@ export default function Statistics() {
                 <option value="tukey">Tukey HSD (All Pairs)</option>
                 <option value="duncan">Duncan's MRT (Step-wise Ranked)</option>
                 <option value="dunnett">Dunnett's Test (vs Control)</option>
+                <option value="snk">Student-Newman-Keuls (SNK)</option>
+                <option value="bonferroni">Bonferroni Correction</option>
               </optgroup>
               <optgroup label="Advanced Designs">
                 <option value="splitplot">Split-Plot ANOVA (Factorial)</option>
@@ -358,8 +476,13 @@ export default function Statistics() {
                 <option value="Humidity">Humidity (%)</option>
                 <option value="Windspeed">Wind Speed (km/h)</option>
                 <option value="Rain">Rainfall (mm)</option>
-                <option value="SoilPH">Soil pH</option>
-                <option value="SoilClay">Soil Clay %</option>
+                {/* Task 59: Show SoilPH / SoilClay only when data exists in project trials */}
+                {projectTrials.some(t => t.SoilPH != null && t.SoilPH !== '') && (
+                  <option value="SoilPH">Soil pH</option>
+                )}
+                {projectTrials.some(t => t.SoilClay != null && t.SoilClay !== '') && (
+                  <option value="SoilClay">Soil Clay %</option>
+                )}
               </select>
             </div>
           ) : (
@@ -433,8 +556,178 @@ export default function Statistics() {
               Export CSV
             </button>
           )}
+          {results && !results.error && (
+            <button
+              onClick={handleExportPDF}
+              disabled={exportingPDF}
+              className="bg-rose-50 text-rose-700 px-4 py-2.5 rounded-lg font-medium hover:bg-rose-100 transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Download className="w-4 h-4" />
+              {exportingPDF ? 'Exporting...' : 'Export PDF'}
+            </button>
+          )}
+          {results && !results.error && (
+            <button
+              onClick={handleExportExcel}
+              disabled={exportingExcel}
+              className="bg-emerald-50 text-emerald-700 px-4 py-2.5 rounded-lg font-medium hover:bg-emerald-100 transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Download className="w-4 h-4" />
+              {exportingExcel ? 'Exporting...' : 'Export Excel'}
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Task 20: Power Analysis Panel — shown when test === 'power' */}
+      {test === 'power' && (() => {
+        // Pre-populate k from projectTrials treatment count
+        const treatmentCount = projectTrials.length > 0
+          ? new Set(projectTrials.map(t => t.FormulationName)).size
+          : powerK;
+
+        // Live-compute power result
+        const powerResult = calculatePower({
+          alpha,
+          effectSize: powerEffectSize,
+          nPerGroup: powerN,
+          kGroups: treatmentCount || powerK,
+          targetPower: powerTargetPower,
+        });
+
+        const powerBadgeColor =
+          powerResult.achievedPower >= 0.90 ? 'bg-emerald-100 text-emerald-700' :
+          powerResult.achievedPower >= 0.80 ? 'bg-blue-100 text-blue-700' :
+          powerResult.achievedPower >= 0.70 ? 'bg-amber-100 text-amber-700' :
+                                               'bg-rose-100 text-rose-700';
+
+        const interpBadgeColor =
+          powerResult.interpretation === 'Excellent' ? 'bg-emerald-100 text-emerald-700' :
+          powerResult.interpretation === 'Good'      ? 'bg-blue-100 text-blue-700' :
+          powerResult.interpretation === 'Acceptable'? 'bg-amber-100 text-amber-700' :
+                                                        'bg-rose-100 text-rose-700';
+
+        return (
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 md:p-6 space-y-4">
+            <h3 className="font-bold text-slate-800 flex items-center gap-2 text-base border-b border-slate-100 pb-2">
+              <Zap className="w-5 h-5 text-purple-600" /> Power Analysis — Sample Size Calculator
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
+              {/* k */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">
+                  Treatments (k)
+                </label>
+                <input
+                  type="number"
+                  min={2}
+                  value={treatmentCount || powerK}
+                  onChange={(e) => setPowerK(Math.max(2, parseInt(e.target.value) || 2))}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-purple-400"
+                  readOnly={treatmentCount > 0}
+                />
+                {treatmentCount > 0 && (
+                  <p className="text-[10px] text-slate-400 mt-0.5">Auto-detected from project</p>
+                )}
+              </div>
+              {/* n */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">
+                  Reps per Treatment (n)
+                </label>
+                <input
+                  type="number"
+                  min={2}
+                  value={powerN}
+                  onChange={(e) => setPowerN(Math.max(2, parseInt(e.target.value) || 2))}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-purple-400"
+                />
+              </div>
+              {/* Effect size */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">
+                  Effect Size (Cohen's f)
+                </label>
+                <input
+                  type="number"
+                  min={0.01}
+                  max={2}
+                  step={0.05}
+                  value={powerEffectSize}
+                  onChange={(e) => setPowerEffectSize(Math.max(0.01, parseFloat(e.target.value) || 0.1))}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-purple-400"
+                />
+                <p className="text-[10px] text-slate-400 mt-0.5">
+                  {powerResult.effectSizeLabel?.label} ({powerResult.effectSizeLabel?.convention})
+                </p>
+              </div>
+              {/* Target power */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">
+                  Target Power
+                </label>
+                <div className="flex gap-2 flex-wrap">
+                  {[0.70, 0.80, 0.90].map(tp => (
+                    <label key={tp} className="flex items-center gap-1 text-xs cursor-pointer">
+                      <input
+                        type="radio"
+                        name="targetPower"
+                        value={tp}
+                        checked={powerTargetPower === tp}
+                        onChange={() => setPowerTargetPower(tp)}
+                        className="text-purple-600"
+                      />
+                      {Math.round(tp * 100)}%
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Results row */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+              <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
+                <span className="text-[10px] font-semibold text-slate-500 uppercase block">Achieved Power</span>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-2xl font-bold text-slate-800">
+                    {(powerResult.achievedPower * 100).toFixed(1)}%
+                  </span>
+                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${powerBadgeColor}`}>
+                    {powerResult.interpretation}
+                  </span>
+                </div>
+              </div>
+              <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
+                <span className="text-[10px] font-semibold text-slate-500 uppercase block">
+                  Min n for {Math.round(powerTargetPower * 100)}% Power
+                </span>
+                <span className="text-2xl font-bold text-slate-800 block mt-1">
+                  {powerResult.minNForTarget} per group
+                </span>
+                <span className="text-[10px] text-slate-400">
+                  ({powerResult.minNForTarget * (treatmentCount || powerK)} total plots)
+                </span>
+              </div>
+              <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
+                <span className="text-[10px] font-semibold text-slate-500 uppercase block">Interpretation</span>
+                <span className={`inline-block text-xs font-semibold px-2 py-1 rounded-full mt-1 ${interpBadgeColor}`}>
+                  {powerResult.interpretation}
+                </span>
+                <p className="text-[10px] text-slate-500 mt-1">
+                  F-critical: {powerResult.fCritical?.toFixed(3)} | λ = {powerResult.lambda?.toFixed(2)}
+                </p>
+              </div>
+            </div>
+
+            {/* Power curve chart */}
+            <PowerAnalysisPanel
+              powerCurve={powerResult.powerCurve}
+              targetPower={powerTargetPower}
+              minNForTarget={powerResult.minNForTarget}
+            />
+          </div>
+        );
+      })()}
 
       {/* Results Display */}
       {results && (
@@ -569,16 +862,97 @@ export default function Statistics() {
                 <h4 className="font-bold text-slate-800 flex items-center gap-2 text-sm border-b border-slate-100 pb-2">
                   <Info className="w-4 h-4 text-blue-600" /> Assumptions Validation
                 </h4>
-                <div className="space-y-2 text-xs">
-                  <div className={`p-2 rounded border ${results.assumptions.normalityPassed ? 'bg-emerald-50/50 border-emerald-100 text-emerald-800' : 'bg-rose-50/50 border-rose-100 text-rose-800'}`}>
-                    <span className="font-semibold block text-[10px]">Normality (Jarque-Bera)</span>
-                    <span className="font-bold">{results.assumptions.normalityPassed ? 'Passed' : 'Failed'}</span> (p = {results.assumptions.normalityP?.toFixed(4)})
-                  </div>
-                  <div className={`p-2 rounded border ${results.assumptions.variancePassed ? 'bg-emerald-50/50 border-emerald-100 text-emerald-800' : 'bg-rose-50/50 border-rose-100 text-rose-800'}`}>
-                    <span className="font-semibold block text-[10px]">Variance (Levene's)</span>
-                    <span className="font-bold">{results.assumptions.variancePassed ? 'Passed' : 'Failed'}</span> (p = {results.assumptions.varianceP?.toFixed(4)})
-                  </div>
+                {/* 4-test compact table */}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[10px]">
+                    <thead>
+                      <tr className="text-slate-500 font-semibold uppercase border-b border-slate-100">
+                        <th className="text-left pb-1 pr-2">Test</th>
+                        <th className="text-center pb-1 px-1">Result</th>
+                        <th className="text-right pb-1">p</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {/* Jarque-Bera */}
+                      <tr className="py-1">
+                        <td className="py-1 pr-2 font-medium text-slate-700">Jarque-Bera</td>
+                        <td className="py-1 px-1 text-center">
+                          {results.assumptions.normalityPassed
+                            ? <span className="text-emerald-600 font-bold">✓</span>
+                            : <span className="text-rose-600 font-bold">✗</span>}
+                        </td>
+                        <td className="py-1 text-right text-slate-500">{results.assumptions.normalityP?.toFixed(4) ?? '—'}</td>
+                      </tr>
+                      {/* Shapiro-Wilk */}
+                      <tr>
+                        <td className="py-1 pr-2 font-medium text-slate-700">Shapiro-Wilk</td>
+                        <td className="py-1 px-1 text-center">
+                          {results.assumptions.shapiroWilkResult
+                            ? results.assumptions.shapiroWilkResult.passed
+                              ? <span className="text-emerald-600 font-bold">✓</span>
+                              : <span className="text-rose-600 font-bold">✗</span>
+                            : <span className="text-slate-400">—</span>}
+                        </td>
+                        <td className="py-1 text-right text-slate-500">
+                          {results.assumptions.shapiroWilkResult?.pValue?.toFixed(4) ?? '—'}
+                        </td>
+                      </tr>
+                      {/* Levene's */}
+                      <tr>
+                        <td className="py-1 pr-2 font-medium text-slate-700">Levene's</td>
+                        <td className="py-1 px-1 text-center">
+                          {results.assumptions.variancePassed
+                            ? <span className="text-emerald-600 font-bold">✓</span>
+                            : <span className="text-rose-600 font-bold">✗</span>}
+                        </td>
+                        <td className="py-1 text-right text-slate-500">{results.assumptions.varianceP?.toFixed(4) ?? '—'}</td>
+                      </tr>
+                      {/* Bartlett's */}
+                      <tr>
+                        <td className="py-1 pr-2 font-medium text-slate-700">Bartlett's</td>
+                        <td className="py-1 px-1 text-center">
+                          {results.assumptions.bartlettsResult
+                            ? results.assumptions.bartlettsResult.passed
+                              ? <span className="text-emerald-600 font-bold">✓</span>
+                              : <span className="text-rose-600 font-bold">✗</span>
+                            : <span className="text-slate-400">—</span>}
+                        </td>
+                        <td className="py-1 text-right text-slate-500">
+                          {results.assumptions.bartlettsResult?.pValue?.toFixed(4) ?? '—'}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
+                {/* Advisories */}
+                {(() => {
+                  const jbPassed = results.assumptions.normalityPassed;
+                  const swResult = results.assumptions.shapiroWilkResult;
+                  const swPassed = swResult ? swResult.passed : null;
+                  const levPassed = results.assumptions.variancePassed;
+                  const bartResult = results.assumptions.bartlettsResult;
+                  const bartPassed = bartResult ? bartResult.passed : null;
+                  const advisories = [];
+                  // Normality tests disagree
+                  if (swPassed != null && jbPassed !== swPassed) {
+                    advisories.push('Normality tests disagree — consider Kruskal-Wallis');
+                  }
+                  // Both variance tests fail
+                  if (!levPassed && bartPassed === false) {
+                    advisories.push('Both variance tests indicate heteroscedasticity — consider Welch correction or data transformation');
+                  }
+                  if (advisories.length === 0) return null;
+                  return (
+                    <div className="mt-2 space-y-1.5">
+                      {advisories.map((msg, i) => (
+                        <div key={i} className="flex items-start gap-1.5 bg-amber-50 border border-amber-200 rounded p-1.5 text-[10px] text-amber-800">
+                          <AlertCircle className="w-3 h-3 text-amber-500 shrink-0 mt-0.5" />
+                          <span>{msg}</span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             ) : (
               <div className="bg-white p-4 rounded-xl border border-slate-200 flex items-center justify-center text-slate-400 text-xs shadow-sm">
@@ -587,9 +961,79 @@ export default function Statistics() {
             )}
           </div>
 
+          {/* Task 22: Correlation Panel */}
+          {results?.assumptions && projectTrials.length > 0 && (() => {
+            // Available numeric metrics from project trials
+            const allMetrics = ['controlPct', 'weedCover', 'diseaseSeverity', 'pestCount', 'yield', 'plantHeight', 'chlorophyllIndex', 'rootBiomass', 'shootBiomass'];
+            // Gather primary metric values across all trials (flattened)
+            const collectValues = (m) => {
+              const vals = [];
+              projectTrials.forEach(trial => {
+                const efficacy = safeJsonParse(trial.EfficacyDataJSON, []);
+                const filtered = daa ? efficacy.filter(e => (e.daa || e.daysAfterApplication) === parseInt(daa)) : efficacy;
+                filtered.forEach(obs => {
+                  const v = obs[m] ?? obs.controlPct;
+                  if (v != null && !isNaN(v)) vals.push(Number(v));
+                });
+              });
+              return vals;
+            };
+            const primaryVals = collectValues(metric);
+            if (primaryVals.length < 3) return null;
+
+            const correlations = allMetrics
+              .filter(m => m !== metric)
+              .map(m => {
+                const otherVals = collectValues(m);
+                if (otherVals.length < 3) return null;
+                const n = Math.min(primaryVals.length, otherVals.length);
+                const { r, p } = pearsonR(primaryVals.slice(0, n), otherVals.slice(0, n));
+                if (r == null) return null;
+                const stars = p < 0.01 ? '**' : p < 0.05 ? '*' : '';
+                return { metricA: metric, metricB: m, r, p, stars, n };
+              })
+              .filter(Boolean);
+
+            if (correlations.length === 0) return null;
+
+            return (
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                <h4 className="font-bold text-slate-800 flex items-center gap-2 text-sm border-b border-slate-100 pb-2 mb-3">
+                  <Activity className="w-4 h-4 text-indigo-600" /> Metric Correlations
+                  <span className="text-[10px] font-normal text-slate-400 ml-1">(Pearson r · ** p&lt;0.01, * p&lt;0.05)</span>
+                </h4>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-slate-500 font-semibold uppercase text-[9px] border-b border-slate-100">
+                        <th className="text-left pb-1.5 pr-3">Metric Pair</th>
+                        <th className="text-right pb-1.5 px-3">r</th>
+                        <th className="text-right pb-1.5 px-3">p</th>
+                        <th className="text-right pb-1.5">Sig.</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {correlations.map(({ metricA, metricB, r, p, stars }, i) => (
+                        <tr key={i}>
+                          <td className="py-1.5 pr-3 font-medium text-slate-700">
+                            {metricA} × {metricB}
+                          </td>
+                          <td className={`py-1.5 px-3 text-right font-bold ${Math.abs(r) >= 0.7 ? 'text-purple-600' : Math.abs(r) >= 0.4 ? 'text-blue-600' : 'text-slate-500'}`}>
+                            {r.toFixed(3)}
+                          </td>
+                          <td className="py-1.5 px-3 text-right text-slate-500">{p.toFixed(4)}</td>
+                          <td className="py-1.5 text-right font-bold text-amber-600">{stars || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Effect Sizes Card */}
-          {results.effectSizes && (
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          {results.effectSizes && (            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
               <h4 className="font-bold text-slate-800 flex items-center gap-2 text-sm border-b border-slate-100 pb-2 mb-3">
                 <TrendingUp className="w-4 h-4 text-purple-600" /> Effect Sizes & Confidence Intervals
               </h4>
@@ -814,8 +1258,12 @@ export default function Statistics() {
               </div>
               <div className="p-4">
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                  {Object.entries(results.treatmentMeans).map(([trt, mean]) => {
+                {Object.entries(results.treatmentMeans).map(([trt, mean], rankIdx) => {
                     const unadj = results.unadjustedMeans?.[trt];
+                    // Task 21: Tier badge
+                    const tier = getTier(mean, metric);
+                    const sortedMeans = Object.entries(results.treatmentMeans).sort((a, b) => b[1] - a[1]);
+                    const rank = sortedMeans.findIndex(([t]) => t === trt) + 1;
                     return (
                       <div key={trt} className="bg-slate-50 p-3 rounded-lg flex flex-col justify-between">
                         <p className="text-xs text-slate-500 truncate mb-1" title={trt}>{trt}</p>
@@ -828,6 +1276,18 @@ export default function Statistics() {
                             {results.groups?.[trt] && (
                               <span className="text-xs font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded" title={`Significance Group: ${results.groups[trt]}`}>
                                 {results.groups[trt]}
+                              </span>
+                            )}
+                          </div>
+                          {/* Tier badge (Task 21) */}
+                          <div className="flex items-center gap-1 mt-0.5">
+                            {tier ? (
+                              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${tier.color}`}>
+                                {tier.label}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500">
+                                #{rank}
                               </span>
                             )}
                           </div>

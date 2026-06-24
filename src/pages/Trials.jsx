@@ -70,8 +70,10 @@ const emptyForm = (category = 'herbicide') => {
     ControlFinalized: false, FinalizationDate: '', FinalControlDuration: '',
     Temperature: '', Humidity: '', Windspeed: '', Rain: '',
     Replication: '', PlotNumber: '',
+    BBCHCode: '', GPSLatitude: '', GPSLongitude: '',
     SoilPH: '', SoilClay: '', SoilSand: '', SoilOC: '', SoilTexture: '',
-    YieldValue: '', IsLive: true,
+    YieldValue: '', YieldUnit: 't/ha', YieldNotes: '', GrainMoisture: '', ThousandGrainWeight: '', HarvestDAA: '',
+    IsLive: true,
     ApplicationTiming: '',
   };
   // Add category-specific fields with empty defaults
@@ -192,7 +194,14 @@ export default function Trials({ onMenuClick }) {
   // --- Observation modal ---
   const [isObsModalOpen, setIsObsModalOpen] = useState(false);
   const [editingObsIdx, setEditingObsIdx] = useState(null);
-  const [obsForm, setObsForm] = useState({ daa: '', date: toDatetimeLocal(new Date()), notes: '', weedDetails: [], weatherTemp: '', weatherHumidity: '', weatherWind: '', weatherRain: '', bbchStage: '' });
+  const [obsForm, setObsForm] = useState({ daa: '', date: toDatetimeLocal(new Date()), notes: '', weedDetails: [], weatherTemp: '', weatherHumidity: '', weatherWind: '', weatherRain: '', bbchStage: '', phytotoxicityPct: '', phytotoxicityNotes: '' });
+
+  // --- Plot & Site Data collapsible ---
+  const [plotDataOpen, setPlotDataOpen] = useState(false);
+
+  // --- Baseline warning dialog ---
+  const [baselineWarningOpen, setBaselineWarningOpen] = useState(false);
+  const [pendingObsSave, setPendingObsSave] = useState(null);
 
   // --- Application modal ---
   const [isAppModalOpen, setIsAppModalOpen] = useState(false);
@@ -340,6 +349,17 @@ export default function Trials({ onMenuClick }) {
   const [qrCardSize, setQrCardSize] = useState(
     state.settings?.cardSize === 'A4' ? 'a4' : state.settings?.cardSize === 'A6' ? 'a6' : 'id-card'
   );
+  const [qrFields, setQrFields] = useState({
+    formulationName: true,
+    investigator: true,
+    date: true,
+    dosage: true,
+    targetField: true,
+    location: true,
+    designDetails: true,
+    trialId: true,
+    logo: true,
+  });
   const bulkQrRef = useRef(null);
 
   // --- Harvest & Yield ---
@@ -558,6 +578,23 @@ export default function Trials({ onMenuClick }) {
         const dateDiff = new Date(b.Date || 0) - new Date(a.Date || 0);
         if (dateDiff !== 0) return dateDiff;
 
+        // For pot trials with same date, sort by replication block, then row, then column/pot number
+        const aIsPot = a.TrialDesign === 'PotTrial' || a.PotLabel;
+        const bIsPot = b.TrialDesign === 'PotTrial' || b.PotLabel;
+        if (aIsPot && bIsPot) {
+          const aRep = parseInt(a.Replication) || 0;
+          const bRep = parseInt(b.Replication) || 0;
+          if (aRep !== bRep) return aRep - bRep;
+
+          const aRow = parseInt(a.PotRow) || 0;
+          const bRow = parseInt(b.PotRow) || 0;
+          if (aRow !== bRow) return aRow - bRow;
+
+          const aCol = parseInt(a.PotCol) || 0;
+          const bCol = parseInt(b.PotCol) || 0;
+          return aCol - bCol;
+        }
+
         // Secondary sort for same date: newest DateUpdatedAt / CreatedAt on top
         const aTime = new Date(a.DateUpdatedAt || a.CreatedAt || a._createdAt?.toDate?.() || 0).getTime();
         const bTime = new Date(b.DateUpdatedAt || b.CreatedAt || b._createdAt?.toDate?.() || 0).getTime();
@@ -567,6 +604,23 @@ export default function Trials({ onMenuClick }) {
       if (sortBy === 'date-asc') {
         const dateDiff = new Date(a.Date || 0) - new Date(b.Date || 0);
         if (dateDiff !== 0) return dateDiff;
+
+        // For pot trials with same date, sort by replication block, then row, then column/pot number
+        const aIsPot = a.TrialDesign === 'PotTrial' || a.PotLabel;
+        const bIsPot = b.TrialDesign === 'PotTrial' || b.PotLabel;
+        if (aIsPot && bIsPot) {
+          const aRep = parseInt(a.Replication) || 0;
+          const bRep = parseInt(b.Replication) || 0;
+          if (aRep !== bRep) return aRep - bRep;
+
+          const aRow = parseInt(a.PotRow) || 0;
+          const bRow = parseInt(b.PotRow) || 0;
+          if (aRow !== bRow) return aRow - bRow;
+
+          const aCol = parseInt(a.PotCol) || 0;
+          const bCol = parseInt(b.PotCol) || 0;
+          return aCol - bCol;
+        }
 
         // Secondary sort for same date: oldest DateUpdatedAt / CreatedAt on top
         const aTime = new Date(a.DateUpdatedAt || a.CreatedAt || a._createdAt?.toDate?.() || 0).getTime();
@@ -628,9 +682,13 @@ export default function Trials({ onMenuClick }) {
         Temperature: trial.Temperature || '', Humidity: trial.Humidity || '',
         Windspeed: trial.Windspeed || '', Rain: trial.Rain || '',
         Replication: trial.Replication || '', PlotNumber: trial.PlotNumber || '',
+        BBCHCode: trial.BBCHCode || '', GPSLatitude: trial.GPSLatitude || '', GPSLongitude: trial.GPSLongitude || '',
         SoilPH: trial.SoilPH || '', SoilClay: trial.SoilClay || '',
         SoilSand: trial.SoilSand || '', SoilOC: trial.SoilOC || '',
         SoilTexture: trial.SoilTexture || '',
+        YieldValue: trial.YieldValue || '', YieldUnit: trial.YieldUnit || 't/ha',
+        YieldNotes: trial.YieldNotes || '', GrainMoisture: trial.GrainMoisture || '',
+        ThousandGrainWeight: trial.ThousandGrainWeight || '', HarvestDAA: trial.HarvestDAA || '',
         ApplicationTiming: trial.ApplicationTiming || '',
         WeedGrowthStage: trial.WeedGrowthStage || '',
         TrialDesign: trial.TrialDesign || 'RCBD',
@@ -751,14 +809,52 @@ export default function Trials({ onMenuClick }) {
 
     const finalFormData = { ...formData };
 
+    // Task 58: If YieldValue is provided, persist it into EfficacyDataJSON at harvest DAA
+    let baseEfficacyJSON = isEdit ? (editingTrial.EfficacyDataJSON || '[]') : '[]';
+    if (finalFormData.YieldValue && !isNaN(parseFloat(finalFormData.YieldValue))) {
+      const harvestDaa = finalFormData.HarvestDAA && !isNaN(parseInt(finalFormData.HarvestDAA))
+        ? parseInt(finalFormData.HarvestDAA)
+        : 999;
+      const existingEfficacy = safeJsonParse(baseEfficacyJSON, []);
+      const existingIdx = existingEfficacy.findIndex(o => Number(o.daa) === harvestDaa && o._isYieldRecord);
+      const yieldRecord = {
+        daa: harvestDaa,
+        _isYieldRecord: true,
+        yieldValue: parseFloat(finalFormData.YieldValue),
+        yieldUnit: finalFormData.YieldUnit || 't/ha',
+        grainMoisture: finalFormData.GrainMoisture ? parseFloat(finalFormData.GrainMoisture) : undefined,
+        thousandGrainWeight: finalFormData.ThousandGrainWeight ? parseFloat(finalFormData.ThousandGrainWeight) : undefined,
+        notes: finalFormData.YieldNotes || undefined,
+        date: finalFormData.Date || new Date().toISOString(),
+      };
+      if (existingIdx >= 0) {
+        existingEfficacy[existingIdx] = { ...existingEfficacy[existingIdx], ...yieldRecord };
+      } else {
+        existingEfficacy.push(yieldRecord);
+      }
+      existingEfficacy.sort((a, b) => (a.daa || 0) - (b.daa || 0));
+      baseEfficacyJSON = JSON.stringify(existingEfficacy);
+    }
+
+    // Task 58: Store structured yield details separately
+    const yieldDetails = finalFormData.YieldValue ? {
+      yieldValue: parseFloat(finalFormData.YieldValue),
+      yieldUnit: finalFormData.YieldUnit || 't/ha',
+      grainMoisture: finalFormData.GrainMoisture || undefined,
+      thousandGrainWeight: finalFormData.ThousandGrainWeight || undefined,
+      harvestDaa: finalFormData.HarvestDAA || 999,
+      notes: finalFormData.YieldNotes || undefined,
+    } : undefined;
+
     const payload = {
       ...(isEdit ? editingTrial : {}),
       ...finalFormData,
       FormulationID: formMatch?.ID || (isEdit ? editingTrial.FormulationID : ''),
       DateUpdatedAt: dateUpdatedAt,
-      ...(isEdit ? {} : {
+      ...(yieldDetails ? { YieldDetails: JSON.stringify(yieldDetails) } : {}),
+      ...(isEdit ? { EfficacyDataJSON: baseEfficacyJSON } : {
         ID: Date.now().toString(),
-        EfficacyDataJSON: '[]', PhotoURLs: '[]', WeedPhotosJSON: '[]',
+        EfficacyDataJSON: baseEfficacyJSON, PhotoURLs: '[]', WeedPhotosJSON: '[]',
         CreatedAt: new Date().toISOString(),
       }),
     };
@@ -1096,7 +1192,16 @@ export default function Trials({ onMenuClick }) {
     const t = parseFloat(temp), w = parseFloat(wind), r = parseFloat(rain);
     if (isFinite(t)) {
       if (t > 30) risks.push({ type: 'warning', msg: `Heat stress risk (${t}°C > 30°C) — may reduce efficacy.` });
-      if (t < 5)  risks.push({ type: 'info',    msg: `Cold conditions (${t}°C) — slow herbicide uptake.` });
+      if (t < 5)  {
+        const cat = activeTrial?.Category || state?.activeCategory || 'herbicide';
+        const msg = cat === 'herbicide' ? 'slow herbicide uptake.' :
+                    cat === 'fungicide' ? 'slow fungicide absorption & disease latency.' :
+                    cat === 'pesticide' ? 'reduced insect activity & pesticide contact.' :
+                    cat === 'nutrition' ? 'reduced plant nutrient absorption.' :
+                    cat === 'biostimulant' ? 'sluggish physiological response to biostimulants.' :
+                    'slow chemical uptake.';
+        risks.push({ type: 'info', msg: `Cold conditions (${t}°C) — ${msg}` });
+      }
     }
     if (isFinite(w)) {
       if (w > 15) risks.push({ type: 'danger',  msg: `High wind (${w} km/h) — severe spray drift risk.` });
@@ -1104,7 +1209,7 @@ export default function Trials({ onMenuClick }) {
     }
     if (isFinite(r) && r > 0) risks.push({ type: 'danger', msg: `Rain (${r} mm) — wash-off risk if not rain-fast.` });
     return risks;
-  }, []);
+  }, [activeTrial?.Category, state?.activeCategory]);
 
   // ── Fetch weather for observation date ─────────────────────────────
   const fetchObsWeather = useCallback(async (date) => {
@@ -1145,7 +1250,7 @@ export default function Trials({ onMenuClick }) {
     
     peers.forEach(p => {
       const eff = validateEfficacyData(safeJsonParse(p.EfficacyDataJSON, []), activeCategory);
-      const match = eff.find(o => o.daa === daa);
+      const match = eff.find(o => Number(o.daa) === Number(daa));
       if (match) {
         const val = parseFloat(match[primaryObsField]);
         if (!isNaN(val)) {
@@ -1290,7 +1395,9 @@ export default function Trials({ onMenuClick }) {
       weatherHumidity: '',
       weatherWind: '',
       weatherRain: '',
-      bbchStage: ''
+      bbchStage: '',
+      phytotoxicityPct: '',
+      phytotoxicityNotes: ''
     };
 
     catConfig.observationFields?.forEach(f => {
@@ -1381,8 +1488,13 @@ export default function Trials({ onMenuClick }) {
       weatherHumidity: obsForm.weatherHumidity,
       weatherWind: obsForm.weatherWind,
       weatherRain: obsForm.weatherRain,
-      bbchStage: obsForm.bbchStage || ''
+      bbchStage: obsForm.bbchStage || '',
+      phytotoxicityPct: obsForm.phytotoxicityPct !== '' && obsForm.phytotoxicityPct != null ? Number(obsForm.phytotoxicityPct) : undefined,
+      phytotoxicityNotes: obsForm.phytotoxicityNotes || undefined
     };
+    // Remove undefined fields to keep records clean
+    if (newObs.phytotoxicityPct === undefined) delete newObs.phytotoxicityPct;
+    if (!newObs.phytotoxicityNotes) delete newObs.phytotoxicityNotes;
 
     catConfig.observationFields?.forEach(f => {
       const val = obsForm[f.key];
@@ -1400,7 +1512,18 @@ export default function Trials({ onMenuClick }) {
     }
 
     if (editingObsIdx !== null) efficacyData[editingObsIdx] = newObs;
-    else efficacyData.push(newObs);
+    else {
+      // Task 57: Baseline check — warn if first post-spray obs added with no baseline
+      const daaNum = Number(obsForm.daa);
+      const hasBaseline = efficacyData.some(o => Number(o.daa) === 0);
+      if (daaNum > 0 && !hasBaseline && editingObsIdx === null) {
+        // Store pending obs and show warning dialog instead of saving immediately
+        setPendingObsSave({ newObs, efficacyData, activeTrial });
+        setBaselineWarningOpen(true);
+        return;
+      }
+      efficacyData.push(newObs);
+    }
     efficacyData.sort((a, b) => a.daa - b.daa);
 
     const newResult = calculateResultRating(efficacyData, activeTrial.IsControl || false, activeCategory);
@@ -1413,6 +1536,31 @@ export default function Trials({ onMenuClick }) {
 
     updateState({ trials: getAppState().trials.map(t => t.ID === updated.ID ? updated : t) });
     setActiveTrial(updated);
+    setIsObsModalOpen(false);
+    try {
+      await updateTrial({ ID: updated.ID, EfficacyDataJSON: updated.EfficacyDataJSON, Result: updated.Result }, getAppState);
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Observation saved', type: 'success' } }));
+    } catch (err) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Failed to save observation', type: 'error' } }));
+    }
+  };
+
+  // Task 57: Helper to finalize observation save after baseline warning "Proceed"
+  const finalizePendingObsSave = async () => {
+    if (!pendingObsSave) return;
+    const { newObs, efficacyData, activeTrial: trial } = pendingObsSave;
+    efficacyData.push(newObs);
+    efficacyData.sort((a, b) => a.daa - b.daa);
+    const newResult = calculateResultRating(efficacyData, trial.IsControl || false, activeCategory);
+    const updated = {
+      ...trial,
+      EfficacyDataJSON: JSON.stringify(efficacyData),
+      Result: newResult
+    };
+    updateState({ trials: getAppState().trials.map(t => t.ID === updated.ID ? updated : t) });
+    setActiveTrial(updated);
+    setBaselineWarningOpen(false);
+    setPendingObsSave(null);
     setIsObsModalOpen(false);
     try {
       await updateTrial({ ID: updated.ID, EfficacyDataJSON: updated.EfficacyDataJSON, Result: updated.Result }, getAppState);
@@ -1565,11 +1713,13 @@ export default function Trials({ onMenuClick }) {
     const resultRating = calculateResultRating(efficacyData, activeTrial?.IsControl === true || activeTrial?.IsControl === 'true', activeCategory);
     const observedWeeds = getObservedWeedsList(efficacyData);
 
+    const targetField = catConfig.targetField || 'WeedSpecies';
     const updated = { 
       ...activeTrial, 
       EfficacyDataJSON: JSON.stringify(efficacyData),
       Result: resultRating,
       WeedSpecies: observedWeeds,
+      [targetField]: observedWeeds,
       AISummariesJSON: '{}'
     };
     updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
@@ -1581,6 +1731,7 @@ export default function Trials({ onMenuClick }) {
         EfficacyDataJSON: updated.EfficacyDataJSON, 
         Result: updated.Result,
         WeedSpecies: updated.WeedSpecies,
+        [targetField]: updated[targetField],
         AISummariesJSON: '{}' 
       }, getAppState); 
     } catch (e) {}
@@ -1631,7 +1782,7 @@ export default function Trials({ onMenuClick }) {
     const baseVal = parseFloat(baseline?.[primaryObsField] ?? 100) || 100;
     const wceRows = sorted.map(obs => {
       const val = parseFloat(obs[primaryObsField] ?? 0) || 0;
-      const wce = obs.daa === baseline?.daa ? null : calculateEfficacy(activeCategory, val, baseVal);
+      const wce = Number(obs.daa) === Number(baseline?.daa) ? null : calculateEfficacy(activeCategory, val, baseVal);
       let rating = 'Baseline';
       if (wce !== null) {
         if (activeCategory === 'nutrition' || activeCategory === 'biostimulant') {
@@ -2174,12 +2325,14 @@ export default function Trials({ onMenuClick }) {
     const resultRating = calculateResultRating(efficacyData, activeTrial?.IsControl === true || activeTrial?.IsControl === 'true');
     const observedWeeds = getObservedWeedsList(efficacyData);
 
+    const targetField = catConfig.targetField || 'WeedSpecies';
     const updated = { 
       ...activeTrial, 
       PhotoURLs: JSON.stringify(photos),
       EfficacyDataJSON: JSON.stringify(efficacyData),
       Result: resultRating,
       WeedSpecies: observedWeeds,
+      [targetField]: observedWeeds,
       AISummariesJSON: '{}'
     };
     updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
@@ -2192,6 +2345,7 @@ export default function Trials({ onMenuClick }) {
         EfficacyDataJSON: updated.EfficacyDataJSON,
         Result: updated.Result,
         WeedSpecies: updated.WeedSpecies,
+        [targetField]: updated[targetField],
         AISummariesJSON: '{}'
       }, getAppState); 
     } catch (e) {}
@@ -2387,7 +2541,7 @@ export default function Trials({ onMenuClick }) {
       });
     }
 
-    const existingIdx = efficacyData.findIndex(o => o.daa === Number(daa));
+    const existingIdx = efficacyData.findIndex(o => Number(o.daa) === Number(daa));
     if (existingIdx >= 0) {
       const existing = efficacyData[existingIdx];
       const count = Number(existing.sampleCount || 1);
@@ -2709,10 +2863,18 @@ Rules:
 
         if (existingPhoto) {
           if (existingPhoto.deleted) {
-            return; // Skip re-importing deleted photos
-          }
-          // If the photo exists in the database but the URL is broken or has '[base64-removed]', restore it!
-          if (isPhotoBroken(existingPhoto) || !existingPhoto.url || existingPhoto.url.includes('[base64-removed]')) {
+            if (!healOnly) {
+              existingPhoto.deleted = false;
+              existingPhoto.url = webViewUrl;
+              existingPhoto.driveId = img.id;
+              existingPhoto.fileName = img.name;
+              existingPhoto.importedFrom = 'Drive';
+              if (!existingPhoto.date && photoDate) existingPhoto.date = photoDate;
+              healedCount++;
+            } else {
+              return; // Skip re-importing deleted photos
+            }
+          } else if (isPhotoBroken(existingPhoto) || !existingPhoto.url || existingPhoto.url.includes('[base64-removed]')) {
             existingPhoto.url = webViewUrl;
             existingPhoto.driveId = img.id;
             existingPhoto.fileName = img.name;
@@ -2911,9 +3073,19 @@ Rules:
 
               if (existingPhoto) {
                 if (existingPhoto.deleted) {
-                  return; // Skip re-importing deleted photos
-                }
-                if (isPhotoBroken(existingPhoto) || !existingPhoto.url || existingPhoto.url.includes('[base64-removed]')) {
+                  if (!healOnly) {
+                    existingPhoto.deleted = false;
+                    existingPhoto.url = webViewUrl;
+                    existingPhoto.driveId = img.id;
+                    existingPhoto.fileName = img.name;
+                    existingPhoto.importedFrom = 'Drive';
+                    if (!existingPhoto.date && photoDate) existingPhoto.date = photoDate;
+                    localHealed++;
+                    totalHealed++;
+                  } else {
+                    return; // Skip re-importing deleted photos
+                  }
+                } else if (isPhotoBroken(existingPhoto) || !existingPhoto.url || existingPhoto.url.includes('[base64-removed]')) {
                   existingPhoto.url = webViewUrl;
                   existingPhoto.driveId = img.id;
                   existingPhoto.fileName = img.name;
@@ -3021,10 +3193,8 @@ Rules:
     const targetTrial = (specificTrial && specificTrial.ID) ? specificTrial : activeTrial;
     if (!targetTrial) return;
 
-    // Get all trials for this project (or just the single trial)
-    const allTrials = targetTrial.ProjectID
-      ? trials.filter(t => t.ProjectID === targetTrial.ProjectID)
-      : [targetTrial];
+    // Scan only the photos belonging to this respective trial
+    const allTrials = [targetTrial];
 
     // Collect all photos with their DAA calculated from photo date vs trial date
     const photosToAnalyze = [];
@@ -3503,11 +3673,15 @@ Rules:
   }, []);
 
   const buildTrialCardsCss = useCallback((cardWidth, cardHeight) => `
+      @page {
+        size: auto;
+        margin: 0mm;
+      }
       @media print {
         body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         .no-print { display: none !important; }
       }
-      body { margin: 0.5cm; font-family: sans-serif; background: #ffffff; }
+      body { margin: 10mm; font-family: system-ui, -apple-system, sans-serif; background: #ffffff; }
       .print-header {
         margin-bottom: 0.5cm;
         padding: 0.35cm 0.45cm;
@@ -3526,9 +3700,9 @@ Rules:
       .card {
         width: ${cardWidth}cm;
         height: ${cardHeight}cm;
-        border: 1px solid #ccc;
-        border-radius: 4px;
-        padding: 0.4cm;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 0px;
         box-sizing: border-box;
         display: flex;
         flex-direction: column;
@@ -3537,48 +3711,220 @@ Rules:
         overflow: hidden;
         position: relative;
         background: #ffffff;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
       }
-      .card-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.3cm; }
-      .card-header h3 {
-        font-size: 12pt;
+      .card-banner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 6px 10px;
+        font-size: 8pt;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        border-bottom: 1px solid;
+      }
+      .block-theme-1 { background-color: #ecfdf5; border-color: #a7f3d0; color: #065f46; }
+      .block-theme-2 { background-color: #eff6ff; border-color: #bfdbfe; color: #1e40af; }
+      .block-theme-3 { background-color: #faf5ff; border-color: #e9d5ff; color: #6b21a8; }
+      .block-theme-4 { background-color: #fff7ed; border-color: #fed7aa; color: #9a3412; }
+      .block-theme-5 { background-color: #fef2f2; border-color: #fecaca; color: #991b1b; }
+      .block-theme-6 { background-color: #fefce8; border-color: #fef08a; color: #854d0e; }
+      
+      .card-content {
+        padding: 10px 12px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        height: calc(100% - 28px);
+        box-sizing: border-box;
+        position: relative;
+      }
+      .card-title-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+      .card-title-row h3 {
+        font-size: 11pt;
         margin: 0;
-        font-weight: bold;
-        color: #2c5282;
-        max-width: 65%;
-        line-height: 1.2;
+        font-weight: 800;
+        color: #0f172a;
+        line-height: 1.25;
       }
-      .logo { max-width: 2.5cm; max-height: 1.2cm; object-fit: contain; flex-shrink: 0; }
-      .card-body { padding-right: 2.9cm; }
-      .card-body p { font-size: 9pt; margin: 0.1cm 0; }
+      .logo { max-width: 2.2cm; max-height: 1cm; object-fit: contain; flex-shrink: 0; }
+      .card-body { padding-right: 2.6cm; flex-grow: 1; }
+      .card-body p { font-size: 8pt; margin: 3px 0; color: #475569; display: flex; align-items: center; gap: 4px; }
+      .card-body p strong { color: #1e293b; font-weight: 600; }
       .card-footer {
         position: absolute;
-        right: 0.4cm;
-        bottom: 0.4cm;
+        right: 12px;
+        bottom: 10px;
         text-align: right;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
       }
-      .qr-code { width: 2.5cm; height: 2.5cm; display: block; }
+      .qr-code { width: 2.2cm; height: 2.2cm; display: block; border: 1px solid #f1f5f9; border-radius: 6px; padding: 2px; background: #ffffff; }
+      .trial-id { font-size: 7.5px; color: #94a3b8; margin-top: 4px; font-family: monospace; }
+      .coord-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 4px;
+        margin-top: 6px;
+        max-width: 80%;
+      }
+      .coord-item {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 4px;
+        padding: 3px 5px;
+        font-size: 7.5pt;
+        color: #334155;
+        line-height: 1.1;
+      }
+      .coord-item strong {
+        color: #64748b;
+        font-size: 6pt;
+        text-transform: uppercase;
+        display: block;
+        margin-bottom: 1px;
+        font-weight: 700;
+      }
+      .coord-item span {
+        color: #1e293b;
+        font-weight: 600;
+      }
     `, []);
 
-  const buildTrialCardsMarkup = useCallback(async (selectedTrials, companyLogo) => {
+  const buildTrialCardsMarkup = useCallback(async (selectedTrials, companyLogo, fields, blocks) => {
     const cards = [];
+    const emojiMap = ['🟢', '🔵', '🟣', '🟠', '🔴', '🟡'];
+    
     for (const trial of selectedTrials) {
       const qrCodeUrl = await generateQrCodeDataUrl(buildPrintableTrialUrl(trial));
       const formattedDate = formatDateTime(trial.Date);
+      
+      const trialCat = trial.Category || 'herbicide';
+      const cConf = getCategoryConfig(trialCat);
+      const targetLabel = cConf.targetLabel || 'Weed Species';
+      const targetValue = trial[cConf.targetField] || trial.WeedSpecies || '';
+
+      const blockIndex = blocks && trial.BlockID ? blocks.findIndex(b => String(b.ID) === String(trial.BlockID)) : -1;
+      const blockColorIdx = blockIndex !== -1 ? (blockIndex % 6) : 0;
+      const blockThemeClass = `block-theme-${blockColorIdx + 1}`;
+      const blockEmoji = emojiMap[blockColorIdx] || '🟢';
+      
+      const blockName = trial.BlockID ? (blocks?.find(b => String(b.ID) === String(trial.BlockID))?.Name || '') : '';
+      const designType = trial.TrialDesign || 'RCBD';
+      const designLabel = designType === 'PotTrial' ? 'Pot Trials' : designType;
+      
+      const bannerTitle = blockName ? `${blockEmoji} ${blockName}` : 'Trial Card';
+      
+      let designMarkup = '';
+      if (fields.designDetails) {
+        const items = [];
+        if (designType === 'PotTrial') {
+          if (trial.PotLabel) {
+            items.push(`<strong>Pot</strong><span>${sanitizePrintHtml(trial.PotLabel)}</span>`);
+          }
+          let posVal = '';
+          const rowVal = String(trial.PotRow || '').trim();
+          const colVal = String(trial.PotCol || '').trim();
+          
+          let colClean = colVal.replace(/^Col\s*/i, '').replace(/^C/i, '').trim();
+          if (colClean && !colClean.startsWith('C') && !isNaN(colClean)) {
+            colClean = 'C' + colClean;
+          }
+          
+          let rowClean = rowVal.replace(/^Row\s*/i, '').replace(/^R/i, '').trim();
+          if (rowClean && !rowClean.startsWith('R') && !isNaN(rowClean)) {
+            rowClean = 'R' + rowClean;
+          }
+
+          if (rowClean && colClean) {
+            posVal = `${rowClean}${colClean}`;
+          } else if (rowClean) {
+            const proj = state.projects?.find(p => p.ID === trial.ProjectID);
+            if (proj) {
+              const potCols = parseInt(proj.PotCols) || 4;
+              posVal = `${rowClean} (C1-C${potCols})`;
+            } else {
+              posVal = rowClean;
+            }
+          } else if (colClean) {
+            const proj = state.projects?.find(p => p.ID === trial.ProjectID);
+            if (proj) {
+              const potRows = parseInt(proj.PotRows) || 9;
+              const blocksCount = parseInt(proj.PotBlocks || proj.BlocksCount) || 3;
+              const rowsPerBlock = Math.floor(potRows / blocksCount) || 1;
+              const repNum = parseInt(trial.Replication) || 1;
+              const startRow = (repNum - 1) * rowsPerBlock + 1;
+              const endRow = Math.min(repNum * rowsPerBlock, potRows);
+              if (blocksCount > 1) {
+                posVal = `${colClean} (R${startRow}-R${endRow})`;
+              } else {
+                posVal = colClean;
+              }
+            } else {
+              posVal = colClean;
+            }
+          }
+          if (posVal) {
+            items.push(`<strong>Pos</strong><span>${sanitizePrintHtml(posVal)}</span>`);
+          }
+        } else {
+          if (blockName) items.push(`<strong>Block</strong><span>${sanitizePrintHtml(blockName)}</span>`);
+          if (trial.Replication) items.push(`<strong>Rep</strong><span>${sanitizePrintHtml(trial.Replication)}</span>`);
+          if (trial.PlotNumber) items.push(`<strong>Plot</strong><span>#${sanitizePrintHtml(trial.PlotNumber)}</span>`);
+          if (trial.SubBlockID) items.push(`<strong>Sub-Blk</strong><span>${sanitizePrintHtml(trial.SubBlockID)}</span>`);
+          if (trial.MainFactor) items.push(`<strong>Main Fac</strong><span>${sanitizePrintHtml(trial.MainFactor)}</span>`);
+          if (trial.SubFactor) items.push(`<strong>Sub Fac</strong><span>${sanitizePrintHtml(trial.SubFactor)}</span>`);
+        }
+        
+        if (items.length > 0) {
+          designMarkup = `
+            <div class="coord-grid">
+              ${items.map(item => `<div class="coord-item">${item}</div>`).join('')}
+            </div>
+          `;
+        }
+      }
+
+      const hasLogo = fields.logo && companyLogo && (
+        companyLogo.startsWith('data:') || 
+        companyLogo.startsWith('http') || 
+        companyLogo.startsWith('/') || 
+        companyLogo.startsWith('.')
+      );
+
       cards.push(`
         <div class="card">
-          <div>
-            <div class="card-header">
-              <h3>${sanitizePrintHtml(trial.FormulationName || 'Untitled Trial')}</h3>
-              ${companyLogo ? `<img src="${companyLogo}" class="logo" alt="Logo">` : ''}
-            </div>
-            <div class="card-body">
-              <p><strong>Investigator:</strong> ${sanitizePrintHtml(trial.InvestigatorName || '')}</p>
-              <p><strong>Date:</strong> ${sanitizePrintHtml(formattedDate)}</p>
-              <p><strong>Dosage:</strong> ${sanitizePrintHtml(trial.Dosage || '')}</p>
-            </div>
+          <div class="card-banner ${blockThemeClass}">
+            <span>${sanitizePrintHtml(bannerTitle)}</span>
+            <span>${sanitizePrintHtml(designLabel)}</span>
           </div>
-          <div class="card-footer">
-            ${qrCodeUrl ? `<img src="${qrCodeUrl}" class="qr-code" alt="QR Code">` : ''}
+          <div class="card-content">
+            <div>
+              <div class="card-title-row">
+                <h3>${fields.formulationName ? sanitizePrintHtml(trial.FormulationName || 'Untitled Trial') : 'Trial Card'}</h3>
+                ${hasLogo ? `<img src="${companyLogo}" class="logo" alt="Logo">` : ''}
+              </div>
+              <div class="card-body">
+                ${fields.investigator && trial.InvestigatorName ? `<p>👤 <strong>Inv:</strong> ${sanitizePrintHtml(trial.InvestigatorName)}</p>` : ''}
+                ${fields.date && trial.Date ? `<p>📅 <strong>Date:</strong> ${sanitizePrintHtml(formattedDate)}</p>` : ''}
+                ${fields.dosage && trial.Dosage ? `<p>🧪 <strong>Dose:</strong> ${sanitizePrintHtml(trial.Dosage)}</p>` : ''}
+                ${fields.location && trial.Location ? `<p>📍 <strong>Loc:</strong> ${sanitizePrintHtml(trial.Location)}</p>` : ''}
+                ${fields.targetField && targetValue ? `<p>🎯 <strong>${targetLabel}:</strong> ${sanitizePrintHtml(targetValue)}</p>` : ''}
+                ${designMarkup}
+              </div>
+            </div>
+            <div class="card-footer">
+              ${qrCodeUrl ? `<img src="${qrCodeUrl}" class="qr-code" alt="QR Code">` : ''}
+              ${fields.trialId ? `<div class="trial-id">ID: ${trial.ID.slice(-10)}</div>` : ''}
+            </div>
           </div>
         </div>
       `);
@@ -3598,16 +3944,23 @@ Rules:
 
     window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Generating print layout...', type: 'info' } }));
 
+    const firstTrial = selectedTrials[0];
+    const proj = state.projects?.find(p => p.ID === firstTrial?.ProjectID);
+    const titleName = proj ? proj.Name : (firstTrial?.FormulationName || 'Trials');
+    const cleanTitle = titleName.replace(/[^a-zA-Z0-9_\-\s]/g, '').trim() || 'Trial_Cards';
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const documentTitle = `Trial_Cards_${cleanTitle.replace(/\s+/g, '_')}_${dateStr}`;
+
     const { cardWidth, cardHeight, label } = getTrialCardPrintSettings();
     const companyLogo = state.settings?.logoBase64 || '';
-    const cardsMarkup = await buildTrialCardsMarkup(selectedTrials, companyLogo);
+    const cardsMarkup = await buildTrialCardsMarkup(selectedTrials, companyLogo, qrFields, state.blocks);
     const cardsCss = buildTrialCardsCss(cardWidth, cardHeight);
 
     printWindow.document.write(`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Print Trial Cards</title>
+  <title>${documentTitle}</title>
   <style>${cardsCss}</style>
 </head>
 <body>
@@ -3624,7 +3977,7 @@ Rules:
       printWindow.print();
       printWindow.close();
     }, 500);
-  }, [buildTrialCardsCss, buildTrialCardsMarkup, getTrialCardPrintSettings, selectedForBulk, state.settings?.logoBase64, trials]);
+  }, [buildTrialCardsCss, buildTrialCardsMarkup, getTrialCardPrintSettings, selectedForBulk, state.settings?.logoBase64, trials, qrFields, state.blocks, state.projects]);
 
   const ResultBadge = ({ result }) => {
     if (!result) return null;
@@ -4374,8 +4727,81 @@ If none are present, write "None".`;
             if (newDaa !== null) obs.daa = newDaa;
             efficacyChanged = true;
             matched = true;
+
+            // Check if there is an existing observation with the same DAA
+            const duplicateObs = efficacyData.find(o => o !== obs && Number(o.daa) === Number(newDaa));
+            if (duplicateObs) {
+              const confirmMerge = window.confirm(
+                `An observation at DAA ${newDaa} already exists. Do you want to merge this photo's observation metrics into the existing DAA ${newDaa} observation and delete the duplicate entry?`
+              );
+              if (confirmMerge) {
+                const count = duplicateObs.sampleCount || 1;
+                const config = getCategoryConfig(activeTrial.Category || activeCategory);
+                const fieldsToMerge = [
+                  ...(config.observationFields || []).map(f => f.key),
+                  'weedCover'
+                ];
+                
+                fieldsToMerge.forEach(key => {
+                  if (obs[key] !== undefined && obs[key] !== null && obs[key] !== '') {
+                    const val1 = parseFloat(duplicateObs[key]);
+                    const val2 = parseFloat(obs[key]);
+                    if (!isNaN(val1) && !isNaN(val2)) {
+                      duplicateObs[key] = Number((((val1 * count) + val2) / (count + 1)).toFixed(2));
+                    } else if (!isNaN(val2)) {
+                      duplicateObs[key] = val2;
+                    }
+                  }
+                });
+                
+                const speciesMap = new Map();
+                const addSpecies = (item) => {
+                  if (!item || !item.species) return;
+                  const existingSpec = speciesMap.get(item.species);
+                  const coverVal = parseFloat(item.cover);
+                  if (existingSpec) {
+                    if (!isNaN(coverVal)) {
+                      const specCount = existingSpec.count || 1;
+                      const oldCov = parseFloat(existingSpec.cover);
+                      existingSpec.cover = !isNaN(oldCov) ? Number((((oldCov * specCount) + coverVal) / (specCount + 1)).toFixed(2)) : coverVal;
+                      existingSpec.count = specCount + 1;
+                    }
+                    if (item.status && !existingSpec.status.includes(item.status)) {
+                      existingSpec.status = [existingSpec.status, item.status].filter(Boolean).join(', ');
+                    }
+                    if (item.notes && !existingSpec.notes.includes(item.notes)) {
+                      existingSpec.notes = [existingSpec.notes, item.notes].filter(Boolean).join(' | ');
+                    }
+                  } else {
+                    speciesMap.set(item.species, {
+                      ...item,
+                      cover: !isNaN(coverVal) ? coverVal : null,
+                      count: 1
+                    });
+                  }
+                };
+
+                (duplicateObs.weedDetails || []).forEach(addSpecies);
+                (obs.weedDetails || []).forEach(addSpecies);
+                duplicateObs.weedDetails = Array.from(speciesMap.values()).map(({ count, ...rest }) => rest);
+
+                if (obs.notes) {
+                  duplicateObs.notes = [duplicateObs.notes, obs.notes].filter(Boolean).join(' | ');
+                }
+
+                duplicateObs.sampleCount = count + 1;
+                obs._toDelete = true;
+              }
+            }
           }
         });
+
+        const beforeLen = efficacyData.length;
+        const filtered = efficacyData.filter(o => !o._toDelete);
+        if (filtered.length !== beforeLen) {
+          efficacyData.length = 0;
+          efficacyData.push(...filtered);
+        }
       }
 
       // 2. Fallback to sequence rank (index of sorted list)
@@ -4388,6 +4814,76 @@ If none are present, write "None".`;
             mainObs.date = newDate;
             if (newDaa !== null) mainObs.daa = newDaa;
             efficacyChanged = true;
+
+            // Check if there is an existing observation with the same DAA
+            const duplicateObs = efficacyData.find(o => o !== mainObs && Number(o.daa) === Number(newDaa));
+            if (duplicateObs) {
+              const confirmMerge = window.confirm(
+                `An observation at DAA ${newDaa} already exists. Do you want to merge this photo's observation metrics into the existing DAA ${newDaa} observation and delete the duplicate entry?`
+              );
+              if (confirmMerge) {
+                const count = duplicateObs.sampleCount || 1;
+                const config = getCategoryConfig(activeTrial.Category || activeCategory);
+                const fieldsToMerge = [
+                  ...(config.observationFields || []).map(f => f.key),
+                  'weedCover'
+                ];
+                
+                fieldsToMerge.forEach(key => {
+                  if (mainObs[key] !== undefined && mainObs[key] !== null && mainObs[key] !== '') {
+                    const val1 = parseFloat(duplicateObs[key]);
+                    const val2 = parseFloat(mainObs[key]);
+                    if (!isNaN(val1) && !isNaN(val2)) {
+                      duplicateObs[key] = Number((((val1 * count) + val2) / (count + 1)).toFixed(2));
+                    } else if (!isNaN(val2)) {
+                      duplicateObs[key] = val2;
+                    }
+                  }
+                });
+                
+                const speciesMap = new Map();
+                const addSpecies = (item) => {
+                  if (!item || !item.species) return;
+                  const existingSpec = speciesMap.get(item.species);
+                  const coverVal = parseFloat(item.cover);
+                  if (existingSpec) {
+                    if (!isNaN(coverVal)) {
+                      const specCount = existingSpec.count || 1;
+                      const oldCov = parseFloat(existingSpec.cover);
+                      existingSpec.cover = !isNaN(oldCov) ? Number((((oldCov * specCount) + coverVal) / (specCount + 1)).toFixed(2)) : coverVal;
+                      existingSpec.count = specCount + 1;
+                    }
+                    if (item.status && !existingSpec.status.includes(item.status)) {
+                      existingSpec.status = [existingSpec.status, item.status].filter(Boolean).join(', ');
+                    }
+                    if (item.notes && !existingSpec.notes.includes(item.notes)) {
+                      existingSpec.notes = [existingSpec.notes, item.notes].filter(Boolean).join(' | ');
+                    }
+                  } else {
+                    speciesMap.set(item.species, {
+                      ...item,
+                      cover: !isNaN(coverVal) ? coverVal : null,
+                      count: 1
+                    });
+                  }
+                };
+
+                (duplicateObs.weedDetails || []).forEach(addSpecies);
+                (mainObs.weedDetails || []).forEach(addSpecies);
+                duplicateObs.weedDetails = Array.from(speciesMap.values()).map(({ count, ...rest }) => rest);
+
+                if (mainObs.notes) {
+                  duplicateObs.notes = [duplicateObs.notes, mainObs.notes].filter(Boolean).join(' | ');
+                }
+
+                duplicateObs.sampleCount = count + 1;
+                
+                const obsIdx = efficacyData.indexOf(mainObs);
+                if (obsIdx !== -1) {
+                  efficacyData.splice(obsIdx, 1);
+                }
+              }
+            }
           }
         }
       }
@@ -5260,34 +5756,190 @@ If none are present, write "None".`;
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Plot #</label>
-                    <input type="number" value={formData.PlotNumber} onChange={e => setFormData({...formData, PlotNumber: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" />
+                    {(() => {
+                      const pn = parseInt(formData.PlotNumber);
+                      const projectTrialsForDup = formData.ProjectID
+                        ? (state.trials || []).filter(t => t.ProjectID === formData.ProjectID && (!editingTrial || t.ID !== editingTrial.ID))
+                        : [];
+                      const isDuplicate = formData.PlotNumber !== '' && !isNaN(pn) && projectTrialsForDup.some(t => parseInt(t.PlotNumber) === pn);
+                      return (
+                        <>
+                          <input type="number" min="1" value={formData.PlotNumber} onChange={e => setFormData({...formData, PlotNumber: e.target.value})} className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 ${isDuplicate ? 'border-amber-400 focus:ring-amber-400' : 'focus:ring-emerald-400'}`} />
+                          {isDuplicate && <p className="text-xs text-amber-600 mt-0.5">Plot # already used in this project</p>}
+                        </>
+                      );
+                    })()}
                   </div>
                 </>
               )}
             </div>
           )}
 
-          {/* Soil Data */}
-          <details className="group">
-            <summary className="text-xs font-semibold text-slate-500 uppercase cursor-pointer flex items-center gap-2 py-1">
-              <span className="group-open:rotate-90 transition-transform inline-block">▶</span> Soil Data (optional)
-            </summary>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-3">
-              {[['SoilPH','Soil pH','0.1'],['SoilClay','Clay %','1'],['SoilSand','Sand %','1'],['SoilOC','Org. Carbon %','0.01']].map(([k, label, step]) => (
-                <div key={k}>
-                  <label className="block text-xs text-slate-500 mb-1">{label}</label>
-                  <input type="number" step={step} value={formData[k]} onChange={e => setFormData({...formData, [k]: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" />
+          {/* Plot & Site Data collapsible — Task 55 */}
+          <div className="border border-slate-200 rounded-xl overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setPlotDataOpen(v => !v)}
+              className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-50 hover:bg-slate-100 transition text-xs font-semibold text-slate-600 uppercase"
+            >
+              <span className="flex items-center gap-2"><MapPin className="w-3.5 h-3.5 text-slate-400" /> Plot &amp; Site Data (optional)</span>
+              <ChevronRight className={`w-4 h-4 text-slate-400 transition-transform ${plotDataOpen ? 'rotate-90' : ''}`} />
+            </button>
+            {plotDataOpen && (
+              <div className="p-4 space-y-3">
+                {/* BBCH Code with lookup */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">BBCH Code (crop growth stage)</label>
+                  <input
+                    type="text"
+                    value={formData.BBCHCode || ''}
+                    onChange={e => setFormData({...formData, BBCHCode: e.target.value})}
+                    className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                    placeholder="e.g. 12"
+                    maxLength={3}
+                  />
+                  {(() => {
+                    const code = (formData.BBCHCode || '').trim();
+                    if (!code) return null;
+                    const match = BBCH_STAGES.find(s => s.value === code || String(s.value) === code);
+                    if (match) return <p className="text-xs text-emerald-700 mt-0.5 bg-emerald-50 rounded px-2 py-1">📋 {match.label}</p>;
+                    const num = parseInt(code);
+                    if (!isNaN(num)) {
+                      const rangeMatch = BBCH_STAGES.find(s => {
+                        const sv = parseInt(s.value);
+                        return !isNaN(sv) && num >= sv && num < sv + 10;
+                      });
+                      if (rangeMatch) return <p className="text-xs text-blue-700 mt-0.5 bg-blue-50 rounded px-2 py-1">~{rangeMatch.label}</p>;
+                    }
+                    return <p className="text-xs text-amber-600 mt-0.5">Unknown BBCH code</p>;
+                  })()}
                 </div>
-              ))}
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">Texture</label>
-                <select value={formData.SoilTexture} onChange={e => setFormData({...formData, SoilTexture: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
-                  <option value="">Any</option>
-                  {['Loam','Clay','Sandy Loam','Sand','Silt','Clay Loam'].map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
+                {/* GPS fields */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">GPS Latitude</label>
+                    <input
+                      type="number"
+                      step="0.000001"
+                      min="-90"
+                      max="90"
+                      value={formData.GPSLatitude || ''}
+                      onChange={e => setFormData({...formData, GPSLatitude: e.target.value})}
+                      className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                      placeholder="-90 to 90"
+                    />
+                    {formData.GPSLatitude !== '' && (parseFloat(formData.GPSLatitude) < -90 || parseFloat(formData.GPSLatitude) > 90) && (
+                      <p className="text-xs text-red-600 mt-0.5">Must be between -90 and 90</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">GPS Longitude</label>
+                    <input
+                      type="number"
+                      step="0.000001"
+                      min="-180"
+                      max="180"
+                      value={formData.GPSLongitude || ''}
+                      onChange={e => setFormData({...formData, GPSLongitude: e.target.value})}
+                      className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                      placeholder="-180 to 180"
+                    />
+                    {formData.GPSLongitude !== '' && (parseFloat(formData.GPSLongitude) < -180 || parseFloat(formData.GPSLongitude) > 180) && (
+                      <p className="text-xs text-red-600 mt-0.5">Must be between -180 and 180</p>
+                    )}
+                  </div>
+                </div>
+                {/* Soil fields */}
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Soil pH</label>
+                    <input type="number" step="0.1" min="0" max="14" value={formData.SoilPH || ''} onChange={e => setFormData({...formData, SoilPH: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" />
+                    {formData.SoilPH !== '' && (parseFloat(formData.SoilPH) < 0 || parseFloat(formData.SoilPH) > 14) && (
+                      <p className="text-xs text-red-600 mt-0.5">Must be 0–14</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Clay %</label>
+                    <input type="number" step="1" min="0" max="100" value={formData.SoilClay || ''} onChange={e => setFormData({...formData, SoilClay: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" />
+                    {formData.SoilClay !== '' && (parseFloat(formData.SoilClay) < 0 || parseFloat(formData.SoilClay) > 100) && (
+                      <p className="text-xs text-red-600 mt-0.5">Must be 0–100%</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Sand %</label>
+                    <input type="number" step="1" min="0" max="100" value={formData.SoilSand || ''} onChange={e => setFormData({...formData, SoilSand: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Org. Carbon %</label>
+                    <input type="number" step="0.01" min="0" value={formData.SoilOC || ''} onChange={e => setFormData({...formData, SoilOC: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Texture</label>
+                    <select value={formData.SoilTexture || ''} onChange={e => setFormData({...formData, SoilTexture: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                      <option value="">Any</option>
+                      {['Loam','Clay','Sandy Loam','Sand','Silt','Clay Loam'].map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+                </div>
               </div>
-            </div>
-          </details>
+            )}
+          </div>
+
+          {/* Yield Data Panel — Task 58 */}
+          {(() => {
+            const yieldVal = parseFloat(formData.YieldValue);
+            const projectYieldsForOutlier = formData.ProjectID
+              ? (state.trials || [])
+                  .filter(t => t.ProjectID === formData.ProjectID && (!editingTrial || t.ID !== editingTrial.ID) && t.YieldValue && !isNaN(parseFloat(t.YieldValue)))
+                  .map(t => parseFloat(t.YieldValue))
+              : [];
+            const yieldMean = projectYieldsForOutlier.length > 0 ? projectYieldsForOutlier.reduce((a, b) => a + b, 0) / projectYieldsForOutlier.length : null;
+            const isOutlier = !isNaN(yieldVal) && yieldVal > 0 && yieldMean !== null && yieldVal > 20 * yieldMean;
+            return (
+              <div className="border border-slate-200 rounded-xl overflow-hidden">
+                <div className="px-4 py-2.5 bg-slate-50 text-xs font-semibold text-slate-600 uppercase flex items-center gap-2">
+                  <Leaf className="w-3.5 h-3.5 text-emerald-500" /> Yield Data (optional)
+                </div>
+                <div className="p-4 grid grid-cols-2 md:grid-cols-3 gap-3">
+                  {formData.PlotNumber !== '' && (
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">Plot # (read-only)</label>
+                      <input type="text" readOnly value={formData.PlotNumber} className="w-full px-3 py-2 text-sm border rounded-lg bg-slate-50 text-slate-500 cursor-default" />
+                    </div>
+                  )}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Yield Value</label>
+                    <input type="number" step="0.001" min="0" value={formData.YieldValue || ''} onChange={e => setFormData({...formData, YieldValue: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="e.g. 3.5" />
+                    {isOutlier && (
+                      <p className="text-xs text-amber-600 mt-0.5">⚠ Outlier: &gt;20× project mean ({yieldMean?.toFixed(2)})</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Unit</label>
+                    <select value={formData.YieldUnit || 't/ha'} onChange={e => setFormData({...formData, YieldUnit: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                      {['t/ha','kg/ha','bu/ac','kg/plot'].map(u => <option key={u} value={u}>{u}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Grain Moisture (%)</label>
+                    <input type="number" step="0.1" min="0" max="100" value={formData.GrainMoisture || ''} onChange={e => setFormData({...formData, GrainMoisture: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="Optional" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">1000-Grain Weight (g)</label>
+                    <input type="number" step="0.1" min="0" value={formData.ThousandGrainWeight || ''} onChange={e => setFormData({...formData, ThousandGrainWeight: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="Optional" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Harvest DAA</label>
+                    <input type="number" min="0" value={formData.HarvestDAA || ''} onChange={e => setFormData({...formData, HarvestDAA: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="e.g. 999" />
+                  </div>
+                  <div className="col-span-2 md:col-span-3">
+                    <label className="block text-xs text-slate-500 mb-1">Yield Notes</label>
+                    <input type="text" value={formData.YieldNotes || ''} onChange={e => setFormData({...formData, YieldNotes: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="Optional notes" />
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           <div>
             <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Notes</label>
@@ -5365,7 +6017,7 @@ If none are present, write "None".`;
                   <ResultBadge result={detailTrial.Result} />
                 </div>
                 <h2 className="text-xl font-bold text-slate-800 truncate">{detailTrial.FormulationName}</h2>
-                <p className="text-xs text-slate-500 mt-0.5">{formatDateTime(detailTrial.Date)} · {detailTrial.Location || 'No location'}</p>
+                <p className="text-xs text-slate-500 mt-0.5">{formatDateTime(detailTrial.Date)} · {detailTrial.Location || projects.find(p => String(p.ID) === String(detailTrial.ProjectID))?.Location || 'No location'}</p>
               </div>
               <div className="flex gap-2 shrink-0" ref={exportMenuRef}>
                 {canDownload && (
@@ -5609,7 +6261,17 @@ If none are present, write "None".`;
                         );
                         catConfig.specificFields.forEach(f => {
                           if (f.key !== catConfig.targetField && f.key !== 'YieldValue') {
-                            infoFields.push([f.label, detailTrial[f.key] || '—', Leaf]);
+                            let val = detailTrial[f.key];
+                            if (!val || val === '—') {
+                              const latestObs = detailEfficacy.slice().sort((a,b) => (parseFloat(b.daa) || 0) - (parseFloat(a.daa) || 0))[0];
+                              if (latestObs) {
+                                const obsKey = Object.keys(latestObs).find(k => k.toLowerCase() === f.key.toLowerCase());
+                                if (obsKey && latestObs[obsKey] !== undefined && latestObs[obsKey] !== null && latestObs[obsKey] !== '') {
+                                  val = latestObs[obsKey];
+                                }
+                              }
+                            }
+                            infoFields.push([f.label, val || '—', Leaf]);
                           }
                         });
                       }
@@ -7787,6 +8449,46 @@ If none are present, write "None".`;
             </select>
           </div>
 
+          {/* Task 56: Phytotoxicity fields */}
+          <div className="border border-amber-200 rounded-xl p-3 bg-amber-50 space-y-3">
+            <p className="text-xs font-bold text-amber-700 uppercase flex items-center gap-1"><Leaf className="w-3.5 h-3.5" /> Crop Injury / Phytotoxicity (optional)</p>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Crop Injury / Phytotoxicity (%)</label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={obsForm.phytotoxicityPct !== '' && obsForm.phytotoxicityPct != null ? obsForm.phytotoxicityPct : 0}
+                  onChange={e => setObsForm(p => ({...p, phytotoxicityPct: e.target.value}))}
+                  className="flex-1 accent-amber-500"
+                />
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={obsForm.phytotoxicityPct || ''}
+                  onChange={e => setObsForm(p => ({...p, phytotoxicityPct: e.target.value}))}
+                  className="w-16 px-2 py-1 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 text-center"
+                  placeholder="0"
+                />
+                <span className="text-xs text-amber-700 font-semibold">%</span>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Phytotoxicity Notes</label>
+              <textarea
+                rows="2"
+                value={obsForm.phytotoxicityNotes || ''}
+                onChange={e => setObsForm(p => ({...p, phytotoxicityNotes: e.target.value}))}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400"
+                placeholder="Describe symptoms, affected area, etc."
+              />
+            </div>
+          </div>
+
           <div>
             <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Notes</label>
             <textarea rows="2" value={obsForm.notes} onChange={e => setObsForm({...obsForm, notes: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" />
@@ -7805,6 +8507,44 @@ If none are present, write "None".`;
         onClose={() => { setCropperOpen(false); setCropSource(null); cropCallbackRef.current = null; }}
         onCropComplete={handleCropComplete}
       />
+
+      {/* ── BASELINE WARNING DIALOG — Task 57 ── */}
+      {baselineWarningOpen && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50" onClick={() => { setBaselineWarningOpen(false); setPendingObsSave(null); }} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
+                <span className="text-amber-600 text-xl">⚠</span>
+              </div>
+              <div>
+                <h3 className="font-bold text-slate-800 text-base">No Pre-Spray Baseline Recorded</h3>
+                <p className="text-sm text-slate-600 mt-1">
+                  No pre-spray baseline observation (DAA = 0) has been recorded for this trial.
+                  Recording a baseline is <strong>strongly recommended</strong> for accurate efficacy calculation.
+                </p>
+                <p className="text-sm text-slate-500 mt-2">Proceed without baseline?</p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 pt-2 border-t">
+              <button
+                type="button"
+                onClick={() => { setBaselineWarningOpen(false); setPendingObsSave(null); }}
+                className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={finalizePendingObsSave}
+                className="px-4 py-2 text-sm font-semibold bg-amber-500 text-white rounded-lg hover:bg-amber-600"
+              >
+                Proceed Without Baseline
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── PHOTO EDIT MODAL ── */}
       {photoEditModal && (
@@ -7986,14 +8726,31 @@ If none are present, write "None".`;
                 </div>
               </div>
 
-              <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600">
-                <p className="font-semibold mb-1">Each card includes:</p>
-                <ul className="space-y-0.5 list-disc list-inside">
-                  <li>QR code linked to the trial report</li>
-                  <li>Formulation name</li>
-                  <li>Investigator and date</li>
-                  <li>Dosage and optional company logo</li>
-                </ul>
+              <div className="bg-slate-50 rounded-lg p-3 space-y-2">
+                <label className="block text-xs font-semibold text-slate-600 uppercase">Include Parameters</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { key: 'formulationName', label: 'Formulation Name' },
+                    { key: 'investigator', label: 'Investigator' },
+                    { key: 'date', label: 'Trial Date' },
+                    { key: 'dosage', label: 'Dosage' },
+                    { key: 'targetField', label: 'Target Value' },
+                    { key: 'location', label: 'Location' },
+                    { key: 'designDetails', label: 'Layout (Block/Plot/Pot)' },
+                    { key: 'trialId', label: 'Trial ID' },
+                    { key: 'logo', label: 'Company Logo' },
+                  ].map(field => (
+                    <label key={field.key} className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer hover:text-emerald-700">
+                      <input
+                        type="checkbox"
+                        checked={qrFields[field.key]}
+                        onChange={(e) => setQrFields(prev => ({ ...prev, [field.key]: e.target.checked }))}
+                        className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5"
+                      />
+                      <span>{field.label}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
 
               <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">

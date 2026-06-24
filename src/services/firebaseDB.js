@@ -34,7 +34,8 @@ function cleanForFirestore(obj) {
   for (const [k, v] of Object.entries(obj)) {
     if (v === undefined) continue;
     // Strip raw base64 image data strings (these should be in Google Drive, not Firestore)
-    if (typeof v === 'string' && v.startsWith('data:image')) {
+    // Exempt logoBase64 since the company logo needs to be stored in settings.
+    if (k !== 'logoBase64' && typeof v === 'string' && v.startsWith('data:image')) {
       out[k] = '[base64-removed]';
       continue;
     }

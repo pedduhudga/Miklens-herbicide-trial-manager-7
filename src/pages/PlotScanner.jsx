@@ -22,13 +22,19 @@ import { useNavigate } from "react-router-dom";
 import QRScanner from "../components/QRScanner.jsx";
 import TopBar from "../components/TopBar.jsx";
 import { useAppState } from "../hooks/useAppState.jsx";
+import CameraCapture from "../components/CameraCapture.jsx";
+import CropperModal from "../components/CropperModal.jsx";
 import {
   uploadPhoto as uploadPhotoToDrive,
   updateTrial,
 } from "../services/dataLayer.js";
-import { getCategoryConfig } from "../utils/categoryConfig.js";
+import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryValue } from "../utils/categoryConfig.js";
 import { compressImage } from "../utils/imageCompression.js";
-import { toDatetimeLocal } from "../utils/dateUtils.js";
+import { toDatetimeLocal, formatDateTime, calculateDAA } from "../utils/dateUtils.js";
+import { safeJsonParse } from "../utils/helpers.js";
+import { resolvePhotoSrc, getDriveFileId } from "../utils/photoUtils.js";
+import { validateEfficacyData } from "../utils/analysisUtils.js";
+import { analyzePhoto, generateTextWithAI } from "../services/multiProviderAI.js";
 
 function parseQrData(raw) {
   if (!raw) return null;
@@ -253,107 +259,7 @@ function QuickActionModal({ trial, rawQr, onClose, onAction, activeCategory = 'h
   );
 }
 
-// ─── Camera Capture Modal (inline, for "Add Photo" / "Identify Weeds") ────────
-
-function CameraModal({ mode, onClose, onCapture, activeCategory = 'herbicide' }) {
-  const videoRef = useRef(null);
-  const [stream, setStream] = useState(null);
-  const [capturing, setCapturing] = useState(false);
-  const [error, setError] = useState(null);
-  const catConfig = getCategoryConfig(activeCategory);
-
-  React.useEffect(() => {
-    let s = null;
-    (async () => {
-      try {
-        s = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: "environment" },
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
-          },
-        });
-        setStream(s);
-        if (videoRef.current) {
-          videoRef.current.srcObject = s;
-          videoRef.current.setAttribute("playsinline", true);
-          videoRef.current.play();
-        }
-      } catch {
-        setError("Camera access denied or unavailable.");
-      }
-    })();
-    return () => {
-      if (s) s.getTracks().forEach((t) => t.stop());
-    };
-  }, []);
-
-  const capture = useCallback(() => {
-    if (!videoRef.current || capturing) return;
-    setCapturing(true);
-    const video = videoRef.current;
-    const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext("2d").drawImage(video, 0, 0);
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
-    if (stream) stream.getTracks().forEach((t) => t.stop());
-    onCapture(dataUrl, mode);
-  }, [capturing, stream, mode, onCapture]);
-
-  return (
-    <div className="fixed inset-0 bg-black z-[10001] flex flex-col">
-      <button
-        onClick={onClose}
-        className="absolute top-4 right-4 w-10 h-10 rounded-full bg-black/50 flex items-center justify-center z-10 text-white"
-      >
-        <X className="w-6 h-6" />
-      </button>
-      <div className="absolute top-4 left-4 z-10">
-        <span
-          className={`px-3 py-1 rounded-full text-xs font-bold text-white ${mode === "weed" ? "bg-emerald-500" : "bg-blue-500"}`}
-        >
-          {mode === "weed" ? `🌿 ${catConfig.targetLabel} Photo` : "📷 Trial Photo"}
-        </span>
-      </div>
-      {error ? (
-        <div className="flex-1 flex items-center justify-center text-white text-center p-6">
-          <div>
-            <AlertTriangle className="w-12 h-12 text-red-400 mx-auto mb-3" />
-            <p>{error}</p>
-            <button
-              onClick={onClose}
-              className="mt-4 px-6 py-2 bg-white/10 rounded-full text-sm"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      ) : (
-        <>
-          <video
-            ref={videoRef}
-            className="flex-1 w-full object-cover"
-            playsInline
-          />
-          <div className="absolute bottom-10 left-0 right-0 flex justify-center">
-            <button
-              onClick={capture}
-              disabled={capturing}
-              className="w-20 h-20 rounded-full border-4 border-white flex items-center justify-center bg-white/20 backdrop-blur-sm active:scale-95 transition-transform disabled:opacity-50"
-            >
-              {capturing ? (
-                <Loader2 className="w-8 h-8 text-white animate-spin" />
-              ) : (
-                <div className="w-14 h-14 rounded-full bg-white" />
-              )}
-            </button>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
+// CameraModal removed in favor of standard CameraCapture component
 
 // ─── Scan History Item ─────────────────────────────────────────────────────────
 
@@ -408,6 +314,26 @@ export default function PlotScanner({ onMenuClick }) {
   const [pendingPhotoSetup, setPendingPhotoSetup] = useState(null); // { dataUrl, mimeType, trialId, mode, date, tag, label }
   const pendingGalleryTrialRef = useRef(null);
   const pendingGalleryModeRef = useRef("general");
+
+  // Cropper modal state variables
+  const [cropperOpen, setCropperOpen] = useState(false);
+  const [cropSource, setCropSource] = useState(null);
+  const cropCallbackRef = useRef(null);
+
+  const openCropperFor = (dataUrl, callback) => {
+    setCropSource(dataUrl);
+    cropCallbackRef.current = callback;
+    setCropperOpen(true);
+  };
+
+  const handleCropComplete = (croppedUrl) => {
+    setCropperOpen(false);
+    setCropSource(null);
+    if (cropCallbackRef.current) {
+      cropCallbackRef.current(croppedUrl);
+      cropCallbackRef.current = null;
+    }
+  };
 
   // ── Scan result handler ───────────────────────────────────────────────────
   const handleScan = useCallback(
@@ -472,6 +398,439 @@ export default function PlotScanner({ onMenuClick }) {
     [navigate],
   );
 
+  const updatePhotoAiStatus = useCallback(async (trialId, photoSrc, status, errorMsg = '', aiData = null, photoKey = 'PhotoURLs') => {
+    const currentTrials = getAppState().trials || [];
+    const trial = currentTrials.find(t => t.ID === trialId);
+    if (!trial) return;
+    const photos = safeJsonParse(trial[photoKey], []);
+    const updatedPhotos = photos.map(p => {
+      const src = resolvePhotoSrc(p);
+      if (src === photoSrc || p.tempId === photoSrc) {
+        const updated = { ...p, aiStatus: status, aiError: errorMsg };
+        if (aiData) {
+          updated.aiData = aiData;
+        }
+        return updated;
+      }
+      return p;
+    });
+    const patch = { ID: trial.ID, [photoKey]: JSON.stringify(updatedPhotos) };
+    const updatedTrial = { ...trial, ...patch };
+    updateState({ trials: currentTrials.map(t => t.ID === trialId ? updatedTrial : t) });
+    try {
+      await updateTrial(patch, getAppState);
+    } catch (e) {
+      console.error('Failed to update photo AI status:', e);
+    }
+  }, [getAppState, updateState]);
+
+  const createObservationFromAI = async (trial, daa, aiData, obsDate = null, photoUrl = null, weatherData = null) => {
+    const latestTrial = getAppState().trials.find(t => t.ID === trial.ID) || trial;
+    const trialCat = latestTrial.Category || activeCategory;
+    const catConfig = getCategoryConfig(trialCat);
+    const efficacyData = validateEfficacyData(safeJsonParse(latestTrial.EfficacyDataJSON, []), trialCat);
+
+    const getNormalizedTargetName = (name) => {
+      if (!name) return 'Unknown';
+      const clean = name.trim().toLowerCase();
+      if (clean.includes('leafminer') || clean.includes('leaf miner') || clean.includes('leaf mining')) {
+        return 'Leafminer Damage';
+      }
+      if (clean.includes('plant vigor') || clean.includes('general vigor') || clean.includes('visual vigor')) {
+        return 'General Plant Vigor';
+      }
+      if (clean.includes('plant health') || clean.includes('general plant health')) {
+        return 'General Plant Health';
+      }
+      if (clean.includes('leaf health') || clean.includes('general leaf health')) {
+        return 'General Leaf Health';
+      }
+      if (clean.includes('foliage') || clean.includes('general foliage')) {
+        return 'General Foliage';
+      }
+      if (clean.includes('vegetative development') || clean.includes('vegetative growth')) {
+        return 'General Vegetative Development';
+      }
+      return name.replace(/\b\w/g, c => c.toUpperCase());
+    };
+
+    // Normalize target details list
+    const isHerbicide = trialCat === 'herbicide';
+    const aiTargetsList = isHerbicide ? (aiData.weeds || []) : (aiData.targets || []);
+    
+    const isDetectedVal = (coverVal, statusStr) => {
+      const s = String(statusStr || '').toLowerCase();
+      return s !== 'not detected' && s !== 'absent' && parseFloat(coverVal || 0) > 0;
+    };
+
+    const normalizedWeeds = aiTargetsList.map(w => {
+      let rawStatus = String(w.status || '').trim();
+      if (!isHerbicide && (rawStatus === 'Unaffected' || !rawStatus)) {
+        rawStatus = 'Healthy';
+      }
+      const rawSpecies = w.species || w.name || 'Unknown';
+      const cleanSpecies = isHerbicide ? rawSpecies : getNormalizedTargetName(rawSpecies);
+      
+      // Stage-appropriate metrics (Growth-Stage Filtering)
+      const isReproductiveMetric = ['fruit count', 'marketable yield', 'unmarketable yield'].includes(cleanSpecies.toLowerCase());
+      let isEarlyStage = false;
+      const bbchVal = aiData.bbchStage || '';
+      const m = bbchVal.match(/BBCH\s*(\d+)/i);
+      const bbchNum = m ? parseInt(m[1], 10) : null;
+      if (bbchNum !== null) {
+        if (bbchNum < 60) isEarlyStage = true;
+      } else if (Number(daa) < 30) {
+        isEarlyStage = true;
+      }
+
+      if (!isHerbicide && isReproductiveMetric && isEarlyStage) {
+        return {
+          species: cleanSpecies,
+          cover: 0,
+          status: 'N/A',
+          growthStage: '',
+          notes: 'Not applicable at early growth stage',
+          confidence: null,
+          detectedCount: 0,
+          incidence: 0.0
+        };
+      }
+
+      const coverVal = typeof w.cover === 'number' ? w.cover : parseFloat(w.cover || w.value || 0);
+      const det = isDetectedVal(coverVal, rawStatus) ? 1 : 0;
+      return {
+        species: cleanSpecies,
+        cover: coverVal,
+        status: rawStatus,
+        growthStage: String(w.growthStage || '').trim(),
+        notes: String(w.notes || '').trim(),
+        confidence: w.confidence !== undefined ? parseInt(w.confidence, 10) : null,
+        detectedCount: det,
+        incidence: det ? 100.0 : 0.0
+      };
+    });
+
+    // Calculate primary values
+    const primaryObsField = getPrimaryObservationField(trialCat);
+    let primaryValue = 0;
+    
+    if (isHerbicide) {
+      primaryValue = typeof aiData.totalWeedCover === 'number'
+        ? aiData.totalWeedCover
+        : normalizedWeeds.reduce((sum, w) => sum + (w.cover || 0), 0);
+    } else {
+      if (aiData.metrics && typeof aiData.metrics[primaryObsField] === 'number') {
+        primaryValue = aiData.metrics[primaryObsField];
+      } else if (aiData.metrics && aiData.metrics[primaryObsField] !== undefined) {
+        primaryValue = parseFloat(aiData.metrics[primaryObsField] || 0);
+      } else {
+        primaryValue = normalizedWeeds.reduce((sum, w) => sum + (w.cover || 0), 0);
+      }
+    }
+
+    const deduplicateText = (existingText, newText) => {
+      if (!existingText) return newText || '';
+      if (!newText) return existingText || '';
+      const splitSentences = (txt) => {
+        return txt.split(/[.|;\n]/).map(s => s.trim()).filter(s => s.length > 5);
+      };
+      const getWordSet = (str) => new Set(str.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").split(/\s+/).filter(Boolean));
+      const getSimilarity = (s1, s2) => {
+        const set1 = getWordSet(s1);
+        const set2 = getWordSet(s2);
+        if (set1.size === 0 || set2.size === 0) return 0;
+        const intersection = new Set([...set1].filter(x => set2.has(x)));
+        return intersection.size / Math.min(set1.size, set2.size);
+      };
+      
+      const existingParts = splitSentences(existingText);
+      const newParts = splitSentences(newText);
+      const combined = [...existingParts];
+      newParts.forEach(part => {
+        const words = part.split(/\s+/).filter(Boolean).length;
+        const threshold = words < 10 || part.length < 50 ? 0.75 : 0.65;
+        const isDuplicate = combined.some(existingPart => {
+          const sim = getSimilarity(existingPart, part);
+          return sim > threshold;
+        });
+        if (!isDuplicate) {
+          combined.push(part);
+        }
+      });
+      return combined.join('. ') + (combined.length > 0 && !combined[combined.length - 1].endsWith('.') ? '.' : '');
+    };
+
+    const aiNotes = [];
+    if (aiData.efficacyAssessment || aiData.overallAssessment) aiNotes.push(aiData.efficacyAssessment || aiData.overallAssessment);
+    if (aiData.notes) aiNotes.push(aiData.notes);
+
+    let cleanNotes = aiNotes.length > 0 ? deduplicateText('', aiNotes.join('. ')) : `AI-analyzed on ${formatDateTime(new Date())}`;
+    let cleanEfficacy = aiData.efficacyAssessment || aiData.overallAssessment || '';
+
+    if (Number(daa) > 0) {
+      const rxDaa = new RegExp(`\\b(at|on|for|from|during)\\s+daa\\s*0\\b`, 'gi');
+      const rxDay = new RegExp(`\\b(at|on|for|from|during)\\s+day\\s*0\\b`, 'gi');
+      cleanNotes = cleanNotes.replace(rxDaa, `$1 DAA ${daa}`).replace(rxDay, `$1 Day ${daa}`);
+      cleanEfficacy = cleanEfficacy.replace(rxDaa, `$1 DAA ${daa}`).replace(rxDay, `$1 Day ${daa}`);
+      
+      cleanNotes = cleanNotes.replace(/\bDAA\s*0\b/g, `DAA ${daa}`).replace(/\bDay\s*0\b/g, `Day ${daa}`);
+      cleanEfficacy = cleanEfficacy.replace(/\bDAA\s*0\b/g, `DAA ${daa}`).replace(/\bDay\s*0\b/g, `Day ${daa}`);
+    }
+
+    const newObs = {
+      date: obsDate || toDatetimeLocal(new Date()),
+      daa: Number(daa),
+      [primaryObsField]: primaryValue,
+      weedCover: isHerbicide ? primaryValue : null,
+      weedDetails: normalizedWeeds.length > 0 ? normalizedWeeds : [{ species: isHerbicide ? 'No weeds detected' : 'No targets detected', cover: 0, status: '', notes: aiData.notes || 'AI-analyzed', confidence: null, detectedCount: 0, incidence: 0.0 }],
+      notes: cleanNotes,
+      aiConfidence: aiData.confidence || 'MEDIUM',
+      aiEfficacyAssessment: cleanEfficacy,
+      competitionLevel: aiData.competitionLevel || '',
+      status: 'Analyzed',
+      source: 'AI',
+      photoUrl: photoUrl || '',
+      bbchStage: aiData.bbchStage || '',
+      ...(weatherData ? {
+        weatherTemp: weatherData.temp,
+        weatherHumidity: weatherData.hum,
+        weatherWind: weatherData.wind,
+        weatherRain: weatherData.rain
+      } : {})
+    };
+
+    // Save all dynamic metrics fields directly into the observation
+    if (aiData.metrics && typeof aiData.metrics === 'object') {
+      Object.entries(aiData.metrics).forEach(([k, v]) => {
+        if (v === null || v === undefined || v === '') return;
+        const num = parseFloat(v);
+        if (!isNaN(num)) {
+          newObs[k] = num;
+        }
+      });
+    }
+
+    const existingIdx = efficacyData.findIndex(o => Number(o.daa) === Number(daa));
+    if (existingIdx >= 0) {
+      const existing = efficacyData[existingIdx];
+      const count = Number(existing.sampleCount || 1);
+      
+      const existingPrimaryValue = parseFloat(existing[primaryObsField] ?? 0) || 0;
+      const mergedPrimaryValue = parseFloat(((existingPrimaryValue * count) + primaryValue) / (count + 1));
+      
+      const mergedObs = {
+        ...existing,
+        sampleCount: count + 1,
+        [primaryObsField]: Number(mergedPrimaryValue.toFixed(2)),
+      };
+      if (primaryObsField === 'weedCover') {
+        mergedObs.weedCover = Number(mergedPrimaryValue.toFixed(2));
+      } else {
+        mergedObs.weedCover = existing.weedCover ?? null;
+      }
+
+      // Average all dynamic metrics
+      if (aiData.metrics && typeof aiData.metrics === 'object') {
+        Object.entries(aiData.metrics).forEach(([k, v]) => {
+          if (v === null || v === undefined || v === '') return;
+          const num = parseFloat(v);
+          if (!isNaN(num)) {
+            const oldVal = parseFloat(existing[k]);
+            if (!isNaN(oldVal)) {
+              mergedObs[k] = Number((((oldVal * count) + num) / (count + 1)).toFixed(2));
+            } else {
+              mergedObs[k] = num;
+            }
+          }
+        });
+      }
+
+      // Synthesize notes with AI
+      if (newObs.notes || existing.notes) {
+        const combined = [existing.notes, newObs.notes].filter(Boolean).join(' | ');
+        try {
+          const prompt = `You are a professional agricultural scientist.
+We are merging observations from multiple plant scans/samples at DAA ${daa} for Treatment: ${latestTrial.FormulationName || latestTrial.FormulationId || 'Unknown'} (Category: ${trialCat}, Crop: ${latestTrial.CropCrop || latestTrial.Crop || 'Crop'}).
+Here are the plant-level raw notes:
+${combined}
+
+Please synthesize these raw notes into a single, cohesive, publication-grade scientific summary of 1-2 sentences.
+Rules:
+1. Deduplicate similar observations.
+2. Reconcile any contradictions.
+3. Keep it strictly factual, professional, and concise. Do NOT give advice, recommendations, or monitoring schedules.
+4. Do NOT include markdown headers or bullet points.`;
+          
+          const synth = await generateTextWithAI(prompt, 'You are a professional agronomist.');
+          if (synth && synth.trim()) {
+            mergedObs.notes = synth.trim();
+          } else {
+            mergedObs.notes = deduplicateText(existing.notes, newObs.notes);
+          }
+        } catch (e) {
+          console.warn('Failed to synthesize notes:', e);
+          mergedObs.notes = deduplicateText(existing.notes, newObs.notes);
+        }
+      }
+
+      // Synthesize efficacy assessment with AI
+      if (newObs.aiEfficacyAssessment || existing.aiEfficacyAssessment) {
+        const combined = [existing.aiEfficacyAssessment, newObs.aiEfficacyAssessment].filter(Boolean).join(' | ');
+        try {
+          const prompt = `You are a professional agricultural scientist.
+We are merging observations from multiple plant scans/samples at DAA ${daa} for Treatment: ${latestTrial.FormulationName || latestTrial.FormulationId || 'Unknown'} (Category: ${trialCat}, Crop: ${latestTrial.CropCrop || latestTrial.Crop || 'Crop'}).
+Here are the plant-level efficacy assessments:
+${combined}
+
+Please synthesize these assessments into a single, cohesive, publication-grade scientific summary of 1-2 sentences.
+Rules:
+1. Deduplicate similar observations.
+2. Reconcile any contradictions.
+3. Keep it strictly factual, professional, and concise. Do NOT give advice, recommendations, or monitoring schedules.
+4. Do NOT include markdown headers or bullet points.`;
+          
+          const synth = await generateTextWithAI(prompt, 'You are a professional agronomist.');
+          if (synth && synth.trim()) {
+            mergedObs.aiEfficacyAssessment = synth.trim();
+          } else {
+            mergedObs.aiEfficacyAssessment = deduplicateText(existing.aiEfficacyAssessment, newObs.aiEfficacyAssessment);
+          }
+        } catch (e) {
+          console.warn('Failed to synthesize efficacy assessment:', e);
+          mergedObs.aiEfficacyAssessment = deduplicateText(existing.aiEfficacyAssessment, newObs.aiEfficacyAssessment);
+        }
+      }
+
+      // Merge photoUrls (comma separated list)
+      if (photoUrl) {
+        const urls = existing.photoUrl ? existing.photoUrl.split(',').map(u => u.trim()).filter(Boolean) : [];
+        if (!urls.includes(photoUrl)) {
+          urls.push(photoUrl);
+        }
+        mergedObs.photoUrl = urls.join(', ');
+      }
+
+      // Merge targets/weeds details list with clean normalization match
+      const mergedWeedDetails = [...(existing.weedDetails || [])];
+      normalizedWeeds.forEach(newW => {
+        const matchIdx = mergedWeedDetails.findIndex(w => {
+          const wName = getNormalizedTargetName(w.species || w.name).toLowerCase();
+          const newName = getNormalizedTargetName(newW.species || newW.name).toLowerCase();
+          return wName === newName;
+        });
+        if (matchIdx >= 0) {
+          const oldW = mergedWeedDetails[matchIdx];
+          const oldConf = oldW.confidence !== undefined && oldW.confidence !== null ? parseFloat(oldW.confidence) : null;
+          const newConf = newW.confidence !== undefined && newW.confidence !== null ? parseFloat(newW.confidence) : null;
+          let mergedConf = null;
+          if (oldConf !== null && newConf !== null) {
+            mergedConf = Math.round(((oldConf * count) + newConf) / (count + 1));
+          } else {
+            mergedConf = newConf !== null ? newConf : oldConf;
+          }
+          
+          const oldDetCount = oldW.detectedCount !== undefined ? parseInt(oldW.detectedCount, 10) : (isDetectedVal(oldW.cover || 0, oldW.status) ? count : 0);
+          const newDetCount = isDetectedVal(newW.cover, newW.status) ? 1 : 0;
+          const mergedDetCount = oldDetCount + newDetCount;
+          const mergedIncidence = parseFloat((mergedDetCount / (count + 1) * 100).toFixed(1));
+
+          mergedWeedDetails[matchIdx] = {
+            ...oldW,
+            species: getNormalizedTargetName(oldW.species || oldW.name),
+            status: newW.status === 'N/A' || oldW.status === 'N/A' ? 'N/A' : (newW.status || oldW.status),
+            cover: newW.status === 'N/A' || oldW.status === 'N/A' ? 0 : Number((((parseFloat(oldW.cover || 0) * count) + newW.cover) / (count + 1)).toFixed(2)),
+            confidence: newW.status === 'N/A' || oldW.status === 'N/A' ? null : mergedConf,
+            detectedCount: mergedDetCount,
+            incidence: mergedIncidence,
+            notes: deduplicateText(oldW.notes, newW.notes)
+          };
+        } else {
+          const det = isDetectedVal(newW.cover, newW.status) ? 1 : 0;
+          mergedWeedDetails.push({
+            ...newW,
+            species: getNormalizedTargetName(newW.species || newW.name),
+            detectedCount: det,
+            incidence: parseFloat((det / (count + 1) * 100).toFixed(1))
+          });
+        }
+      });
+      mergedObs.weedDetails = mergedWeedDetails;
+
+      efficacyData[existingIdx] = mergedObs;
+    } else {
+      newObs.sampleCount = 1;
+      efficacyData.push(newObs);
+    }
+    efficacyData.sort((a, b) => a.daa - b.daa);
+
+    // Calculate Result rating dynamically based on remaining severity/cover
+    let resultRating = 'Unrated';
+    if (efficacyData.length > 0) {
+      const latestObs = [...efficacyData].sort((a, b) => (parseFloat(b.daa) || 0) - (parseFloat(a.daa) || 0))[0];
+      const val = Number(getObservationPrimaryValue(trialCat, latestObs) ?? 0);
+      
+      if (trialCat === 'nutrition' || trialCat === 'biostimulant') {
+        const firstObs = [...efficacyData].sort((a, b) => (parseFloat(a.daa) || 0) - (parseFloat(b.daa) || 0))[0];
+        const baseVal = getObservationPrimaryValue(trialCat, firstObs) || 1;
+        const pctImprovement = ((val / baseVal) - 1) * 100;
+        if (pctImprovement >= 15) {
+          resultRating = 'Excellent';
+        } else if (pctImprovement >= 8) {
+          resultRating = 'Good';
+        } else if (pctImprovement >= 3) {
+          resultRating = 'Fair';
+        } else {
+          resultRating = 'Poor';
+        }
+      } else {
+        if (val <= 10) {
+          resultRating = 'Excellent';
+        } else if (val <= 25) {
+          resultRating = 'Good';
+        } else if (val <= 50) {
+          resultRating = 'Fair';
+        } else {
+          resultRating = 'Poor';
+        }
+      }
+    }
+
+    const targetField = catConfig.targetField || 'WeedSpecies';
+    const targetsString = normalizedWeeds.length > 0 ? normalizedWeeds.map(w => w.species).join(', ') : 'None detected';
+
+    const updated = {
+      ...latestTrial,
+      EfficacyDataJSON: JSON.stringify(efficacyData),
+      Result: resultRating,
+      [targetField]: targetsString,
+      ...(isHerbicide ? { WeedSpecies: targetsString } : {}),
+      ...(Number(daa) === 0 ? {
+        ApplicationTiming: latestTrial.ApplicationTiming || aiData.applicationTiming || '',
+        WeedGrowthStage: latestTrial.WeedGrowthStage || aiData.overallWeedGrowthStage || ''
+      } : {})
+    };
+
+    updateState({ trials: getAppState().trials.map(t => t.ID === updated.ID ? updated : t) });
+
+    const patch = {
+      ID: latestTrial.ID,
+      EfficacyDataJSON: updated.EfficacyDataJSON,
+      Result: updated.Result,
+      [targetField]: updated[targetField],
+      ...(isHerbicide ? { WeedSpecies: updated.WeedSpecies } : {}),
+      ...(Number(daa) === 0 ? {
+        ApplicationTiming: updated.ApplicationTiming,
+        WeedGrowthStage: updated.WeedGrowthStage
+      } : {})
+    };
+
+    try {
+      await updateTrial(patch, getAppState);
+    } catch (e) {
+      console.error('Failed to save AI observation:', e);
+    }
+  };
+
   // ── Photo upload (add to trial state + queue sync) ────────────────────────
   const handlePhotoUpload = useCallback(
     async (dataUrl, mimeType, trialId, mode, customDate, customTag, customLabel) => {
@@ -498,7 +857,7 @@ export default function PlotScanner({ onMenuClick }) {
       // YYYY-MM-DD date format
       const photoDate = customDate ? customDate.split("T")[0] : new Date().toISOString().split("T")[0];
       const photoLabel = customLabel || (isWeed ? "Weed Photo" : "Field Observation");
-      const photoTagValue = customTag || "";
+      const photoTagValue = customTag || (isWeed ? "Weed Photo" : "Whole Canopy");
       const photoKey = isWeed ? "WeedPhotosJSON" : "PhotoURLs";
       const existing = (() => {
         try {
@@ -515,6 +874,7 @@ export default function PlotScanner({ onMenuClick }) {
         date: photoDate,
         label: photoLabel,
         tag: photoTagValue,
+        aiStatus: 'pending'
       };
 
       const optimisticList = [...existing, optimisticEntry];
@@ -528,6 +888,33 @@ export default function PlotScanner({ onMenuClick }) {
         ),
       });
 
+      // Construct folderPath for Google Drive hierarchical routing
+      const project = appState.projects?.find((p) => p.ID === trial.ProjectID);
+      const projectName = project ? project.Name : 'Ungrouped Projects';
+      const dosageSuffix = trial.Dosage ? ` (${trial.Dosage})` : '';
+      const idSuffix = trial.ID ? ` - ${String(trial.ID).slice(-5)}` : '';
+      const trialNameWithDate = `${trial.FormulationName || 'Unknown Formulation'}${dosageSuffix} (${trial.Date ? trial.Date.split('T')[0] : photoDate})${idSuffix}`.trim();
+      
+      const rawCategory = trial.Category || project?.Category || appState?.activeCategory || 'herbicide';
+      const categoryLower = String(rawCategory).trim().toLowerCase();
+      const categoryName = categoryLower === 'herbicide' ? 'Herbicide' :
+                           categoryLower === 'fungicide' ? 'Fungicide' :
+                           categoryLower === 'pesticide' ? 'Pesticide' :
+                           categoryLower === 'nutrition' ? 'Nutrition' :
+                           categoryLower === 'biostimulant' ? 'Biostimulant' :
+                           categoryLower.charAt(0).toUpperCase() + categoryLower.slice(1);
+
+      const userName = String(
+        appState?.auth?.user?.Name || 
+        appState?.auth?.user?.Username || 
+        appState?.auth?.Name || 
+        appState?.auth?.Username || 
+        trial.InvestigatorName || 
+        'Default User'
+      ).trim() || 'Default User';
+
+      const folderPath = [categoryName, userName, projectName, trialNameWithDate];
+
       try {
         const driveResult = await uploadPhotoToDrive(
           {
@@ -539,6 +926,7 @@ export default function PlotScanner({ onMenuClick }) {
             label: photoLabel,
             date: photoDate,
             tag: photoTagValue,
+            folderPath,
           },
           getAppState,
         );
@@ -548,8 +936,8 @@ export default function PlotScanner({ onMenuClick }) {
 
         const driveUrl = driveResult?.url || driveResult?.fileUrl || null;
         const finalEntry = driveUrl
-          ? { url: driveUrl, date: photoDate, label: photoLabel, tag: photoTagValue, identifications: [] }
-          : { fileData: finalDataUrl, mimeType: finalMimeType, date: photoDate, label: photoLabel, tag: photoTagValue, identifications: [] };
+          ? { url: driveUrl, driveId: driveResult?.id || getDriveFileId(driveUrl), date: photoDate, label: photoLabel, tag: photoTagValue, identifications: [], aiStatus: 'pending' }
+          : { fileData: finalDataUrl, mimeType: finalMimeType, date: photoDate, label: photoLabel, tag: photoTagValue, identifications: [], aiStatus: 'pending' };
         const finalList = existing.concat(finalEntry);
         const persistedTrial = {
           ...trial,
@@ -567,27 +955,113 @@ export default function PlotScanner({ onMenuClick }) {
         );
 
         setUploadStatus({
-          msg: `Photo saved to ${isWeed ? catConfig.targetLabel.toLowerCase() : "trial"} successfully!`,
-          type: "success",
+          msg: `Photo saved. Starting AI analysis...`,
+          type: "info",
         });
-        setHistory((prev) =>
-          prev.map((h, i) =>
-            i === 0
-              ? { ...h, action: isWeed ? `${catConfig.targetLabel} photo added` : "Photo added" }
-              : h,
-          ),
-        );
+
+        // Calculate Days After Application (DAA)
+        const daa = calculateDAA(photoDate, trial.Date);
+
+        // Fetch weather conditions
+        const fetchWeatherForPhoto = async (lat, lon) => {
+          try {
+            const today = new Date().toISOString().split('T')[0];
+            let wUrl;
+            if (photoDate < today) {
+              wUrl = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&start_date=${photoDate}&end_date=${photoDate}&hourly=temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation&wind_speed_unit=kmh`;
+            } else {
+              wUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation&wind_speed_unit=kmh`;
+            }
+            const wr = await fetch(wUrl);
+            const wd = await wr.json();
+            let temp, hum, wind, rain;
+            if (photoDate < today && wd.hourly) {
+              const midday = wd.hourly.time?.findIndex(t => t.includes('T12:')) ?? 6;
+              const idx = midday >= 0 ? midday : 6;
+              temp = wd.hourly.temperature_2m?.[idx];
+              hum = wd.hourly.relative_humidity_2m?.[idx];
+              wind = wd.hourly.wind_speed_10m?.[idx];
+              rain = wd.hourly.precipitation?.[idx];
+            } else if (wd.current) {
+              temp = wd.current.temperature_2m;
+              hum = wd.current.relative_humidity_2m;
+              wind = wd.current.wind_speed_10m;
+              rain = wd.current.precipitation;
+            }
+            return { temp, hum, wind, rain };
+          } catch(we) {
+            console.warn('Weather fetch failed:', we.message);
+            return null;
+          }
+        };
+
+        let weatherInfo = null;
+        if (trial.Lat && trial.Lon) {
+          weatherInfo = await fetchWeatherForPhoto(trial.Lat, trial.Lon);
+        } else if (navigator.geolocation) {
+          weatherInfo = await new Promise((resolve) => {
+            navigator.geolocation.getCurrentPosition(
+              async (pos) => {
+                const res = await fetchWeatherForPhoto(pos.coords.latitude.toFixed(8), pos.coords.longitude.toFixed(8));
+                resolve(res);
+              },
+              () => {
+                console.warn('Geolocation denied — weather not fetched');
+                resolve(null);
+              },
+              {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 0
+              }
+            );
+          });
+        }
+
+        // Run Gemini AI analysis
+        await updatePhotoAiStatus(trial.ID, driveUrl || finalDataUrl, 'processing', '', null, photoKey);
+        const result = await analyzePhoto(finalDataUrl, {
+          treatment: trial.FormulationName,
+          daa,
+          rep: trial.Replication || 1,
+          category: trial.Category || activeCategory,
+          photoTag: photoTagValue
+        }, (msg) => {
+          setUploadStatus({ msg, type: "info" });
+        });
+
+        if (result.success) {
+          await createObservationFromAI(trial, daa, result.data, photoDate, driveUrl || finalDataUrl, weatherInfo);
+          await updatePhotoAiStatus(trial.ID, driveUrl || finalDataUrl, 'completed', '', result.data, photoKey);
+          
+          setUploadStatus({
+            msg: `AI complete! Logged observation at DAA ${daa}`,
+            type: "success",
+          });
+          setHistory((prev) =>
+            prev.map((h, i) =>
+              i === 0
+                ? { ...h, action: `AI observation logged (DAA ${daa})` }
+                : h,
+            ),
+          );
+        } else {
+          await updatePhotoAiStatus(trial.ID, driveUrl || finalDataUrl, 'failed', result.error || 'AI analysis skipped', null, photoKey);
+          setUploadStatus({
+            msg: `Photo saved, but AI analysis skipped: ${result.error}`,
+            type: "warning",
+          });
+        }
       } catch (err) {
-        console.error("Photo upload error:", err);
-        // Keep the optimistic local photo visible, but report that the cloud sync failed.
+        console.error("Photo upload/analysis error:", err);
         setUploadStatus({
-          msg: `Photo added locally, but cloud sync failed: ${err.message}`,
-          type: "warning",
+          msg: `Error saving or analyzing photo: ${err.message}`,
+          type: "error",
         });
       }
-      setTimeout(() => setUploadStatus(null), 4000);
+      setTimeout(() => setUploadStatus(null), 5000);
     },
-    [getAppState, updateState],
+    [getAppState, updateState, activeCategory, updatePhotoAiStatus, createObservationFromAI],
   );
 
   // ── Camera capture callback ───────────────────────────────────────────────
@@ -598,14 +1072,16 @@ export default function PlotScanner({ onMenuClick }) {
       if (!trialId) return;
 
       const defaultLabel = mode === 'weed' ? 'Weed Photo' : 'Field Observation';
-      setPendingPhotoSetup({
-        dataUrl,
-        mimeType: "image/jpeg",
-        trialId,
-        mode,
-        date: toDatetimeLocal(new Date()),
-        tag: "",
-        label: defaultLabel
+      openCropperFor(dataUrl, (croppedUrl) => {
+        setPendingPhotoSetup({
+          dataUrl: croppedUrl,
+          mimeType: "image/jpeg",
+          trialId,
+          mode,
+          date: toDatetimeLocal(new Date()),
+          tag: "",
+          label: defaultLabel
+        });
       });
     },
     [cameraModal],
@@ -624,14 +1100,16 @@ export default function PlotScanner({ onMenuClick }) {
       const reader = new FileReader();
       reader.onload = async (ev) => {
         const defaultLabel = mode === 'weed' ? 'Weed Photo' : 'Field Observation';
-        setPendingPhotoSetup({
-          dataUrl: ev.target.result,
-          mimeType: file.type || "image/jpeg",
-          trialId,
-          mode,
-          date: toDatetimeLocal(new Date()),
-          tag: "",
-          label: defaultLabel
+        openCropperFor(ev.target.result, (croppedUrl) => {
+          setPendingPhotoSetup({
+            dataUrl: croppedUrl,
+            mimeType: "image/jpeg",
+            trialId,
+            mode,
+            date: toDatetimeLocal(new Date()),
+            tag: "",
+            label: defaultLabel
+          });
         });
       };
       reader.readAsDataURL(file);
@@ -807,7 +1285,7 @@ export default function PlotScanner({ onMenuClick }) {
       {/* Quick Action Modal */}
       {quickModal && (
         <QuickActionModal
-          trial={quickModal.trial}
+          trial={state.trials?.find(t => String(t.ID) === String(quickModal.trial?.ID)) || quickModal.trial}
           rawQr={quickModal.raw}
           onClose={() => setQuickModal(null)}
           onAction={handleAction}
@@ -817,14 +1295,24 @@ export default function PlotScanner({ onMenuClick }) {
 
       {/* Camera Modal for photo capture */}
       {cameraModal && (
-        <CameraModal
-          mode={cameraModal.mode}
-          trialId={cameraModal.trialId}
+        <CameraCapture
+          onCapture={(dataUrl) => handleCapture(dataUrl, cameraModal.mode)}
           onClose={() => setCameraModal(null)}
-          onCapture={handleCapture}
-          activeCategory={activeCategory}
+          initialAspectRatio="3:4"
         />
       )}
+
+      {/* Cropper Modal */}
+      <CropperModal
+        isOpen={cropperOpen}
+        imageSrc={cropSource}
+        onClose={() => {
+          setCropperOpen(false);
+          setCropSource(null);
+          cropCallbackRef.current = null;
+        }}
+        onCropComplete={handleCropComplete}
+      />
 
       {/* Photo Details Setup Modal */}
       {pendingPhotoSetup && (() => {
