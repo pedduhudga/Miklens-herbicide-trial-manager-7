@@ -15,7 +15,7 @@
   - Handle edge cases: zero trials, single treatment, all-null parameter data — return partial ReportData with warnings rather than throwing
   - _Requirements: 1.1-1.7, 2.1, 4.1-4.3_
 
-- [-] 2. Extend AnalysisEngine with Batch Analysis
+- [x] 2. Extend AnalysisEngine with Batch Analysis
   - Add `async analyzeAllParameters(paramKeys, options = {})` method to the `AnalysisEngine` class in `src/utils/analysisUtils.js`
   - Iterate over paramKeys array, call `this.analyze(key, null, options.daa, options)` for each key
   - Return `{ [paramKey]: AnalysisResult }` — catch errors per-parameter and store `{ error: message }` without throwing
@@ -24,7 +24,7 @@
   - Do not modify any existing method signatures
   - _Requirements: 2.1, 2.4, 4.1-4.2_
 
-- [~] 3. Build the ReportConfigPanel Component
+- [x] 3. Build the ReportConfigPanel Component
   - Create `src/components/ReportConfigPanel.jsx` with props: `{ project, subTrials, activeCategory, onGenerate, canDownload }`
   - Add internal state for: format ('pdf'|'excel'|'docx'), postHoc ('lsd'|'tukey'|'duncan'), alpha (0.05|0.01), daa (number|null), transformation ('none'|'arcsine'|'log'|'sqrt'), includePhotos (bool), includeWeather (bool)
   - Build pre-flight data summary panel using useMemo: count distinct treatment groups, count replications per treatment, call `getParametersWithData`, detect unbalanced design, detect missing control, detect treatments with <2 reps
@@ -36,7 +36,7 @@
   - Use Tailwind classes consistent with existing Reports.jsx style
   - _Requirements: 6.1-6.6_
 
-- [~] 4. Build the ReportProgressModal Component
+- [x] 4. Build the ReportProgressModal Component
   - Create `src/components/ReportProgressModal.jsx` with props: `{ isOpen, steps, currentStep, percent, onCancel }`
   - Render a centered modal overlay (fixed, z-50) with title "Generating Report…", animated progress bar, and vertical step list
   - Each step shows ✓ (done), ▶ (active), ○ (pending), or ✗ (error) icon based on status field
@@ -45,7 +45,7 @@
   - Prevent body scroll when modal is open
   - _Requirements: 6.4_
 
-- [~] 5. Build the PDF Report Renderer
+- [x] 5. Build the PDF Report Renderer
   - Create `src/services/pdfReportRenderer.js` with async function `generateProjectPDF(reportData, options = {})`
   - Use jsPDF and jspdf-autotable (already installed); import `createDoc`, `pdfHeader`, `pdfAddFooter`, `secHeading`, `addPhotoGrid` from `src/services/trialReports.js`
   - Build Cover Page: project name, category badge, metadata grid (crop, location, investigator, organisation, GPS, trial period), design label, confidential footer, then new page
@@ -64,7 +64,7 @@
   - Save as `ProjectReport_{projectName}_{date}.pdf`
   - _Requirements: 5.1, 10.1-10.7_
 
-- [~] 6. Build the Excel Report Renderer
+- [x] 6. Build the Excel Report Renderer
   - Create `src/services/excelReportRenderer.js` with async function `generateProjectExcel(reportData, options = {})`
   - Use ExcelJS (already installed via AdvancedReportGenerator); create a fresh `ExcelJS.Workbook`
   - Sheet 1 Cover/Summary: project name, crop, location, investigator, date generated, summary stats (treatments count, reps, primary metric mean, CV%), design name
@@ -84,7 +84,7 @@
   - Save as `ProjectReport_{projectName}_{date}.xlsx` via blob URL download
   - _Requirements: 5.2, 5.4_
 
-- [~] 7. Build the DOCX Report Renderer
+- [x] 7. Build the DOCX Report Renderer
   - Create `src/services/docxReportRenderer.js` with async function `generateProjectDocx(reportData, options = {})`
   - Use the existing `docx` library (already used in trialReports.js); import helper styles from trialReports.js where possible
   - Build document with same section order as PDF renderer using Paragraph, TextRun, Table, TableRow, TableCell
@@ -95,7 +95,7 @@
   - Save as `ProjectReport_{projectName}_{date}.docx` via blob URL download
   - _Requirements: 5.3, 5.4_
 
-- [~] 8. Upgrade the Reports Page UI
+- [x] 8. Upgrade the Reports Page UI
   - Modify `src/pages/Reports.jsx` to add a tab bar with two tabs: "Project Report" (new, default) and "Single Trial Report" (existing)
   - In Project Report tab: project selector dropdown filtered by activeCategory; show sub-trial count and expandable preview listing treatment names and rep counts; render `<ReportConfigPanel>` passing selected project, its sub-trials, and activeCategory
   - Handle `onGenerate(options)` callback: open ReportProgressModal, call `buildReportData`, call appropriate renderer (generateProjectPDF / generateProjectExcel / generateProjectDocx), update progress steps, close modal on completion or error
@@ -104,7 +104,7 @@
   - Add error handling: catch renderer errors, close modal, show toast with error message
   - _Requirements: 5.5, 6.1-6.6_
 
-- [~] 9. Wire Up LargeScale Project Reports
+- [x] 9. Wire Up LargeScale Project Reports
   - Modify `src/pages/LargeScaleTrials.jsx` to add a "Project Report (Professional)" button in the existing download reports section
   - On click: open simplified ReportConfigPanel (format + options only, no project selector) in a Modal
   - In `buildReportData`, handle `options.isLargeScale === true`: source observations from `fbGetLargeScaleData(projectId).observations`, map sectors to treatment groups using sector Dosage, map quadrant visits to replication observations
@@ -112,7 +112,7 @@
   - Reuse ReportProgressModal for progress display
   - _Requirements: 8.1-8.5_
 
-- [~] 10. Validation and Build Verification
+- [x] 10. Validation and Build Verification
   - Run `npm run build` (or `vite build`) in the project root and confirm zero build errors
   - Verify `src/services/reportDataBuilder.js` exports `buildReportData`, `getParametersWithData`, and `computeTreatmentMeans` without import errors
   - Verify `src/utils/analysisUtils.js` AnalysisEngine class has `analyzeAllParameters` method

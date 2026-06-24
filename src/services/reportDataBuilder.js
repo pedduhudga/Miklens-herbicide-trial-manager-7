@@ -5,6 +5,13 @@
  * Accepts project-level trial data, groups by treatment, computes
  * descriptive statistics via AnalysisEngine, and returns a single
  * well-shaped ReportData object consumed by all report renderers.
+ *
+ * Stabilization fixes applied (2026-06-24):
+ *  PI-1 – ANOVA key-name mismatch between performANOVA() and buildAnovaShape()
+ *  PI-2 – Hardcoded 4-row ANOVA source table (now design-aware)
+ *  PI-3 – Pot Trial reporting consistency (CRD-style label, no spurious Blocks row)
+ *  PI-4 – phytotoxicity excluded from efficacy% calculation
+ *  PI-5 – LargeScale data path: sector/GPS/spatial CV% enrichment
  */
 
 import { validateEfficacyData, AnalysisEngine } from '../utils/analysisUtils.js';
@@ -14,6 +21,12 @@ import {
   calculateEfficacy,
 } from '../utils/categoryConfig.js';
 import { safeJsonParse } from '../utils/helpers.js';
+import { fbGetLargeScaleData } from './largeScaleService.js';
+
+// ─── Parameters that must NOT be reported as "efficacy %" ────────────────────
+// These are adverse/side-effect parameters — lower value is better for the
+// CROP but the reduction logic would produce a misleadingly positive number.
+const EXCLUDED_FROM_EFFICACY = new Set(['phytotoxicity', 'cropPhytotoxicity']);
 
 // ─── small math helpers ────────────────────────────────────────────────────────
 
@@ -408,11 +421,67 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
   }
 
   // ── 8. Build parameters array ───────────────────────────────────────────────
+
+  /**
+   * PI-1 FIX: Map the actual key names returned by performANOVA() / AnalysisEngine.analyze()
+   *   performANOVA() returns: ssTreatments, ssBlocks, dfTreatments, dfBlocks,
+   *                           msTreatments, msBlocks, fStatistic, pValue,
+   *                           cd5, cd1, semGlobal, cv, grandMean, ssError,
+   *                           ssTotal, dfError, dfTotal, msError
+   *   AnalysisEngine wraps these in ar.anova (same keys from performANOVA).
+   *   The old code used wrong keys (ssTreat, fVal, pVal, lsd5…) which all
+   *   resolved to null/0.  This version reads both key variants so it works
+   *   whether the value comes from performANOVA or calculateANOVA.
+   *
+   * PI-2 / PI-3 FIX: Build a design-aware ANOVA source table.
+   *   CRD and Pot Trial (stripe) use 3 rows: Treatments | Error | Total
+   *   RCBD and Pot Trial (rcbd-pot) use 4 rows: Treatments | Blocks | Error | Total
+   */
   const buildAnovaShape = (ar) => {
     if (!ar || ar.error) return null;
-    const a = ar.anova || {};
-    const pVal = a.pVal ?? a.p ?? null;
-    const fVal = a.fVal ?? a.f ?? null;
+
+    // ar.anova can be from performANOVA() (uses anovaTable sub-object + top-level keys)
+    // OR from calculateANOVA() (uses ssTreat / dfTreat / fVal / pVal flat keys).
+    // We need to handle both.
+    const a   = ar.anova || {};       // AnalysisEngine stores performANOVA result here
+    const tbl = a.anovaTable || {};  // performANOVA sub-object
+
+    // ── Sum of Squares ─────────────────────────────────────────────────────
+    // performANOVA   → a.ssTreatments / a.ssBlocks / a.ssError / a.ssTotal
+    // calculateANOVA → a.ssTreat / a.ssBlock / a.ssError / a.ssTotal
+    // anovaTable     → tbl.ss[]
+    const ssTrt   = a.ssTreatments  ?? a.ssTreat  ?? (tbl.ss?.[0]) ?? 0;
+    const ssBlk   = a.ssBlocks      ?? a.ssBlock  ?? (tbl.ss?.[1]) ?? 0;
+    const ssErr   = a.ssError       ?? (tbl.ss?.[tbl.source?.indexOf('Error')] ?? 0);
+    const ssTot   = a.ssTotal       ?? (tbl.ss?.[tbl.source?.indexOf('Total')] ?? 0);
+
+    // ── Degrees of Freedom ─────────────────────────────────────────────────
+    const dfTrt   = a.dfTreatments  ?? a.dfTreat  ?? (tbl.df?.[0]) ?? 0;
+    const dfBlk   = a.dfBlocks      ?? a.dfBlock  ?? (tbl.df?.[1]) ?? 0;
+    const dfErr   = a.dfError       ?? (tbl.df?.[tbl.source?.indexOf('Error')] ?? 0);
+    const dfTot   = a.dfTotal       ?? (tbl.df?.[tbl.source?.indexOf('Total')] ?? 0);
+
+    // ── Mean Squares ───────────────────────────────────────────────────────
+    const msTrt   = a.msTreatments  ?? a.msTreat  ?? (tbl.ms?.[0]) ?? 0;
+    const msBlk   = a.msBlocks      ?? a.msBlock  ?? (tbl.ms?.[1]) ?? 0;
+    const msErr   = a.msError       ?? (tbl.ms?.[tbl.source?.indexOf('Error')] ?? 0);
+
+    // ── F-statistic & p-value ──────────────────────────────────────────────
+    // performANOVA   → a.fStatistic / a.pValue
+    // calculateANOVA → a.fVal / a.pVal
+    const fVal    = a.fStatistic    ?? a.fVal     ?? (tbl.f?.[0])  ?? null;
+    const pVal    = a.pValue        ?? a.pVal     ?? (tbl.p?.[0])  ?? null;
+
+    // ── Precision statistics ───────────────────────────────────────────────
+    // performANOVA   → a.semGlobal / a.cd5 / a.cd1 / a.cv / a.grandMean
+    // calculateANOVA → a.sem (if present) / a.cv / a.grandMean
+    const sem     = a.semGlobal     ?? a.sem      ?? null;
+    const lsd5    = a.cd5           ?? a.lsd5     ?? a.lsd  ?? null;
+    const lsd1    = a.cd1           ?? a.lsd1     ?? null;
+    const cvPct   = a.cv            ?? null;
+    const gMean   = a.grandMean     ?? null;
+
+    // ── Significance labels ────────────────────────────────────────────────
     const { symbol, text } = pVal !== null
       ? (pVal <= 0.01
           ? { symbol: '**', text: 'Highly Significant at 1% level' }
@@ -421,21 +490,51 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
           : { symbol: 'NS', text: 'Non-Significant (NS)' })
       : { symbol: '?', text: 'Cannot compute' };
 
+    // ── Design-aware ANOVA source table (PI-2 / PI-3) ─────────────────────
+    // If anovaTable already has a source array (from performANOVA), use it
+    // directly as it is already design-aware (CRD = 3 rows, RCBD = 4 rows).
+    // Fall back to detecting design from the analysisEngine result or project.
+    let useCrdStyle = false;
+    if (tbl.source && Array.isArray(tbl.source)) {
+      useCrdStyle = !tbl.source.includes('Blocks');
+    } else {
+      // Fallback: CRD-style when dfBlk === 0 (no block term)
+      useCrdStyle = dfBlk === 0;
+    }
+
+    let sourceArr, ssArr, dfArr, msArr, fArr, pArr;
+    if (useCrdStyle) {
+      sourceArr = ['Treatments', 'Error', 'Total'];
+      ssArr     = [ssTrt,  ssErr, ssTot];
+      dfArr     = [dfTrt,  dfErr, dfTot];
+      msArr     = [msTrt,  msErr, null];
+      fArr      = [fVal,   null,  null];
+      pArr      = [pVal,   null,  null];
+    } else {
+      sourceArr = ['Treatments', 'Blocks', 'Error', 'Total'];
+      ssArr     = [ssTrt,  ssBlk, ssErr, ssTot];
+      dfArr     = [dfTrt,  dfBlk, dfErr, dfTot];
+      msArr     = [msTrt,  msBlk, msErr, null];
+      fArr      = [fVal,   null,  null,  null];
+      pArr      = [pVal,   null,  null,  null];
+    }
+
     return {
-      source: ['Treatments', 'Blocks', 'Error', 'Total'],
-      ss: [a.ssTreat ?? 0, a.ssBlock ?? 0, a.ssError ?? 0, a.ssTotal ?? 0],
-      df: [a.dfTreat ?? 0, a.dfBlock ?? 0, a.dfError ?? 0, a.dfTotal ?? 0],
-      ms: [a.msTreat ?? 0, a.msBlock ?? 0, a.msError ?? 0, null],
-      f: [fVal, null, null, null],
-      p: [pVal, null, null, null],
-      grandMean: a.grandMean ?? null,
-      cv: a.cv ?? null,
-      sem: a.sem ?? a.semPlus ?? null,
-      lsd5: a.lsd5 ?? a.lsd ?? null,
-      lsd1: a.lsd1 ?? null,
+      source: sourceArr,
+      ss:     ssArr,
+      df:     dfArr,
+      ms:     msArr,
+      f:      fArr,
+      p:      pArr,
+      grandMean: gMean,
+      cv:    cvPct,
+      sem:   sem,
+      lsd5:  lsd5,
+      lsd1:  lsd1,
       significant: pVal !== null && pVal <= 0.05,
-      significance_label: text,
+      significance_label:  text,
       significance_symbol: symbol,
+      usedCrdModel: useCrdStyle,
     };
   };
 
@@ -443,11 +542,16 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
     const fieldMeta = (categoryConfig.observationFields || []).find(f => f.key === paramKey) || {};
     const ar = analysisResults[paramKey];
     const letters = ar?.postHoc?.letters || {};
-    const engineMeans = ar?.means || {};
     const engineEfficacy = ar?.efficacy || {};
 
-    // Per-treatment means (computed independently from rawMatrix for accuracy)
+    // Per-treatment means (computed independently from raw trial data)
     const rawMeans = computeTreatmentMeans(subTrials, paramKey, options.daa ?? null, category);
+
+    // PI-4 FIX: phytotoxicity and similar adverse-effect parameters must not
+    // be presented as "efficacy %" because the reduction formula would
+    // misleadingly suggest the treatment is highly effective at causing crop
+    // damage.  We set efficacy_pct = null and flag the column header instead.
+    const isExcludedFromEfficacy = EXCLUDED_FROM_EFFICACY.has(paramKey);
 
     const meansObj = {};
     for (const key of treatmentKeys) {
@@ -457,31 +561,36 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
       const treatMean = rm.mean ?? null;
 
       let efficacy_pct = null;
-      if (engineEfficacy[name] !== undefined) {
-        efficacy_pct = engineEfficacy[name];
-      } else if (utcMean !== null && treatMean !== null && utcMean !== 0) {
-        efficacy_pct = calculateEfficacy(category, treatMean, utcMean);
+      if (!isExcludedFromEfficacy) {
+        if (engineEfficacy[name] !== undefined) {
+          efficacy_pct = engineEfficacy[name];
+        } else if (utcMean !== null && treatMean !== null && utcMean !== 0) {
+          efficacy_pct = calculateEfficacy(category, treatMean, utcMean);
+        }
       }
 
       meansObj[name] = {
-        mean: rm.mean ?? null,
-        sd: rm.sd ?? null,
-        se: rm.se ?? null,
-        cv: rm.cv ?? null,
-        n: rm.n ?? 0,
-        cldLetter: letters[name] || '',
+        mean:       rm.mean ?? null,
+        sd:         rm.sd   ?? null,
+        se:         rm.se   ?? null,
+        cv:         rm.cv   ?? null,
+        n:          rm.n    ?? 0,
+        cldLetter:  letters[name] || '',
         efficacy_pct,
+        // Flag so renderers can display "N/A (adverse effect)" instead of "—"
+        efficacyExcluded: isExcludedFromEfficacy,
       };
     }
 
     return {
-      key: paramKey,
-      label: fieldMeta.label || paramKey,
-      unit: fieldMeta.unit || '',
-      means: meansObj,
-      anova: buildAnovaShape(ar),
-      postHocMethod: options.postHoc || 'lsd',
+      key:            paramKey,
+      label:          fieldMeta.label || paramKey,
+      unit:           fieldMeta.unit  || '',
+      means:          meansObj,
+      anova:          buildAnovaShape(ar),
+      postHocMethod:  options.postHoc || 'lsd',
       transformation: options.transformation || 'none',
+      efficacyExcluded: isExcludedFromEfficacy,
     };
   };
 
@@ -493,8 +602,7 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
     (allParamEntries.length ? allParamEntries[0] : buildParameterEntry(primaryField));
 
   // Yield parameter (if category supports yield)
-  const yieldEntry = (() => {
-    const yieldParamKey = 'yieldKgPlot';
+  const buildYieldEntry = async () => {
     // Check if any trial has yield data
     const hasYield = subTrials.some(t => {
       const yVal = toNum(t.Yield || t.YieldValue || t.yieldKgPlot);
@@ -524,7 +632,8 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
     } catch (_e) { /* yield ANOVA optional */ }
 
     return { means: yieldMeans, anova: yieldAnova };
-  })();
+  };
+  const yieldEntry = await buildYieldEntry();
 
   // ── 9. Check params with partial data ──────────────────────────────────────
   for (const field of categoryConfig.observationFields || []) {
@@ -596,35 +705,105 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
   ];
 
   const design = project?.Design || project?.TrialDesign || 'RCBD';
+
+  // PI-3 FIX: Determine the actual statistical model used for Pot Trials so
+  // renderers can display the correct ANOVA model in the report header.
+  const potLayout = project?.PotLayout || subTrials[0]?.PotLayout || 'stripe';
+  const isPotTrial = design === 'PotTrial';
+  // Pot Trial with stripe/randomized-row layout → CRD model
+  // Pot Trial with rcbd-pot layout → RCBD model
+  const analysisModel = isPotTrial
+    ? (potLayout === 'rcbd-pot' ? 'RCBD' : 'CRD')
+    : /CRD/i.test(design)
+    ? 'CRD'
+    : /FACTORIAL|TWO[- ]?WAY|2WAY/i.test(design)
+    ? 'Two-Way Factorial'
+    : /SPLIT[- ]?PLOT/i.test(design)
+    ? 'Split-Plot'
+    : 'RCBD';
+
   const designLabels = {
-    RCBD: 'Randomized Complete Block Design',
-    CRD: 'Completely Randomized Design',
-    PotTrial: 'Pot Trial',
-    Factorial: 'Factorial Design',
-    'Split-Plot': 'Split-Plot Design',
-    LargeScale: 'Large-Scale Field Trial',
+    RCBD:          'Randomized Complete Block Design',
+    CRD:           'Completely Randomized Design',
+    PotTrial:      'Pot Trial',
+    Factorial:     'Factorial Design',
+    'Split-Plot':  'Split-Plot Design',
+    LargeScale:    'Large-Scale Field Trial',
   };
 
+  // PI-5 FIX: For LargeScale projects, enrich meta with spatial sector data
+  // if it has been loaded via fbGetLargeScaleData (passed through options).
+  // Also compute per-treatment spatial CV% from sector values.
+  const isLargeScale = design === 'LargeScale';
+  let largescaleSectors  = [];
+  let spatialSummary     = {};   // { [treatmentName]: { sectorCount, spatialCV } }
+
+  if (isLargeScale && options.largeScaleData) {
+    // options.largeScaleData = { sectors, quadrantsMap, observations }
+    largescaleSectors = options.largeScaleData.sectors || [];
+
+    // Build per-treatment spatial CV using final observation values per sector
+    const sectorValuesByTreatment = {};
+    largescaleSectors.forEach(sector => {
+      const trtKey = sector.Dosage
+        ? `${sector.Name || sector.Code}|${sector.Dosage}`
+        : sector.Name || sector.Code;
+
+      const quads = options.largeScaleData.quadrantsMap?.[sector.ID] || [];
+      quads.forEach(quad => {
+        const visits = quad.visits || [];
+        if (!visits.length) return;
+        const lastVisit = visits[visits.length - 1];
+        const val = toNum(
+          lastVisit.weedObservations?.[0]?.cover ??
+          lastVisit.cropPhytotoxicity ??
+          null
+        );
+        if (val !== null) {
+          const tName = sector.Name || sector.Code || trtKey;
+          if (!sectorValuesByTreatment[tName]) sectorValuesByTreatment[tName] = [];
+          sectorValuesByTreatment[tName].push(val);
+        }
+      });
+    });
+
+    Object.entries(sectorValuesByTreatment).forEach(([tName, vals]) => {
+      const stats = descStats(vals);
+      spatialSummary[tName] = {
+        sectorCount: vals.length,
+        spatialCV: stats.cv !== null ? stats.cv : null,
+        spatialMean: stats.mean,
+        spatialSD: stats.sd,
+      };
+    });
+  }
+
   const meta = {
-    projectName: project?.ProjectName || project?.Name || `Project ${projectId}`,
-    crop: project?.Crop || subTrials[0]?.Crop || '',
-    location: project?.Location || project?.Farm || subTrials[0]?.Location || '',
+    projectName:  project?.ProjectName || project?.Name || `Project ${projectId}`,
+    crop:         project?.Crop    || subTrials[0]?.Crop || '',
+    location:     project?.Location || project?.Farm    || subTrials[0]?.Location || '',
     investigator: project?.Investigator || project?.InvestigatorName || '',
-    organisation: project?.Organisation || project?.Organization || '',
-    gps: project?.GPS || project?.Coordinates || null,
+    organisation: project?.Organisation || project?.Organization    || '',
+    gps:          project?.GPS || project?.Coordinates || null,
     targetSpecies:
-      project?.WeedSpecies ||
+      project?.WeedSpecies  ||
       project?.DiseaseTarget ||
-      project?.PestTarget ||
+      project?.PestTarget   ||
       project?.NutrientType ||
-      project?.TargetWeed ||
+      project?.TargetWeed   ||
       '',
     applicationDates,
-    reportDate: new Date().toISOString().split('T')[0],
+    reportDate:    new Date().toISOString().split('T')[0],
     design,
-    designLabel: designLabels[design] || design,
+    designLabel:   designLabels[design] || design,
+    // PI-3: expose the actual statistical model for renderers
+    analysisModel,
+    // PI-5: LargeScale spatial fields
+    isLargeScale,
+    largescaleSectors,
+    spatialSummary,
     replications: maxReps,
-    treatments: treatmentKeys.length,
+    treatments:   treatmentKeys.length,
     category,
     categoryConfig,
   };
@@ -632,8 +811,8 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
   // ── 13. Data completeness ───────────────────────────────────────────────────
   const dataCompleteness = {
     expected: totalExpected,
-    actual: totalActual,
-    pct: totalExpected > 0 ? Math.round((totalActual / totalExpected) * 100) : 0,
+    actual:   totalActual,
+    pct:      totalExpected > 0 ? Math.round((totalActual / totalExpected) * 100) : 0,
   };
 
   // ── 14. Assemble and return ─────────────────────────────────────────────────

@@ -30,6 +30,7 @@ import { performANOVA, performTwoWayANOVA, performTukeyHSD } from '../utils/stat
 import { EPPO_CODES, BBCH_STAGES, lookupEPPO } from '../utils/eppoBBCHData.js';
 import { exportToARM, importARMCSV } from '../services/armExporter.js';
 import { fetchWeather as fetchWeatherService, fetchSoilData } from '../services/weather.js';
+import { fbGetLargeScaleData } from '../services/largeScaleService.js';
 
 function computeSummaryStats(values) {
   const n = values.length;
@@ -190,6 +191,13 @@ import {
   exportMasterDocx
 } from '../services/trialReports.js';
 
+import ReportConfigPanel from '../components/ReportConfigPanel.jsx';
+import ReportProgressModal from '../components/ReportProgressModal.jsx';
+import { buildReportData } from '../services/reportDataBuilder.js';
+import { generateProjectPDF } from '../services/pdfReportRenderer.js';
+import { generateProjectExcel } from '../services/excelReportRenderer.js';
+import { generateProjectDocx } from '../services/docxReportRenderer.js';
+
 import L from 'leaflet';
 import QRCodeLib from 'qrcode';
 
@@ -274,6 +282,12 @@ export default function LargeScaleTrials({ onMenuClick }) {
   const [isVisitModalOpen, setIsVisitModalOpen] = useState(false);
   const [editingSubTrial, setEditingSubTrial] = useState(null);
   const [editingVisitIdx, setEditingVisitIdx] = useState(null);
+
+  // Professional Report state
+  const [proReportModalOpen, setProReportModalOpen] = useState(false);
+  const [proReportProgress, setProReportProgress] = useState(false);
+  const [proReportSteps, setProReportSteps] = useState([]);
+  const [proReportPercent, setProReportPercent] = useState(0);
 
   // Forms
   const [projectForm, setProjectForm] = useState({ Name: '', Crop: '', Location: '', Investigator: '', TargetWeed: '', GPSBounds: '' });
@@ -2559,6 +2573,70 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
     }
   };
 
+  const handleGenerateProReport = async (reportOptions) => {
+    if (!canDownload) {
+      toast('Download permission is disabled for your account.', 'error');
+      return;
+    }
+    if (!activeProjectId) {
+      toast('Please select a project first.', 'warning');
+      return;
+    }
+
+    setProReportModalOpen(false);
+    const steps = [
+      { label: 'Aggregating treatment data', status: 'pending' },
+      { label: 'Running statistical analysis', status: 'pending' },
+      { label: `Generating ${reportOptions.format.toUpperCase()} report`, status: 'pending' },
+      { label: 'Preparing download', status: 'pending' },
+    ];
+    setProReportSteps(steps);
+    setProReportPercent(0);
+    setProReportProgress(true);
+
+    try {
+      setProReportSteps(prev => prev.map((s, i) => i === 0 ? { ...s, status: 'active' } : s));
+      setProReportPercent(10);
+
+      const reportData = await buildReportData(
+        activeProjectId,
+        subTrials,
+        {
+          ...reportOptions,
+          project: activeProject,
+          category: activeCategory,
+          // PI-5: pass LargeScale spatial data so reportDataBuilder can enrich
+          // the report with sector codes, GPS coordinates, and spatial CV%.
+          // Best-effort: if the fetch fails the report still works without spatial data.
+          largeScaleData: await fbGetLargeScaleData(activeProjectId).catch(() => null),
+        },
+        getAppState()
+      );
+
+      setProReportSteps(prev => prev.map((s, i) => i === 0 ? { ...s, status: 'done' } : i === 2 ? { ...s, status: 'active' } : s));
+      setProReportPercent(60);
+
+      if (reportOptions.format === 'pdf') {
+        await generateProjectPDF(reportData, reportOptions);
+      } else if (reportOptions.format === 'excel') {
+        await generateProjectExcel(reportData, reportOptions);
+      } else {
+        await generateProjectDocx(reportData, reportOptions);
+      }
+
+      setProReportSteps(prev => prev.map((s, i) => (i === 2 || i === 3) ? { ...s, status: 'done' } : s));
+      setProReportPercent(100);
+
+      setTimeout(() => setProReportProgress(false), 1500);
+      toast('Professional report generated successfully!', 'success');
+    } catch (error) {
+      console.error('[LargeScaleTrials] Pro report failed:', error);
+      setProReportSteps(prev => prev.map(s => s.status === 'active' ? { ...s, status: 'error' } : s));
+      setProReportProgress(false);
+      toast(`Report generation failed: ${error.message}`, 'error');
+    }
+  };
+
   const handleBulkDeleteSubTrials = async () => {
     if (isViewer) {
       toast('Viewer role cannot delete sub-trials.', 'error');
@@ -4111,6 +4189,18 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
                           >
                             <BookOpen className="w-4 h-4 text-indigo-600" /> Word Document
                           </button>
+                          <button
+                            onClick={() => {
+                              if (!canDownload) { toast('Download permission is disabled.', 'error'); return; }
+                              if (!activeProjectId) { toast('Please select a project first.', 'warning'); return; }
+                              setProReportModalOpen(true);
+                            }}
+                            disabled={!activeProjectId}
+                            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white font-semibold rounded-xl hover:bg-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                          >
+                            <Download className="w-4 h-4" />
+                            Project Report (Professional)
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -4895,6 +4985,32 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
           onCapture={handleQuickPhotoCapture}
         />
       )}
+
+      {/* Professional Report Config Modal */}
+      {proReportModalOpen && (
+        <Modal
+          isOpen={proReportModalOpen}
+          onClose={() => setProReportModalOpen(false)}
+          title="Generate Professional Project Report"
+          size="lg"
+        >
+          <ReportConfigPanel
+            project={activeProject}
+            subTrials={subTrials}
+            activeCategory={activeCategory}
+            onGenerate={handleGenerateProReport}
+            canDownload={canDownload}
+          />
+        </Modal>
+      )}
+
+      {/* Professional Report Progress Modal */}
+      <ReportProgressModal
+        isOpen={proReportProgress}
+        steps={proReportSteps}
+        percent={proReportPercent}
+        onCancel={() => setProReportProgress(false)}
+      />
 
       {/* Cropper Modal */}
       {cropperOpen && (
