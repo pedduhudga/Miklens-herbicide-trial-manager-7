@@ -888,6 +888,33 @@ Rules:
         ),
       });
 
+      // Construct folderPath for Google Drive hierarchical routing
+      const project = appState.projects?.find((p) => p.ID === trial.ProjectID);
+      const projectName = project ? project.Name : 'Ungrouped Projects';
+      const dosageSuffix = trial.Dosage ? ` (${trial.Dosage})` : '';
+      const idSuffix = trial.ID ? ` - ${String(trial.ID).slice(-5)}` : '';
+      const trialNameWithDate = `${trial.FormulationName || 'Unknown Formulation'}${dosageSuffix} (${trial.Date ? trial.Date.split('T')[0] : photoDate})${idSuffix}`.trim();
+      
+      const rawCategory = trial.Category || project?.Category || appState?.activeCategory || 'herbicide';
+      const categoryLower = String(rawCategory).trim().toLowerCase();
+      const categoryName = categoryLower === 'herbicide' ? 'Herbicide' :
+                           categoryLower === 'fungicide' ? 'Fungicide' :
+                           categoryLower === 'pesticide' ? 'Pesticide' :
+                           categoryLower === 'nutrition' ? 'Nutrition' :
+                           categoryLower === 'biostimulant' ? 'Biostimulant' :
+                           categoryLower.charAt(0).toUpperCase() + categoryLower.slice(1);
+
+      const userName = String(
+        appState?.auth?.user?.Name || 
+        appState?.auth?.user?.Username || 
+        appState?.auth?.Name || 
+        appState?.auth?.Username || 
+        trial.InvestigatorName || 
+        'Default User'
+      ).trim() || 'Default User';
+
+      const folderPath = [categoryName, userName, projectName, trialNameWithDate];
+
       try {
         const driveResult = await uploadPhotoToDrive(
           {
@@ -899,6 +926,7 @@ Rules:
             label: photoLabel,
             date: photoDate,
             tag: photoTagValue,
+            folderPath,
           },
           getAppState,
         );
