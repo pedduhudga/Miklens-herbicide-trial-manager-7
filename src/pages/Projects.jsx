@@ -3221,21 +3221,22 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
           for (let b = 0; b < blocksCount; b++) {
             const blockObj = blocks[b];
             
-            const blockTrts = [];
-            while (blockTrts.length < colsPerBlock) {
-              trtList.forEach(t => {
-                for (let p = 0; p < potsPerTrt; p++) {
-                  if (blockTrts.length < colsPerBlock) {
-                    blockTrts.push(t);
-                  }
-                }
-              });
+            // Shuffle the unique treatments for this block
+            const shuffledTrtList = [...trtList];
+            for (let i = shuffledTrtList.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              [shuffledTrtList[i], shuffledTrtList[j]] = [shuffledTrtList[j], shuffledTrtList[i]];
             }
 
-            for (let i = blockTrts.length - 1; i > 0; i--) {
-              const j = Math.floor(Math.random() * (i + 1));
-              [blockTrts[i], blockTrts[j]] = [blockTrts[j], blockTrts[i]];
-            }
+            // Replicate each treatment side-by-side within the block
+            const blockTrts = [];
+            shuffledTrtList.forEach(t => {
+              for (let p = 0; p < potsPerTrt; p++) {
+                if (blockTrts.length < colsPerBlock) {
+                  blockTrts.push(t);
+                }
+              }
+            });
 
             for (let j = 0; j < blockTrts.length; j++) {
               const t = blockTrts[j];
