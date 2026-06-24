@@ -1437,7 +1437,16 @@ Rules:
     const t = parseFloat(temp), w = parseFloat(wind), r = parseFloat(rain);
     if (isFinite(t)) {
       if (t > 30) risks.push({ type: 'warning', msg: `Heat stress risk (${t}°C > 30°C) — may reduce efficacy.` });
-      if (t < 5)  risks.push({ type: 'info',    msg: `Cold conditions (${t}°C) — slow herbicide uptake.` });
+      if (t < 5)  {
+        const cat = activeSubTrial?.Category || state?.activeCategory || 'herbicide';
+        const msg = cat === 'herbicide' ? 'slow herbicide uptake.' :
+                    cat === 'fungicide' ? 'slow fungicide absorption & disease latency.' :
+                    cat === 'pesticide' ? 'reduced insect activity & pesticide contact.' :
+                    cat === 'nutrition' ? 'reduced plant nutrient absorption.' :
+                    cat === 'biostimulant' ? 'sluggish physiological response to biostimulants.' :
+                    'slow chemical uptake.';
+        risks.push({ type: 'info', msg: `Cold conditions (${t}°C) — ${msg}` });
+      }
     }
     if (isFinite(w)) {
       if (w > 15) risks.push({ type: 'danger',  msg: `High wind (${w} km/h) — severe spray drift risk.` });
@@ -1445,7 +1454,7 @@ Rules:
     }
     if (isFinite(r) && r > 0) risks.push({ type: 'danger', msg: `Rain (${r} mm) — wash-off risk if not rain-fast.` });
     return risks;
-  }, []);
+  }, [activeSubTrial?.Category, state?.activeCategory]);
 
   const fetchObsWeather = useCallback(async (date) => {
     if (!activeSubTrial?.Lat || !activeSubTrial?.Lon) return;
