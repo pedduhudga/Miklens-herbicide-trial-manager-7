@@ -3545,9 +3545,9 @@ Rules:
       .card {
         width: ${cardWidth}cm;
         height: ${cardHeight}cm;
-        border: 1px dashed #cbd5e1;
-        border-radius: 8px;
-        padding: 0.35cm;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 0px;
         box-sizing: border-box;
         display: flex;
         flex-direction: column;
@@ -3556,29 +3556,64 @@ Rules:
         overflow: hidden;
         position: relative;
         background: #ffffff;
-        border-left: 4px solid #0d9488;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
       }
-      .card-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.2cm; }
-      .card-header h3 {
+      .card-banner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 6px 10px;
+        font-size: 8pt;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        border-bottom: 1px solid;
+      }
+      .block-theme-1 { background-color: #ecfdf5; border-color: #a7f3d0; color: #065f46; }
+      .block-theme-2 { background-color: #eff6ff; border-color: #bfdbfe; color: #1e40af; }
+      .block-theme-3 { background-color: #faf5ff; border-color: #e9d5ff; color: #6b21a8; }
+      .block-theme-4 { background-color: #fff7ed; border-color: #fed7aa; color: #9a3412; }
+      .block-theme-5 { background-color: #fef2f2; border-color: #fecaca; color: #991b1b; }
+      .block-theme-6 { background-color: #fefce8; border-color: #fef08a; color: #854d0e; }
+      
+      .card-content {
+        padding: 10px 12px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        height: calc(100% - 28px);
+        box-sizing: border-box;
+        position: relative;
+      }
+      .card-title-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+      .card-title-row h3 {
         font-size: 11pt;
         margin: 0;
-        font-weight: 700;
+        font-weight: 800;
         color: #0f172a;
-        max-width: 70%;
-        line-height: 1.2;
+        line-height: 1.25;
       }
       .logo { max-width: 2.2cm; max-height: 1cm; object-fit: contain; flex-shrink: 0; }
-      .card-body { padding-right: 2.7cm; flex-grow: 1; display: flex; flex-direction: column; justify-content: center; }
-      .card-body p { font-size: 8pt; margin: 0.05cm 0; color: #475569; }
-      .card-body p strong { color: #1e293b; }
+      .card-body { padding-right: 2.6cm; flex-grow: 1; }
+      .card-body p { font-size: 8pt; margin: 3px 0; color: #475569; display: flex; align-items: center; gap: 4px; }
+      .card-body p strong { color: #1e293b; font-weight: 600; }
       .card-footer {
         position: absolute;
-        right: 0.35cm;
-        bottom: 0.35cm;
+        right: 12px;
+        bottom: 10px;
         text-align: right;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
       }
-      .qr-code { width: 2.2cm; height: 2.2cm; display: block; border: 1px solid #f1f5f9; border-radius: 4px; padding: 2px; }
-      .trial-id { font-size: 7.5px; color: #94a3b8; margin-top: 3px; font-family: monospace; }
+      .qr-code { width: 2.2cm; height: 2.2cm; display: block; border: 1px solid #f1f5f9; border-radius: 6px; padding: 2px; background: #ffffff; }
+      .trial-id { font-size: 7.5px; color: #94a3b8; margin-top: 4px; font-family: monospace; }
       .coord-grid {
         display: grid;
         grid-template-columns: repeat(2, 1fr);
@@ -3596,16 +3631,23 @@ Rules:
         line-height: 1.1;
       }
       .coord-item strong {
-        color: #475569;
-        font-size: 6.5pt;
+        color: #64748b;
+        font-size: 6pt;
         text-transform: uppercase;
         display: block;
         margin-bottom: 1px;
+        font-weight: 700;
+      }
+      .coord-item span {
+        color: #1e293b;
+        font-weight: 600;
       }
     `, []);
 
   const buildTrialCardsMarkup = useCallback(async (selectedTrials, companyLogo, fields, blocks) => {
     const cards = [];
+    const emojiMap = ['🟢', '🔵', '🟣', '🟠', '🔴', '🟡'];
+    
     for (const trial of selectedTrials) {
       const qrCodeUrl = await generateQrCodeDataUrl(buildPrintableTrialUrl(trial));
       const formattedDate = formatDateTime(trial.Date);
@@ -3615,22 +3657,32 @@ Rules:
       const targetLabel = cConf.targetLabel || 'Weed Species';
       const targetValue = trial[cConf.targetField] || trial.WeedSpecies || '';
 
+      const blockIndex = blocks && trial.BlockID ? blocks.findIndex(b => String(b.ID) === String(trial.BlockID)) : -1;
+      const blockColorIdx = blockIndex !== -1 ? (blockIndex % 6) : 0;
+      const blockThemeClass = `block-theme-${blockColorIdx + 1}`;
+      const blockEmoji = emojiMap[blockColorIdx] || '🟢';
+      
+      const blockName = trial.BlockID ? (blocks?.find(b => String(b.ID) === String(trial.BlockID))?.Name || '') : '';
+      const designType = trial.TrialDesign || 'RCBD';
+      
+      let bannerTitle = `${blockEmoji} ${blockName || 'Trial Card'}`;
+      if (designType === 'PotTrial') {
+        bannerTitle = `🏺 Pot Trial`;
+      }
+      
       let designMarkup = '';
       if (fields.designDetails) {
-        const designType = trial.TrialDesign || 'RCBD';
-        const blockName = trial.BlockID ? (blocks?.find(b => String(b.ID) === String(trial.BlockID))?.Name || '') : '';
         const items = [];
-        
         if (designType === 'PotTrial') {
-          if (trial.PotLabel) items.push(`<strong>Pot</strong>${sanitizePrintHtml(trial.PotLabel)}`);
-          if (trial.PotRow || trial.PotCol) items.push(`<strong>Pos</strong>R${sanitizePrintHtml(trial.PotRow)} C${sanitizePrintHtml(trial.PotCol)}`);
+          if (trial.PotLabel) items.push(`<strong>Pot</strong><span>${sanitizePrintHtml(trial.PotLabel)}</span>`);
+          if (trial.PotRow || trial.PotCol) items.push(`<strong>Pos</strong><span>R${sanitizePrintHtml(trial.PotRow)} C${sanitizePrintHtml(trial.PotCol)}</span>`);
         } else {
-          if (blockName) items.push(`<strong>Block</strong>${sanitizePrintHtml(blockName)}`);
-          if (trial.Replication) items.push(`<strong>Rep</strong>${sanitizePrintHtml(trial.Replication)}`);
-          if (trial.PlotNumber) items.push(`<strong>Plot</strong>#${sanitizePrintHtml(trial.PlotNumber)}`);
-          if (trial.SubBlockID) items.push(`<strong>Sub-Blk</strong>${sanitizePrintHtml(trial.SubBlockID)}`);
-          if (trial.MainFactor) items.push(`<strong>Main Fac</strong>${sanitizePrintHtml(trial.MainFactor)}`);
-          if (trial.SubFactor) items.push(`<strong>Sub Fac</strong>${sanitizePrintHtml(trial.SubFactor)}`);
+          if (blockName) items.push(`<strong>Block</strong><span>${sanitizePrintHtml(blockName)}</span>`);
+          if (trial.Replication) items.push(`<strong>Rep</strong><span>${sanitizePrintHtml(trial.Replication)}</span>`);
+          if (trial.PlotNumber) items.push(`<strong>Plot</strong><span>#${sanitizePrintHtml(trial.PlotNumber)}</span>`);
+          if (trial.SubBlockID) items.push(`<strong>Sub-Blk</strong><span>${sanitizePrintHtml(trial.SubBlockID)}</span>`);
+          if (trial.MainFactor) items.push(`<strong>Main Fac</strong><span>${sanitizePrintHtml(trial.MainFactor)}</span>`);
+          if (trial.SubFactor) items.push(`<strong>Sub Fac</strong><span>${sanitizePrintHtml(trial.SubFactor)}</span>`);
         }
         
         if (items.length > 0) {
@@ -3642,27 +3694,38 @@ Rules:
         }
       }
 
+      const hasLogo = fields.logo && companyLogo && (
+        companyLogo.startsWith('data:') || 
+        companyLogo.startsWith('http') || 
+        companyLogo.startsWith('/') || 
+        companyLogo.startsWith('.')
+      );
+
       cards.push(`
         <div class="card">
-          <div style="height: 100%; display: flex; flex-direction: column; justify-content: space-between;">
+          <div class="card-banner ${blockThemeClass}">
+            <span>${sanitizePrintHtml(bannerTitle)}</span>
+            <span>${sanitizePrintHtml(designType)}</span>
+          </div>
+          <div class="card-content">
             <div>
-              <div class="card-header">
+              <div class="card-title-row">
                 <h3>${fields.formulationName ? sanitizePrintHtml(trial.FormulationName || 'Untitled Trial') : 'Trial Card'}</h3>
-                ${fields.logo && companyLogo ? `<img src="${companyLogo}" class="logo" alt="Logo">` : ''}
+                ${hasLogo ? `<img src="${companyLogo}" class="logo" alt="Logo">` : ''}
               </div>
               <div class="card-body">
-                ${fields.investigator && trial.InvestigatorName ? `<p><strong>Investigator:</strong> ${sanitizePrintHtml(trial.InvestigatorName)}</p>` : ''}
-                ${fields.date && trial.Date ? `<p><strong>Date:</strong> ${sanitizePrintHtml(formattedDate)}</p>` : ''}
-                ${fields.dosage && trial.Dosage ? `<p><strong>Dosage:</strong> ${sanitizePrintHtml(trial.Dosage)}</p>` : ''}
-                ${fields.location && trial.Location ? `<p><strong>Location:</strong> ${sanitizePrintHtml(trial.Location)}</p>` : ''}
-                ${fields.targetField && targetValue ? `<p><strong>${targetLabel}:</strong> ${sanitizePrintHtml(targetValue)}</p>` : ''}
+                ${fields.investigator && trial.InvestigatorName ? `<p>👤 <strong>Inv:</strong> ${sanitizePrintHtml(trial.InvestigatorName)}</p>` : ''}
+                ${fields.date && trial.Date ? `<p>📅 <strong>Date:</strong> ${sanitizePrintHtml(formattedDate)}</p>` : ''}
+                ${fields.dosage && trial.Dosage ? `<p>🧪 <strong>Dose:</strong> ${sanitizePrintHtml(trial.Dosage)}</p>` : ''}
+                ${fields.location && trial.Location ? `<p>📍 <strong>Loc:</strong> ${sanitizePrintHtml(trial.Location)}</p>` : ''}
+                ${fields.targetField && targetValue ? `<p>🎯 <strong>${targetLabel}:</strong> ${sanitizePrintHtml(targetValue)}</p>` : ''}
                 ${designMarkup}
               </div>
             </div>
-          </div>
-          <div class="card-footer">
-            ${qrCodeUrl ? `<img src="${qrCodeUrl}" class="qr-code" alt="QR Code">` : ''}
-            ${fields.trialId ? `<div class="trial-id">ID: ${trial.ID.slice(-10)}</div>` : ''}
+            <div class="card-footer">
+              ${qrCodeUrl ? `<img src="${qrCodeUrl}" class="qr-code" alt="QR Code">` : ''}
+              ${fields.trialId ? `<div class="trial-id">ID: ${trial.ID.slice(-10)}</div>` : ''}
+            </div>
           </div>
         </div>
       `);
