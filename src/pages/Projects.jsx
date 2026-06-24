@@ -788,8 +788,42 @@ export default function Projects({ onMenuClick }) {
         }
       } else if (potLayout === 'rcbd-pot') {
         const blocksCount = parseInt(randomizeForm.potBlocks) || 3;
-        const rowsPerBlock = Math.floor(potRows / blocksCount);
-        potsVal = rowsPerBlock * blocksCount;
+        if (potRows === 1) {
+          let count = 0;
+          const colsPerBlock = Math.floor(potCols / blocksCount) || 1;
+          for (let b = 0; b < blocksCount; b++) {
+            const startCol = b * colsPerBlock;
+            const endCol = Math.min((b + 1) * colsPerBlock, potCols);
+            const numColsInBlock = endCol - startCol;
+            const blockTrts = [];
+            while (blockTrts.length < numColsInBlock) {
+              trtList.forEach(t => { if (blockTrts.length < numColsInBlock) blockTrts.push(t); });
+            }
+            blockTrts.forEach(t => { if (t === tName) count++; });
+          }
+          potsVal = count;
+        } else {
+          const rowsPerBlock = Math.floor(potRows / blocksCount) || 1;
+          const isHorizontal = String(potStripeDirection).toLowerCase().includes('horizontal');
+          let count = 0;
+          for (let b = 0; b < blocksCount; b++) {
+            if (isHorizontal) {
+              const numRowsInBlock = rowsPerBlock;
+              const blockTrts = [];
+              while (blockTrts.length < numRowsInBlock) {
+                trtList.forEach(t => { if (blockTrts.length < numRowsInBlock) blockTrts.push(t); });
+              }
+              blockTrts.forEach(t => { if (t === tName) count += potCols; });
+            } else {
+              const blockTrts = [];
+              while (blockTrts.length < potCols) {
+                trtList.forEach(t => { if (blockTrts.length < potCols) blockTrts.push(t); });
+              }
+              blockTrts.forEach(t => { if (t === tName) count += rowsPerBlock; });
+            }
+          }
+          potsVal = count;
+        }
       } else {
         // balanced-pot
         let pCount = 0;
@@ -1423,19 +1457,14 @@ export default function Projects({ onMenuClick }) {
       }
     } else if (potLayout === 'rcbd-pot') {
       if (potRows === 1) {
-        const colsPerBlock = Math.floor(potCols / blocksCount) || 1;
-        for (let b = 0; b < blocksCount; b++) {
-          const startCol = b * colsPerBlock;
-          const endCol = Math.min((b + 1) * colsPerBlock, potCols);
-          const numColsInBlock = endCol - startCol;
-          
-          const blockTrts = [];
-          while (blockTrts.length < numColsInBlock) {
-            trts.forEach(t => { if (blockTrts.length < numColsInBlock) blockTrts.push(t); });
-          }
-          const shuffled = shuffleDeterministic(blockTrts, b + 50);
-          for (let c = startCol; c < endCol; c++) {
-            matrix[0][c] = shuffled[c - startCol] || { name: '?', role: 'none' };
+        // Group replicates of the same treatment side-by-side
+        const shuffledTrts = shuffleDeterministic(trts, 99);
+        for (let i = 0; i < shuffledTrts.length; i++) {
+          for (let b = 0; b < blocksCount; b++) {
+            const c = i * blocksCount + b;
+            if (c < potCols) {
+              matrix[0][c] = shuffledTrts[i];
+            }
           }
         }
       } else {
@@ -1495,14 +1524,9 @@ export default function Projects({ onMenuClick }) {
         const abbrev = label.length > 6 ? label.substring(0, 5) + '..' : label;
         const colorClasses = getTreatmentColor(label, uniqueTrts);
 
-        if (potLayout === 'rcbd-pot' && potRows === 1 && c > 0 && c % colsPerBlock === 0) {
-          const blockNum = Math.floor(c / colsPerBlock) + 1;
+        if (potLayout === 'rcbd-pot' && potRows === 1 && c > 0 && c % blocksCount === 0) {
           rowCells.push(
-            <div key={`col-divider-${c}`} className="flex flex-col items-center justify-center mx-2 px-1 border-l-2 border-dashed border-emerald-400 self-stretch relative">
-              <span className="absolute -top-3.5 bg-emerald-50 px-1 border border-emerald-200 rounded text-[7px] font-bold text-emerald-800 uppercase tracking-wider whitespace-nowrap">
-                Blk {blockNum}
-              </span>
-            </div>
+            <div key={`col-divider-${c}`} className="flex flex-col items-center justify-center mx-2 px-0.5 border-l border-dashed border-emerald-300 self-stretch relative" />
           );
         }
 
@@ -3162,8 +3186,7 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
         const isHorizontal = String(potStripeDirection).toLowerCase().includes('horizontal');
 
         if (potRows === 1) {
-          const colsPerBlock = Math.floor(potCols / blocksCount) || 1;
-          let plotIndex = 1;
+          const blocks = [];
           for (let b = 1; b <= blocksCount; b++) {
             const blockId = 'block_' + Date.now() + '_pot_rcbd_' + b + '_' + Math.random().toString(36).substring(2, 7);
             const block = {
@@ -3175,67 +3198,24 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
               Category: activeCategory
             };
             blocksToSave.push(block);
+            blocks.push(block);
+          }
 
-            const startCol = (b - 1) * colsPerBlock + 1;
-            const endCol = Math.min(b * colsPerBlock, potCols);
-            const numColsInBlock = endCol - startCol + 1;
+          const shuffledTrts = [...trtList];
+          for (let i = shuffledTrts.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            const temp = shuffledTrts[i];
+            shuffledTrts[i] = shuffledTrts[j];
+            shuffledTrts[j] = temp;
+          }
 
-            const blockTrtList = [];
-            while (blockTrtList.length < numColsInBlock) {
-              trtList.forEach(t => {
-                if (blockTrtList.length < numColsInBlock) {
-                  blockTrtList.push(t);
-                }
-              });
-            }
-            for (let i = blockTrtList.length - 1; i > 0; i--) {
-              const j = Math.floor(Math.random() * (i + 1));
-              const temp = blockTrtList[i];
-              blockTrtList[i] = blockTrtList[j];
-              blockTrtList[j] = temp;
-            }
-
-            if (potObsMode === 'column-wise' || potObsMode === 'row-wise') {
-              for (let c = startCol; c <= endCol; c++) {
-                const t = blockTrtList[c - startCol];
-                const trialId = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
-                const targetField = config.targetField || 'WeedSpecies';
-                const label = `Col ${c} (1 Pot)`;
-                const plotNum = b * 100 + (c - startCol + 1);
-
-                const tToSave = {
-                  ID: trialId,
-                  ProjectID: activeProject.ID,
-                  BlockID: block.ID,
-                  FormulationID: t.fid,
-                  FormulationName: t.name,
-                  InvestigatorName: randomizeForm.investigatorName || '',
-                  Dosage: t.dosage || randomizeForm.dosage || '',
-                  Date: randomizeForm.date || new Date().toISOString().split('T')[0],
-                  Replication: String(b),
-                  RandomizationOrder: plotIndex,
-                  IsControl: t.role === 'control',
-                  IsStandardCheck: t.role === 'standard',
-                  Status: 'Draft',
-                  IsLive: true,
-                  EfficacyDataJSON: '[]',
-                  PhotoURLs: '[]',
-                  WeedPhotosJSON: '[]',
-                  PlotNumber: plotNum,
-                  AISummariesJSON: JSON.stringify({ plotNum, label, col: c }),
-                  Category: activeCategory,
-                  TrialDesign: 'PotTrial',
-                  PotCol: c,
-                  PotRow: null,
-                  PotLabel: label,
-                  [targetField]: randomizeForm.weedSpecies || ''
-                };
-                trialsToSave.push(tToSave);
-                plotIndex++;
-              }
-            } else {
-              for (let c = startCol; c <= endCol; c++) {
-                const t = blockTrtList[c - startCol];
+          let plotIndex = 1;
+          for (let i = 0; i < shuffledTrts.length; i++) {
+            const t = shuffledTrts[i];
+            for (let b = 1; b <= blocksCount; b++) {
+              const c = i * blocksCount + b;
+              if (c <= potCols) {
+                const block = blocks[b - 1];
                 const trialId = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
                 const targetField = config.targetField || 'WeedSpecies';
                 const label = randomizeForm.potIdentifierFormat === 'sequential' 
@@ -5909,7 +5889,10 @@ ${photosHtml}
                   min="1"
                   max={parseInt(randomizeForm.potRows) === 1 ? randomizeForm.potCols : randomizeForm.potRows}
                   value={randomizeForm.potBlocks || '3'}
-                  onChange={e => setRandomizeForm(p => ({ ...p, potBlocks: e.target.value }))}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setRandomizeForm(p => ({ ...p, potBlocks: val, replications: val }));
+                  }}
                   className={INPUT}
                 />
                 {((parseInt(randomizeForm.potRows) === 1)
@@ -6140,7 +6123,7 @@ ${photosHtml}
                         <div>Observation Units: <span className="font-bold text-emerald-700">{allocationPreview.potBlocks * allocationPreview.potCols}</span></div>
                       )}
                       <div>Pots per Treatment: <span className="font-bold text-emerald-700">{allocationPreview.potRows}</span></div>
-                      <div>Pots per Block: <span className="font-bold text-emerald-700">{Math.floor(allocationPreview.potRows / allocationPreview.potBlocks) * allocationPreview.potCols}</span></div>
+                      <div>Pots per Block: <span className="font-bold text-emerald-700">{allocationPreview.potRows === 1 ? Math.floor(allocationPreview.potCols / allocationPreview.potBlocks) : (Math.floor(allocationPreview.potRows / allocationPreview.potBlocks) * allocationPreview.potCols)}</span></div>
                       <div>Analysis Method: <span className="font-bold text-slate-700">RCBD ANOVA</span></div>
                     </div>
                   </div>
