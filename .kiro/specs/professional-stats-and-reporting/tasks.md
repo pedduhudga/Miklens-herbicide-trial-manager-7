@@ -100,11 +100,11 @@ This plan implements all 19 requirements across 13 task groups, in dependency or
   - Requirements: R3
   - Files: `src/pages/Statistics.jsx`
 
-- [~] 20. Build dedicated Power Analysis input panel in `Statistics.jsx` shown when `test === 'power'`; fields: k (pre-populated from selected project's treatment count), n, effectSize (default 0.4), targetPower (0.70/0.80/0.90); live-recompute on every field change; display achieved power, min-n result, interpretation badge; render power curve chart via `<PowerAnalysisPanel>`
+- [x] 20. Build dedicated Power Analysis input panel in `Statistics.jsx` shown when `test === 'power'`; fields: k (pre-populated from selected project's treatment count), n, effectSize (default 0.4), targetPower (0.70/0.80/0.90); live-recompute on every field change; display achieved power, min-n result, interpretation badge; render power curve chart via `<PowerAnalysisPanel>`
   - Requirements: R5
   - Files: `src/pages/Statistics.jsx`
 
-- [~] 21. Add Tier Classification badges to the treatment means table in `Statistics.jsx` post-hoc results; thresholds for control-pct metrics: Excellent >= 80% (green), Good 60-79% (yellow), Fair 40-59% (orange), Poor < 40% (red); for non-percentage metrics show rank number only; apply same thresholds as the Report_Engine ranking table
+- [-] 21. Add Tier Classification badges to the treatment means table in `Statistics.jsx` post-hoc results; thresholds for control-pct metrics: Excellent >= 80% (green), Good 60-79% (yellow), Fair 40-59% (orange), Poor < 40% (red); for non-percentage metrics show rank number only; apply same thresholds as the Report_Engine ranking table
   - Requirements: R9
   - Files: `src/pages/Statistics.jsx`
 
