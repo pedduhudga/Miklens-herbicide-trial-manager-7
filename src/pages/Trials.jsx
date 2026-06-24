@@ -312,7 +312,7 @@ export default function Trials({ onMenuClick }) {
   const [aiLoading, setAiLoading] = useState(false);
   const [syncingPhotos, setSyncingPhotos] = useState(false);
   const [syncingAllPhotos, setSyncingAllPhotos] = useState(false);
-  const [syncHealOnly, setSyncHealOnly] = useState(true);
+  const [syncHealOnly, setSyncHealOnly] = useState(false);
 
   // --- AI weed cover detection ---
   const [detectingCover, setDetectingCover] = useState(false);
@@ -2769,10 +2769,18 @@ Rules:
 
         if (existingPhoto) {
           if (existingPhoto.deleted) {
-            return; // Skip re-importing deleted photos
-          }
-          // If the photo exists in the database but the URL is broken or has '[base64-removed]', restore it!
-          if (isPhotoBroken(existingPhoto) || !existingPhoto.url || existingPhoto.url.includes('[base64-removed]')) {
+            if (!healOnly) {
+              existingPhoto.deleted = false;
+              existingPhoto.url = webViewUrl;
+              existingPhoto.driveId = img.id;
+              existingPhoto.fileName = img.name;
+              existingPhoto.importedFrom = 'Drive';
+              if (!existingPhoto.date && photoDate) existingPhoto.date = photoDate;
+              healedCount++;
+            } else {
+              return; // Skip re-importing deleted photos
+            }
+          } else if (isPhotoBroken(existingPhoto) || !existingPhoto.url || existingPhoto.url.includes('[base64-removed]')) {
             existingPhoto.url = webViewUrl;
             existingPhoto.driveId = img.id;
             existingPhoto.fileName = img.name;
@@ -2971,9 +2979,19 @@ Rules:
 
               if (existingPhoto) {
                 if (existingPhoto.deleted) {
-                  return; // Skip re-importing deleted photos
-                }
-                if (isPhotoBroken(existingPhoto) || !existingPhoto.url || existingPhoto.url.includes('[base64-removed]')) {
+                  if (!healOnly) {
+                    existingPhoto.deleted = false;
+                    existingPhoto.url = webViewUrl;
+                    existingPhoto.driveId = img.id;
+                    existingPhoto.fileName = img.name;
+                    existingPhoto.importedFrom = 'Drive';
+                    if (!existingPhoto.date && photoDate) existingPhoto.date = photoDate;
+                    localHealed++;
+                    totalHealed++;
+                  } else {
+                    return; // Skip re-importing deleted photos
+                  }
+                } else if (isPhotoBroken(existingPhoto) || !existingPhoto.url || existingPhoto.url.includes('[base64-removed]')) {
                   existingPhoto.url = webViewUrl;
                   existingPhoto.driveId = img.id;
                   existingPhoto.fileName = img.name;
