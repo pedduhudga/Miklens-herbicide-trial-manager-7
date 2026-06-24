@@ -1565,11 +1565,13 @@ export default function Trials({ onMenuClick }) {
     const resultRating = calculateResultRating(efficacyData, activeTrial?.IsControl === true || activeTrial?.IsControl === 'true', activeCategory);
     const observedWeeds = getObservedWeedsList(efficacyData);
 
+    const targetField = catConfig.targetField || 'WeedSpecies';
     const updated = { 
       ...activeTrial, 
       EfficacyDataJSON: JSON.stringify(efficacyData),
       Result: resultRating,
       WeedSpecies: observedWeeds,
+      [targetField]: observedWeeds,
       AISummariesJSON: '{}'
     };
     updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
@@ -1581,6 +1583,7 @@ export default function Trials({ onMenuClick }) {
         EfficacyDataJSON: updated.EfficacyDataJSON, 
         Result: updated.Result,
         WeedSpecies: updated.WeedSpecies,
+        [targetField]: updated[targetField],
         AISummariesJSON: '{}' 
       }, getAppState); 
     } catch (e) {}
@@ -2174,12 +2177,14 @@ export default function Trials({ onMenuClick }) {
     const resultRating = calculateResultRating(efficacyData, activeTrial?.IsControl === true || activeTrial?.IsControl === 'true');
     const observedWeeds = getObservedWeedsList(efficacyData);
 
+    const targetField = catConfig.targetField || 'WeedSpecies';
     const updated = { 
       ...activeTrial, 
       PhotoURLs: JSON.stringify(photos),
       EfficacyDataJSON: JSON.stringify(efficacyData),
       Result: resultRating,
       WeedSpecies: observedWeeds,
+      [targetField]: observedWeeds,
       AISummariesJSON: '{}'
     };
     updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
@@ -2192,6 +2197,7 @@ export default function Trials({ onMenuClick }) {
         EfficacyDataJSON: updated.EfficacyDataJSON,
         Result: updated.Result,
         WeedSpecies: updated.WeedSpecies,
+        [targetField]: updated[targetField],
         AISummariesJSON: '{}'
       }, getAppState); 
     } catch (e) {}
@@ -3021,10 +3027,8 @@ Rules:
     const targetTrial = (specificTrial && specificTrial.ID) ? specificTrial : activeTrial;
     if (!targetTrial) return;
 
-    // Get all trials for this project (or just the single trial)
-    const allTrials = targetTrial.ProjectID
-      ? trials.filter(t => t.ProjectID === targetTrial.ProjectID)
-      : [targetTrial];
+    // Scan only the photos belonging to this respective trial
+    const allTrials = [targetTrial];
 
     // Collect all photos with their DAA calculated from photo date vs trial date
     const photosToAnalyze = [];
@@ -5365,7 +5369,7 @@ If none are present, write "None".`;
                   <ResultBadge result={detailTrial.Result} />
                 </div>
                 <h2 className="text-xl font-bold text-slate-800 truncate">{detailTrial.FormulationName}</h2>
-                <p className="text-xs text-slate-500 mt-0.5">{formatDateTime(detailTrial.Date)} · {detailTrial.Location || 'No location'}</p>
+                <p className="text-xs text-slate-500 mt-0.5">{formatDateTime(detailTrial.Date)} · {detailTrial.Location || projects.find(p => String(p.ID) === String(detailTrial.ProjectID))?.Location || 'No location'}</p>
               </div>
               <div className="flex gap-2 shrink-0" ref={exportMenuRef}>
                 {canDownload && (
@@ -5609,7 +5613,17 @@ If none are present, write "None".`;
                         );
                         catConfig.specificFields.forEach(f => {
                           if (f.key !== catConfig.targetField && f.key !== 'YieldValue') {
-                            infoFields.push([f.label, detailTrial[f.key] || '—', Leaf]);
+                            let val = detailTrial[f.key];
+                            if (!val || val === '—') {
+                              const latestObs = detailEfficacy.slice().sort((a,b) => (parseFloat(b.daa) || 0) - (parseFloat(a.daa) || 0))[0];
+                              if (latestObs) {
+                                const obsKey = Object.keys(latestObs).find(k => k.toLowerCase() === f.key.toLowerCase());
+                                if (obsKey && latestObs[obsKey] !== undefined && latestObs[obsKey] !== null && latestObs[obsKey] !== '') {
+                                  val = latestObs[obsKey];
+                                }
+                              }
+                            }
+                            infoFields.push([f.label, val || '—', Leaf]);
                           }
                         });
                       }

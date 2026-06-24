@@ -2763,7 +2763,7 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
                 <div className="flex border-b bg-white overflow-x-auto whitespace-nowrap scrollbar-none mb-6">
                   {[['info','Info'],['observations','Obs'],['harvest','Harvest & Yield'],['photos','Photos'],['weather','Weather'],['chart','Chart'],['statistics','Stats'],['qr','QR'],['export','Export']].map(([k, label]) => {
                     const obsCount = obsData.sorted.length;
-                    const photosCount = safeJsonParse(activeSubTrial.PhotoURLs, []).length;
+                    const photosCount = safeJsonParse(activeSubTrial.PhotoURLs, []).filter(p => !p.deleted).length;
                     const harvestPhotos = safeJsonParse(activeSubTrial.HarvestDataJSON, {}).photos || [];
                     return (
                       <button
@@ -2813,7 +2813,17 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
                             );
                             config.specificFields.forEach(f => {
                               if (f.key !== config.targetField && f.key !== 'YieldValue') {
-                                subInfoFields.push([f.label, activeSubTrial[f.key] || '—', Leaf]);
+                                let val = activeSubTrial[f.key];
+                                if (!val || val === '—') {
+                                  const latestObs = obsData.sorted.slice().sort((a,b) => (parseFloat(b.daa) || 0) - (parseFloat(a.daa) || 0))[0];
+                                  if (latestObs) {
+                                    const obsKey = Object.keys(latestObs).find(k => k.toLowerCase() === f.key.toLowerCase());
+                                    if (obsKey && latestObs[obsKey] !== undefined && latestObs[obsKey] !== null && latestObs[obsKey] !== '') {
+                                      val = latestObs[obsKey];
+                                    }
+                                  }
+                                }
+                                subInfoFields.push([f.label, val || '—', Leaf]);
                               }
                             });
                           }

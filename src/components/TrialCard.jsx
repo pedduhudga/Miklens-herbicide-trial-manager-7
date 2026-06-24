@@ -3,6 +3,7 @@ import { Calendar, MapPin, FlaskConical, Activity, Image as ImageIcon, ChevronLe
 import { safeJsonParse } from '../utils/helpers.js';
 import { formatDateTime } from '../utils/dateUtils.js';
 import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryValue } from '../utils/categoryConfig.js';
+import { validateEfficacyData } from '../utils/analysisUtils.js';
 import { useAuth } from '../hooks/useAuth.js';
 
 const RESULT_COLORS = {
@@ -83,8 +84,14 @@ const TrialCard = memo(function TrialCard({
   const isEditable = !isViewer && (isOwnData || isSharedEdit);
   const canDownloadTrial = !isViewer && isOwnData && user?.tabPermissions?.['Allow Downloads'] !== false;
   const [activePhotoIdx, setActivePhotoIdx] = useState(0);
-  const photos = useMemo(() => safeJsonParse(trial.PhotoURLs, []), [trial.PhotoURLs]);
-  const efficacyData = useMemo(() => safeJsonParse(trial.EfficacyDataJSON, []), [trial.EfficacyDataJSON]);
+  const photos = useMemo(() => {
+    const parsed = safeJsonParse(trial.PhotoURLs, []);
+    return Array.isArray(parsed) ? parsed.filter(p => !p.deleted) : [];
+  }, [trial.PhotoURLs]);
+  const efficacyData = useMemo(() => {
+    const parsed = safeJsonParse(trial.EfficacyDataJSON, []);
+    return validateEfficacyData(parsed, categoryId);
+  }, [trial.EfficacyDataJSON, categoryId]);
   const isLive = String(trial.IsLive) !== 'false';
   const isCompleted = trial.IsCompleted === true || trial.IsCompleted === 'true';
 
@@ -436,19 +443,26 @@ const TrialCard = memo(function TrialCard({
 
         <div className="space-y-1.5 text-xs text-slate-500">
           <div className="flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5 shrink-0" /><span>{formatDateTime(trial.Date) || '—'}</span></div>
-          {trial.Lat && trial.Lon ? (
-            <div className="flex items-center gap-1.5 font-mono text-slate-500">
-              <MapPin className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
-              <span>{parseFloat(trial.Lat).toFixed(6)}, {parseFloat(trial.Lon).toFixed(6)}</span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{trial.Location || '—'}</span></div>
-          )}
-          {trial.Lat && trial.Lon && trial.Location && (
-            <div className="flex items-center gap-1.5 text-slate-400 pl-5 text-[11px] -mt-0.5">
-              <span className="truncate">{trial.Location}</span>
-            </div>
-          )}
+          {(() => {
+            const trialLocation = trial.Location || project?.Location;
+            return (
+              <>
+                {trial.Lat && trial.Lon ? (
+                  <div className="flex items-center gap-1.5 font-mono text-slate-500">
+                    <MapPin className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
+                    <span>{parseFloat(trial.Lat).toFixed(6)}, {parseFloat(trial.Lon).toFixed(6)}</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{trialLocation || '—'}</span></div>
+                )}
+                {trial.Lat && trial.Lon && trialLocation && (
+                  <div className="flex items-center gap-1.5 text-slate-400 pl-5 text-[11px] -mt-0.5">
+                    <span className="truncate">{trialLocation}</span>
+                  </div>
+                )}
+              </>
+            );
+          })()}
           <div className="flex items-center gap-1.5"><FlaskConical className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{trial.Dosage || '—'}</span></div>
           {trial.WeedSpecies && <div className="flex items-center gap-1.5"><Activity className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{trial.WeedSpecies}</span></div>}
           {trial.TrialDesign === 'Split-Plot' && (trial.MainFactor || trial.SubFactor) && (

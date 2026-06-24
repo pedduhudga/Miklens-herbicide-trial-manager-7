@@ -267,6 +267,9 @@ export const CATEGORIES = {
       { key: 'leafColorScore', label: 'Leaf Color Score (1-5 LCC)', type: 'number', min: 1, max: 5 },
       { key: 'interveinalChlorosis', label: 'Interveinal Chlorosis (0-10)', type: 'number', min: 0, max: 10 },
       { key: 'leafMarginNecrosis', label: 'Leaf Margin Necrosis (0-10)', type: 'number', min: 0, max: 10 },
+      { key: 'chlorophyllIndex', label: 'SPAD/Chlorophyll Reading', type: 'number', min: 0 },
+      { key: 'plantHeight', label: 'Plant Height (cm)', type: 'number', min: 0 },
+      { key: 'tillerCount', label: 'Tiller Count (per hill)', type: 'number', min: 0 },
     ],
     formulationFields: [
       { key: 'NutrientComposition', label: 'Nutrient Composition (N-P-K)', type: 'text', placeholder: 'e.g. 46-0-0 (Urea)' },
@@ -336,6 +339,10 @@ export const CATEGORIES = {
       { key: 'leafAreaIndexEstimated', label: 'Leaf Area Index (0-10 scale)', type: 'number', min: 0, max: 10 },
       { key: 'shootDensityScore', label: 'Shoot Density Score (0-10)', type: 'number', min: 0, max: 10 },
       { key: 'wiltingIndex', label: 'Wilting Index (0-10)', type: 'number', min: 0, max: 10 },
+      { key: 'plantHeight', label: 'Plant Height (cm)', type: 'number', min: 0 },
+      { key: 'chlorophyllIndex', label: 'SPAD/Chlorophyll Reading', type: 'number', min: 0 },
+      { key: 'rootBiomass', label: 'Root Biomass (g)', type: 'number', min: 0 },
+      { key: 'shootBiomass', label: 'Shoot Biomass (g)', type: 'number', min: 0 },
     ],
     formulationFields: [
       { key: 'ActiveIngredients', label: 'Active Biological Agents', type: 'text', placeholder: 'e.g. Ascophyllum nodosum extract' },
