@@ -1,0 +1,123 @@
+# Implementation Tasks: Advanced Multi-Treatment Professional Reporting System
+
+- [x] 1. Build the ReportDataBuilder Service
+  - Create `src/services/reportDataBuilder.js` with an async function `buildReportData(projectId, subTrials, options, state)` returning a complete ReportData object
+  - Group subTrials by `FormulationName + Dosage` to form treatment groups; identify UTC/control by matching names containing "control", "untreated", or "check"
+  - Build raw data matrix: `rawMatrix[treatmentName][repId][paramKey] = value` using `validateEfficacyData` from `src/utils/analysisUtils.js`
+  - For each observation parameter in `categoryConfig.observationFields` that has any non-null values, compute per-treatment descriptive stats (mean, SD, SE, CV, n) using final DAA observation or `options.daa`
+  - Build time-series table: for each unique DAA across all trials, compute treatment means
+  - Compute efficacy % vs UTC using `calculateEfficacy` from `categoryConfig.js`
+  - Instantiate `AnalysisEngine` and call `analyze()` for the primary parameter and each additional parameter; collect ANOVA results and CLD letters
+  - Collect weather rows from trial fields (Temperature, Humidity, Windspeed, Rain, Date)
+  - Collect photo entries from `safeJsonParse(trial.PhotoURLs)` across all trials
+  - Detect and populate warnings array: unbalanced design, missing control, insufficient data (<2 treatments or <2 reps)
+  - Export helper functions `getParametersWithData(subTrials, categoryId)` and `computeTreatmentMeans(subTrials, paramKey, daa, category)`
+  - Handle edge cases: zero trials, single treatment, all-null parameter data — return partial ReportData with warnings rather than throwing
+  - _Requirements: 1.1-1.7, 2.1, 4.1-4.3_
+
+- [-] 2. Extend AnalysisEngine with Batch Analysis
+  - Add `async analyzeAllParameters(paramKeys, options = {})` method to the `AnalysisEngine` class in `src/utils/analysisUtils.js`
+  - Iterate over paramKeys array, call `this.analyze(key, null, options.daa, options)` for each key
+  - Return `{ [paramKey]: AnalysisResult }` — catch errors per-parameter and store `{ error: message }` without throwing
+  - Accept `options.postHoc` ('lsd' | 'tukey' | 'duncan') and pass it through to `analyze()`
+  - Verify that existing `analyze()` method returns CLD letters in `result.postHoc.letters`; if not, extract from `getLetterGrouping()` and attach to the result
+  - Do not modify any existing method signatures
+  - _Requirements: 2.1, 2.4, 4.1-4.2_
+
+- [~] 3. Build the ReportConfigPanel Component
+  - Create `src/components/ReportConfigPanel.jsx` with props: `{ project, subTrials, activeCategory, onGenerate, canDownload }`
+  - Add internal state for: format ('pdf'|'excel'|'docx'), postHoc ('lsd'|'tukey'|'duncan'), alpha (0.05|0.01), daa (number|null), transformation ('none'|'arcsine'|'log'|'sqrt'), includePhotos (bool), includeWeather (bool)
+  - Build pre-flight data summary panel using useMemo: count distinct treatment groups, count replications per treatment, call `getParametersWithData`, detect unbalanced design, detect missing control, detect treatments with <2 reps
+  - Display summary line: "X treatments · Y replications · Z parameters with data"
+  - Display each warning as a styled amber alert row
+  - Build available DAA dropdown by deriving unique DAA values from all sub-trials' EfficacyDataJSON
+  - Disable "Generate Report" button if: `!canDownload`, fewer than 2 treatments, or primary metric has no data
+  - On click call `onGenerate(options)` with current option values
+  - Use Tailwind classes consistent with existing Reports.jsx style
+  - _Requirements: 6.1-6.6_
+
+- [~] 4. Build the ReportProgressModal Component
+  - Create `src/components/ReportProgressModal.jsx` with props: `{ isOpen, steps, currentStep, percent, onCancel }`
+  - Render a centered modal overlay (fixed, z-50) with title "Generating Report…", animated progress bar, and vertical step list
+  - Each step shows ✓ (done), ▶ (active), ○ (pending), or ✗ (error) icon based on status field
+  - Show optional "Cancel" button only when `onCancel` is provided
+  - When `percent === 100` change title to "Report Ready" and auto-close after 1200ms
+  - Prevent body scroll when modal is open
+  - _Requirements: 6.4_
+
+- [~] 5. Build the PDF Report Renderer
+  - Create `src/services/pdfReportRenderer.js` with async function `generateProjectPDF(reportData, options = {})`
+  - Use jsPDF and jspdf-autotable (already installed); import `createDoc`, `pdfHeader`, `pdfAddFooter`, `secHeading`, `addPhotoGrid` from `src/services/trialReports.js`
+  - Build Cover Page: project name, category badge, metadata grid (crop, location, investigator, organisation, GPS, trial period), design label, confidential footer, then new page
+  - Build Trial Design & Methodology section: design name/description, treatment/replication/plot counts, application timing
+  - Build Treatment List Table: columns #, Treatment, Dosage, Application Timing, Replications, Role; highlight control row with gray background
+  - Build Raw Data Table (Treatment × Replication): columns Treatment, Rep1, Rep2, ..., Mean, SD from `reportData.rawMatrix` for primary parameter
+  - Build Treatment Means & Statistics table: Treatment | Mean | SD | SE | Efficacy% | CLD | Stars; followed by ANOVA source table (Source | SS | df | MS | F | p); then stats block (Grand Mean, CV%, SEm±, LSD 5%, LSD 1%); significance statement; LSD footnote
+  - Build Time-Series Means Table (only if ≥2 DAA points exist): rows=treatments, columns=DAA time-points
+  - Loop over `reportData.parameters` excluding primary: mini-heading, compact means table with CLD, ANOVA F and p footer
+  - Build Yield section if `reportData.yield` exists
+  - Build Weather Summary Table if `options.includeWeather` and weather data present
+  - Build Photo Grid if `options.includePhotos` using `addPhotoGrid`, grouped by treatment then DAA
+  - Build Conclusions section with auto-generated paragraph
+  - Add page-break logic throughout (add new page when `y + sectionHeight > ph - 20`)
+  - Apply footer on all pages via `pdfAddFooter`
+  - Save as `ProjectReport_{projectName}_{date}.pdf`
+  - _Requirements: 5.1, 10.1-10.7_
+
+- [~] 6. Build the Excel Report Renderer
+  - Create `src/services/excelReportRenderer.js` with async function `generateProjectExcel(reportData, options = {})`
+  - Use ExcelJS (already installed via AdvancedReportGenerator); create a fresh `ExcelJS.Workbook`
+  - Sheet 1 Cover/Summary: project name, crop, location, investigator, date generated, summary stats (treatments count, reps, primary metric mean, CV%), design name
+  - Sheet 2 Trial Info: all project-level fields
+  - Sheet 3 Treatment List: same columns as PDF, control row highlighted yellow
+  - Sheet 4 Raw Data Matrix: one row per trial with treatment name, replication ID, plot number, date, DAA, all observation parameter values
+  - Sheet 5 Treatment Means: Treatment | n | Mean | SD | SE | CV% | Efficacy% | CLD Letter; footer rows Grand Mean, SEm±, LSD 5%, LSD 1%, CV%
+  - Sheet 6 ANOVA Table: Source | SS | df | MS | F-value | p-value; light green fill on significant rows (p<0.05); significance statement below
+  - Sheet 7 Post-Hoc Comparisons: Treatment A | Treatment B | Mean Diff | Significant? | Critical Value
+  - Sheet 8 All Parameters Data: one block per parameter separated by blank rows; each block has parameter label, means table, ANOVA summary row
+  - Sheet 9 Time-Series Data: Treatment | 0 DAA | 7 DAA | 15 DAA | ...
+  - Sheet 10 Yield: same format as Sheet 5 for yield data; "No yield data recorded" if none
+  - Sheet 11 Weather: Date | DAA | Temp | Humidity | Wind | Rain
+  - Sheet 12 Charts: data tables with range notes for user to create charts
+  - Sheet 13 Photos: grid of embedded thumbnail images with treatment and DAA labels
+  - Apply consistent cell styling: bold dark header rows with white text, alternating row fill, number format "0.00" for means, "0.0000" for p-values
+  - Save as `ProjectReport_{projectName}_{date}.xlsx` via blob URL download
+  - _Requirements: 5.2, 5.4_
+
+- [~] 7. Build the DOCX Report Renderer
+  - Create `src/services/docxReportRenderer.js` with async function `generateProjectDocx(reportData, options = {})`
+  - Use the existing `docx` library (already used in trialReports.js); import helper styles from trialReports.js where possible
+  - Build document with same section order as PDF renderer using Paragraph, TextRun, Table, TableRow, TableCell
+  - Use HeadingLevel.HEADING_1 / HEADING_2 for section titles; PageBreak between major sections
+  - Treatment Means table: bold header row with border styling, CLD letters in rightmost column, Stars in separate column (**/*/ NS)
+  - ANOVA table: dark shaded header row, alternating row fills
+  - Include numbered table of contents at the start
+  - Save as `ProjectReport_{projectName}_{date}.docx` via blob URL download
+  - _Requirements: 5.3, 5.4_
+
+- [~] 8. Upgrade the Reports Page UI
+  - Modify `src/pages/Reports.jsx` to add a tab bar with two tabs: "Project Report" (new, default) and "Single Trial Report" (existing)
+  - In Project Report tab: project selector dropdown filtered by activeCategory; show sub-trial count and expandable preview listing treatment names and rep counts; render `<ReportConfigPanel>` passing selected project, its sub-trials, and activeCategory
+  - Handle `onGenerate(options)` callback: open ReportProgressModal, call `buildReportData`, call appropriate renderer (generateProjectPDF / generateProjectExcel / generateProjectDocx), update progress steps, close modal on completion or error
+  - Single Trial Report tab: render existing 5 report cards exactly unchanged
+  - Import ReportConfigPanel, ReportProgressModal from new component paths; import buildReportData and all three renderers
+  - Add error handling: catch renderer errors, close modal, show toast with error message
+  - _Requirements: 5.5, 6.1-6.6_
+
+- [~] 9. Wire Up LargeScale Project Reports
+  - Modify `src/pages/LargeScaleTrials.jsx` to add a "Project Report (Professional)" button in the existing download reports section
+  - On click: open simplified ReportConfigPanel (format + options only, no project selector) in a Modal
+  - In `buildReportData`, handle `options.isLargeScale === true`: source observations from `fbGetLargeScaleData(projectId).observations`, map sectors to treatment groups using sector Dosage, map quadrant visits to replication observations
+  - Generated reports for LargeScale projects include: sector/quadrant map text table (Sector Code | Treatment | Dosage | GPS), spatial CV% per treatment group
+  - Reuse ReportProgressModal for progress display
+  - _Requirements: 8.1-8.5_
+
+- [~] 10. Validation and Build Verification
+  - Run `npm run build` (or `vite build`) in the project root and confirm zero build errors
+  - Verify `src/services/reportDataBuilder.js` exports `buildReportData`, `getParametersWithData`, and `computeTreatmentMeans` without import errors
+  - Verify `src/utils/analysisUtils.js` AnalysisEngine class has `analyzeAllParameters` method
+  - Verify `src/components/ReportConfigPanel.jsx` and `src/components/ReportProgressModal.jsx` render without errors
+  - Verify `src/services/pdfReportRenderer.js`, `src/services/excelReportRenderer.js`, and `src/services/docxReportRenderer.js` export their main functions
+  - Verify `src/pages/Reports.jsx` has two-tab structure and imports all new modules correctly
+  - Verify existing single-trial report cards in Reports.jsx are unchanged and still functional
+  - _Requirements: All_

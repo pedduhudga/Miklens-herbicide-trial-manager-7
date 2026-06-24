@@ -1354,6 +1354,31 @@ export class AnalysisEngine {
                     treatmentStats.forEach(ts => { letters[ts.treatmentId] = ts.rank; });
                     return { method: 'lsd', alpha, lsd: lsdRef, value: lsdRef, letters };
                 }
+
+                /**
+                 * Batch analysis: runs analyze() for each paramKey and returns a map of results.
+                 * Errors per parameter are caught and stored as { error: string } without throwing.
+                 *
+                 * @param {string[]} paramKeys - List of observation parameter keys to analyze
+                 * @param {object}   options   - Forwarded to analyze(); supports .daa, .postHoc ('lsd'|'tukey'|'duncan'), .alpha, etc.
+                 * @returns {Promise<{ [paramKey]: AnalysisResult | { error: string } }>}
+                 */
+                async analyzeAllParameters(paramKeys, options = {}) {
+                    const results = {};
+                    for (const key of paramKeys) {
+                        try {
+                            const result = await this.analyze(key, null, options.daa, options);
+                            // Normalize postHoc.letters so callers always find letters under that key
+                            if (result && result.postHoc && !result.postHoc.letters) {
+                                result.postHoc.letters = result.postHoc.groups || result.postHoc.cld || {};
+                            }
+                            results[key] = result;
+                        } catch (e) {
+                            results[key] = { error: e.message || String(e) };
+                        }
+                    }
+                    return results;
+                }
             }
 
             function assignCLDByComparator(treatmentStats, isNonSignificant) {
