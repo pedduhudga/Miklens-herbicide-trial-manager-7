@@ -112,7 +112,7 @@ This plan implements all 19 requirements across 13 task groups, in dependency or
   - Requirements: R12
   - Files: `src/pages/Statistics.jsx`
 
-- [~] 23. Show `results.effectSizes.omegaSquared` in the Effect Sizes card in `Statistics.jsx` alongside existing eta-squared and Cohen's f
+- [x] 23. Show `results.effectSizes.omegaSquared` in the Effect Sizes card in `Statistics.jsx` alongside existing eta-squared and Cohen's f
   - Requirements: R1
   - Files: `src/pages/Statistics.jsx`
 
