@@ -4378,8 +4378,81 @@ If none are present, write "None".`;
             if (newDaa !== null) obs.daa = newDaa;
             efficacyChanged = true;
             matched = true;
+
+            // Check if there is an existing observation with the same DAA
+            const duplicateObs = efficacyData.find(o => o !== obs && Number(o.daa) === Number(newDaa));
+            if (duplicateObs) {
+              const confirmMerge = window.confirm(
+                `An observation at DAA ${newDaa} already exists. Do you want to merge this photo's observation metrics into the existing DAA ${newDaa} observation and delete the duplicate entry?`
+              );
+              if (confirmMerge) {
+                const count = duplicateObs.sampleCount || 1;
+                const config = getCategoryConfig(activeTrial.Category || activeCategory);
+                const fieldsToMerge = [
+                  ...(config.observationFields || []).map(f => f.key),
+                  'weedCover'
+                ];
+                
+                fieldsToMerge.forEach(key => {
+                  if (obs[key] !== undefined && obs[key] !== null && obs[key] !== '') {
+                    const val1 = parseFloat(duplicateObs[key]);
+                    const val2 = parseFloat(obs[key]);
+                    if (!isNaN(val1) && !isNaN(val2)) {
+                      duplicateObs[key] = Number((((val1 * count) + val2) / (count + 1)).toFixed(2));
+                    } else if (!isNaN(val2)) {
+                      duplicateObs[key] = val2;
+                    }
+                  }
+                });
+                
+                const speciesMap = new Map();
+                const addSpecies = (item) => {
+                  if (!item || !item.species) return;
+                  const existingSpec = speciesMap.get(item.species);
+                  const coverVal = parseFloat(item.cover);
+                  if (existingSpec) {
+                    if (!isNaN(coverVal)) {
+                      const specCount = existingSpec.count || 1;
+                      const oldCov = parseFloat(existingSpec.cover);
+                      existingSpec.cover = !isNaN(oldCov) ? Number((((oldCov * specCount) + coverVal) / (specCount + 1)).toFixed(2)) : coverVal;
+                      existingSpec.count = specCount + 1;
+                    }
+                    if (item.status && !existingSpec.status.includes(item.status)) {
+                      existingSpec.status = [existingSpec.status, item.status].filter(Boolean).join(', ');
+                    }
+                    if (item.notes && !existingSpec.notes.includes(item.notes)) {
+                      existingSpec.notes = [existingSpec.notes, item.notes].filter(Boolean).join(' | ');
+                    }
+                  } else {
+                    speciesMap.set(item.species, {
+                      ...item,
+                      cover: !isNaN(coverVal) ? coverVal : null,
+                      count: 1
+                    });
+                  }
+                };
+
+                (duplicateObs.weedDetails || []).forEach(addSpecies);
+                (obs.weedDetails || []).forEach(addSpecies);
+                duplicateObs.weedDetails = Array.from(speciesMap.values()).map(({ count, ...rest }) => rest);
+
+                if (obs.notes) {
+                  duplicateObs.notes = [duplicateObs.notes, obs.notes].filter(Boolean).join(' | ');
+                }
+
+                duplicateObs.sampleCount = count + 1;
+                obs._toDelete = true;
+              }
+            }
           }
         });
+
+        const beforeLen = efficacyData.length;
+        const filtered = efficacyData.filter(o => !o._toDelete);
+        if (filtered.length !== beforeLen) {
+          efficacyData.length = 0;
+          efficacyData.push(...filtered);
+        }
       }
 
       // 2. Fallback to sequence rank (index of sorted list)
@@ -4392,6 +4465,76 @@ If none are present, write "None".`;
             mainObs.date = newDate;
             if (newDaa !== null) mainObs.daa = newDaa;
             efficacyChanged = true;
+
+            // Check if there is an existing observation with the same DAA
+            const duplicateObs = efficacyData.find(o => o !== mainObs && Number(o.daa) === Number(newDaa));
+            if (duplicateObs) {
+              const confirmMerge = window.confirm(
+                `An observation at DAA ${newDaa} already exists. Do you want to merge this photo's observation metrics into the existing DAA ${newDaa} observation and delete the duplicate entry?`
+              );
+              if (confirmMerge) {
+                const count = duplicateObs.sampleCount || 1;
+                const config = getCategoryConfig(activeTrial.Category || activeCategory);
+                const fieldsToMerge = [
+                  ...(config.observationFields || []).map(f => f.key),
+                  'weedCover'
+                ];
+                
+                fieldsToMerge.forEach(key => {
+                  if (mainObs[key] !== undefined && mainObs[key] !== null && mainObs[key] !== '') {
+                    const val1 = parseFloat(duplicateObs[key]);
+                    const val2 = parseFloat(mainObs[key]);
+                    if (!isNaN(val1) && !isNaN(val2)) {
+                      duplicateObs[key] = Number((((val1 * count) + val2) / (count + 1)).toFixed(2));
+                    } else if (!isNaN(val2)) {
+                      duplicateObs[key] = val2;
+                    }
+                  }
+                });
+                
+                const speciesMap = new Map();
+                const addSpecies = (item) => {
+                  if (!item || !item.species) return;
+                  const existingSpec = speciesMap.get(item.species);
+                  const coverVal = parseFloat(item.cover);
+                  if (existingSpec) {
+                    if (!isNaN(coverVal)) {
+                      const specCount = existingSpec.count || 1;
+                      const oldCov = parseFloat(existingSpec.cover);
+                      existingSpec.cover = !isNaN(oldCov) ? Number((((oldCov * specCount) + coverVal) / (specCount + 1)).toFixed(2)) : coverVal;
+                      existingSpec.count = specCount + 1;
+                    }
+                    if (item.status && !existingSpec.status.includes(item.status)) {
+                      existingSpec.status = [existingSpec.status, item.status].filter(Boolean).join(', ');
+                    }
+                    if (item.notes && !existingSpec.notes.includes(item.notes)) {
+                      existingSpec.notes = [existingSpec.notes, item.notes].filter(Boolean).join(' | ');
+                    }
+                  } else {
+                    speciesMap.set(item.species, {
+                      ...item,
+                      cover: !isNaN(coverVal) ? coverVal : null,
+                      count: 1
+                    });
+                  }
+                };
+
+                (duplicateObs.weedDetails || []).forEach(addSpecies);
+                (mainObs.weedDetails || []).forEach(addSpecies);
+                duplicateObs.weedDetails = Array.from(speciesMap.values()).map(({ count, ...rest }) => rest);
+
+                if (mainObs.notes) {
+                  duplicateObs.notes = [duplicateObs.notes, mainObs.notes].filter(Boolean).join(' | ');
+                }
+
+                duplicateObs.sampleCount = count + 1;
+                
+                const obsIdx = efficacyData.indexOf(mainObs);
+                if (obsIdx !== -1) {
+                  efficacyData.splice(obsIdx, 1);
+                }
+              }
+            }
           }
         }
       }
