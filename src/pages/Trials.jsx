@@ -3677,12 +3677,44 @@ Rules:
           let posVal = '';
           const rowVal = String(trial.PotRow || '').trim();
           const colVal = String(trial.PotCol || '').trim();
-          if (rowVal && colVal) {
-            posVal = `R${rowVal.replace(/^R/i, '')} C${colVal.replace(/^C/i, '')}`;
-          } else if (rowVal) {
-            posVal = `Row ${rowVal}`;
-          } else if (colVal) {
-            posVal = `Col ${colVal}`;
+          
+          let colClean = colVal.replace(/^Col\s*/i, '').replace(/^C/i, '').trim();
+          if (colClean && !colClean.startsWith('C') && !isNaN(colClean)) {
+            colClean = 'C' + colClean;
+          }
+          
+          let rowClean = rowVal.replace(/^Row\s*/i, '').replace(/^R/i, '').trim();
+          if (rowClean && !rowClean.startsWith('R') && !isNaN(rowClean)) {
+            rowClean = 'R' + rowClean;
+          }
+
+          if (rowClean && colClean) {
+            posVal = `${rowClean}${colClean}`;
+          } else if (rowClean) {
+            const proj = state.projects?.find(p => p.ID === trial.ProjectID);
+            if (proj) {
+              const potCols = parseInt(proj.PotCols) || 4;
+              posVal = `${rowClean} (C1-C${potCols})`;
+            } else {
+              posVal = rowClean;
+            }
+          } else if (colClean) {
+            const proj = state.projects?.find(p => p.ID === trial.ProjectID);
+            if (proj) {
+              const potRows = parseInt(proj.PotRows) || 9;
+              const blocksCount = parseInt(proj.PotBlocks || proj.BlocksCount) || 3;
+              const rowsPerBlock = Math.floor(potRows / blocksCount) || 1;
+              const repNum = parseInt(trial.Replication) || 1;
+              const startRow = (repNum - 1) * rowsPerBlock + 1;
+              const endRow = Math.min(repNum * rowsPerBlock, potRows);
+              if (blocksCount > 1) {
+                posVal = `${colClean} (R${startRow}-R${endRow})`;
+              } else {
+                posVal = colClean;
+              }
+            } else {
+              posVal = colClean;
+            }
           }
           if (posVal) {
             items.push(`<strong>Pos</strong><span>${sanitizePrintHtml(posVal)}</span>`);
