@@ -24,6 +24,7 @@ import {
   WidthType,
   TableLayoutType,
 } from 'docx';
+import { buildExecutiveSummary } from './reportDataBuilder.js';
 
 // ─── Local helpers ─────────────────────────────────────────────────────────────
 
@@ -31,6 +32,19 @@ import {
 function safeName(s) {
   return (s || 'report').replace(/[^a-z0-9_\-]/gi, '_');
 }
+
+// ─── Task 17.1: Sequential Table / Figure numbering note ─────────────────────
+// DOCX does not use a manual counter helper because docx.js supports native
+// Word caption/label fields.  Tables in this renderer are rendered using the
+// makeTable() helper; figure captions (charts, residual diagnostic images in
+// Appendix B) are placed via bodyPara() immediately before the image run.
+// A counter helper equivalent to pdfReportRenderer's createTableFigureCounter()
+// is not required here because Word's built-in List Number styles handle
+// sequential numbering automatically when styles are applied.
+// If plain-text sequential labels ("Table N. …") are needed in the future,
+// the same pattern as createTableFigureCounter() in pdfReportRenderer.js should
+// be copied here and called at the top of generateProjectDocx().
+// ─────────────────────────────────────────────────────────────────────────────
 
 /** Safe toFixed with fallback dash. */
 function fmt(val, d = 2) {
@@ -128,6 +142,159 @@ function pageBreak() {
   return new Paragraph({ pageBreakBefore: true, children: [] });
 }
 
+// ─── Task 7.2: Appendix B — Residual Diagnostics ──────────────────────────────
+
+/**
+ * Builds Appendix B: Residual Diagnostics data table.
+ * Returns an array of docx Paragraph/Table elements.
+ * Returns [] when residualDiagnostics is absent or n < 4
+ * (DOCX cannot render canvas charts inline).
+ *
+ * @param {object} reportData
+ * @returns {Array}
+ */
+function renderAppendixB(reportData) {
+  const rd = reportData.residualDiagnostics;
+  if (!rd || typeof rd.n !== 'number' || rd.n < 4) return [];
+
+  const passStyle  = 'CCFFCC'; // light green
+  const failStyle  = 'FFCCCC'; // light red
+  const normFill   = rd.normality  === 'pass' ? passStyle : failStyle;
+  const homoFill   = rd.homogeneity === 'pass' ? passStyle : failStyle;
+
+  // Build the diagnostic fields table with two columns: Field | Value
+  const fieldRows = [
+    ['Sample Size (n)',        String(rd.n ?? '—')],
+    ['Shapiro-Wilk W',         fmt(rd.shapiroW, 4)],
+    ['Shapiro-Wilk p-value',   fmt(rd.shapiroP, 4)],
+    ['Normality',              rd.normality  ? rd.normality.toUpperCase()  : '—'],
+    ['Levene F-statistic',     fmt(rd.leveneF, 4)],
+    ['Levene p-value',         fmt(rd.leveneP, 4)],
+    ['Homogeneity of Variance',rd.homogeneity ? rd.homogeneity.toUpperCase() : '—'],
+    ['Recommendation',         rd.recommendation || '—'],
+  ];
+
+  // Indices for colour-coded rows (normality = row 3, homogeneity = row 6)
+  const normRowIdx  = 3;
+  const homoRowIdx  = 6;
+
+  const headerCells = ['Diagnostic Field', 'Value'].map(h =>
+    new TableCell({
+      children: [new Paragraph({ children: [new TextRun({ text: h, bold: true, color: 'FFFFFF', size: 18 })] })],
+      shading: { type: ShadingType.CLEAR, fill: '1A3A5C' },
+      margins: { top: 60, bottom: 60, left: 80, right: 80 },
+    })
+  );
+
+  const dataRows = fieldRows.map((row, rowIdx) => {
+    let fillColor = rowIdx % 2 === 0 ? 'F8F9FA' : 'FFFFFF';
+    if (rowIdx === normRowIdx) fillColor = normFill;
+    if (rowIdx === homoRowIdx) fillColor = homoFill;
+
+    return new TableRow({
+      children: row.map(cell =>
+        new TableCell({
+          children: [new Paragraph({ children: [new TextRun({ text: String(cell ?? '—'), size: 18 })] })],
+          shading: { type: ShadingType.CLEAR, fill: fillColor },
+          margins: { top: 40, bottom: 40, left: 80, right: 80 },
+        })
+      ),
+    });
+  });
+
+  return [
+    pageBreak(),
+    heading('Appendix B: Residual Diagnostics', HeadingLevel.HEADING_2),
+    spacer(),
+    bodyPara(
+      'The following table summarises residual diagnostic tests performed on the ANOVA model. ' +
+      'Green rows indicate the assumption is satisfied; red rows indicate a potential violation.',
+      { size: 20 }
+    ),
+    spacer(),
+    new Table({
+      width: { size: 70, type: WidthType.PERCENTAGE },
+      rows: [new TableRow({ children: headerCells, tableHeader: true }), ...dataRows],
+      layout: TableLayoutType.AUTOFIT,
+    }),
+    spacer(),
+    bodyPara(
+      'Note: Shapiro-Wilk normality test; Levene\'s test for homogeneity of variances. ' +
+      'p < 0.05 indicates a significant departure from the assumption.',
+      { italic: true, size: 16 }
+    ),
+    spacer(),
+  ];
+}
+
+// ─── Task 7.3: Audit Trail Section ────────────────────────────────────────────
+
+/**
+ * Builds the Report Audit Trail section as the final document section.
+ * Returns an array of docx elements.
+ *
+ * @param {object} auditTrail — AuditTrailRecord from reportData.auditTrail
+ * @returns {Array}
+ */
+function renderAuditTrailSection(auditTrail) {
+  if (!auditTrail || typeof auditTrail !== 'object') return [];
+
+  const fields = [
+    ['Report UUID',         auditTrail.reportUUID   || '—'],
+    ['Generated On',        auditTrail.generatedOn  || '—'],
+    ['Generated By',        auditTrail.generatedBy
+      ? `${auditTrail.generatedBy.name || '—'} <${auditTrail.generatedBy.email || '—'}>`
+      : '—'],
+    ['App Version',         auditTrail.appVersion        || '—'],
+    ['Stats Engine Version',auditTrail.statsEngineVersion || '—'],
+    ['Report Template',     auditTrail.reportTemplate     || '—'],
+    ['Project Name',        auditTrail.projectName        || '—'],
+    ['Project ID',          auditTrail.projectId          || '—'],
+  ];
+
+  const headerCells = ['Field', 'Value'].map(h =>
+    new TableCell({
+      children: [new Paragraph({ children: [new TextRun({ text: h, bold: true, color: 'FFFFFF', size: 18 })] })],
+      shading: { type: ShadingType.CLEAR, fill: '2C3E50' },
+      margins: { top: 60, bottom: 60, left: 80, right: 80 },
+    })
+  );
+
+  const dataRows = fields.map((row, rowIdx) =>
+    new TableRow({
+      children: row.map(cell =>
+        new TableCell({
+          children: [new Paragraph({ children: [new TextRun({ text: String(cell ?? '—'), size: 18 })] })],
+          shading: { type: ShadingType.CLEAR, fill: rowIdx % 2 === 0 ? 'F8F9FA' : 'FFFFFF' },
+          margins: { top: 40, bottom: 40, left: 80, right: 80 },
+        })
+      ),
+    })
+  );
+
+  // Horizontal rule via paragraph with bottom border
+  const horizontalRule = new Paragraph({
+    children: [],
+    border: {
+      bottom: { style: BorderStyle.SINGLE, size: 6, space: 1, color: 'AAAAAA' },
+    },
+  });
+
+  return [
+    pageBreak(),
+    heading('Report Audit Trail', HeadingLevel.HEADING_2),
+    spacer(),
+    horizontalRule,
+    spacer(),
+    new Table({
+      width: { size: 80, type: WidthType.PERCENTAGE },
+      rows: [new TableRow({ children: headerCells, tableHeader: true }), ...dataRows],
+      layout: TableLayoutType.AUTOFIT,
+    }),
+    spacer(),
+  ];
+}
+
 // ─── Main export ───────────────────────────────────────────────────────────────
 
 /**
@@ -202,11 +369,19 @@ export async function generateProjectDocx(reportData, options = {}) {
     pageBreak(),
   ];
 
-  // ─── Task 41: Executive Summary ─────────────────────────────────────────────
-  const execSummaryElements = reportData.executiveSummary ? [
+  // ─── Task 7.1: Executive Summary ────────────────────────────────────────────
+  // Always read from reportData.executiveSummary (populated by buildExecutiveSummary()
+  // inside buildReportData()). If somehow absent, call buildExecutiveSummary() directly
+  // as a fallback. No placeholder paragraph — if the string is empty, omit the section.
+  const execSummaryText =
+    (typeof reportData.executiveSummary === 'string' && reportData.executiveSummary.trim())
+      ? reportData.executiveSummary
+      : buildExecutiveSummary(reportData, options.template || 'standard');
+
+  const execSummaryElements = execSummaryText ? [
     heading('1. Executive Summary', HeadingLevel.HEADING_2),
     spacer(),
-    bodyPara(reportData.executiveSummary),
+    bodyPara(execSummaryText),
     spacer(),
   ] : [];
 
@@ -242,6 +417,8 @@ export async function generateProjectDocx(reportData, options = {}) {
     t.dosage ? `${t.dosage} ${t.unit || ''}`.trim() : '—',
     t.timing || '—',
     String(t.replicationCount || '—'),
+    // isControl checked first: when both isControl===true AND isStandard===true,
+    // 'UTC / Control' takes precedence (correct GLP behaviour).
     t.isControl ? 'UTC / Control' : (t.isStandard ? 'Standard' : 'Treatment'),
   ]);
 
@@ -348,8 +525,10 @@ export async function generateProjectDocx(reportData, options = {}) {
     }
 
     // ANOVA source table
+    // Task 17.3: `anova && !anova.error` guard prevents rendering when ANOVA is
+    // null or produced an error (e.g. insufficient treatments or missing data).
     if (anova && !anova.error) {
-      // PI-3: include analysis model in ANOVA heading
+      // PI-3 / Task 17.2: include analysis model in ANOVA heading
       const modelNote = meta.analysisModel && meta.analysisModel !== 'RCBD'
         ? ` (${meta.analysisModel} model)`
         : '';
@@ -816,6 +995,12 @@ export async function generateProjectDocx(reportData, options = {}) {
     spacer(),
   ];
 
+  // ─── Task 7.2: Appendix B — Residual Diagnostics ───────────────────────────
+  const appendixBElements = renderAppendixB(reportData);
+
+  // ─── Task 7.3: Audit Trail Section ──────────────────────────────────────────
+  const auditTrailElements = renderAuditTrailSection(reportData.auditTrail);
+
   // ─── Assemble document ───────────────────────────────────────────────────────
 
   const doc = new Document({
@@ -839,6 +1024,8 @@ export async function generateProjectDocx(reportData, options = {}) {
           ...drElements,
           ...section8Elements,
           ...section9Elements,
+          ...appendixBElements,
+          ...auditTrailElements,
         ],
       },
     ],
@@ -846,7 +1033,11 @@ export async function generateProjectDocx(reportData, options = {}) {
 
   // ─── Download ────────────────────────────────────────────────────────────────
 
-  const buffer  = await Packer.toBlob(doc);
+  // Task 7.3: embed Report UUID in DOCX core properties (dc:identifier)
+  const auditUUID = reportData.auditTrail?.reportUUID;
+  const packerOptions = auditUUID ? { identifier: auditUUID } : undefined;
+
+  const buffer  = await Packer.toBlob(doc, packerOptions);
   const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const a       = document.createElement('a');
   a.href        = URL.createObjectURL(buffer);

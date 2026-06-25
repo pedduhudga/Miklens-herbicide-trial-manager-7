@@ -51,6 +51,12 @@ export const CATEGORIES = {
     observationFields: [
       { key: 'weedCover', label: 'Weed Cover (%)', type: 'number', min: 0, max: 100 },
       { key: 'weedDetails', label: 'Weed Species Details', type: 'weedArray' },
+      // Req 5.1 — phytotoxicity and weather-at-observation fields
+      { key: 'phytotoxicityPct', label: 'Phytotoxicity (%)', type: 'number', min: 0, max: 100 },
+      { key: 'phytotoxicityNotes', label: 'Phytotoxicity Notes', type: 'text' },
+      { key: 'weatherTempAtObs', label: 'Temperature at Obs (°C)', type: 'number' },
+      { key: 'weatherHumidityAtObs', label: 'Humidity at Obs (%)', type: 'number', min: 0, max: 100 },
+      { key: 'weatherWindAtObs', label: 'Wind Speed at Obs (km/h)', type: 'number', min: 0 },
     ],
     // Formulation-specific fields
     formulationFields: [
@@ -126,6 +132,8 @@ export const CATEGORIES = {
       { key: 'lesionCountAvg', label: 'Avg Lesions per Leaf', type: 'number', min: 0 },
       { key: 'chloroticHaloIncidence', label: 'Chlorotic Halo Incidence (%)', type: 'number', min: 0, max: 100 },
       { key: 'defoliationPct', label: 'Defoliation (%)', type: 'number', min: 0, max: 100 },
+      // Req 5.2 — AUDPC field
+      { key: 'AUDPC', label: 'AUDPC (Area Under Disease Progress Curve)', type: 'number', min: 0 },
     ],
     formulationFields: [
       { key: 'ModeOfAction', label: 'Mode of Action (FRAC Group)', type: 'text', placeholder: 'e.g. Group 3 - DMI (Triazole)' },

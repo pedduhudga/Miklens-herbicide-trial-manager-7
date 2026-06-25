@@ -2,6 +2,20 @@ import React, { useEffect, useState } from 'react';
 import { Loader2, CheckCircle, ChevronRight, X, AlertCircle } from 'lucide-react';
 
 /**
+ * Default 6-step pipeline labels used by report generators (Task 20.5).
+ * Callers can import this array, copy it, then update step statuses as
+ * generation progresses.
+ */
+export const DEFAULT_REPORT_STEPS = [
+  { label: 'Aggregating data',       status: 'pending' },
+  { label: 'Running statistics',     status: 'pending' },
+  { label: 'Embedding charts',       status: 'pending' },
+  { label: 'Processing photos',      status: 'pending' },
+  { label: 'Generating report file', status: 'pending' },
+  { label: 'Preparing download',     status: 'pending' },
+];
+
+/**
  * ReportProgressModal
  *
  * Props:
@@ -11,7 +25,8 @@ import { Loader2, CheckCircle, ChevronRight, X, AlertCircle } from 'lucide-react
  *   percent     {number}   — 0–100 overall progress percentage
  *   onCancel    {Function} — optional; when provided, a Cancel button is shown (only while percent < 100)
  */
-export default function ReportProgressModal({ isOpen, steps = [], currentStep, percent = 0, onCancel }) {
+
+export default function ReportProgressModal({ isOpen, steps = [], currentStep, percent = 0, onCancel, errorMessage }) {
   // After reaching 100% show a "Done!" state briefly
   const [showDone, setShowDone] = useState(false);
 
@@ -108,6 +123,14 @@ export default function ReportProgressModal({ isOpen, steps = [], currentStep, p
               </li>
             ))}
           </ul>
+        )}
+
+        {/* ── Error message ── */}
+        {errorMessage && (
+          <div className="mt-3 flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+            <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" aria-hidden="true" />
+            <p className="text-sm text-red-700">{errorMessage}</p>
+          </div>
         )}
 
         {/* ── Cancel button ── */}

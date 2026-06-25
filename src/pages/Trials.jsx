@@ -2018,8 +2018,30 @@ export default function Trials({ onMenuClick }) {
 
     const folderPath = [categoryName, userName, projectName, trialNameWithDate];
 
+    // Build per-photo tag fields from observation context (Requirements 2.1, 2.2, 2.4, 2.5)
+    let photoTagFields;
+    if (isObsModalOpen) {
+      const efficacyData = safeJsonParse(targetTrial.EfficacyDataJSON, []);
+      const obsIdx = editingObsIdx != null && editingObsIdx >= 0 ? editingObsIdx : (efficacyData.length > 0 ? efficacyData.length - 1 : null);
+      photoTagFields = {
+        treatment: targetTrial?.FormulationName ?? null,
+        daa: parseInt(obsForm?.daa) || null,
+        plotNumber: targetTrial?.PlotNumber ?? null,
+        observationId: obsIdx != null ? obsIdx : null,
+        direction: null,
+      };
+    } else {
+      photoTagFields = {
+        treatment: null,
+        daa: null,
+        plotNumber: null,
+        observationId: null,
+        direction: null,
+      };
+    }
+
     // Optimistically add a placeholder with tempId so the photo appears immediately
-    const photoEntry = { tempId, fileData: dataUrl, date: photoDate, label: cameraMode === 'weed' ? 'Weed Photo' : 'Field Observation', tag: photoTag, identifications: [], aiStatus: 'pending' };
+    const photoEntry = { tempId, fileData: dataUrl, date: photoDate, label: cameraMode === 'weed' ? 'Weed Photo' : 'Field Observation', tag: photoTag, identifications: [], aiStatus: 'pending', ...photoTagFields };
     const photosOptimistic = [...safeJsonParse(targetTrial.PhotoURLs, []), photoEntry];
     const optimisticTrial = { ...targetTrial, PhotoURLs: JSON.stringify(photosOptimistic) };
     updateState({ trials: getAppState().trials.map(t => t.ID === optimisticTrial.ID ? optimisticTrial : t) });
@@ -2100,7 +2122,7 @@ export default function Trials({ onMenuClick }) {
       // 2. Replace placeholder with final Drive URL entry
       const currentPhotos = safeJsonParse(targetTrial.PhotoURLs, []).filter(p => p.tempId !== tempId);
       const finalEntry = driveUrl
-        ? { url: driveUrl, driveId: uploadResult?.id || getDriveFileId(driveUrl), date: photoDate, label: photoEntry.label, tag: photoTag, identifications: [], aiStatus: 'pending' }
+        ? { url: driveUrl, driveId: uploadResult?.id || getDriveFileId(driveUrl), date: photoDate, label: photoEntry.label, tag: photoTag, identifications: [], aiStatus: 'pending', ...photoTagFields }
         : { ...photoEntry, tempId: undefined, aiStatus: 'pending' };
       currentPhotos.push(finalEntry);
 
@@ -9061,7 +9083,7 @@ If none are present, write "None".`;
             
             <div className="grid grid-cols-2 gap-3 text-xs bg-slate-50 p-3 rounded-lg border">
               {pendingHarvestAiResult.harvestDate && (
-                <div className="col-span-2 border-b pb-1.5 mb-1">
+                <div className="col-span-2 border--1.5 mb-1">
                   <span className="font-semibold text-slate-500">Suggested Date:</span>{' '}
                   <span className="font-bold text-slate-800">{pendingHarvestAiResult.harvestDate}</span>
                 </div>

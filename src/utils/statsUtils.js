@@ -8,6 +8,12 @@ import { getObservationPrimaryValue } from './categoryConfig.js';
 import jStat from 'jstat';
 
 /**
+ * Version identifier for the statistics engine.
+ * Read by buildReportData() for audit trail purposes.
+ */
+export const STATS_ENGINE_VERSION = '1.0.0';
+
+/**
  * Calculate basic statistics: mean, variance, std dev
  */
 export function calculateStats(values) {

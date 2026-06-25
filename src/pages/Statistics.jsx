@@ -11,7 +11,7 @@ import {
 import { performDoseResponseAnalysis } from '../utils/doseResponseUtils.js';
 import { safeJsonParse } from '../utils/helpers.js';
 import { exportStatsPDF, exportStatsExcel } from '../services/statsExporter.js';
-import { computeTreatmentMeans } from '../services/reportDataBuilder.js';
+import { computeTreatmentMeans, computeCorrelationMatrix } from '../services/reportDataBuilder.js';
 import PowerAnalysisPanel from '../components/PowerAnalysisPanel.jsx';
 import { 
   BarChart3, Calculator, ChevronDown, Download, 

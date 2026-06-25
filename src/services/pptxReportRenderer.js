@@ -75,6 +75,95 @@ async function toBase64(src, maxPx = 600) {
   } catch { return null; }
 }
 
+// ─── Multi-slide photo renderer ───────────────────────────────────────────────
+
+/**
+ * Renders photos in batches of 6 onto separate slides (2 rows × 3 cols grid).
+ * Each photo's resolvedSrc is awaited sequentially to avoid memory spikes.
+ * Each slide is subtitled "Trial Photos (N of M)" where N = batch end, M = total.
+ *
+ * @param {object} prs          — pptxgenjs presentation instance
+ * @param {object} reportData   — ReportData object (reportData.photos used)
+ * @param {object} ctx          — slide-rendering context helpers & constants
+ */
+async function renderPhotoSlides(prs, reportData, ctx) {
+  const { addHeaderBand, LIGHT_BG, GRAY, SLIDE_W, SLIDE_H } = ctx;
+  const photos = reportData.photos || [];
+  if (photos.length === 0) return;
+
+  const BATCH_SIZE = 6;
+  const COLS = 3;
+  const IMG_W = 2.9;
+  const IMG_H = 1.85;
+  const START_X = 0.25;
+  const START_Y = 1.0;
+  const GUTTER_X = 0.15;
+  const GUTTER_Y = 0.15;
+
+  const totalSlides = Math.ceil(photos.length / BATCH_SIZE);
+
+  for (let i = 0; i < photos.length; i += BATCH_SIZE) {
+    const batch = photos.slice(i, i + BATCH_SIZE);
+    const slideIndex = Math.floor(i / BATCH_SIZE) + 1; // 1-based
+    // e.g. "Trial Photos (1 of 3)", "Trial Photos (2 of 3)"
+    const subtitle = `Trial Photos (${slideIndex} of ${totalSlides})`;
+
+    const slide = prs.addSlide();
+    slide.addShape(prs.ShapeType.rect, {
+      x: 0, y: 0, w: SLIDE_W, h: SLIDE_H,
+      fill: { color: LIGHT_BG },
+    });
+    addHeaderBand(slide, 'Trial Photos', subtitle);
+
+    // Process photos in the batch sequentially (one await at a time)
+    for (let j = 0; j < batch.length; j++) {
+      const col = j % COLS;
+      const row = Math.floor(j / COLS);
+      const x = START_X + col * (IMG_W + GUTTER_X);
+      const y = START_Y + row * (IMG_H + GUTTER_Y);
+      const photo = batch[j];
+
+      // Resolve image data — use resolvedSrc first, fall back to url
+      const src = photo.resolvedSrc || photo.url || null;
+      let imgData = null;
+      try {
+        imgData = await toBase64(src, 600); // sequential: one at a time
+      } catch (_e) {
+        imgData = null;
+      }
+
+      if (imgData) {
+        slide.addImage({ data: imgData, x, y, w: IMG_W, h: IMG_H });
+      } else {
+        // Grey placeholder with "Image unavailable" label
+        slide.addShape(prs.ShapeType.rect, {
+          x, y, w: IMG_W, h: IMG_H,
+          fill: { color: 'EEEEEE' },
+          line: { color: 'CCCCCC', width: 1 },
+        });
+        slide.addText('Image unavailable', {
+          x, y: y + IMG_H / 2 - 0.15,
+          w: IMG_W, h: 0.3,
+          fontSize: 8, color: GRAY, align: 'center',
+        });
+      }
+
+      // Photo caption below image (treatment | DAA)
+      const label = [
+        photo.treatment || '',
+        photo.daa != null ? `${photo.daa} DAA` : '',
+      ].filter(Boolean).join(' | ');
+      if (label) {
+        slide.addText(label, {
+          x, y: y + IMG_H + 0.02,
+          w: IMG_W, h: 0.18,
+          fontSize: 7, color: GRAY, align: 'center',
+        });
+      }
+    }
+  }
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 /**
@@ -85,9 +174,10 @@ async function toBase64(src, maxPx = 600) {
  *  2. Trial Design
  *  3. Treatment Means Bar Chart
  *  4. ANOVA Results Table
- *  5. Treatment Ranking
- *  6. Conclusions
- *  7. (Optional) Photos — up to 6, 2×3 grid
+ *  5. Statistical Residual Diagnostics (conditional — only when residualDiagnostics.n >= 4)
+ *  6. Treatment Ranking
+ *  7. Conclusions
+ *  8+. Trial Photos — multi-slide 2×3 grid, 6 per slide (optional)
  *
  * @param {object} reportData  — ReportData object from reportDataBuilder.js
  * @param {object} [options]   — { includePhotos }
@@ -321,7 +411,141 @@ export async function generateProjectPPTX(reportData, options = {}) {
     }
   }
 
-  // ─── SLIDE 5: Treatment Ranking ──────────────────────────────────────────────
+  // ─── SLIDE 5: Statistical Residual Diagnostics (conditional) ───────────────
+  const residDiag = reportData.residualDiagnostics || null;
+  if (residDiag && typeof residDiag.n === 'number' && residDiag.n >= 4) {
+    const slide = prs.addSlide();
+    slide.addShape(prs.ShapeType.rect, { x: 0, y: 0, w: SLIDE_W, h: SLIDE_H, fill: { color: LIGHT_BG } });
+    addHeaderBand(slide, 'Statistical Residual Diagnostics', `n = ${residDiag.n} observations`);
+
+    // ── 1×3 panel grid ────────────────────────────────────────────────────────
+    const panelW  = 3.0;
+    const panelH  = 2.6;
+    const startX  = 0.25;
+    const panelY  = 0.95;
+    const gutterX = 0.25;
+
+    const panels = [
+      {
+        title: 'Histogram of Residuals',
+        icon: '📊',
+        lines: (() => {
+          const res = Array.isArray(residDiag.residuals) ? residDiag.residuals : [];
+          if (res.length === 0) return ['No residual data'];
+          const mn = Math.min(...res);
+          const mx = Math.max(...res);
+          const mean = res.reduce((s, v) => s + v, 0) / res.length;
+          const sd = Math.sqrt(res.reduce((s, v) => s + (v - mean) ** 2, 0) / res.length);
+          return [
+            `n = ${res.length}`,
+            `Min: ${fmt(mn, 3)}`,
+            `Max: ${fmt(mx, 3)}`,
+            `Mean: ${fmt(mean, 4)}`,
+            `SD: ${fmt(sd, 4)}`,
+          ];
+        })(),
+      },
+      {
+        title: 'Q-Q Plot',
+        icon: '📈',
+        lines: (() => {
+          const normLabel = residDiag.normality === 'pass' ? '✓ PASS' : '✗ FAIL';
+          const normColor = residDiag.normality === 'pass' ? '1E8C3A' : 'C0392B';
+          return [
+            `Shapiro-Wilk W: ${fmt(residDiag.shapiroW, 4)}`,
+            `p-value: ${fmt(residDiag.shapiroP, 4)}`,
+            { text: `Normality: ${normLabel}`, color: normColor },
+            '',
+            residDiag.normality === 'fail'
+              ? 'Consider Kruskal-Wallis'
+              : 'Normal distribution assumed',
+          ];
+        })(),
+      },
+      {
+        title: 'Fitted vs. Residuals',
+        icon: '🔬',
+        lines: (() => {
+          const homoLabel = residDiag.homogeneity === 'pass' ? '✓ PASS' : '✗ FAIL';
+          const homoColor = residDiag.homogeneity === 'pass' ? '1E8C3A' : 'C0392B';
+          return [
+            `Levene F: ${fmt(residDiag.leveneF, 4)}`,
+            `p-value: ${fmt(residDiag.leveneP, 4)}`,
+            { text: `Homogeneity: ${homoLabel}`, color: homoColor },
+            '',
+            residDiag.homogeneity === 'fail'
+              ? 'Variance unequal across groups'
+              : 'Variances approximately equal',
+          ];
+        })(),
+      },
+    ];
+
+    panels.forEach((panel, pi) => {
+      const x = startX + pi * (panelW + gutterX);
+
+      // Panel background card
+      slide.addShape(prs.ShapeType.rect, {
+        x, y: panelY, w: panelW, h: panelH,
+        fill: { color: WHITE },
+        line: { color: ACCENT, width: 1.5 },
+      });
+
+      // Panel title bar
+      slide.addShape(prs.ShapeType.rect, {
+        x, y: panelY, w: panelW, h: 0.38,
+        fill: { color: ACCENT },
+      });
+      slide.addText(`${panel.icon} ${panel.title}`, {
+        x: x + 0.1, y: panelY + 0.04, w: panelW - 0.2, h: 0.3,
+        fontSize: 9, bold: true, color: WHITE, align: 'center',
+      });
+
+      // Panel content lines
+      let lineY = panelY + 0.46;
+      const lineH = 0.32;
+      panel.lines.forEach((line) => {
+        if (line === '') { lineY += lineH * 0.4; return; }
+        const isObj = typeof line === 'object' && line !== null;
+        const text  = isObj ? line.text : line;
+        const color = isObj ? line.color : DARK;
+        slide.addText(String(text), {
+          x: x + 0.12, y: lineY, w: panelW - 0.24, h: lineH,
+          fontSize: 9, color, align: 'left', wrap: true,
+          bold: isObj,
+        });
+        lineY += lineH;
+      });
+    });
+
+    // ── Recommendation strip below panels ─────────────────────────────────────
+    if (residDiag.recommendation) {
+      const recY = panelY + panelH + 0.14;
+      slide.addShape(prs.ShapeType.rect, {
+        x: startX, y: recY, w: SLIDE_W - startX * 2, h: 0.38,
+        fill: { color: 'FFF8E1' },
+        line: { color: 'F59E0B', width: 1 },
+      });
+      slide.addText(`⚠ Recommendation: ${residDiag.recommendation}`, {
+        x: startX + 0.1, y: recY + 0.05, w: SLIDE_W - startX * 2 - 0.2, h: 0.28,
+        fontSize: 9, color: '92400E', align: 'left', wrap: true,
+      });
+    }
+
+    // ── Overall assumption summary (bottom-right) ──────────────────────────────
+    const overallPass = residDiag.normality === 'pass' && residDiag.homogeneity === 'pass';
+    const overallY    = panelY + panelH + (residDiag.recommendation ? 0.6 : 0.14);
+    const summaryText = overallPass
+      ? '✓ ANOVA assumptions satisfied — parametric results are valid.'
+      : '⚠ One or more assumptions failed — interpret ANOVA results with caution.';
+    const summaryColor = overallPass ? '1E8C3A' : 'C0392B';
+    slide.addText(summaryText, {
+      x: startX, y: overallY, w: SLIDE_W - startX * 2, h: 0.3,
+      fontSize: 9, bold: true, color: summaryColor, align: 'center',
+    });
+  }
+
+  // ─── SLIDE 6 (was 5): Treatment Ranking ──────────────────────────────────────
   {
     const slide = prs.addSlide();
     slide.addShape(prs.ShapeType.rect, { x: 0, y: 0, w: SLIDE_W, h: SLIDE_H, fill: { color: LIGHT_BG } });
@@ -371,7 +595,7 @@ export async function generateProjectPPTX(reportData, options = {}) {
     });
   }
 
-  // ─── SLIDE 6: Conclusions ────────────────────────────────────────────────────
+  // ─── SLIDE 7 (was 6): Conclusions ────────────────────────────────────────────
   {
     const slide = prs.addSlide();
     slide.addShape(prs.ShapeType.rect, { x: 0, y: 0, w: SLIDE_W, h: SLIDE_H, fill: { color: LIGHT_BG } });
@@ -415,42 +639,71 @@ export async function generateProjectPPTX(reportData, options = {}) {
     });
   }
 
-  // ─── SLIDE 7 (Optional): Photos 2×3 grid ────────────────────────────────────
+  // ─── SLIDES: Photos — multi-slide 2×3 grid (batch of 6 per slide) ───────────
   const photos = Array.isArray(reportData.photos) ? reportData.photos : [];
   if (options.includePhotos !== false && photos.length > 0) {
+    await renderPhotoSlides(prs, reportData, { addHeaderBand, LIGHT_BG, GRAY, SLIDE_W, SLIDE_H });
+  }
+
+  // ─── SLIDE: Audit Trail ──────────────────────────────────────────────────────
+  {
+    const auditTrail = reportData.auditTrail || {};
     const slide = prs.addSlide();
     slide.addShape(prs.ShapeType.rect, { x: 0, y: 0, w: SLIDE_W, h: SLIDE_H, fill: { color: LIGHT_BG } });
-    addHeaderBand(slide, 'Trial Photos', `${Math.min(photos.length, 6)} of ${photos.length} photos`);
+    addHeaderBand(slide, 'Report Audit Trail', 'Traceability record for this generated report');
 
-    const maxPhotos = 6;
-    const cols = 3, rows = 2;
-    const imgW = 2.9, imgH = 1.85;
-    const startX = 0.25, startY = 1.0;
-    const gutterX = 0.15, gutterY = 0.15;
+    // Build rows: field name / value pairs
+    const auditRows = [
+      ['Report UUID',            auditTrail.reportUUID            || '—'],
+      ['Generated On',           auditTrail.generatedOn           || '—'],
+      ['Generated By (Name)',    auditTrail.generatedBy?.name     || '—'],
+      ['Generated By (Email)',   auditTrail.generatedBy?.email    || '—'],
+      ['App Version',            auditTrail.appVersion            || '—'],
+      ['Stats Engine Version',   auditTrail.statsEngineVersion    || '—'],
+      ['Report Template',        auditTrail.reportTemplate        || '—'],
+      ['Project Name',           auditTrail.projectName           || '—'],
+      ['Project ID',             auditTrail.projectId             || '—'],
+    ];
 
-    const selectedPhotos = photos.slice(0, maxPhotos);
-    for (let i = 0; i < selectedPhotos.length; i++) {
-      const col = i % cols, row = Math.floor(i / cols);
-      const x = startX + col * (imgW + gutterX);
-      const y = startY + row * (imgH + gutterY);
-      const entry = selectedPhotos[i];
+    const colWA  = [3.8, 5.8]; // Field | Value
+    const startX = 0.5;
+    const rowH   = 0.38;
+    const headerY = 1.0;
 
-      try {
-        const imgData = await toBase64(entry.url, 600);
-        if (imgData) {
-          slide.addImage({ data: imgData, x, y, w: imgW, h: imgH });
-        } else {
-          slide.addShape(prs.ShapeType.rect, { x, y, w: imgW, h: imgH, fill: { color: 'EEEEEE' }, line: { color: 'CCCCCC' } });
-          slide.addText('Image unavailable', { x, y: y + imgH / 2 - 0.15, w: imgW, h: 0.3, fontSize: 8, color: GRAY, align: 'center' });
-        }
-      } catch { /* skip */ }
+    // Header row
+    const colHeaders = ['Field', 'Value'];
+    colHeaders.forEach((h, ci) => {
+      const x = startX + (ci === 0 ? 0 : colWA[0]);
+      slide.addShape(prs.ShapeType.rect, {
+        x, y: headerY, w: colWA[ci], h: 0.34,
+        fill: { color: ACCENT },
+      });
+      slide.addText(h, {
+        x, y: headerY, w: colWA[ci], h: 0.34,
+        fontSize: 9, bold: true, color: WHITE, align: 'center',
+      });
+    });
 
-      // Label below photo
-      const label = [entry.treatment || '', entry.daa != null ? `${entry.daa} DAA` : ''].filter(Boolean).join(' | ');
-      if (label) {
-        slide.addText(label, { x, y: y + imgH + 0.02, w: imgW, h: 0.18, fontSize: 7, color: GRAY, align: 'center' });
-      }
-    }
+    // Data rows — alternating fill
+    auditRows.forEach(([field, value], ri) => {
+      const y = headerY + 0.34 + ri * rowH;
+      const rowBg = ri % 2 === 0 ? 'F0F9F7' : WHITE;
+
+      [field, value].forEach((cell, ci) => {
+        const x = startX + (ci === 0 ? 0 : colWA[0]);
+        slide.addShape(prs.ShapeType.rect, {
+          x, y, w: colWA[ci], h: rowH - 0.02,
+          fill: { color: rowBg },
+          line: { color: 'E2E8F0', width: 0.5 },
+        });
+        slide.addText(String(cell), {
+          x: x + 0.1, y, w: colWA[ci] - 0.2, h: rowH - 0.02,
+          fontSize: 8, color: DARK, align: ci === 0 ? 'left' : 'left',
+          bold: ci === 0,
+          wrap: true,
+        });
+      });
+    });
   }
 
   // ─── Download ────────────────────────────────────────────────────────────────
