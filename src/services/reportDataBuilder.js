@@ -433,6 +433,7 @@ export function exportTidyCSV(projectId, subTrials, state = {}) {
   const fixedCols = [
     'ProjectID', 'ProjectName', 'TrialID', 'PlotNumber', 'BlockID',
     'TreatmentName', 'DosageValue', 'DosageUnit', 'BBCH',
+    'Crop', 'Variety', 'PreviousCrop', 'IrrigationMethod', 'PlantPopulation',
     'GPSLatitude', 'GPSLongitude', 'SoilPH', 'SoilClay',
     'DAA', 'ObservationDate',
   ];
@@ -458,6 +459,11 @@ export function exportTidyCSV(projectId, subTrials, state = {}) {
         trial.Dosage || '',
         trial.DosageUnit || trial.Unit || '',
         trial.BBCH || '',
+        trial.Crop || '',
+        trial.Variety || '',
+        trial.PreviousCrop || '',
+        trial.IrrigationMethod || '',
+        trial.PlantPopulation || '',
         trial.GPSLatitude  || trial.Latitude  || '',
         trial.GPSLongitude || trial.Longitude || '',
         trial.SoilPH  || trial.soilPH  || '',
@@ -481,6 +487,11 @@ export function exportTidyCSV(projectId, subTrials, state = {}) {
         trial.Dosage || '',
         trial.DosageUnit || trial.Unit || '',
         trial.BBCH || obs.bbch || '',
+        trial.Crop || '',
+        trial.Variety || '',
+        trial.PreviousCrop || '',
+        trial.IrrigationMethod || '',
+        trial.PlantPopulation || '',
         trial.GPSLatitude  || trial.Latitude  || '',
         trial.GPSLongitude || trial.Longitude || '',
         trial.SoilPH  || trial.soilPH  || '',
@@ -684,7 +695,23 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
         if (Number.isFinite(d)) allDaas.add(d);
       });
 
-      const row = { daa: targetObs ? (parseFloat(targetObs.daa) || null) : null };
+      const row = {
+        daa: targetObs ? (parseFloat(targetObs.daa) || null) : null,
+        trialID: trial.ID || '',
+        plotNumber: trial.PlotNumber || '',
+        dosage: trial.Dosage || '',
+        unit: trial.DosageUnit || trial.YieldUnit || '',
+        bbch: trial.BBCHCode || '',
+        lat: trial.GPSLatitude || trial.Lat || '',
+        lon: trial.GPSLongitude || trial.Lon || '',
+        soilPH: trial.SoilPH || '',
+        soilClay: trial.SoilClay || '',
+        crop: trial.Crop || '',
+        variety: trial.Variety || '',
+        previousCrop: trial.PreviousCrop || '',
+        irrigationMethod: trial.IrrigationMethod || '',
+        plantPopulation: trial.PlantPopulation || '',
+      };
       for (const field of numFields) {
         const val = toNum(targetObs?.[field.key]);
         row[field.key] = val;
@@ -1143,6 +1170,10 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
   const meta = {
     projectName:  project?.ProjectName || project?.Name || `Project ${projectId}`,
     crop:         project?.Crop    || subTrials[0]?.Crop || '',
+    variety:      project?.Variety || subTrials[0]?.Variety || '',
+    previousCrop: project?.PreviousCrop || subTrials[0]?.PreviousCrop || '',
+    irrigationMethod: project?.IrrigationMethod || subTrials[0]?.IrrigationMethod || '',
+    plantPopulation: project?.PlantPopulation || subTrials[0]?.PlantPopulation || '',
     location:     project?.Location || project?.Farm    || subTrials[0]?.Location || '',
     investigator: project?.Investigator || project?.InvestigatorName || '',
     organisation: project?.Organisation || project?.Organization    || '',
@@ -1191,6 +1222,26 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
     photos,
     warnings,
     dataCompleteness,
+    // Application log — adjuvant and tankMix per application
+    applicationLog: subTrials.flatMap(trial => {
+      const apps = safeJsonParse(trial.ApplicationLogJSON, []);
+      return apps.map(app => ({
+        trialID: trial.ID,
+        treatmentName: trial.FormulationName || '',
+        code: app.code || '',
+        date: app.date || '',
+        dosage: app.dosage || '',
+        method: app.method || '',
+        cropStage: app.cropStage || '',
+        adjuvant: app.adjuvant || '',
+        tankMix: app.tankMix || '',
+        temp: app.temp || '',
+        humidity: app.humidity || '',
+        windspeed: app.windspeed || '',
+        rain: app.rain || '',
+        notes: app.notes || '',
+      }));
+    }),
   };
 
   // ── Task 13: Residual diagnostics ──────────────────────────────────────────

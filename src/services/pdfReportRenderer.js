@@ -180,8 +180,10 @@ async function renderStandard(reportData, options = {}) {
   doc.setFontSize(10);
   const appDates = Array.isArray(meta.applicationDates) ? meta.applicationDates.join(', ') : (meta.applicationDates || '—');
   const metaGrid = [
-    ['Crop',           meta.crop || '—',           'Location',      meta.location || '—'],
-    ['Investigator',   meta.investigator || '—',    'Organisation',  meta.organisation || '—'],
+    ['Crop',           meta.crop || '—',           'Variety',       meta.variety || '—'],
+    ['Location',       meta.location || '—',        'Investigator',  meta.investigator || '—'],
+    ['Organisation',   meta.organisation || '—',    'Prev. Crop',    meta.previousCrop || '—'],
+    ['Irrigation',     meta.irrigationMethod || '—','Plant Popul.',  meta.plantPopulation || '—'],
     ['Trial Period',   appDates,                    'Report Date',   meta.reportDate || '—'],
     ['GPS',            meta.gps || '—',             'Target Species',meta.targetSpecies || '—'],
   ];

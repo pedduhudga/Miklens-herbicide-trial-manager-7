@@ -190,6 +190,11 @@ export const CATEGORIES = {
     ],
     observationFields: [
       { key: 'pestCount', label: 'Pest Count (per unit/plant)', type: 'number', min: 0 },
+      { key: 'liveInsectCount', label: 'Live Insect Count (per unit)', type: 'number', min: 0 },
+      { key: 'deadInsectCount', label: 'Dead Insect Count (per unit)', type: 'number', min: 0 },
+      { key: 'eggCount', label: 'Egg Count (per plant/leaf)', type: 'number', min: 0 },
+      { key: 'larvaCount', label: 'Larva / Nymph Count (per plant)', type: 'number', min: 0 },
+      { key: 'adultCount', label: 'Adult Count (per plant)', type: 'number', min: 0 },
       { key: 'damageRating', label: 'Crop Damage Rating (0-9)', type: 'number', min: 0, max: 9 },
       { key: 'feedingDamagePct', label: 'Feeding Damage (%)', type: 'number', min: 0, max: 100 },
       { key: 'beneficialCount', label: 'Beneficial Insect Count', type: 'number', min: 0 },
@@ -343,6 +348,9 @@ export const CATEGORIES = {
       { key: 'chlorophyllIndex', label: 'SPAD/Chlorophyll Reading', type: 'number', min: 0 },
       { key: 'rootBiomass', label: 'Root Biomass (g)', type: 'number', min: 0 },
       { key: 'shootBiomass', label: 'Shoot Biomass (g)', type: 'number', min: 0 },
+      { key: 'rootLength', label: 'Root Length (cm)', type: 'number', min: 0 },
+      { key: 'leafCount', label: 'Leaf Count (per plant)', type: 'number', min: 0 },
+      { key: 'noduleCount', label: 'Nodule Count (per root system)', type: 'number', min: 0 },
     ],
     formulationFields: [
       { key: 'ActiveIngredients', label: 'Active Biological Agents', type: 'text', placeholder: 'e.g. Ascophyllum nodosum extract' },

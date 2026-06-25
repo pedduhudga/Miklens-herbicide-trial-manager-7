@@ -170,6 +170,7 @@ function buildSheet2TrialInfo(wb, reportData) {
   const fields = [
     ['Name',             meta.projectName || '—'],
     ['Crop',             meta.crop || '—'],
+    ['Variety',          meta.variety || '—'],
     ['Location',         meta.location || '—'],
     ['Investigator',     meta.investigator || '—'],
     ['Organisation',     meta.organisation || '—'],
@@ -181,6 +182,9 @@ function buildSheet2TrialInfo(wb, reportData) {
     ['Category',         meta.category || '—'],
     ['Replications',     String(meta.replications ?? '—')],
     ['Treatments',       String(meta.treatments ?? '—')],
+    ['Previous Crop',    meta.previousCrop || '—'],
+    ['Irrigation Method',meta.irrigationMethod || '—'],
+    ['Plant Population', meta.plantPopulation || '—'],
     ['Report Date',      meta.reportDate || new Date().toISOString().slice(0, 10)],
   ];
 
@@ -192,9 +196,23 @@ function buildSheet2TrialInfo(wb, reportData) {
     }
   });
 
-  // PI-5: LargeScale sector summary table
-  if (meta.isLargeScale && meta.largescaleSectors && meta.largescaleSectors.length > 0) {
+  // Application Log — adjuvant & tankMix table
+  const appLog = reportData.applicationLog || [];
+  if (appLog.length > 0) {
     ws.addRow([]);
+    const appLogLabel = ws.addRow(['Application Log (Adjuvant & Tank Mix)']);
+    appLogLabel.getCell(1).font = { bold: true, size: 11, color: { argb: 'FF2C3E50' } };
+    ws.mergeCells(`A${appLogLabel.number}:G${appLogLabel.number}`);
+    const appHead = ws.addRow(['Application', 'Date', 'Dosage', 'Method', 'Crop Stage', 'Adjuvant', 'Tank Mix Partners']);
+    appHead.eachCell({ includeEmpty: true }, cell => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4A6FA5' } }; cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
+    appLog.forEach((app, idx) => {
+      const row = ws.addRow([app.code || `App ${idx + 1}`, app.date || '', app.dosage || '', app.method || '', app.cropStage || '', app.adjuvant || '—', app.tankMix || '—']);
+      if (idx % 2 === 0) row.eachCell({ includeEmpty: true }, cell => { cell.fill = ALT_FILL; });
+    });
+  }
+
+  // PI-5: LargeScale sector summary table
+  if (meta.isLargeScale && meta.largescaleSectors && meta.largescaleSectors.length > 0) {    ws.addRow([]);
     const sectorLabel = ws.addRow(['Sector / Quadrant Summary (LargeScale)']);
     sectorLabel.getCell(1).font = { bold: true, size: 11, color: { argb: 'FF2C3E50' } };
     ws.mergeCells(`A${sectorLabel.number}:D${sectorLabel.number}`);
@@ -862,6 +880,7 @@ function buildSheet15TidyData(wb, reportData) {
   const fixedCols = [
     'ProjectID', 'ProjectName', 'TrialID', 'PlotNumber', 'BlockID',
     'TreatmentName', 'DosageValue', 'DosageUnit', 'BBCH',
+    'Crop', 'Variety', 'PreviousCrop', 'IrrigationMethod', 'PlantPopulation',
     'GPSLatitude', 'GPSLongitude', 'SoilPH', 'SoilClay',
     'DAA', 'ObservationDate',
   ];
@@ -888,6 +907,11 @@ function buildSheet15TidyData(wb, reportData) {
         repData.dosage || '—',
         repData.unit || '—',
         repData.bbch || '',
+        repData.crop || '',
+        repData.variety || '',
+        repData.previousCrop || '',
+        repData.irrigationMethod || '',
+        repData.plantPopulation || '',
         repData.lat || '',
         repData.lon || '',
         repData.soilPH || '',

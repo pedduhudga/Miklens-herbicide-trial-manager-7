@@ -132,6 +132,10 @@ export function getAllTrialDataFields(trial, options = {}) {
   
   const data = {
     crop: trial.Crop || proj?.Crop || '—',
+    variety: trial.Variety || proj?.Variety || '—',
+    previousCrop: trial.PreviousCrop || '—',
+    irrigationMethod: trial.IrrigationMethod || '—',
+    plantPopulation: trial.PlantPopulation ? `${trial.PlantPopulation} plants/ha` : '—',
     yieldValue: trial.YieldValue || trial.Yield || '—',
     applicationTiming: trial.ApplicationTiming || proj?.ApplicationTiming || '—',
     cropStage: trial.CropStage || trial.cropStage || trial.CropStageAtApplication || '—',
@@ -1971,7 +1975,8 @@ export function exportMultipleTrialsToCSV(trials) {
 
   const header = [
     'Trial ID', 'Category', 'Formulation', 'Investigator', 'Date', 'Location', 'Dosage',
-    'Crop', 'Yield', 'Application Timing', 'Growth Stage', 'BBCH Code', 'App Method', 'Spray Vol (L/ha)', 'Nozzle',
+    'Crop', 'Variety', 'Previous Crop', 'Irrigation Method', 'Plant Population (plants/ha)',
+    'Yield', 'Application Timing', 'Growth Stage', 'BBCH Code', 'App Method', 'Spray Vol (L/ha)', 'Nozzle',
     'Soil pH', 'Soil Clay %', 'Soil Sand %', 'Soil OC', 'Soil Texture', 'Soil N (ppm)', 'Soil P (ppm)', 'Soil K (ppm)', 'Soil CEC', 'Soil Moisture %',
     'Trial Design', 'Replication / Block ID',
     'Target Label', 'Target Value', 'Overall Result', 'Trial Status',
@@ -1999,7 +2004,8 @@ export function exportMultipleTrialsToCSV(trials) {
 
     const baseRow = [
       trial.ID, trial.Category || 'herbicide', trial.FormulationName, trial.InvestigatorName, trial.Date, trial.Location, trial.Dosage,
-      dataFields.crop, dataFields.yieldValue, dataFields.applicationTiming, dataFields.cropStage, dataFields.bbchCode,
+      dataFields.crop, dataFields.variety, dataFields.previousCrop, dataFields.irrigationMethod, dataFields.plantPopulation,
+      dataFields.yieldValue, dataFields.applicationTiming, dataFields.cropStage, dataFields.bbchCode,
       dataFields.applicationMethod, dataFields.sprayVolume, dataFields.nozzle,
       dataFields.soil?.ph || '', dataFields.soil?.clay || '', dataFields.soil?.sand || '', dataFields.soil?.organicCarbon || '', dataFields.soil?.texture || '',
       dataFields.soil?.nitrogen || '', dataFields.soil?.phosphorus || '', dataFields.soil?.potassium || '', dataFields.soil?.cec || '', dataFields.soil?.moisture || '',
@@ -2092,7 +2098,8 @@ export function exportAllTrialsCSV(trials, projects = []) {
   const targetLabel = allSameCategory ? repConfig.targetLabel : 'Target Species';
 
   const header = ['Trial ID', 'Category', 'Formulation', 'Investigator', 'Date', 'Location', 'Dosage',
-                  'Crop', 'Yield', 'Application Timing', 'Growth Stage', 'BBCH Code',
+                  'Crop', 'Variety', 'Previous Crop', 'Irrigation Method', 'Plant Population',
+                  'Yield', 'Application Timing', 'Growth Stage', 'BBCH Code',
                   targetLabel, 'Result', 'Status', 'Project', 'Replication',
                   'Plot #', 'Temp (°C)', 'Humidity (%)', 'Wind (km/h)', 'Rain (mm)',
                   'Observations', 'Photos'];
@@ -2102,7 +2109,8 @@ export function exportAllTrialsCSV(trials, projects = []) {
     const dataFields = getAllTrialDataFields(t, { projects });
     return [
       t.ID, t.Category || 'herbicide', t.FormulationName, t.InvestigatorName, t.Date, t.Location, t.Dosage,
-      dataFields.crop, dataFields.yieldValue, dataFields.applicationTiming, dataFields.cropStage, dataFields.bbchCode,
+      dataFields.crop, dataFields.variety, dataFields.previousCrop, dataFields.irrigationMethod, dataFields.plantPopulation,
+      dataFields.yieldValue, dataFields.applicationTiming, dataFields.cropStage, dataFields.bbchCode,
       tConfig.targetValue, t.Result,
       (t.IsCompleted === true || t.IsCompleted === 'true') ? 'Finalized' : 'Ongoing',
       proj?.Name || '', t.Replication || '', t.PlotNumber || '',
@@ -2149,6 +2157,10 @@ export function exportFieldReportTxt(trial, projectName = '') {
     `Location:       ${trial.Location || '—'}`,
     `Dosage:         ${trial.Dosage || '—'}`,
     `Crop:           ${dataFields.crop}`,
+    `Variety:        ${dataFields.variety}`,
+    `Previous Crop:  ${dataFields.previousCrop}`,
+    `Irrigation:     ${dataFields.irrigationMethod}`,
+    `Plant Pop.:     ${dataFields.plantPopulation}`,
     `Yield:          ${dataFields.yieldValue}`,
     `App Timing:     ${dataFields.applicationTiming}`,
     `Growth Stage:   ${dataFields.cropStage}`,

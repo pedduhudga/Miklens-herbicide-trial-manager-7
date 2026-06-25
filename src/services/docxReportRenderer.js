@@ -178,9 +178,13 @@ export async function generateProjectDocx(reportData, options = {}) {
     }),
     spacer(),
     bodyPara(`Crop: ${meta.crop || '—'}`, { size: 22 }),
+    bodyPara(`Variety: ${meta.variety || '—'}`, { size: 22 }),
     bodyPara(`Location: ${meta.location || '—'}`, { size: 22 }),
     bodyPara(`Investigator: ${meta.investigator || '—'}`, { size: 22 }),
     bodyPara(`Organisation: ${meta.organisation || '—'}`, { size: 22 }),
+    bodyPara(`Previous Crop: ${meta.previousCrop || '—'}`, { size: 22 }),
+    bodyPara(`Irrigation Method: ${meta.irrigationMethod || '—'}`, { size: 22 }),
+    bodyPara(`Plant Population: ${meta.plantPopulation || '—'}`, { size: 22 }),
     bodyPara(`Trial Period: ${appDates}`, { size: 22 }),
     bodyPara(`Report Date: ${meta.reportDate || new Date().toISOString().slice(0, 10)}`, { size: 22 }),
     spacer(),
@@ -663,6 +667,30 @@ export async function generateProjectDocx(reportData, options = {}) {
     }
   }
 
+  // ─── Application Log (Adjuvant & Tank Mix) ───────────────────────────────────
+  const appLogElements = [];
+  const appLog = reportData.applicationLog || [];
+  const appLogWithData = appLog.filter(app => app.adjuvant || app.tankMix);
+  if (appLog.length > 0) {
+    appLogElements.push(
+      heading('Application Log', HeadingLevel.HEADING_2),
+      spacer(),
+      makeTable(
+        ['Application', 'Date', 'Dosage', 'Method', 'Crop Stage', 'Adjuvant', 'Tank Mix'],
+        appLog.map((app, i) => [
+          app.code || `App ${i + 1}`,
+          app.date || '—',
+          app.dosage || '—',
+          app.method || '—',
+          app.cropStage || '—',
+          app.adjuvant || '—',
+          app.tankMix || '—',
+        ])
+      ),
+      spacer()
+    );
+  }
+
   // ─── Task 44: Parameter Correlation Matrix ────────────────────────────────────
   const corrElements = [];
   const corrMatrix = reportData.correlationMatrix;
@@ -806,6 +834,7 @@ export async function generateProjectDocx(reportData, options = {}) {
           ...section6Elements,
           ...section7Elements,
           ...section7bElements,
+          ...appLogElements,
           ...corrElements,
           ...drElements,
           ...section8Elements,
