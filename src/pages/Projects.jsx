@@ -1395,8 +1395,11 @@ export default function Projects({ onMenuClick }) {
 
     // Helper for deterministic pseudo-random shuffling (to avoid shifting preview on every render)
     const getSeedRandom = (seed) => {
-      const x = Math.sin(seed) * 10000;
-      return x - Math.floor(x);
+      let h = seed ^ 123456789;
+      h = Math.imul(h ^ (h >>> 16), 2246822507);
+      h = Math.imul(h ^ (h >>> 13), 3266489909);
+      h = (h ^ (h >>> 16)) >>> 0;
+      return h / 4294967296;
     };
 
     const shuffleDeterministic = (array, seed) => {
