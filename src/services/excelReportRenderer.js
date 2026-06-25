@@ -10,6 +10,7 @@
 
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
+import { resolvePhotoSrc } from '../utils/photoUtils.js';
 
 // ─── Style constants ───────────────────────────────────────────────────────────
 
@@ -170,6 +171,7 @@ function buildSheet2TrialInfo(wb, reportData) {
   const fields = [
     ['Name',             meta.projectName || '—'],
     ['Crop',             meta.crop || '—'],
+    ['Variety',          meta.variety || '—'],
     ['Location',         meta.location || '—'],
     ['Investigator',     meta.investigator || '—'],
     ['Organisation',     meta.organisation || '—'],
@@ -181,6 +183,9 @@ function buildSheet2TrialInfo(wb, reportData) {
     ['Category',         meta.category || '—'],
     ['Replications',     String(meta.replications ?? '—')],
     ['Treatments',       String(meta.treatments ?? '—')],
+    ['Previous Crop',    meta.previousCrop || '—'],
+    ['Irrigation Method',meta.irrigationMethod || '—'],
+    ['Plant Population', meta.plantPopulation || '—'],
     ['Report Date',      meta.reportDate || new Date().toISOString().slice(0, 10)],
   ];
 
@@ -192,9 +197,23 @@ function buildSheet2TrialInfo(wb, reportData) {
     }
   });
 
-  // PI-5: LargeScale sector summary table
-  if (meta.isLargeScale && meta.largescaleSectors && meta.largescaleSectors.length > 0) {
+  // Application Log — adjuvant & tankMix table
+  const appLog = reportData.applicationLog || [];
+  if (appLog.length > 0) {
     ws.addRow([]);
+    const appLogLabel = ws.addRow(['Application Log (Adjuvant & Tank Mix)']);
+    appLogLabel.getCell(1).font = { bold: true, size: 11, color: { argb: 'FF2C3E50' } };
+    ws.mergeCells(`A${appLogLabel.number}:G${appLogLabel.number}`);
+    const appHead = ws.addRow(['Application', 'Date', 'Dosage', 'Method', 'Crop Stage', 'Adjuvant', 'Tank Mix Partners']);
+    appHead.eachCell({ includeEmpty: true }, cell => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4A6FA5' } }; cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
+    appLog.forEach((app, idx) => {
+      const row = ws.addRow([app.code || `App ${idx + 1}`, app.date || '', app.dosage || '', app.method || '', app.cropStage || '', app.adjuvant || '—', app.tankMix || '—']);
+      if (idx % 2 === 0) row.eachCell({ includeEmpty: true }, cell => { cell.fill = ALT_FILL; });
+    });
+  }
+
+  // PI-5: LargeScale sector summary table
+  if (meta.isLargeScale && meta.largescaleSectors && meta.largescaleSectors.length > 0) {    ws.addRow([]);
     const sectorLabel = ws.addRow(['Sector / Quadrant Summary (LargeScale)']);
     sectorLabel.getCell(1).font = { bold: true, size: 11, color: { argb: 'FF2C3E50' } };
     ws.mergeCells(`A${sectorLabel.number}:D${sectorLabel.number}`);
@@ -227,6 +246,8 @@ function buildSheet3TreatmentList(wb, reportData) {
   addHeaderRow(ws, ['#', 'Treatment / Formulation', 'Dosage', 'App. Timing', 'Replications', 'Role']);
 
   treatmentList.forEach((t, idx) => {
+    // isControl checked first: when both isControl===true AND isStandard===true,
+    // 'UTC / Control' takes precedence (correct GLP behaviour).
     const role = t.isControl ? 'UTC / Control' : (t.isStandard ? 'Standard' : 'Treatment');
     const dosageStr = t.dosage ? `${t.dosage} ${t.unit || ''}`.trim() : '—';
     const row = ws.addRow([
@@ -277,6 +298,7 @@ function buildSheet4RawData(wb, reportData) {
           return v !== null && v !== undefined ? v : '—';
         }),
       ];
+      // Streaming row-by-row — safe for >30 treatments (no pre-built array)
       const row = ws.addRow(rowValues);
       if (rowIdx % 2 === 0) {
         row.eachCell({ includeEmpty: true }, cell => { cell.fill = ALT_FILL; });
@@ -437,38 +459,66 @@ function buildSheet6Anova(wb, reportData) {
 
 /**
  * Sheet 7 — Post-Hoc Comparisons
+ *
+ * Reads `reportData.primaryParameter.anova.comparisons` (normalised by
+ * buildAnovaShape in reportDataBuilder.js).  Each comparison object has:
+ *   treatmentA, treatmentB, meanA, meanB, diff, criticalValue, significant
  */
 function buildSheet7PostHoc(wb, reportData) {
   const ws = wb.addWorksheet('Post-Hoc Comparisons');
   const param = reportData.primaryParameter || {};
   const anova = param.anova || null;
+  const postHocMethod = param.postHocMethod || '';
 
-  addHeaderRow(ws, ['Treatment A', 'Treatment B', 'Mean A', 'Mean B', 'Mean Diff', 'Significant?', 'Critical Value']);
+  // Title row indicating which post-hoc test was used
+  const methodLabel = postHocMethod
+    ? `Post-Hoc Comparisons — ${param.label || param.key || 'Primary Parameter'} (${postHocMethod.toUpperCase()})`
+    : `Post-Hoc Comparisons — ${param.label || param.key || 'Primary Parameter'}`;
+  const titleRow = ws.addRow([methodLabel]);
+  titleRow.getCell(1).font = { bold: true, size: 12, color: { argb: 'FF2C3E50' } };
+  ws.mergeCells(`A${titleRow.number}:G${titleRow.number}`);
+  titleRow.height = 22;
 
-  // Check if comparisons data exists (stored in anova.comparisons if present)
-  const comparisons = anova?.comparisons || null;
+  // Header columns: Treatment A | Treatment B | Mean A | Mean B | Mean Difference | Critical Value | Significant
+  addHeaderRow(ws, ['Treatment A', 'Treatment B', 'Mean A', 'Mean B', 'Mean Difference', 'Critical Value', 'Significant']);
 
-  if (comparisons && Array.isArray(comparisons) && comparisons.length > 0) {
+  // Read comparisons from anova.comparisons (populated by buildAnovaShape)
+  const comparisons = Array.isArray(anova?.comparisons) ? anova.comparisons : [];
+
+  if (comparisons.length > 0) {
     comparisons.forEach((comp, idx) => {
+      const meanAVal      = comp.meanA          !== null && comp.meanA          !== undefined ? parseFloat(fmt(comp.meanA))          : '—';
+      const meanBVal      = comp.meanB          !== null && comp.meanB          !== undefined ? parseFloat(fmt(comp.meanB))          : '—';
+      const diffVal       = comp.diff           !== null && comp.diff           !== undefined ? parseFloat(fmt(comp.diff))           : '—';
+      const critVal       = comp.criticalValue  !== null && comp.criticalValue  !== undefined ? parseFloat(fmt(comp.criticalValue))  : '—';
+      const sigLabel      = comp.significant ? 'Yes' : 'No';
+
       const row = ws.addRow([
         comp.treatmentA || '—',
         comp.treatmentB || '—',
-        comp.meanA !== null && comp.meanA !== undefined ? parseFloat(fmt(comp.meanA)) : '—',
-        comp.meanB !== null && comp.meanB !== undefined ? parseFloat(fmt(comp.meanB)) : '—',
-        comp.diff  !== null && comp.diff  !== undefined ? parseFloat(fmt(comp.diff))  : '—',
-        comp.significant ? 'Yes' : 'No',
-        comp.criticalValue !== null && comp.criticalValue !== undefined ? parseFloat(fmt(comp.criticalValue)) : '—',
+        meanAVal,
+        meanBVal,
+        diffVal,
+        critVal,
+        sigLabel,
       ]);
-      ['C', 'D', 'E', 'G'].forEach(col => {
+
+      // Number formats for numeric columns: C (Mean A), D (Mean B), E (Mean Diff), F (Critical Value)
+      ['C', 'D', 'E', 'F'].forEach(col => {
         const cell = row.getCell(col);
         if (typeof cell.value === 'number') cell.numFmt = NUM_FMT_2;
       });
-      if (idx % 2 === 0) {
+
+      // Highlight significant pairs with green tint
+      if (comp.significant) {
+        row.eachCell({ includeEmpty: true }, cell => { cell.fill = SIG_FILL; });
+      } else if (idx % 2 === 0) {
         row.eachCell({ includeEmpty: true }, cell => { cell.fill = ALT_FILL; });
       }
     });
   } else {
-    const noRow = ws.addRow(['Post-hoc comparisons not available — run analysis with Tukey or Duncan option']);
+    // No comparisons available — write informative message instead of a placeholder row
+    const noRow = ws.addRow(['No post-hoc comparisons available for this dataset']);
     ws.mergeCells(`A${noRow.number}:G${noRow.number}`);
     noRow.getCell(1).font = { italic: true, color: { argb: 'FF888888' } };
   }
@@ -478,6 +528,11 @@ function buildSheet7PostHoc(wb, reportData) {
 
 /**
  * Sheet 8 — All Parameters Data
+ *
+ * Task 16.2 (Excel): Excel workbooks do not have Compact_Template vs Comprehensive_Template
+ * distinction (unlike PDF). All parameters are always rendered, including those where all
+ * treatment means are null/absent (displayed as '—'). This is the Comprehensive behaviour
+ * and is intentional — users may filter or hide rows as needed in Excel.
  */
 function buildSheet8AllParameters(wb, reportData) {
   const ws = wb.addWorksheet('All Parameters');
@@ -591,6 +646,33 @@ function buildSheet10Yield(wb, reportData) {
   titleRow.getCell(1).font = { bold: true, size: 12, color: { argb: 'FF2C3E50' } };
   ws.mergeCells(`A${titleRow.number}:I${titleRow.number}`);
   titleRow.height = 22;
+
+  // ── Task 16.4: Yield metadata sub-header ─────────────────────────────────
+  // YieldUnit, GrainMoisture, ThousandGrainWeight, HarvestDAA sourced from
+  // yieldData.meta, reportData.meta, or treatmentList[0].
+  const meta = reportData.meta || {};
+  const firstTreatment = Array.isArray(reportData.treatmentList) ? reportData.treatmentList[0] : null;
+  const yMeta = yieldData.meta || {};
+  const yieldUnit          = yMeta.YieldUnit           || meta.YieldUnit           || firstTreatment?.YieldUnit           || '—';
+  const grainMoisture      = yMeta.GrainMoisture       || meta.GrainMoisture       || firstTreatment?.GrainMoisture       || null;
+  const thousandGrainWeight= yMeta.ThousandGrainWeight || meta.ThousandGrainWeight || firstTreatment?.ThousandGrainWeight || null;
+  const harvestDAA         = yMeta.HarvestDAA          || meta.HarvestDAA          || firstTreatment?.HarvestDAA          || null;
+
+  const metaHeaderRow = ws.addRow(['Yield Unit', 'Grain Moisture (%)', '1000-Grain Wt (g)', 'Harvest DAA']);
+  metaHeaderRow.eachCell({ includeEmpty: true }, cell => {
+    cell.font = { bold: true, size: 9, color: { argb: 'FF555555' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F5E9' } };
+  });
+  const metaValRow = ws.addRow([
+    yieldUnit,
+    grainMoisture  != null ? parseFloat(fmt(grainMoisture, 1))       : '—',
+    thousandGrainWeight != null ? parseFloat(fmt(thousandGrainWeight, 2)) : '—',
+    harvestDAA     != null ? harvestDAA                               : '—',
+  ]);
+  metaValRow.eachCell({ includeEmpty: true }, cell => {
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F8E9' } };
+  });
+  ws.addRow([]); // blank separator before means table
 
   addHeaderRow(ws, ['Treatment', 'n', 'Mean', 'SD', 'SE', 'CV%', 'Efficacy (%)', 'CLD Letter', 'Significance']);
 
@@ -748,6 +830,32 @@ function buildSheet13Photos(wb, reportData) {
   const ws = wb.addWorksheet('Photos');
   const photos = Array.isArray(reportData.photos) ? reportData.photos : [];
 
+  // ── Task 18.4: Workbook size guard ────────────────────────────────────────
+  // Count photos whose fileData is actual base64 (not a URL, not null, not the
+  // sentinel '[base64-removed]') and estimate projected size at ~300 KB each.
+  const PHOTO_SIZE_ESTIMATE_BYTES = 300 * 1024; // 300 KB per photo
+  const WORKBOOK_SIZE_LIMIT_BYTES = 50 * 1024 * 1024; // 50 MB
+
+  const photosWithFileData = photos.filter(p =>
+    p.fileData &&
+    p.fileData !== '[base64-removed]' &&
+    !p.fileData.startsWith('http') // not a URL
+  );
+  const projectedSize = photosWithFileData.length * PHOTO_SIZE_ESTIMATE_BYTES;
+  const exceedsSizeLimit = projectedSize > WORKBOOK_SIZE_LIMIT_BYTES;
+
+  // If >50 photos OR projected base64 size >50 MB, insert a header warning row
+  if (photos.length > 50 || exceedsSizeLimit) {
+    const warningMsg = exceedsSizeLimit
+      ? `Note: Large photo count detected (${photos.length} photos, ~${Math.round(projectedSize / (1024 * 1024))} MB projected). Images referenced by URL only to stay within 50 MB workbook limit.`
+      : `Note: Large photo count detected. Images referenced by URL only to stay within 50 MB workbook limit.`;
+    const warnRow = ws.addRow([warningMsg]);
+    ws.mergeCells(`A${warnRow.number}:D${warnRow.number}`);
+    warnRow.getCell(1).font = { bold: true, color: { argb: 'FF856404' } };
+    warnRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3CD' } };
+    warnRow.height = 22;
+  }
+
   addHeaderRow(ws, ['Treatment', 'DAA', 'Date', 'URL']);
 
   // Note about embedded images
@@ -756,24 +864,65 @@ function buildSheet13Photos(wb, reportData) {
   noteRow.getCell(1).font = { italic: true, color: { argb: 'FF888888' } };
 
   photos.forEach((photo, idx) => {
+    // Task 5.2: Use resolvePhotoSrc() instead of raw photo.url
+    const resolvedUrl = resolvePhotoSrc(photo);
     const row = ws.addRow([
       photo.treatment || '—',
       photo.daa !== null && photo.daa !== undefined ? photo.daa : '—',
       photo.date || '—',
-      photo.url || '—',
+      resolvedUrl || 'Image unavailable',
     ]);
     if (idx % 2 === 0) {
       row.eachCell({ includeEmpty: true }, cell => { cell.fill = ALT_FILL; });
     }
-    // Make URL cell a hyperlink if present
-    if (photo.url) {
+    // Make URL cell a hyperlink only when a valid resolved URL exists
+    if (resolvedUrl) {
       const urlCell = row.getCell(4);
-      urlCell.value = { text: photo.url, hyperlink: photo.url };
+      urlCell.value = { text: resolvedUrl, hyperlink: resolvedUrl };
       urlCell.font = { color: { argb: 'FF0563C1' }, underline: true };
     }
   });
 
   autoColumnWidths(ws);
+}
+
+/**
+ * Sheet 14 — Audit Trail (protected, read-only)
+ */
+function buildSheet14AuditTrail(wb, reportData) {
+  const ws = wb.addWorksheet('Audit Trail');
+  const auditTrail = reportData.auditTrail || {};
+
+  addHeaderRow(ws, ['Field', 'Value']);
+
+  // Flatten audit trail fields — generatedBy is an object, expand to separate rows
+  const fields = [
+    ['Report UUID',           auditTrail.reportUUID       || '—'],
+    ['Generated On',          auditTrail.generatedOn      || '—'],
+    ['Generated By (Name)',   auditTrail.generatedBy?.name  || '—'],
+    ['Generated By (Email)',  auditTrail.generatedBy?.email || '—'],
+    ['App Version',           auditTrail.appVersion       || '—'],
+    ['Stats Engine Version',  auditTrail.statsEngineVersion || '—'],
+    ['Report Template',       auditTrail.reportTemplate   || '—'],
+    ['Project Name',          auditTrail.projectName      || '—'],
+    ['Project ID',            auditTrail.projectId        || '—'],
+  ];
+
+  fields.forEach(([field, value], idx) => {
+    const row = ws.addRow([field, value]);
+    row.getCell(1).font = BOLD_FONT;
+    if (idx % 2 === 0) {
+      row.eachCell({ includeEmpty: true }, cell => { cell.fill = ALT_FILL; });
+    }
+  });
+
+  autoColumnWidths(ws);
+
+  // Task 5.3: Protect the sheet (locked, no password required)
+  ws.protect('', {
+    selectLockedCells: true,
+    selectUnlockedCells: true,
+  });
 }
 
 /**
@@ -862,6 +1011,7 @@ function buildSheet15TidyData(wb, reportData) {
   const fixedCols = [
     'ProjectID', 'ProjectName', 'TrialID', 'PlotNumber', 'BlockID',
     'TreatmentName', 'DosageValue', 'DosageUnit', 'BBCH',
+    'Crop', 'Variety', 'PreviousCrop', 'IrrigationMethod', 'PlantPopulation',
     'GPSLatitude', 'GPSLongitude', 'SoilPH', 'SoilClay',
     'DAA', 'ObservationDate',
   ];
@@ -888,6 +1038,11 @@ function buildSheet15TidyData(wb, reportData) {
         repData.dosage || '—',
         repData.unit || '—',
         repData.bbch || '',
+        repData.crop || '',
+        repData.variety || '',
+        repData.previousCrop || '',
+        repData.irrigationMethod || '',
+        repData.plantPopulation || '',
         repData.lat || '',
         repData.lon || '',
         repData.soilPH || '',
@@ -938,7 +1093,7 @@ export async function generateProjectExcel(reportData, options = {}) {
   wb.modified = new Date();
   wb.properties.date1904 = false;
 
-  // Build all 13 sheets in order
+  // Build all sheets in order
   buildSheet1Cover(wb, reportData);
   buildSheet2TrialInfo(wb, reportData);
   buildSheet3TreatmentList(wb, reportData);
@@ -952,6 +1107,7 @@ export async function generateProjectExcel(reportData, options = {}) {
   buildSheet11Weather(wb, reportData);
   buildSheet12Charts(wb, reportData);
   buildSheet13Photos(wb, reportData);
+  buildSheet14AuditTrail(wb, reportData);
   buildSheet14Correlation(wb, reportData);
   buildSheet15TidyData(wb, reportData);
 

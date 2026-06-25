@@ -75,6 +75,9 @@ const emptyForm = (category = 'herbicide') => {
     YieldValue: '', YieldUnit: 't/ha', YieldNotes: '', GrainMoisture: '', ThousandGrainWeight: '', HarvestDAA: '',
     IsLive: true,
     ApplicationTiming: '',
+    // Agronomic metadata
+    Crop: '', Variety: '',
+    PreviousCrop: '', IrrigationMethod: '', PlantPopulation: '',
   };
   // Add category-specific fields with empty defaults
   catConfig.specificFields.forEach(f => {
@@ -217,7 +220,9 @@ export default function Trials({ onMenuClick }) {
     humidity: '',
     windspeed: '',
     rain: 'No',
-    notes: ''
+    notes: '',
+    adjuvant: '',
+    tankMix: '',
   });
   const [isFetchingAppWeather, setIsFetchingAppWeather] = useState(false);
 
@@ -698,6 +703,11 @@ export default function Trials({ onMenuClick }) {
         PotRow: trial.PotRow || '',
         PotCol: trial.PotCol || '',
         PotLabel: trial.PotLabel || '',
+        Crop: trial.Crop || '',
+        Variety: trial.Variety || '',
+        PreviousCrop: trial.PreviousCrop || '',
+        IrrigationMethod: trial.IrrigationMethod || '',
+        PlantPopulation: trial.PlantPopulation || '',
       });
     } else {
       setFormData({ ...emptyForm(activeCategory), InvestigatorName: state.auth?.user?.Name || state.auth?.user?.Username || '' });
@@ -1585,7 +1595,9 @@ export default function Trials({ onMenuClick }) {
         humidity: app.humidity || '',
         windspeed: app.windspeed || '',
         rain: app.rain || 'No',
-        notes: app.notes || ''
+        notes: app.notes || '',
+        adjuvant: app.adjuvant || '',
+        tankMix: app.tankMix || '',
       });
     } else {
       setEditingAppIdx(null);
@@ -1603,7 +1615,9 @@ export default function Trials({ onMenuClick }) {
         humidity: '',
         windspeed: '',
         rain: 'No',
-        notes: ''
+        notes: '',
+        adjuvant: '',
+        tankMix: '',
       });
     }
     setIsAppModalOpen(true);
@@ -2004,8 +2018,30 @@ export default function Trials({ onMenuClick }) {
 
     const folderPath = [categoryName, userName, projectName, trialNameWithDate];
 
+    // Build per-photo tag fields from observation context (Requirements 2.1, 2.2, 2.4, 2.5)
+    let photoTagFields;
+    if (isObsModalOpen) {
+      const efficacyData = safeJsonParse(targetTrial.EfficacyDataJSON, []);
+      const obsIdx = editingObsIdx != null && editingObsIdx >= 0 ? editingObsIdx : (efficacyData.length > 0 ? efficacyData.length - 1 : null);
+      photoTagFields = {
+        treatment: targetTrial?.FormulationName ?? null,
+        daa: parseInt(obsForm?.daa) || null,
+        plotNumber: targetTrial?.PlotNumber ?? null,
+        observationId: obsIdx != null ? obsIdx : null,
+        direction: null,
+      };
+    } else {
+      photoTagFields = {
+        treatment: null,
+        daa: null,
+        plotNumber: null,
+        observationId: null,
+        direction: null,
+      };
+    }
+
     // Optimistically add a placeholder with tempId so the photo appears immediately
-    const photoEntry = { tempId, fileData: dataUrl, date: photoDate, label: cameraMode === 'weed' ? 'Weed Photo' : 'Field Observation', tag: photoTag, identifications: [], aiStatus: 'pending' };
+    const photoEntry = { tempId, fileData: dataUrl, date: photoDate, label: cameraMode === 'weed' ? 'Weed Photo' : 'Field Observation', tag: photoTag, identifications: [], aiStatus: 'pending', ...photoTagFields };
     const photosOptimistic = [...safeJsonParse(targetTrial.PhotoURLs, []), photoEntry];
     const optimisticTrial = { ...targetTrial, PhotoURLs: JSON.stringify(photosOptimistic) };
     updateState({ trials: getAppState().trials.map(t => t.ID === optimisticTrial.ID ? optimisticTrial : t) });
@@ -2086,7 +2122,7 @@ export default function Trials({ onMenuClick }) {
       // 2. Replace placeholder with final Drive URL entry
       const currentPhotos = safeJsonParse(targetTrial.PhotoURLs, []).filter(p => p.tempId !== tempId);
       const finalEntry = driveUrl
-        ? { url: driveUrl, driveId: uploadResult?.id || getDriveFileId(driveUrl), date: photoDate, label: photoEntry.label, tag: photoTag, identifications: [], aiStatus: 'pending' }
+        ? { url: driveUrl, driveId: uploadResult?.id || getDriveFileId(driveUrl), date: photoDate, label: photoEntry.label, tag: photoTag, identifications: [], aiStatus: 'pending', ...photoTagFields }
         : { ...photoEntry, tempId: undefined, aiStatus: 'pending' };
       currentPhotos.push(finalEntry);
 
@@ -5534,6 +5570,14 @@ If none are present, write "None".`;
               </select>
             </div>
             <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Crop</label>
+              <input type="text" value={formData.Crop || ''} onChange={e => setFormData({...formData, Crop: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="e.g. Rice, Wheat, Maize" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Variety / Hybrid</label>
+              <input type="text" value={formData.Variety || ''} onChange={e => setFormData({...formData, Variety: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="e.g. IR-64, DK-9133" />
+            </div>
+            <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="block text-xs font-semibold text-slate-500 uppercase">Trial Design Type</label>
                 <button
@@ -5881,6 +5925,24 @@ If none are present, write "None".`;
                     </select>
                   </div>
                 </div>
+                {/* Agronomic Context */}
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Previous Crop</label>
+                    <input type="text" value={formData.PreviousCrop || ''} onChange={e => setFormData({...formData, PreviousCrop: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="e.g. Wheat, Fallow" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Irrigation Method</label>
+                    <select value={formData.IrrigationMethod || ''} onChange={e => setFormData({...formData, IrrigationMethod: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                      <option value="">— None / Rainfed —</option>
+                      {['Flood / Furrow','Sprinkler','Drip / Micro','Sub-surface Drip','Basin','Centre Pivot','Rainfed'].map(m => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Plant Population (plants/ha)</label>
+                    <input type="number" min="0" step="1000" value={formData.PlantPopulation || ''} onChange={e => setFormData({...formData, PlantPopulation: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="e.g. 250000" />
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -6207,6 +6269,22 @@ If none are present, write "None".`;
                                 <div className="col-span-full border-t pt-2 mt-1">
                                   <span className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5">Application Notes</span>
                                   <p className="text-slate-600 whitespace-pre-wrap leading-relaxed">{app.notes}</p>
+                                </div>
+                              )}
+                              {(app.adjuvant || app.tankMix) && (
+                                <div className="col-span-full border-t pt-2 mt-1 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  {app.adjuvant && (
+                                    <div className="bg-blue-50 p-2 rounded-lg">
+                                      <span className="block text-[10px] font-bold text-blue-400 uppercase">Adjuvant</span>
+                                      <span className="font-semibold text-slate-700 text-xs">{app.adjuvant}</span>
+                                    </div>
+                                  )}
+                                  {app.tankMix && (
+                                    <div className="bg-purple-50 p-2 rounded-lg">
+                                      <span className="block text-[10px] font-bold text-purple-400 uppercase">Tank Mix</span>
+                                      <span className="font-semibold text-slate-700 text-xs">{app.tankMix}</span>
+                                    </div>
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -7848,11 +7926,34 @@ If none are present, write "None".`;
             </div>
           </div>
 
+          {/* Tank Mix & Adjuvant */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Adjuvant</label>
+              <input
+                type="text"
+                value={appForm.adjuvant}
+                onChange={e => setAppForm({ ...appForm, adjuvant: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+                placeholder="e.g. Silwet 0.05%, Hasten 0.5 L/ha"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Tank Mix Partners</label>
+              <input
+                type="text"
+                value={appForm.tankMix}
+                onChange={e => setAppForm({ ...appForm, tankMix: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+                placeholder="e.g. Glyphosate 360g + 2,4-D 500g"
+              />
+            </div>
+          </div>
+
           {/* Weather Details Box */}
           <div className="border rounded-xl p-3 bg-slate-50 space-y-3">
             <div className="flex justify-between items-center border-b pb-2">
-              <span className="text-xs font-bold text-slate-700 uppercase">Weather Conditions at Application</span>
-              <button
+              <span className="text-xs font-bold text-slate-700 uppercase">Weather Conditions at Application</span>              <button
                 type="button"
                 onClick={handleFetchAppWeather}
                 disabled={isFetchingAppWeather}
@@ -8982,7 +9083,7 @@ If none are present, write "None".`;
             
             <div className="grid grid-cols-2 gap-3 text-xs bg-slate-50 p-3 rounded-lg border">
               {pendingHarvestAiResult.harvestDate && (
-                <div className="col-span-2 border-b pb-1.5 mb-1">
+                <div className="col-span-2 border--1.5 mb-1">
                   <span className="font-semibold text-slate-500">Suggested Date:</span>{' '}
                   <span className="font-bold text-slate-800">{pendingHarvestAiResult.harvestDate}</span>
                 </div>

@@ -1,24 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, lazy, Suspense } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import PlotScanner from './pages/PlotScanner.jsx';
-import DataManagement from './pages/DataManagement.jsx';
-import Settings from './pages/Settings.jsx';
-import UserManagement from './pages/UserManagement.jsx';
-import AIAssistant from './pages/AIAssistant.jsx';
-import SmartSearch from './pages/SmartSearch.jsx';
-import Analytics from './pages/Analytics.jsx';
-import Reports from './pages/Reports.jsx';
-import Statistics from './pages/Statistics.jsx';
-import Alerts from './pages/Alerts.jsx';
-import DoseResponse from './pages/DoseResponse.jsx';
-import ResistanceTracker from './pages/ResistanceTracker.jsx';
-import FieldMap from './pages/FieldMap.jsx';
-import Trials from './pages/Trials.jsx';
-import Projects from './pages/Projects.jsx';
-import LargeScaleTrials from './pages/LargeScaleTrials.jsx';
-import Ingredients from './pages/Ingredients.jsx';
-import Organisations from './pages/Organisations.jsx';
-import Formulations from './pages/Formulations.jsx';
 import { AppStateProvider } from './hooks/useAppState.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import BottomNav from './components/BottomNav.jsx';
@@ -26,29 +7,85 @@ import Toast from './components/Toast.jsx';
 import LoadingOverlay from './components/LoadingOverlay.jsx';
 import ConflictResolverModal from './components/ConflictResolverModal.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
-
-
-import Setup from './pages/Setup.jsx';
-import Login from './pages/Login.jsx';
-import MigrationTool from './pages/MigrationTool.jsx';
+import PermissionGuard from './components/PermissionGuard.jsx';
+import PWAStatus from './components/PWAStatus.jsx';
 import { useAuth } from './hooks/useAuth.js';
 import { useAppState } from './hooks/useAppState.jsx';
 import { useSync } from './hooks/useSync.js';
 import { getAllData } from './services/dataLayer.js';
 import { initAI } from './services/ai.js';
-
-import CompareTrials from './pages/CompareTrials.jsx';
-import Dashboard from './pages/Dashboard.jsx';
-import PlaceholderPage from './pages/PlaceholderPage.jsx';
-import LiveTrialPage from './pages/LiveTrialPage.jsx';
-import CategorySelector from './pages/CategorySelector.jsx';
 import { getCategoryConfig } from './utils/categoryConfig.js';
 
+// Lazy-loaded page components for code splitting - enables route-based code splitting
+// Each page is loaded on-demand when the user navigates to that route
+const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
+const PlotScanner = lazy(() => import('./pages/PlotScanner.jsx'));
+const DataManagement = lazy(() => import('./pages/DataManagement.jsx'));
+const Settings = lazy(() => import('./pages/Settings.jsx'));
+const UserManagement = lazy(() => import('./pages/UserManagement.jsx'));
+const AIAssistant = lazy(() => import('./pages/AIAssistant.jsx'));
+const SmartSearch = lazy(() => import('./pages/SmartSearch.jsx'));
+const Analytics = lazy(() => import('./pages/Analytics.jsx'));
+const Reports = lazy(() => import('./pages/Reports.jsx'));
+const Statistics = lazy(() => import('./pages/Statistics.jsx'));
+const Alerts = lazy(() => import('./pages/Alerts.jsx'));
+const DoseResponse = lazy(() => import('./pages/DoseResponse.jsx'));
+const ResistanceTracker = lazy(() => import('./pages/ResistanceTracker.jsx'));
+const FieldMap = lazy(() => import('./pages/FieldMap.jsx'));
+const Trials = lazy(() => import('./pages/Trials.jsx'));
+const Projects = lazy(() => import('./pages/Projects.jsx'));
+const LargeScaleTrials = lazy(() => import('./pages/LargeScaleTrials.jsx'));
+const Ingredients = lazy(() => import('./pages/Ingredients.jsx'));
+const Organisations = lazy(() => import('./pages/Organisations.jsx'));
+const Formulations = lazy(() => import('./pages/Formulations.jsx'));
+const CompareTrials = lazy(() => import('./pages/CompareTrials.jsx'));
+const CategorySelector = lazy(() => import('./pages/CategorySelector.jsx'));
+const Setup = lazy(() => import('./pages/Setup.jsx'));
+const Login = lazy(() => import('./pages/Login.jsx'));
+const MigrationTool = lazy(() => import('./pages/MigrationTool.jsx'));
+const LiveTrialPage = lazy(() => import('./pages/LiveTrialPage.jsx'));
 
+// Import skeleton loaders for better UX
+import { 
+  DashboardSkeleton, 
+  TrialsSkeleton, 
+  AnalyticsSkeleton, 
+  ReportsSkeleton, 
+  AIAssistantSkeleton 
+} from './components/SkeletonLoaders.jsx';
 
+// Loading fallback component for Suspense - shown while lazy-loaded chunks are fetched
+function PageLoader() {
+  return (
+    <div className="flex items-center justify-center h-full min-h-[400px]">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+        <span className="text-slate-500 text-sm">Loading...</span>
+      </div>
+    </div>
+  );
+}
 
+// Specific skeleton fallbacks for major pages
+function DashboardLoader() {
+  return <DashboardSkeleton />;
+}
 
-import PermissionGuard from './components/PermissionGuard.jsx';
+function TrialsLoader() {
+  return <TrialsSkeleton />;
+}
+
+function AnalyticsLoader() {
+  return <AnalyticsSkeleton />;
+}
+
+function ReportsLoader() {
+  return <ReportsSkeleton />;
+}
+
+function AILoader() {
+  return <AIAssistantSkeleton />;
+}
 
 function AppLayout() {
   const location = useLocation(); // Subscribe to location changes to force update of nested routes
@@ -252,11 +289,19 @@ function AppLayout() {
   }, [activeCategory]);
 
   if (!isConfigured) {
-    return <Setup />;
+    return (
+      <Suspense fallback={<PageLoader />}>
+        <Setup />
+      </Suspense>
+    );
   }
 
   if (!isAuthenticated) {
-    return <Login />;
+    return (
+      <Suspense fallback={<PageLoader />}>
+        <Login />
+      </Suspense>
+    );
   }
 
   return (
@@ -266,29 +311,167 @@ function AppLayout() {
 
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-transparent">
         <Routes>
-          <Route path="/categories" element={<PermissionGuard tabName="All Categories" onMenuClick={toggleSidebar}><CategorySelector /></PermissionGuard>} />
-          <Route path="/" element={<PermissionGuard tabName="Dashboard" onMenuClick={toggleSidebar}><Dashboard onMenuClick={toggleSidebar} /></PermissionGuard>} />
-          <Route path="/large-scale-trials" element={<PermissionGuard tabName="Large Field Trials" onMenuClick={toggleSidebar}><LargeScaleTrials onMenuClick={toggleSidebar} /></PermissionGuard>} />
-          <Route path="/projects" element={<PermissionGuard tabName="Projects (Grouped)" onMenuClick={toggleSidebar}><Projects onMenuClick={toggleSidebar} /></PermissionGuard>} />
-          <Route path="/scanner" element={<PermissionGuard tabName="Plot Scanner" onMenuClick={toggleSidebar}><PlotScanner onMenuClick={toggleSidebar} /></PermissionGuard>} />
-          <Route path="/formulations" element={<PermissionGuard tabName="Formulations" onMenuClick={toggleSidebar}><Formulations onMenuClick={toggleSidebar} /></PermissionGuard>} />
-          <Route path="/trials" element={<PermissionGuard tabName="Trials" onMenuClick={toggleSidebar}><Trials onMenuClick={toggleSidebar} /></PermissionGuard>} />
-          <Route path="/reports" element={<PermissionGuard tabName="Reports & Cards" onMenuClick={toggleSidebar}><Reports onMenuClick={toggleSidebar} /></PermissionGuard>} />
-          <Route path="/organisations" element={<PermissionGuard tabName="Organisations" onMenuClick={toggleSidebar}><Organisations onMenuClick={toggleSidebar} /></PermissionGuard>} />
-          <Route path="/ingredients" element={<PermissionGuard tabName="Ingredient Costs" onMenuClick={toggleSidebar}><Ingredients onMenuClick={toggleSidebar} /></PermissionGuard>} />
-          <Route path="/ai-assistant" element={<PermissionGuard tabName="AI Assistant" onMenuClick={toggleSidebar}><AIAssistant onMenuClick={toggleSidebar} /></PermissionGuard>} />
-          <Route path="/analytics" element={<PermissionGuard tabName="Analytics" onMenuClick={toggleSidebar}><Analytics onMenuClick={toggleSidebar} /></PermissionGuard>} />
-          <Route path="/statistics" element={<PermissionGuard tabName="Statistics" onMenuClick={toggleSidebar}><Statistics onMenuClick={toggleSidebar} /></PermissionGuard>} />
-          <Route path="/alerts" element={<PermissionGuard tabName="Smart Alerts" onMenuClick={toggleSidebar}><Alerts onMenuClick={toggleSidebar} /></PermissionGuard>} />
-          <Route path="/dose-response" element={<PermissionGuard tabName="Dose-Response (ED50)" onMenuClick={toggleSidebar}><DoseResponse onMenuClick={toggleSidebar} /></PermissionGuard>} />
-          <Route path="/resistance" element={<PermissionGuard tabName="Resistance Tracker" onMenuClick={toggleSidebar}><ResistanceTracker onMenuClick={toggleSidebar} /></PermissionGuard>} />
-          <Route path="/map" element={<PermissionGuard tabName="Field Map" onMenuClick={toggleSidebar}><FieldMap onMenuClick={toggleSidebar} /></PermissionGuard>} />
-          <Route path="/search" element={<PermissionGuard tabName="Smart Search" onMenuClick={toggleSidebar}><SmartSearch onMenuClick={toggleSidebar} /></PermissionGuard>} />
-          <Route path="/data" element={<PermissionGuard tabName="Data Management" onMenuClick={toggleSidebar}><DataManagement onMenuClick={toggleSidebar} /></PermissionGuard>} />
-          <Route path="/settings" element={<PermissionGuard tabName="Settings" onMenuClick={toggleSidebar}><Settings onMenuClick={toggleSidebar} /></PermissionGuard>} />
-          <Route path="/users" element={<PermissionGuard tabName="User Management" onMenuClick={toggleSidebar}><UserManagement onMenuClick={toggleSidebar} /></PermissionGuard>} />
-          <Route path="/compare" element={<PermissionGuard tabName="Compare Trials" onMenuClick={toggleSidebar}><CompareTrials onMenuClick={toggleSidebar} /></PermissionGuard>} />
-          <Route path="/migration" element={<PermissionGuard tabName="Firebase Migration" onMenuClick={toggleSidebar}><MigrationTool onMenuClick={toggleSidebar} /></PermissionGuard>} />
+          <Route path="/categories" element={
+            <PermissionGuard tabName="All Categories" onMenuClick={toggleSidebar}>
+              <Suspense fallback={<PageLoader />}>
+                <CategorySelector />
+              </Suspense>
+            </PermissionGuard>
+          } />
+          <Route path="/" element={
+            <PermissionGuard tabName="Dashboard" onMenuClick={toggleSidebar}>
+              <Suspense fallback={<DashboardLoader />}>
+                <Dashboard onMenuClick={toggleSidebar} />
+              </Suspense>
+            </PermissionGuard>
+          } />
+          <Route path="/large-scale-trials" element={
+            <PermissionGuard tabName="Large Field Trials" onMenuClick={toggleSidebar}>
+              <Suspense fallback={<PageLoader />}>
+                <LargeScaleTrials onMenuClick={toggleSidebar} />
+              </Suspense>
+            </PermissionGuard>
+          } />
+          <Route path="/projects" element={
+            <PermissionGuard tabName="Projects (Grouped)" onMenuClick={toggleSidebar}>
+              <Suspense fallback={<PageLoader />}>
+                <Projects onMenuClick={toggleSidebar} />
+              </Suspense>
+            </PermissionGuard>
+          } />
+          <Route path="/scanner" element={
+            <PermissionGuard tabName="Plot Scanner" onMenuClick={toggleSidebar}>
+              <Suspense fallback={<PageLoader />}>
+                <PlotScanner onMenuClick={toggleSidebar} />
+              </Suspense>
+            </PermissionGuard>
+          } />
+          <Route path="/formulations" element={
+            <PermissionGuard tabName="Formulations" onMenuClick={toggleSidebar}>
+              <Suspense fallback={<PageLoader />}>
+                <Formulations onMenuClick={toggleSidebar} />
+              </Suspense>
+            </PermissionGuard>
+          } />
+          <Route path="/trials" element={
+            <PermissionGuard tabName="Trials" onMenuClick={toggleSidebar}>
+              <Suspense fallback={<TrialsLoader />}>
+                <Trials onMenuClick={toggleSidebar} />
+              </Suspense>
+            </PermissionGuard>
+          } />
+          <Route path="/reports" element={
+            <PermissionGuard tabName="Reports & Cards" onMenuClick={toggleSidebar}>
+              <Suspense fallback={<ReportsLoader />}>
+                <Reports onMenuClick={toggleSidebar} />
+              </Suspense>
+            </PermissionGuard>
+          } />
+          <Route path="/organisations" element={
+            <PermissionGuard tabName="Organisations" onMenuClick={toggleSidebar}>
+              <Suspense fallback={<PageLoader />}>
+                <Organisations onMenuClick={toggleSidebar} />
+              </Suspense>
+            </PermissionGuard>
+          } />
+          <Route path="/ingredients" element={
+            <PermissionGuard tabName="Ingredient Costs" onMenuClick={toggleSidebar}>
+              <Suspense fallback={<PageLoader />}>
+                <Ingredients onMenuClick={toggleSidebar} />
+              </Suspense>
+            </PermissionGuard>
+          } />
+          <Route path="/ai-assistant" element={
+            <PermissionGuard tabName="AI Assistant" onMenuClick={toggleSidebar}>
+              <Suspense fallback={<AILoader />}>
+                <AIAssistant onMenuClick={toggleSidebar} />
+              </Suspense>
+            </PermissionGuard>
+          } />
+          <Route path="/analytics" element={
+            <PermissionGuard tabName="Analytics" onMenuClick={toggleSidebar}>
+              <Suspense fallback={<AnalyticsLoader />}>
+                <Analytics onMenuClick={toggleSidebar} />
+              </Suspense>
+            </PermissionGuard>
+          } />
+          <Route path="/statistics" element={
+            <PermissionGuard tabName="Statistics" onMenuClick={toggleSidebar}>
+              <Suspense fallback={<PageLoader />}>
+                <Statistics onMenuClick={toggleSidebar} />
+              </Suspense>
+            </PermissionGuard>
+          } />
+          <Route path="/alerts" element={
+            <PermissionGuard tabName="Smart Alerts" onMenuClick={toggleSidebar}>
+              <Suspense fallback={<PageLoader />}>
+                <Alerts onMenuClick={toggleSidebar} />
+              </Suspense>
+            </PermissionGuard>
+          } />
+          <Route path="/dose-response" element={
+            <PermissionGuard tabName="Dose-Response (ED50)" onMenuClick={toggleSidebar}>
+              <Suspense fallback={<PageLoader />}>
+                <DoseResponse onMenuClick={toggleSidebar} />
+              </Suspense>
+            </PermissionGuard>
+          } />
+          <Route path="/resistance" element={
+            <PermissionGuard tabName="Resistance Tracker" onMenuClick={toggleSidebar}>
+              <Suspense fallback={<PageLoader />}>
+                <ResistanceTracker onMenuClick={toggleSidebar} />
+              </Suspense>
+            </PermissionGuard>
+          } />
+          <Route path="/map" element={
+            <PermissionGuard tabName="Field Map" onMenuClick={toggleSidebar}>
+              <Suspense fallback={<PageLoader />}>
+                <FieldMap onMenuClick={toggleSidebar} />
+              </Suspense>
+            </PermissionGuard>
+          } />
+          <Route path="/search" element={
+            <PermissionGuard tabName="Smart Search" onMenuClick={toggleSidebar}>
+              <Suspense fallback={<PageLoader />}>
+                <SmartSearch onMenuClick={toggleSidebar} />
+              </Suspense>
+            </PermissionGuard>
+          } />
+          <Route path="/data" element={
+            <PermissionGuard tabName="Data Management" onMenuClick={toggleSidebar}>
+              <Suspense fallback={<PageLoader />}>
+                <DataManagement onMenuClick={toggleSidebar} />
+              </Suspense>
+            </PermissionGuard>
+          } />
+          <Route path="/settings" element={
+            <PermissionGuard tabName="Settings" onMenuClick={toggleSidebar}>
+              <Suspense fallback={<PageLoader />}>
+                <Settings onMenuClick={toggleSidebar} />
+              </Suspense>
+            </PermissionGuard>
+          } />
+          <Route path="/users" element={
+            <PermissionGuard tabName="User Management" onMenuClick={toggleSidebar}>
+              <Suspense fallback={<PageLoader />}>
+                <UserManagement onMenuClick={toggleSidebar} />
+              </Suspense>
+            </PermissionGuard>
+          } />
+          <Route path="/compare" element={
+            <PermissionGuard tabName="Compare Trials" onMenuClick={toggleSidebar}>
+              <Suspense fallback={<PageLoader />}>
+                <CompareTrials onMenuClick={toggleSidebar} />
+              </Suspense>
+            </PermissionGuard>
+          } />
+          <Route path="/migration" element={
+            <PermissionGuard tabName="Firebase Migration" onMenuClick={toggleSidebar}>
+              <Suspense fallback={<PageLoader />}>
+                <MigrationTool onMenuClick={toggleSidebar} />
+              </Suspense>
+            </PermissionGuard>
+          } />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
 
@@ -297,6 +480,7 @@ function AppLayout() {
       <BottomNav onMoreClick={toggleSidebar} />
       <Toast />
       <LoadingOverlay />
+      <PWAStatus />
       
       {state.activeConflict && (
         <ConflictResolverModal
@@ -353,12 +537,14 @@ function App() {
     <ErrorBoundary>
       <AppStateProvider>
         <HashRouter>
-          <Routes>
-            {/* Public live QR page — no auth required */}
-            <Route path="/live/:id" element={<LiveTrialPage />} />
-            {/* All authenticated app routes */}
-            <Route path="/*" element={<WebPlatformAdapter><AppLayout /></WebPlatformAdapter>} />
-          </Routes>
+          <Suspense fallback={<PageLoader />}>
+            <Routes>
+              {/* Public live QR page — no auth required */}
+              <Route path="/live/:id" element={<LiveTrialPage />} />
+              {/* All authenticated app routes */}
+              <Route path="/*" element={<WebPlatformAdapter><AppLayout /></WebPlatformAdapter>} />
+            </Routes>
+          </Suspense>
         </HashRouter>
       </AppStateProvider>
     </ErrorBoundary>

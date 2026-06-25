@@ -1,0 +1,42 @@
+{
+  "name": "Miklens Trial Manager",
+  "short_name": "TrialManager",
+  "description": "Professional agricultural research platform for tracking, evaluating, and reporting on herbicide efficacy trials",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#059669",
+  "orientation": "portrait-primary",
+  "categories": ["productivity", "utilities", "business"],
+  "scope": "/",
+  "lang": "en",
+  "dir": "ltr",
+  "icons": [
+    {
+      "src": "./favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "short_name": "Dashboard",
+      "description": "View trial dashboard",
+      "url": "/#/"
+    },
+    {
+      "name": "Trials",
+      "short_name": "Trials", 
+      "description": "Manage trials",
+      "url": "/#/trials"
+    },
+    {
+      "name": "Scanner",
+      "short_name": "Scanner",
+      "description": "Plot scanner", 
+      "url": "/#/scanner"
+    }
+  ]
+}

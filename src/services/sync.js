@@ -257,9 +257,25 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                             continue;
                         } catch (e) {
                             console.error(`[HighTechSync] ? Action Fail: ${item.action}`, e);
+                            const errMsg = String(e.message || '');
+                            const isNonRetryable = 
+                                errMsg.includes('Record not found') || 
+                                errMsg.includes('not found to delete') || 
+                                errMsg.includes('already exists') ||
+                                (item.action === 'deleteTrialRecord' && errMsg.includes('not found'));
+                            
+                            if (isNonRetryable) {
+                                console.warn(`[HighTechSync] Non-retryable error for ${item.action}. Removing from queue. Error: ${errMsg}`);
+                                getAppState().syncQueue = getAppState().syncQueue.filter(i => i.id !== item.id);
+                                updateAppState({ syncQueue: getAppState().syncQueue });
+                                saveSyncQueueOffline(getAppState().syncQueue).catch(err => console.error('Failed to save sync queue offline:', err));
+                                continue;
+                            }
+
                             item.status = 'failed';
                             item.attempts = (item.attempts || 0) + 1;
                             updateAppState({ syncQueue: getAppState().syncQueue });
+                            saveSyncQueueOffline(getAppState().syncQueue).catch(err => console.error('Failed to save sync queue offline:', err));
                             continue;
                         }
                     }

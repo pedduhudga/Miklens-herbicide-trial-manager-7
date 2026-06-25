@@ -8,6 +8,12 @@ import { getObservationPrimaryValue } from './categoryConfig.js';
 import jStat from 'jstat';
 
 /**
+ * Version identifier for the statistics engine.
+ * Read by buildReportData() for audit trail purposes.
+ */
+export const STATS_ENGINE_VERSION = '1.0.0';
+
+/**
  * Calculate basic statistics: mean, variance, std dev
  */
 export function calculateStats(values) {
@@ -1825,6 +1831,7 @@ if (typeof window !== 'undefined') {
   window.checkNormality = checkNormality;
   window.checkLeveneTest = checkLeveneTest;
   window.performKruskalWallis = performKruskalWallis;
+  window.performPCA = performPCA;
 }
 
 // ============================================================================
@@ -3191,4 +3198,186 @@ function buildDiagnosticsFromResiduals(residuals, treatmentMeans, fittedValues =
 
 if (typeof window !== 'undefined') {
   window.calculateResidualsDiagnostics = calculateResidualsDiagnostics;
+}
+
+/**
+ * Principal Component Analysis (PCA)
+ *
+ * Performs PCA on a matrix of treatment-level observation means, extracting
+ * principal components, explained variance, and per-observation loadings.
+ *
+ * @param {Array<Object>} trials    - Trial data array
+ * @param {string[]}      metrics   - Observation field keys to include (e.g. ['diseaseSeverity','greenLeafArea'])
+ * @param {Object}        [options] - { daa, category, standardize }
+ * @returns {Object} PCA result:
+ *   - components: PC1, PC2, ... each with { eigenvalue, variancePct, cumulativePct, loadings: {} }
+ *   - scores: per-treatment { treatmentName, pc1, pc2, ... }
+ *   - params: variable labels used
+ *   - center: means used for centering
+ *   - scale: std devs used for scaling
+ *   - n: number of observations (treatments)
+ *   - error: string if PCA could not be computed
+ */
+export function performPCA(trials, metrics, options = {}) {
+  const { daa = null, category = 'herbicide', standardize = true } = options;
+
+  if (!metrics || metrics.length < 2) {
+    return { error: 'PCA requires at least 2 metric variables.' };
+  }
+
+  // ── 1. Build treatment × metric matrix ────────────────────────────────
+  const treatmentData = {};
+  trials.forEach(trial => {
+    const trt = trial.FormulationName || 'Unknown';
+    const efficacy = safeJsonParse(trial.EfficacyDataJSON, []);
+    const observations = daa != null
+      ? efficacy.filter(e => Number(e.daa) === Number(daa))
+      : efficacy;
+    if (observations.length === 0) return;
+    const latest = observations[observations.length - 1];
+    if (!treatmentData[trt]) treatmentData[trt] = { counts: {}, sums: {} };
+    metrics.forEach(m => {
+      const raw = latest[m];
+      const v = raw !== undefined && raw !== null && raw !== '' ? parseFloat(raw) : NaN;
+      if (!isNaN(v)) {
+        treatmentData[trt].sums[m] = (treatmentData[trt].sums[m] || 0) + v;
+        treatmentData[trt].counts[m] = (treatmentData[trt].counts[m] || 0) + 1;
+      }
+    });
+  });
+
+  const trtNames = Object.keys(treatmentData);
+  if (trtNames.length < 2) {
+    return { error: 'PCA requires at least 2 treatments with observation data.' };
+  }
+
+  // Keep only metrics that have values for ≥2 treatments
+  const usedMetrics = metrics.filter(m =>
+    trtNames.filter(t => treatmentData[t].counts[m] > 0).length >= 2
+  );
+  if (usedMetrics.length < 2) {
+    return { error: 'PCA requires at least 2 metrics with data across ≥2 treatments.' };
+  }
+
+  // Build data matrix (rows = treatments, cols = metrics)
+  const X = trtNames.map(t => usedMetrics.map(m => {
+    const c = treatmentData[t].counts[m];
+    return c > 0 ? treatmentData[t].sums[m] / c : NaN;
+  }));
+
+  // Fill NaN with column mean
+  const n = X.length;
+  const p = usedMetrics.length;
+  const colMeans = usedMetrics.map((_, j) => {
+    const vals = X.map(row => row[j]).filter(v => !isNaN(v));
+    return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+  });
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < p; j++) {
+      if (isNaN(X[i][j])) X[i][j] = colMeans[j];
+    }
+  }
+
+  // ── 2. Center (and optionally scale) ──────────────────────────────────
+  const colStd = usedMetrics.map((_, j) => {
+    const vals = X.map(row => row[j]);
+    const mean = colMeans[j];
+    const variance = vals.reduce((acc, v) => acc + Math.pow(v - mean, 2), 0) / (n - 1 || 1);
+    return Math.sqrt(variance) || 1;
+  });
+
+  const Xc = X.map(row =>
+    row.map((v, j) => standardize ? (v - colMeans[j]) / colStd[j] : v - colMeans[j])
+  );
+
+  // ── 3. Covariance / correlation matrix ────────────────────────────────
+  const S = Array.from({ length: p }, () => Array(p).fill(0));
+  for (let a = 0; a < p; a++) {
+    for (let b = 0; b < p; b++) {
+      let sum = 0;
+      for (let i = 0; i < n; i++) sum += Xc[i][a] * Xc[i][b];
+      S[a][b] = sum / (n - 1 || 1);
+    }
+  }
+
+  // ── 4. Eigendecomposition via iterative Jacobi (symmetric matrix) ─────
+  // Simple power-iteration to find top min(p,4) eigenvectors
+  const maxComponents = Math.min(p, 4);
+  const eigenvectors = [];
+  const eigenvalues = [];
+
+  // Deflation approach: extract eigenvectors one at a time
+  let Swork = S.map(row => [...row]);
+
+  for (let comp = 0; comp < maxComponents; comp++) {
+    // Power iteration
+    let vec = Array(p).fill(0);
+    vec[comp % p] = 1; // start vector
+
+    let lambda = 0;
+    for (let iter = 0; iter < 200; iter++) {
+      // Av = S * vec
+      const Av = Array(p).fill(0);
+      for (let a = 0; a < p; a++) {
+        for (let b = 0; b < p; b++) Av[a] += Swork[a][b] * vec[b];
+      }
+      // Normalize
+      const norm = Math.sqrt(Av.reduce((acc, v) => acc + v * v, 0)) || 1;
+      const newVec = Av.map(v => v / norm);
+      // Convergence
+      const diff = newVec.reduce((acc, v, i) => acc + Math.abs(v - vec[i]), 0);
+      vec = newVec;
+      lambda = norm;
+      if (diff < 1e-8) break;
+    }
+
+    eigenvectors.push([...vec]);
+    eigenvalues.push(Math.max(0, lambda));
+
+    // Deflate: S = S - lambda * vec * vec^T
+    for (let a = 0; a < p; a++) {
+      for (let b = 0; b < p; b++) {
+        Swork[a][b] -= lambda * vec[a] * vec[b];
+      }
+    }
+  }
+
+  // ── 5. Variance explained ─────────────────────────────────────────────
+  const totalVariance = eigenvalues.reduce((a, b) => a + b, 0) || 1;
+  let cumulative = 0;
+
+  const components = eigenvectors.map((vec, i) => {
+    const variancePct = parseFloat(((eigenvalues[i] / totalVariance) * 100).toFixed(2));
+    cumulative += variancePct;
+    const loadings = {};
+    usedMetrics.forEach((m, j) => { loadings[m] = parseFloat(vec[j].toFixed(4)); });
+    return {
+      index: i + 1,
+      label: `PC${i + 1}`,
+      eigenvalue: parseFloat(eigenvalues[i].toFixed(4)),
+      variancePct,
+      cumulativePct: parseFloat(cumulative.toFixed(2)),
+      loadings,
+    };
+  });
+
+  // ── 6. Compute scores (projection) ────────────────────────────────────
+  const scores = trtNames.map((trt, i) => {
+    const scoreObj = { treatmentName: trt };
+    components.forEach((comp, c) => {
+      const score = usedMetrics.reduce((acc, m, j) => acc + Xc[i][j] * eigenvectors[c][j], 0);
+      scoreObj[`pc${c + 1}`] = parseFloat(score.toFixed(4));
+    });
+    return scoreObj;
+  });
+
+  return {
+    components,
+    scores,
+    params: usedMetrics,
+    center: Object.fromEntries(usedMetrics.map((m, j) => [m, parseFloat(colMeans[j].toFixed(4))])),
+    scale: Object.fromEntries(usedMetrics.map((m, j) => [m, parseFloat(colStd[j].toFixed(4))])),
+    n,
+    standardized: standardize,
+  };
 }

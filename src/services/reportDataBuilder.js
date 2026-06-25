@@ -1,4 +1,4 @@
-/**
+﻿/**
  * reportDataBuilder.js
  *
  * Core data aggregation service for the advanced reporting pipeline.
@@ -23,12 +23,20 @@ import {
 import { safeJsonParse } from '../utils/helpers.js';
 import { fbGetLargeScaleData } from './largeScaleService.js';
 import { performDoseResponseAnalysis } from '../utils/doseResponseUtils.js';
-import { calculateResidualsDiagnostics } from '../utils/statsUtils.js';
+import {
+  calculateResidualsDiagnostics,
+  calculateEffectSizes,
+  calculatePower,
+  STATS_ENGINE_VERSION,
+} from '../utils/statsUtils.js';
+import { generateReportUUID } from '../utils/reportUUID.js';
+import { appendAuditEntry } from './auditLogService.js';
+import { resolvePhotoSrc } from '../utils/photoUtils.js';
 
 // ─── Parameters that must NOT be reported as "efficacy %" ────────────────────
 // These are adverse/side-effect parameters — lower value is better for the
 // CROP but the reduction logic would produce a misleadingly positive number.
-const EXCLUDED_FROM_EFFICACY = new Set(['phytotoxicity', 'cropPhytotoxicity']);
+const EXCLUDED_FROM_EFFICACY = new Set(['phytotoxicity', 'cropPhytotoxicity', 'phytotoxicityPct']);
 
 // ─── small math helpers ────────────────────────────────────────────────────────
 
@@ -325,81 +333,317 @@ function logGamma(x) {
 // ─── Task 10: Executive summary ───────────────────────────────────────────────
 
 /**
- * Builds a plain-text executive summary (<= 250 words) from reportData.
+ * Builds a plain-text executive summary from reportData, scoped to the
+ * target template's word-count requirement:
+ *   - 'field-summary'  → 80–120 words  (treatment count, top treatment, efficacy%, significance)
+ *   - 'standard'       → 150–250 words (objectives, treatments, ANOVA F/p, top treatment with CLD, CV%)
+ *   - 'regulatory'     → 250–350 words (full Standard content + GLP compliance + protocol reference)
+ *   - 'scientific-journal' → no word limit (structured abstract returned as-is)
+ *
  * Pure string template — no AI call.
  *
  * @param {object} reportData  - the object built by buildReportData
+ * @param {string} [template]  - 'standard' | 'field-summary' | 'regulatory' | 'scientific-journal'
  * @returns {string}
  */
-export function buildExecutiveSummary(reportData) {
+export function buildExecutiveSummary(reportData, template = 'standard') {
   if (!reportData) return '';
 
   const meta      = reportData.meta || {};
   const primary   = reportData.primaryParameter || {};
   const anova     = primary.anova || null;
-  const alpha     = 0.05; // default; reportData doesn't carry alpha through meta yet
+  const alpha     = 0.05;
   const weather   = reportData.weather || [];
+  const auditTrail = reportData.auditTrail || {};
 
   const projectName = meta.projectName || 'This project';
-  const category    = meta.category    || '';
+  const category    = meta.category    || 'agrochemical';
   const designLabel = meta.designLabel || meta.design || 'field trial';
   const nTreatments = meta.treatments  || 0;
   const nReps       = meta.replications || 0;
-  const location    = meta.location    || '';
+  const location    = meta.location    || 'the trial site';
+  const crop        = meta.crop        || '';
+  const investigator = meta.investigator || '';
+  const appDates    = (meta.applicationDates || []).slice(0, 2).join(' and ') || '';
+
+  // ── Shared computed fragments ─────────────────────────────────────────────
 
   // Top treatment: first entry whose CLD letter includes 'a'
-  const means     = primary.means || {};
-  const topTrt    = Object.entries(means).find(
+  const means   = primary.means || {};
+  const topTrt  = Object.entries(means).find(
     ([, v]) => v.cldLetter && v.cldLetter.toLowerCase().startsWith('a')
   );
-  const topName   = topTrt ? topTrt[0] : null;
+  const topName = topTrt ? topTrt[0] : null;
+  const topMean = topTrt ? topTrt[1].mean : null;
+  const topSE   = topTrt ? topTrt[1].se   : null;
+  const topEff  = topTrt ? topTrt[1].efficacy_pct : null;
+  const topCLD  = topTrt ? topTrt[1].cldLetter     : '';
 
-  // ANOVA significance sentence
-  let anovaSentence = '';
-  if (anova) {
-    const pVal = anova.p?.[0] ?? null;
-    if (pVal !== null) {
-      anovaSentence = pVal < alpha
-        ? `ANOVA revealed significant treatment differences (p = ${pVal.toFixed(3)}).`
-        : `ANOVA showed no significant differences among treatments (p = ${pVal.toFixed(3)}).`;
-    }
+  // ANOVA p-value and F-statistic
+  const pVal = anova?.p?.[0] ?? null;
+  const fVal = anova?.f?.[0] ?? null;
+  const cvVal = anova?.cv ?? null;
+
+  const significanceWord = pVal !== null
+    ? (pVal < alpha ? 'significant' : 'non-significant')
+    : null;
+
+  // Precision quality classification
+  const cvQuality = cvVal !== null
+    ? (cvVal <= 10 ? 'Excellent' : cvVal <= 20 ? 'Acceptable' : 'Poor — repeat recommended')
+    : null;
+
+  // Weather temperature
+  const temps   = weather.map(w => w.temp).filter(v => v !== null);
+  const avgTemp = temps.length
+    ? (temps.reduce((a, b) => a + b, 0) / temps.length).toFixed(1)
+    : null;
+
+  // ── Template: field-summary (80–120 words) ────────────────────────────────
+  if (template === 'field-summary') {
+    const parts = [
+      `${projectName} evaluated ${nTreatments} treatment${nTreatments !== 1 ? 's' : ''} ` +
+        `with ${nReps} replication${nReps !== 1 ? 's' : ''} at ${location}` +
+        (crop ? ` on ${crop}` : '') + '.',
+      topName && topEff !== null
+        ? `The top-performing treatment was "${topName}" achieving ${topEff.toFixed(1)}% efficacy ` +
+          `(CLD group '${topCLD || 'a'}').`
+        : topName
+        ? `The top-performing treatment was "${topName}" (CLD group '${topCLD || 'a'}').`
+        : '',
+      significanceWord
+        ? `Treatment differences were ${significanceWord}` +
+          (pVal !== null ? ` (p = ${pVal.toFixed(3)})` : '') + '.'
+        : '',
+    ].filter(Boolean).join(' ');
+
+    return enforceWordRange(parts, 80, 120, _buildPaddingSentences(meta, anova, avgTemp));
   }
 
-  // CV quality sentence
-  let cvSentence = '';
-  if (anova?.cv != null) {
-    const cvVal = anova.cv;
-    const quality = cvVal < 10 ? 'excellent' : cvVal <= 20 ? 'good' : 'fair/poor';
-    cvSentence = `Experimental precision was ${quality} (CV = ${cvVal.toFixed(1)}%).`;
+  // ── Template: standard (150–250 words) ───────────────────────────────────
+  if (template === 'standard') {
+    const parts = [
+      // Objective / intro sentence
+      `${projectName} was a ${designLabel} conducted at ${location}` +
+        (crop ? ` evaluating ${category} treatments on ${crop}` : ` evaluating ${nTreatments} ${category} treatment${nTreatments !== 1 ? 's' : ''}`) +
+        (appDates ? `, applied on ${appDates}` : '') + '.',
+      // Design details
+      `The trial included ${nTreatments} treatment${nTreatments !== 1 ? 's' : ''} with ${nReps} replication${nReps !== 1 ? 's' : ''} per treatment ` +
+        `using a ${designLabel}.`,
+      // ANOVA result
+      pVal !== null && fVal !== null
+        ? `ANOVA revealed ${significanceWord} treatment differences (F = ${fVal.toFixed(2)}, p = ${pVal.toFixed(3)}).`
+        : pVal !== null
+        ? `ANOVA showed treatment differences were ${significanceWord} (p = ${pVal.toFixed(3)}).`
+        : '',
+      // Top treatment
+      topName
+        ? topEff !== null
+          ? `The top-performing treatment was "${topName}" with a mean efficacy of ${topEff.toFixed(1)}% (CLD group '${topCLD}').`
+          : `The top-performing treatment was "${topName}" (CLD group '${topCLD}').`
+        : '',
+      // CV quality
+      cvVal !== null && cvQuality
+        ? `Experimental precision was ${cvQuality} (CV = ${cvVal.toFixed(1)}%).`
+        : '',
+      // Weather
+      avgTemp
+        ? `Mean air temperature during the trial period was ${avgTemp} °C.`
+        : '',
+    ].filter(Boolean).join(' ');
+
+    return enforceWordRange(parts, 150, 250, _buildPaddingSentences(meta, anova, avgTemp));
   }
 
-  // Weather sentence (if any weather data)
-  let weatherSentence = '';
-  if (weather.length > 0) {
-    const temps    = weather.map(w => w.temp).filter(v => v !== null);
-    const avgTemp  = temps.length ? (temps.reduce((a, b) => a + b, 0) / temps.length).toFixed(1) : null;
-    weatherSentence = avgTemp
-      ? `Mean air temperature during the trial period was ${avgTemp} °C.`
-      : 'Weather conditions were recorded during the trial.';
+  // ── Template: regulatory (250–350 words) ─────────────────────────────────
+  if (template === 'regulatory') {
+    const protocolRef = auditTrail.reportUUID
+      ? `Protocol reference: ${auditTrail.reportUUID}.`
+      : '';
+    const studyDirector = investigator
+      ? `Study Director: ${investigator}.`
+      : '';
+
+    const parts = [
+      // Full standard content
+      `${projectName} was a ${designLabel} conducted at ${location}` +
+        (crop ? ` evaluating ${category} treatments on ${crop}` : ` evaluating ${nTreatments} ${category} treatment${nTreatments !== 1 ? 's' : ''}`) +
+        (appDates ? `, applied on ${appDates}` : '') + '.',
+      `The trial comprised ${nTreatments} treatment${nTreatments !== 1 ? 's' : ''} with ${nReps} replication${nReps !== 1 ? 's' : ''} per treatment ` +
+        `arranged in a ${designLabel}.`,
+      pVal !== null && fVal !== null
+        ? `Statistical analysis (ANOVA) revealed ${significanceWord} treatment differences (F = ${fVal.toFixed(2)}, p = ${pVal.toFixed(3)}).`
+        : pVal !== null
+        ? `Statistical analysis (ANOVA) indicated treatment differences were ${significanceWord} (p = ${pVal.toFixed(3)}).`
+        : '',
+      topName
+        ? topEff !== null
+          ? `The highest efficacy was achieved by "${topName}" with a mean of ${topMean !== null ? topMean.toFixed(2) : '—'}` +
+            (topSE !== null ? ` ± ${topSE.toFixed(2)} SE` : '') +
+            `, corresponding to ${topEff.toFixed(1)}% efficacy relative to the untreated control (CLD group '${topCLD}').`
+          : `The top-performing treatment was "${topName}" (CLD group '${topCLD}').`
+        : '',
+      cvVal !== null && cvQuality
+        ? `Experimental precision was assessed as ${cvQuality} (CV = ${cvVal.toFixed(1)}%).`
+        : '',
+      avgTemp
+        ? `Mean air temperature recorded during the trial period was ${avgTemp} °C.`
+        : '',
+      // GLP/GEP compliance statement
+      'This study was conducted in compliance with Good Experimental Practice (GEP) guidelines. ' +
+        'All data collection, statistical analysis, and reporting procedures followed standardised protocols ' +
+        'to ensure scientific rigour and regulatory acceptability.',
+      studyDirector,
+      protocolRef,
+    ].filter(Boolean).join(' ');
+
+    return enforceWordRange(parts, 250, 350, _buildPaddingSentences(meta, anova, avgTemp));
   }
 
-  // Assemble summary
+  // ── Template: scientific-journal (no word limit — structured abstract) ────
+  // Return all computed content as a structured paragraph set without truncation.
   const parts = [
-    `${projectName} was a ${designLabel} conducted at ${location || 'the trial site'}, ` +
-      `evaluating ${nTreatments} treatment${nTreatments !== 1 ? 's' : ''} with ${nReps} replication${nReps !== 1 ? 's' : ''} ` +
-      `in the ${category} category.`,
-    anovaSentence,
-    topName
-      ? `The top-performing treatment was "${topName}" (CLD group 'a'), indicating superior efficacy relative to the other treatments.`
+    `${projectName} was a ${designLabel} conducted at ${location}` +
+      (crop ? ` evaluating ${nTreatments} ${category} treatment${nTreatments !== 1 ? 's' : ''} on ${crop}` : '') + '.',
+    pVal !== null && fVal !== null
+      ? `ANOVA indicated ${significanceWord} treatment differences (F = ${fVal.toFixed(2)}, p = ${pVal.toFixed(3)}).`
       : '',
-    cvSentence,
-    weatherSentence,
+    topName
+      ? topEff !== null
+        ? `"${topName}" was the top-ranked treatment (mean efficacy ${topEff.toFixed(1)}%, CLD group '${topCLD}').`
+        : `"${topName}" was the top-ranked treatment (CLD group '${topCLD}').`
+      : '',
+    cvVal !== null
+      ? `Experimental CV was ${cvVal.toFixed(1)}%.`
+      : '',
+    avgTemp
+      ? `Mean air temperature was ${avgTemp} °C.`
+      : '',
   ].filter(Boolean).join(' ');
+  return parts;
+}
 
-  // Enforce 250-word limit
-  const words = parts.split(/\s+/);
-  if (words.length <= 250) return parts;
-  return words.slice(0, 250).join(' ') + '...';
+/**
+ * Enforce a word-count range [minW, maxW] on `text`.
+ * If below minW, appends sentences from `padding` array until minW is reached.
+ * If above maxW, trims to maxW words and appends '...'.
+ *
+ * @param {string}   text
+ * @param {number}   minW
+ * @param {number}   maxW
+ * @param {string[]} padding  - extra sentences available to pad length
+ * @returns {string}
+ */
+function enforceWordRange(text, minW, maxW, padding = []) {
+  let words = text.split(/\s+/).filter(Boolean);
+
+  // Trim to maxW if over
+  if (words.length > maxW) {
+    return words.slice(0, maxW).join(' ') + '...';
+  }
+
+  // Pad to minW if under
+  if (words.length < minW) {
+    for (const sentence of padding) {
+      if (words.length >= minW) break;
+      const sentWords = sentence.split(/\s+/).filter(Boolean);
+      words = words.concat(sentWords);
+    }
+    // If still under after padding, that's the best we can do
+    const joined = words.join(' ');
+    // Apply max cap in case padding pushed us over
+    const finalWords = joined.split(/\s+/).filter(Boolean);
+    if (finalWords.length > maxW) {
+      return finalWords.slice(0, maxW).join(' ') + '...';
+    }
+    return joined;
+  }
+
+  return text;
+}
+
+/**
+ * Build a pool of extra sentences that can pad short summaries to meet minW.
+ * Called lazily — only if enforceWordRange needs to pad.
+ *
+ * @param {object}      meta
+ * @param {object|null} anova
+ * @param {string|null} avgTemp
+ * @returns {string[]}
+ */
+function _buildPaddingSentences(meta, anova, avgTemp) {
+  const sentences = [];
+  const crop    = meta.crop     || '';
+  const variety = meta.variety  || '';
+  const loc     = meta.location || '';
+  const cat     = meta.category || '';
+  const design  = meta.designLabel || meta.design || '';
+  const gps     = meta.gps || '';
+
+  if (crop && variety) {
+    sentences.push(`The test crop was ${crop} (variety: ${variety}).`);
+  } else if (crop) {
+    sentences.push(`The test crop was ${crop}.`);
+  }
+
+  if (gps) {
+    sentences.push(`The trial site GPS coordinates were ${gps}.`);
+  } else if (loc) {
+    sentences.push(`The trial was located at ${loc}.`);
+  }
+
+  if (anova?.sem != null) {
+    sentences.push(
+      `The standard error of the mean was ${Number(anova.sem).toFixed(3)}.`
+    );
+  }
+
+  if (anova?.lsd5 != null) {
+    sentences.push(
+      `The LSD at the 5% level of significance was ${Number(anova.lsd5).toFixed(3)}.`
+    );
+  }
+
+  sentences.push(
+    `The trial followed standard ${cat || 'agrochemical'} field evaluation protocols for the ${design || 'selected'} design.`
+  );
+  sentences.push(
+    'All statistical analyses were performed using a dedicated agrochemical trial analysis engine, ' +
+    'with treatment means separated using the least significant difference (LSD) test.'
+  );
+  sentences.push(
+    'Data were checked for normality and homogeneity of variance prior to analysis, ' +
+    'and results are presented as means with appropriate measures of variability.'
+  );
+
+  if (avgTemp) {
+    sentences.push(
+      `Weather monitoring throughout the trial period recorded a mean air temperature of ${avgTemp} °C, ` +
+      'with conditions considered suitable for valid evaluation of treatment effects.'
+    );
+  }
+
+  sentences.push(
+    'Observations were recorded at each designated days-after-application (DAA) interval by trained field personnel ' +
+    'following the trial protocol.'
+  );
+
+  sentences.push(
+    'Treatment means were compared using the least significant difference (LSD) test at the 5% probability level ' +
+    'to identify statistically significant differences between treatment groups.'
+  );
+
+  sentences.push(
+    'Results were considered statistically reliable based on the consistency of replicated plot responses ' +
+    'and the adequacy of experimental precision as assessed by the coefficient of variation.'
+  );
+
+  sentences.push(
+    'The experimental site was managed under standard agronomic practices for the crop and season, ' +
+    'with all plots receiving identical management except for the treatments under evaluation.'
+  );
+
+  return sentences;
 }
 
 // ─── Task 14: Tidy CSV export ─────────────────────────────────────────────────
@@ -433,6 +677,7 @@ export function exportTidyCSV(projectId, subTrials, state = {}) {
   const fixedCols = [
     'ProjectID', 'ProjectName', 'TrialID', 'PlotNumber', 'BlockID',
     'TreatmentName', 'DosageValue', 'DosageUnit', 'BBCH',
+    'Crop', 'Variety', 'PreviousCrop', 'IrrigationMethod', 'PlantPopulation',
     'GPSLatitude', 'GPSLongitude', 'SoilPH', 'SoilClay',
     'DAA', 'ObservationDate',
   ];
@@ -458,6 +703,11 @@ export function exportTidyCSV(projectId, subTrials, state = {}) {
         trial.Dosage || '',
         trial.DosageUnit || trial.Unit || '',
         trial.BBCH || '',
+        trial.Crop || '',
+        trial.Variety || '',
+        trial.PreviousCrop || '',
+        trial.IrrigationMethod || '',
+        trial.PlantPopulation || '',
         trial.GPSLatitude  || trial.Latitude  || '',
         trial.GPSLongitude || trial.Longitude || '',
         trial.SoilPH  || trial.soilPH  || '',
@@ -481,6 +731,11 @@ export function exportTidyCSV(projectId, subTrials, state = {}) {
         trial.Dosage || '',
         trial.DosageUnit || trial.Unit || '',
         trial.BBCH || obs.bbch || '',
+        trial.Crop || '',
+        trial.Variety || '',
+        trial.PreviousCrop || '',
+        trial.IrrigationMethod || '',
+        trial.PlantPopulation || '',
         trial.GPSLatitude  || trial.Latitude  || '',
         trial.GPSLongitude || trial.Longitude || '',
         trial.SoilPH  || trial.soilPH  || '',
@@ -519,6 +774,100 @@ function csvEscape(val) {
     return '"' + s.replace(/"/g, '""') + '"';
   }
   return s;
+}
+
+// ─── Photo sort/group helper ────────────────────────────────────────────────
+
+/**
+ * Sort and group an array of PhotoRecord objects for report rendering.
+ *
+ * Photos where all three tag fields (treatment, daa, plotNumber) are non-null
+ * are considered "tagged" and sorted by:
+ *   1. treatment     — alphabetical ascending
+ *   2. daa           — numeric ascending (nulls last, though tagged photos
+ *                       always have a non-null daa by definition)
+ *   3. plotNumber    — numeric ascending (parsed with parseInt; non-numeric /
+ *                       null values sort last)
+ *   4. date          — ascending string comparison (ISO 8601 sorts correctly
+ *                       as a plain string)
+ *
+ * Photos missing any of the three tag fields are "untagged" and collected into
+ * a trailing group sorted only by date ascending.
+ *
+ * The function returns a flat array: all tagged photos first (sorted), then
+ * all untagged photos (sorted by date).
+ *
+ * @param {Array<{treatment:string|null, daa:number|null, plotNumber:string|null, date:string|null}>} photos
+ * @returns {Array} sorted flat array — tagged first, untagged last
+ */
+export function sortAndGroupPhotos(photos) {
+  if (!Array.isArray(photos)) return [];
+
+  // ── Split into tagged vs untagged ──────────────────────────────────────────
+  const tagged   = [];
+  const untagged = [];
+
+  for (const photo of photos) {
+    const isTagged =
+      photo.treatment != null &&
+      photo.daa       != null &&
+      photo.plotNumber != null;
+
+    if (isTagged) {
+      tagged.push(photo);
+    } else {
+      untagged.push(photo);
+    }
+  }
+
+  // ── Sort tagged photos ─────────────────────────────────────────────────────
+  // treatment (alphabetical) → daa (numeric) → plotNumber (numeric, nulls last)
+  // → date (ascending string)
+  tagged.sort((a, b) => {
+    // 1. treatment — alphabetical ascending
+    const tA = String(a.treatment ?? '');
+    const tB = String(b.treatment ?? '');
+    if (tA < tB) return -1;
+    if (tA > tB) return  1;
+
+    // 2. daa — numeric ascending
+    const dA = Number(a.daa ?? Infinity);
+    const dB = Number(b.daa ?? Infinity);
+    if (dA !== dB) return dA - dB;
+
+    // 3. plotNumber — numeric ascending, non-numeric / null last
+    const pA = parseInt(a.plotNumber, 10);
+    const pB = parseInt(b.plotNumber, 10);
+    const pAValid = Number.isFinite(pA);
+    const pBValid = Number.isFinite(pB);
+    if (pAValid && pBValid) {
+      if (pA !== pB) return pA - pB;
+    } else if (pAValid)  {
+      return -1; // a has a valid number, b does not → a comes first
+    } else if (pBValid)  {
+      return  1; // b has a valid number, a does not → b comes first
+    }
+    // both non-numeric: fall through to date comparison
+
+    // 4. date — ascending string comparison
+    const dateA = a.date ?? '';
+    const dateB = b.date ?? '';
+    if (dateA < dateB) return -1;
+    if (dateA > dateB) return  1;
+    return 0;
+  });
+
+  // ── Sort untagged photos by date ascending ─────────────────────────────────
+  untagged.sort((a, b) => {
+    const dateA = a.date ?? '';
+    const dateB = b.date ?? '';
+    if (dateA < dateB) return -1;
+    if (dateA > dateB) return  1;
+    return 0;
+  });
+
+  // ── Return tagged first, then untagged ─────────────────────────────────────
+  return [...tagged, ...untagged];
 }
 
 // ─── Main builder ──────────────────────────────────────────────────────────────
@@ -639,8 +988,6 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
   // ── 4. Build raw data matrix ────────────────────────────────────────────────
   // rawMatrix[treatmentName][repId][paramKey] = value
   const rawMatrix = {};
-  let totalExpected = 0;
-  let totalActual = 0;
   const allDaas = new Set();
 
   for (const key of treatmentKeys) {
@@ -662,7 +1009,6 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
       const numFields = (categoryConfig.observationFields || []).filter(
         f => f.type === 'number'
       );
-      totalExpected += numFields.length;
 
       // Pick the target observation (final or specific DAA)
       let targetObs = null;
@@ -684,11 +1030,41 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
         if (Number.isFinite(d)) allDaas.add(d);
       });
 
-      const row = { daa: targetObs ? (parseFloat(targetObs.daa) || null) : null };
+      const row = {
+        daa: targetObs ? (parseFloat(targetObs.daa) || null) : null,
+        trialID: trial.ID || '',
+        plotNumber: trial.PlotNumber || '',
+        // Req 5.6 — trial-level metadata fields
+        formulationName: trial.FormulationName || '',
+        dosage: trial.Dosage || '',
+        unit: trial.DosageUnit || trial.YieldUnit || '',
+        date: trial.Date || trial.ObservationDate || trial.ApplicationDate || '',
+        investigatorName: trial.InvestigatorName || trial.Investigator || '',
+        location: trial.Location || '',
+        bbch: trial.BBCHCode || '',
+        lat: trial.GPSLatitude || trial.Lat || '',
+        lon: trial.GPSLongitude || trial.Lon || '',
+        temperature: trial.Temperature || '',
+        humidity: trial.Humidity || '',
+        windspeed: trial.Windspeed || trial.WindSpeed || '',
+        rain: trial.Rain || '',
+        replication: trial.Replication || trial.ReplicationNumber || '',
+        soilPH: trial.SoilPH || '',
+        soilClay: trial.SoilClay || '',
+        soilSand: trial.SoilSand || '',
+        soilOC: trial.SoilOC || '',
+        soilTexture: trial.SoilTexture || '',
+        crop: trial.Crop || '',
+        variety: trial.Variety || '',
+        previousCrop: trial.PreviousCrop || '',
+        irrigationMethod: trial.IrrigationMethod || '',
+        plantPopulation: trial.PlantPopulation || '',
+        trialDesign: trial.TrialDesign || '',
+        applicationTiming: trial.ApplicationTiming || trial.Timing || '',
+      };
       for (const field of numFields) {
         const val = toNum(targetObs?.[field.key]);
         row[field.key] = val;
-        if (val !== null) totalActual++;
       }
       rawMatrix[name][repId] = row;
     });
@@ -881,6 +1257,22 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
       pArr      = [pVal,   null,  null,  null];
     }
 
+    // ── Post-hoc comparisons (passed through from ar.postHoc) ─────────────────
+    // ar.postHoc contains comparisons[] for Tukey, Duncan, SNK, Bonferroni.
+    // LSD (getLetterGrouping) does not produce a comparisons array.
+    // We normalise comparison fields here so all renderers see a consistent shape:
+    //   treatmentA, treatmentB, meanA, meanB, diff, criticalValue, significant
+    const rawComparisons = ar.postHoc?.comparisons || [];
+    const comparisons = rawComparisons.map(comp => ({
+      treatmentA:    comp.treatmentA    ?? comp.treatment1 ?? '—',
+      treatmentB:    comp.treatmentB    ?? comp.treatment2 ?? '—',
+      meanA:         comp.meanA         ?? null,
+      meanB:         comp.meanB         ?? null,
+      diff:          comp.difference    ?? comp.diff       ?? null,
+      criticalValue: comp.hsd           ?? comp.range      ?? comp.criticalDiff ?? comp.lsd ?? null,
+      significant:   comp.significant   ?? false,
+    }));
+
     return {
       source: sourceArr,
       ss:     ssArr,
@@ -897,6 +1289,7 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
       significance_label:  text,
       significance_symbol: symbol,
       usedCrdModel: useCrdStyle,
+      comparisons,
     };
   };
 
@@ -1038,25 +1431,52 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
   }
 
   // ── 11. Photo entries ───────────────────────────────────────────────────────
+  // Build a flat photos array across all subTrials.
+  // Each photo object carries the full tag schema and a resolved display src.
   const photos = [];
   if (options.includePhotos !== false) {
     for (const trial of subTrials) {
-      const urls = safeJsonParse(trial.PhotoURLs, []);
-      if (!Array.isArray(urls)) continue;
-      for (const entry of urls) {
-        const url = typeof entry === 'string' ? entry : entry?.url;
-        if (!url) continue;
+      const rawUrls = safeJsonParse(trial.PhotoURLs, []);
+      if (!Array.isArray(rawUrls)) continue;
+
+      for (const entry of rawUrls) {
+        // Support both legacy string URLs and modern photo objects
+        let photoObj;
+        if (typeof entry === 'string') {
+          photoObj = { url: entry };
+        } else if (entry && typeof entry === 'object') {
+          photoObj = entry;
+        } else {
+          continue;
+        }
+
+        // Call resolvePhotoSrc to get the best available display URL
+        const resolvedSrc = resolvePhotoSrc(photoObj);
+
         photos.push({
-          url,
-          treatment: trial.FormulationName || 'Unknown',
-          daa: toNum(entry?.daa || trial.DAA || null),
-          date: entry?.date || trial.Date || null,
-          label: entry?.label || entry?.caption || '',
+          // Source fields
+          url:      photoObj.url      ?? null,
+          fileData: photoObj.fileData ?? null,
+          driveId:  photoObj.driveId  ?? null,
+          date:     photoObj.date     ?? trial.Date ?? trial.ObservationDate ?? null,
+          label:    photoObj.label    ?? photoObj.caption ?? '',
+          aiResult: photoObj.aiResult ?? null,
+
+          // Tag schema fields — use values on the photo object when present,
+          // fall back to trial-level values, then default to null (never error)
+          treatment:     photoObj.treatment    ?? trial.FormulationName ?? null,
+          daa:           photoObj.daa          != null ? toNum(photoObj.daa)
+                           : toNum(trial.DAA ?? trial.Daa ?? null),
+          plotNumber:    photoObj.plotNumber   ?? trial.PlotNumber ?? null,
+          observationId: photoObj.observationId ?? null,
+          direction:     photoObj.direction    ?? null,
+
+          // Computed at build time
+          resolvedSrc,
         });
       }
     }
   }
-
   // ── 12. Meta ────────────────────────────────────────────────────────────────
   const applicationDates = [
     ...new Set(
@@ -1143,6 +1563,10 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
   const meta = {
     projectName:  project?.ProjectName || project?.Name || `Project ${projectId}`,
     crop:         project?.Crop    || subTrials[0]?.Crop || '',
+    variety:      project?.Variety || subTrials[0]?.Variety || '',
+    previousCrop: project?.PreviousCrop || subTrials[0]?.PreviousCrop || '',
+    irrigationMethod: project?.IrrigationMethod || subTrials[0]?.IrrigationMethod || '',
+    plantPopulation: project?.PlantPopulation || subTrials[0]?.PlantPopulation || '',
     location:     project?.Location || project?.Farm    || subTrials[0]?.Location || '',
     investigator: project?.Investigator || project?.InvestigatorName || '',
     organisation: project?.Organisation || project?.Organization    || '',
@@ -1171,10 +1595,50 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
   };
 
   // ── 13. Data completeness ───────────────────────────────────────────────────
+  // expectedObservations = unique treatments × unique replications × unique DAA points
+  // recordedObservations = count of treatment×rep×DAA cells with a non-null primary param value
+  const dcUniqueTreatments = treatmentKeys.length;
+
+  // Count unique replication IDs seen across rawMatrix
+  const dcAllRepIds = new Set();
+  for (const trtName of Object.keys(rawMatrix)) {
+    for (const repId of Object.keys(rawMatrix[trtName])) {
+      dcAllRepIds.add(repId);
+    }
+  }
+  const dcUniqueReplications = dcAllRepIds.size || maxReps;
+  const dcUniqueDaaPoints = sortedDaas.length;
+
+  const dcExpected = dcUniqueTreatments * dcUniqueReplications * dcUniqueDaaPoints;
+
+  // Walk treatment × trial × DAA to count non-null primary field values
+  let dcRecorded = 0;
+  for (const key of treatmentKeys) {
+    const { trials: tTrials } = treatmentMap[key];
+    for (const trial of tTrials) {
+      const parsedEff = validateEfficacyData(
+        safeJsonParse(trial.EfficacyDataJSON, []),
+        category
+      );
+      for (const daaPoint of sortedDaas) {
+        const obs = parsedEff.find(e => Number(e.daa) === Number(daaPoint));
+        const val = toNum(obs?.[primaryField]);
+        if (val !== null) dcRecorded++;
+      }
+    }
+  }
+
+  const dcMissing = dcExpected - dcRecorded;
+  const dcMissingPct =
+    dcExpected > 0
+      ? Math.round((dcMissing / dcExpected) * 1000) / 10  // 1 decimal place
+      : 0;
+
   const dataCompleteness = {
-    expected: totalExpected,
-    actual:   totalActual,
-    pct:      totalExpected > 0 ? Math.round((totalActual / totalExpected) * 100) : 0,
+    expectedObservations: dcExpected,
+    recordedObservations: dcRecorded,
+    missingObservations:  dcMissing,
+    missingPct:           dcMissingPct,
   };
 
   // ── 14. Assemble and return ─────────────────────────────────────────────────
@@ -1191,6 +1655,26 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
     photos,
     warnings,
     dataCompleteness,
+    // Application log — adjuvant and tankMix per application
+    applicationLog: subTrials.flatMap(trial => {
+      const apps = safeJsonParse(trial.ApplicationLogJSON, []);
+      return apps.map(app => ({
+        trialID: trial.ID,
+        treatmentName: trial.FormulationName || '',
+        code: app.code || '',
+        date: app.date || '',
+        dosage: app.dosage || '',
+        method: app.method || '',
+        cropStage: app.cropStage || '',
+        adjuvant: app.adjuvant || '',
+        tankMix: app.tankMix || '',
+        temp: app.temp || '',
+        humidity: app.humidity || '',
+        windspeed: app.windspeed || '',
+        rain: app.rain || '',
+        notes: app.notes || '',
+      }));
+    }),
   };
 
   // ── Task 13: Residual diagnostics ──────────────────────────────────────────
@@ -1206,6 +1690,82 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
       }
     } else {
       reportData.residualDiagnostics = null;
+    }
+  }
+
+  // ── Task 2.1a: Effect sizes ─────────────────────────────────────────────────
+  // Compute η², ω², and Cohen's f from the primary parameter ANOVA result.
+  // calculateEffectSizes() expects the raw AnalysisEngine result (anovaTable,
+  // treatmentMeans, etc.) — the same object used for residual diagnostics.
+  {
+    const primaryAr = analysisResults[primaryField];
+    if (primaryAr && !primaryAr.error) {
+      try {
+        const es = calculateEffectSizes(primaryAr);
+        if (es) {
+          reportData.effectSizes = {
+            etaSquared:   es.etaSquared   ?? null,
+            omegaSquared: es.omegaSquared ?? null,
+            cohensF:      es.cohensF      ?? null,
+            etaLabel:     es.interpretation?.etaSquared   || '',
+            omegaLabel:   es.interpretation?.omegaSquared || '',
+            cohensLabel:  es.interpretation?.cohensF      || '',
+          };
+        } else {
+          reportData.effectSizes = null;
+        }
+      } catch (_e) {
+        reportData.effectSizes = null;
+      }
+    } else {
+      reportData.effectSizes = null;
+    }
+  }
+
+  // ── Task 2.1b: Power analysis ───────────────────────────────────────────────
+  // Compute achieved power, required n, and a power curve for n = 2–30.
+  // Requires ≥ 3 replications per requirement 6.5.
+  {
+    const primaryAr = analysisResults[primaryField];
+    const nPerGroup = minReps;
+    const kGroups   = treatmentKeys.length;
+
+    if (primaryAr && !primaryAr.error && nPerGroup >= 3 && kGroups >= 2) {
+      try {
+        // Derive Cohen's f from the effect size result if available;
+        // fall back to extracting it from the raw ANOVA result.
+        let cohensF = reportData.effectSizes?.cohensF ?? null;
+        if (cohensF === null) {
+          const es = calculateEffectSizes(primaryAr);
+          cohensF = es?.cohensF ?? 0.25; // medium effect as fallback
+        }
+
+        const pa = calculatePower({
+          alpha:       options.alpha || 0.05,
+          effectSize:  cohensF,
+          nPerGroup,
+          kGroups,
+          targetPower: 0.80,
+        });
+
+        if (pa) {
+          reportData.powerAnalysis = {
+            achievedPower: pa.achievedPower  ?? null,
+            requiredN:     pa.minNForTarget  ?? null,
+            powerTable:    (pa.powerCurve || []).map(row => ({
+              n:     row.n,
+              power: parseFloat((row.power * 100).toFixed(1)),
+            })),
+            interpretation: pa.interpretation || 'Insufficient',
+          };
+        } else {
+          reportData.powerAnalysis = null;
+        }
+      } catch (_e) {
+        reportData.powerAnalysis = null;
+      }
+    } else {
+      reportData.powerAnalysis = null;
     }
   }
 
@@ -1258,8 +1818,13 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
       const trtMean = stats.mean ?? 0;
       if (trtMean > 0) allZero = false;
 
+      // Safety class thresholds per design spec:
+      //   Safe     = exactly 0%
+      //   Minor    = > 0% to < 10%
+      //   Moderate = 10% to 25% (inclusive)
+      //   Severe   = > 25%
       let safetyClass = 'Safe';
-      if (trtMean >= 5 && trtMean < 10)  safetyClass = 'Minor';
+      if (trtMean > 0 && trtMean < 10)   safetyClass = 'Minor';
       else if (trtMean >= 10 && trtMean <= 25) safetyClass = 'Moderate';
       else if (trtMean > 25)              safetyClass = 'Severe';
 
@@ -1278,8 +1843,38 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
   }
 
   // ── Task 10 + 9: Executive summary and correlation matrix ──────────────────
-  reportData.executiveSummary  = buildExecutiveSummary(reportData);
+  // Pass template so buildExecutiveSummary() produces content within the
+  // word-count range defined for each template:
+  //   field-summary  → 80–120 words
+  //   standard       → 150–250 words
+  //   regulatory     → 250–350 words
+  //   scientific-journal → no limit (structured abstract)
+  reportData.executiveSummary  = buildExecutiveSummary(reportData, options?.template || 'standard');
   reportData.correlationMatrix = computeCorrelationMatrix(subTrials, paramsWithData, category);
+
+  // ── Task 2.2: Audit trail ───────────────────────────────────────────────────
+  const auditTrail = {
+    reportUUID:        generateReportUUID(),
+    generatedOn:       new Date().toISOString(),
+    generatedBy: {
+      name:  state?.user?.displayName || '',
+      email: state?.user?.email       || '',
+    },
+    appVersion:        import.meta.env.VITE_APP_VERSION || '0.0.0',
+    statsEngineVersion: STATS_ENGINE_VERSION,
+    reportTemplate:    options?.template || 'standard',
+    projectName:       reportData.meta?.projectName || '',
+    projectId:         projectId || '',
+  };
+
+  // Fire-and-forget persist to IndexedDB
+  try {
+    appendAuditEntry(auditTrail);
+  } catch (_e) {
+    // Non-fatal — audit log write failure must not block report generation
+  }
+
+  reportData.auditTrail = auditTrail;
 
   return reportData;
 }

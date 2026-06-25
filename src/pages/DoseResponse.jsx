@@ -334,9 +334,33 @@ export default function DoseResponse({ onMenuClick }) {
               <TrendingUp className="w-4 h-4 text-blue-600" /> Dose-Response Curve (LL.4 Model)
             </h3>
             {primaryFit && !primaryFit.error && (
-              <button onClick={handleExportCSV} className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium px-3 py-1.5 rounded-lg hover:bg-blue-50 transition">
-                <Download className="w-3.5 h-3.5" /> Export CSV
-              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={handleExportCSV} className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium px-3 py-1.5 rounded-lg hover:bg-blue-50 transition">
+                  <Download className="w-3.5 h-3.5" /> Export CSV
+                </button>
+                <button
+                  onClick={() => {
+                    // Task 21.9: generateDoseResponsePDF — opens print dialog with canvas chart
+                    const canvas = canvasRef.current;
+                    if (!canvas) { window.print(); return; }
+                    const imgData = canvas.toDataURL('image/png');
+                    const win = window.open('', '_blank');
+                    if (!win) { window.print(); return; }
+                    win.document.write(`<!DOCTYPE html><html><head><title>Dose-Response Report</title><style>body{font-family:Arial,sans-serif;margin:20px}img{max-width:100%}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:6px 10px;font-size:12px}th{background:#f1f5f9}</style></head><body>`);
+                    win.document.write(`<h2>${activeCategory.charAt(0).toUpperCase()+activeCategory.slice(1)} Dose-Response Analysis</h2>`);
+                    win.document.write(`<p><strong>Formulation:</strong> ${selectedFormulation || '—'}</p>`);
+                    win.document.write(`<img src="${imgData}" />`);
+                    win.document.write(`<h3>Model Parameters (LL.4)</h3><table><thead><tr><th>Parameter</th><th>Value</th></tr></thead><tbody>`);
+                    [['ED10 (g ai/ha)', primaryFit.ed10?.toFixed(2) ?? '—'],['ED50 (g ai/ha)', primaryFit.ed50?.toFixed(2) ?? '—'],['ED90 (g ai/ha)', primaryFit.ed90?.toFixed(2) ?? '—'],['Slope (b)', primaryFit.params?.b?.toFixed(3) ?? '—'],['R²', primaryFit.r2?.toFixed(4) ?? '—']].forEach(([k,v]) => { win.document.write(`<tr><td>${k}</td><td>${v}</td></tr>`); });
+                    win.document.write(`</tbody></table></body></html>`);
+                    win.document.close();
+                    win.print();
+                  }}
+                  className="flex items-center gap-1 text-xs text-purple-600 hover:text-purple-700 font-medium px-3 py-1.5 rounded-lg hover:bg-purple-50 transition"
+                >
+                  <Download className="w-3.5 h-3.5" /> Export PDF
+                </button>
+              </div>
             )}
           </div>
           <canvas ref={canvasRef} width={760} height={380} className="w-full rounded-lg border border-slate-100" />

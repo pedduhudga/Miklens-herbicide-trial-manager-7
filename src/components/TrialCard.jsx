@@ -78,6 +78,15 @@ const TrialCard = memo(function TrialCard({
   const ownUid = user?.uid || user?.ID || user?.id;
   const isOwnData = isAdmin || !trial.CreatedBy || trial.CreatedBy === ownUid;
   const isShared = !!(trial.CreatedBy && trial.CreatedBy !== ownUid);
+  const efficacyData = useMemo(() => {
+    const parsed = safeJsonParse(trial.EfficacyDataJSON, []);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(obs => {
+      if (!obs || typeof obs !== 'object') return false;
+      const daa = parseFloat(obs.daa);
+      return !isNaN(daa) && daa >= 0;
+    });
+  }, [trial.EfficacyDataJSON]);
   // Task 57: Baseline indicator
   const hasBaseline = useMemo(() => {
     return efficacyData.some(o => Number(o.daa) === 0);
@@ -91,15 +100,6 @@ const TrialCard = memo(function TrialCard({
     const parsed = safeJsonParse(trial.PhotoURLs, []);
     return Array.isArray(parsed) ? parsed.filter(p => !p.deleted) : [];
   }, [trial.PhotoURLs]);
-  const efficacyData = useMemo(() => {
-    const parsed = safeJsonParse(trial.EfficacyDataJSON, []);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(obs => {
-      if (!obs || typeof obs !== 'object') return false;
-      const daa = parseFloat(obs.daa);
-      return !isNaN(daa) && daa >= 0;
-    });
-  }, [trial.EfficacyDataJSON]);
   const isLive = String(trial.IsLive) !== 'false';
   const isCompleted = trial.IsCompleted === true || trial.IsCompleted === 'true';
 
