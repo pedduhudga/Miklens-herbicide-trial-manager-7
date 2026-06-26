@@ -2069,7 +2069,8 @@ export function exportMultipleTrialsToCSV(trials) {
       dataFields.applicationMethod, dataFields.sprayVolume, dataFields.nozzle,
       dataFields.soil?.ph || '', dataFields.soil?.clay || '', dataFields.soil?.sand || '', dataFields.soil?.organicCarbon || '', dataFields.soil?.texture || '',
       dataFields.soil?.nitrogen || '', dataFields.soil?.phosphorus || '', dataFields.soil?.potassium || '', dataFields.soil?.cec || '', dataFields.soil?.moisture || '',
-      trial.TrialDesign || trial.Design || 'RCBD', trial.Replication || trial.BlockID || 'R1'
+      trial.ProjectID ? (trial.TrialDesign || trial.Design || 'RCBD') : 'Individual',
+      trial.ProjectID ? (trial.Replication || trial.BlockID || 'R1') : '-'
     ];
 
     // Push design fields values
