@@ -2084,18 +2084,31 @@ export function exportMultipleTrialsToCSV(trials) {
       }
     });
 
+    const trialMetadataRow = [];
     if (allSameCategory) {
-      baseRow.push(trialConfig.targetValue);
+      trialMetadataRow.push(trialConfig.targetValue);
     } else {
-      baseRow.push(trialConfig.targetLabel, trialConfig.targetValue);
+      trialMetadataRow.push(trialConfig.targetLabel, trialConfig.targetValue);
     }
 
-    baseRow.push(trial.Result || 'Pending', isCompletedStr);
+    trialMetadataRow.push(trial.Result || 'Pending', isCompletedStr);
 
     // Push specific fields values
     specificFields.forEach(f => {
-      baseRow.push(trial[f.key] !== undefined && trial[f.key] !== null ? trial[f.key] : '');
+      trialMetadataRow.push(trial[f.key] !== undefined && trial[f.key] !== null ? trial[f.key] : '');
     });
+
+    const fullBaseRow = [...baseRow, ...trialMetadataRow];
+    const blankPrefixRow = fullBaseRow.map(() => '');
+
+    let isFirstRowOfTrial = true;
+    const getPrefixRow = () => {
+      if (isFirstRowOfTrial) {
+        isFirstRowOfTrial = false;
+        return fullBaseRow;
+      }
+      return blankPrefixRow;
+    };
 
     if (efficacy.length) {
       const sortedObs = [...efficacy].sort((a, b) => (a.daa ?? 0) - (b.daa ?? 0));
@@ -2119,21 +2132,21 @@ export function exportMultipleTrialsToCSV(trials) {
         // Herbicide detail handling
         if (trialConfig.cat === 'herbicide') {
           const details = obs.weedDetails?.length ? obs.weedDetails : [{ species: 'Total', cover: getObservationPrimaryValue(trialConfig.cat, obs) ?? '' }];
-          details.forEach(wd => {
-            const row = [...baseRow, daa, obsDate];
-            // Push placeholders or values for other observation fields
-            obsFields.forEach(f => {
-              if (f.key === 'weedCover') {
-                row.push(getObservationPrimaryValue(trialConfig.cat, obs) ?? '');
-              } else {
-                row.push('');
-              }
-            });
-            row.push(wd.species || 'Total', wd.cover ?? '', status, temp, hum, wind, rain, notes);
-            rows.push(row);
+          const speciesDetailStr = details.map(wd => `${wd.species || 'Total'}: ${wd.cover ?? ''}%`).join(' | ');
+
+          const row = [...getPrefixRow(), daa, obsDate];
+          // Push placeholders or values for other observation fields
+          obsFields.forEach(f => {
+            if (f.key === 'weedCover') {
+              row.push(getObservationPrimaryValue(trialConfig.cat, obs) ?? '');
+            } else {
+              row.push('');
+            }
           });
+          row.push(speciesDetailStr, '', status, temp, hum, wind, rain, notes);
+          rows.push(row);
         } else {
-          const row = [...baseRow, daa, obsDate];
+          const row = [...getPrefixRow(), daa, obsDate];
           obsFields.forEach(f => {
             const val = obs[f.key];
             row.push((val !== undefined && val !== null) ? val : '');
@@ -2147,7 +2160,7 @@ export function exportMultipleTrialsToCSV(trials) {
       });
     } else {
       // Empty observations row
-      const row = [...baseRow, '', ''];
+      const row = [...getPrefixRow(), '', ''];
       obsFields.forEach(() => row.push(''));
       if (uniqueCategories.includes('herbicide')) {
         row.push('', '');
