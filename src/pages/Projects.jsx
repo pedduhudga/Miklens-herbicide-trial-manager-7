@@ -1600,6 +1600,7 @@ export default function Projects({ onMenuClick }) {
     } else if (potLayout === 'rcbd-pot') {
       if (potRows === 1) {
         const colsPerBlock = Math.floor(potCols / blocksCount) || 1;
+        let lastBlockLastTrt = null;
         for (let b = 0; b < blocksCount; b++) {
           const blockTrts = [];
           while (blockTrts.length < colsPerBlock) {
@@ -1613,10 +1614,16 @@ export default function Projects({ onMenuClick }) {
           if (randomizeForm.potAllocationMode === 'beside') {
             const uniqueNames = [...new Set(blockTrts.map(t => t.name))];
             const shuffledUniqueNames = shuffleDeterministic(uniqueNames, b + 50);
+            if (b > 0 && lastBlockLastTrt && shuffledUniqueNames[0] === lastBlockLastTrt && shuffledUniqueNames.length > 1) {
+              [shuffledUniqueNames[0], shuffledUniqueNames[1]] = [shuffledUniqueNames[1], shuffledUniqueNames[0]];
+            }
             shuffledUniqueNames.forEach(name => {
               const matchedTrts = blockTrts.filter(t => t.name === name);
               shuffledBlockTrts.push(...matchedTrts);
             });
+            if (shuffledUniqueNames.length > 0) {
+              lastBlockLastTrt = shuffledUniqueNames[shuffledUniqueNames.length - 1];
+            }
           } else {
             shuffledBlockTrts = shuffleDeterministic(blockTrts, b + 50);
           }
@@ -3418,6 +3425,7 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
           const colsPerBlock = Math.floor(potCols / blocksCount) || 1;
 
           let plotIndex = 1;
+          let lastBlockLastTrt = null;
           for (let b = 0; b < blocksCount; b++) {
             const blockObj = blocks[b];
             
@@ -3436,12 +3444,18 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
                 const j = Math.floor(Math.random() * (i + 1));
                 [uniqueTrtNames[i], uniqueTrtNames[j]] = [uniqueTrtNames[j], uniqueTrtNames[i]];
               }
+              if (b > 0 && lastBlockLastTrt && uniqueTrtNames[0] === lastBlockLastTrt && uniqueTrtNames.length > 1) {
+                [uniqueTrtNames[0], uniqueTrtNames[1]] = [uniqueTrtNames[1], uniqueTrtNames[0]];
+              }
               const groupedBlockTrts = [];
               uniqueTrtNames.forEach(name => {
                 const matched = blockTrts.filter(t => t.name === name);
                 groupedBlockTrts.push(...matched);
               });
               blockTrts.splice(0, blockTrts.length, ...groupedBlockTrts);
+              if (uniqueTrtNames.length > 0) {
+                lastBlockLastTrt = uniqueTrtNames[uniqueTrtNames.length - 1];
+              }
             } else {
               for (let i = blockTrts.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
