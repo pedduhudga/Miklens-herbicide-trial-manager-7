@@ -1901,7 +1901,16 @@ export default function Projects({ onMenuClick }) {
         const blockNum = Math.floor((r - 1) / rowsPerBlock) + 1;
         if (potLayout === 'rcbd-pot') {
           if (potRows === 1) {
-            trial = projectTrials.find(t => String(t.PotCol) === String(c));
+            trial = projectTrials.find(t => {
+              if (String(t.PotCol) === String(c)) return true;
+              try {
+                const summary = JSON.parse(t.AISummariesJSON || '{}');
+                if (summary && Array.isArray(summary.cols)) {
+                  return summary.cols.map(String).includes(String(c));
+                }
+              } catch (e) {}
+              return false;
+            });
           } else if (potObsMode === 'column-wise') {
             trial = projectTrials.find(t => String(t.Replication) === String(blockNum) && String(t.PotCol) === String(c));
           } else if (potObsMode === 'row-wise') {
