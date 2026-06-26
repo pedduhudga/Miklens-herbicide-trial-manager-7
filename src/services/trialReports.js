@@ -1963,6 +1963,7 @@ export function exportMultipleTrialsToCSV(trials) {
   const repConfig = getReportConfig(firstTrial);
   const uniqueCategories = [...new Set(trials.map(t => t.Category || 'herbicide'))];
   const allSameCategory = uniqueCategories.length === 1;
+  const uniqueDesigns = [...new Set(trials.map(t => t.TrialDesign || t.Design || 'RCBD'))];
 
   // Gather active observation fields for these categories
   const obsFields = [];
@@ -1990,6 +1991,29 @@ export function exportMultipleTrialsToCSV(trials) {
     });
   });
 
+  // Gather active design parameters
+  const designFields = [];
+  if (uniqueDesigns.some(d => d === 'PotTrial' || d === 'rcbd-pot')) {
+    designFields.push(
+      { key: 'PotRow', label: 'Pot Row' },
+      { key: 'PotCol', label: 'Pot Column' },
+      { key: 'PotLabel', label: 'Pot Label' },
+      { key: 'PotLayout', label: 'Pot Layout' },
+      { key: 'PotObsMode', label: 'Pot Observation Mode' }
+    );
+  }
+  if (uniqueDesigns.some(d => d === 'Split-Plot' || d === 'Strip-Plot')) {
+    designFields.push(
+      { key: 'MainFactor', label: 'Main Factor' },
+      { key: 'SubFactor', label: 'Sub Factor' }
+    );
+  }
+  if (uniqueDesigns.some(d => d === 'Lattice')) {
+    designFields.push(
+      { key: 'SubBlockID', label: 'Sub-Block ID' }
+    );
+  }
+
   const header = [
     'Trial ID', 'Category', 'Formulation', 'Investigator', 'Date', 'Location', 'Dosage',
     'Crop', 'Variety', 'Previous Crop', 'Irrigation Method', 'Plant Population (plants/ha)',
@@ -1997,6 +2021,11 @@ export function exportMultipleTrialsToCSV(trials) {
     'Soil pH', 'Soil Clay %', 'Soil Sand %', 'Soil OC', 'Soil Texture', 'Soil N (ppm)', 'Soil P (ppm)', 'Soil K (ppm)', 'Soil CEC', 'Soil Moisture %',
     'Trial Design', 'Replication / Block ID'
   ];
+
+  // Add design specific fields to header
+  designFields.forEach(f => {
+    header.push(f.label);
+  });
 
   if (allSameCategory) {
     header.push(repConfig.targetLabel);
@@ -2029,6 +2058,7 @@ export function exportMultipleTrialsToCSV(trials) {
   trials.forEach(trial => {
     const dataFields = getAllTrialDataFields(trial);
     const trialConfig = getReportConfig(trial);
+    const proj = getProjectForTrial(trial);
     const efficacy = validateEfficacy(safeJsonParse(trial.EfficacyDataJSON, []));
     const isCompletedStr = (trial.IsCompleted === true || trial.IsCompleted === 'true') ? 'Finalized' : 'Ongoing';
 
@@ -2041,6 +2071,17 @@ export function exportMultipleTrialsToCSV(trials) {
       dataFields.soil?.nitrogen || '', dataFields.soil?.phosphorus || '', dataFields.soil?.potassium || '', dataFields.soil?.cec || '', dataFields.soil?.moisture || '',
       trial.TrialDesign || trial.Design || 'RCBD', trial.Replication || trial.BlockID || 'R1'
     ];
+
+    // Push design fields values
+    designFields.forEach(f => {
+      if (f.key === 'PotLayout') {
+        baseRow.push(trial.PotLayout || proj?.PotLayout || '-');
+      } else if (f.key === 'PotObsMode') {
+        baseRow.push(trial.PotObsMode || proj?.PotObsMode || '-');
+      } else {
+        baseRow.push(trial[f.key] !== undefined && trial[f.key] !== null ? trial[f.key] : '-');
+      }
+    });
 
     if (allSameCategory) {
       baseRow.push(trialConfig.targetValue);
@@ -4064,6 +4105,17 @@ export function exportMasterCSV(project, subTrials) {
     }
   });
 
+  const specificFields = [];
+  config.specificFields?.forEach(f => {
+    const isSharedOrTarget = [
+      'WeedSpecies', 'DiseaseTarget', 'PestTarget', 'NutrientType', 'BiostimulantType',
+      'YieldValue', 'Yield', 'ApplicationMethod', 'CropStageAtApplication', 'CropStage'
+    ].includes(f.key);
+    if (!isSharedOrTarget && !specificFields.some(x => x.key === f.key)) {
+      specificFields.push(f);
+    }
+  });
+
   // Perform ANOVA & Tukey HSD to get grouping letters
   const trialDesign = project.TrialDesign || project.Design || 'RCBD';
   const design = /CRD/i.test(trialDesign) ? 'CRD' : 'RCBD';
@@ -4094,15 +4146,54 @@ export function exportMasterCSV(project, subTrials) {
     controlMean = cVals.length ? cVals.reduce((a,b)=>a+b, 0)/cVals.length : 0;
   }
 
+  // Gather active design parameters
+  const designFields = [];
+  if (trialDesign === 'PotTrial' || trialDesign === 'rcbd-pot') {
+    designFields.push(
+      { key: 'PotRow', label: 'Pot Row' },
+      { key: 'PotCol', label: 'Pot Column' },
+      { key: 'PotLabel', label: 'Pot Label' },
+      { key: 'PotLayout', label: 'Pot Layout' },
+      { key: 'PotObsMode', label: 'Pot Observation Mode' }
+    );
+  }
+  if (trialDesign === 'Split-Plot' || trialDesign === 'Strip-Plot') {
+    designFields.push(
+      { key: 'MainFactor', label: 'Main Factor' },
+      { key: 'SubFactor', label: 'Sub Factor' }
+    );
+  }
+  if (trialDesign === 'Lattice') {
+    designFields.push(
+      { key: 'SubBlockID', label: 'Sub-Block ID' }
+    );
+  }
+
   const header = [
     'Master Project', 'Sub-Trial ID', 'Category', 'Formulation', 'Replication', 'Plot #', 
     'Location', 'Dosage', 'Crop', 'Yield', 'Application Timing', 'Growth Stage', 'BBCH Code', 'App Method', 'Spray Vol (L/ha)', 'Nozzle',
     'Soil pH', 'Soil Clay %', 'Soil Sand %', 'Soil OC', 'Soil Texture', 'Soil N (ppm)', 'Soil P (ppm)', 'Soil K (ppm)', 'Soil CEC', 'Soil Moisture %',
-    'Trial Design',
-    repConfig.targetLabel, 'Overall Result', 'Trial Status',
+    'Trial Design'
+  ];
+
+  // Add design specific fields to header
+  designFields.forEach(f => {
+    header.push(f.label);
+  });
+
+  header.push(
+    repConfig.targetLabel, 'Overall Result', 'Trial Status'
+  );
+
+  // Add category specific fields to header
+  specificFields.forEach(f => {
+    header.push(f.label);
+  });
+
+  header.push(
     'Tukey Grouping', 'AUDPC', 'Root-to-Shoot Ratio', 'NUE',
     'DAA', 'Obs Date'
-  ];
+  );
 
   // Dynamic observation fields
   obsFields.forEach(f => {
@@ -4141,10 +4232,32 @@ export function exportMasterCSV(project, subTrials) {
       dataFields.applicationMethod, dataFields.sprayVolume, dataFields.nozzle,
       dataFields.soil?.ph || '', dataFields.soil?.clay || '', dataFields.soil?.sand || '', dataFields.soil?.organicCarbon || '', dataFields.soil?.texture || '',
       dataFields.soil?.nitrogen || '', dataFields.soil?.phosphorus || '', dataFields.soil?.potassium || '', dataFields.soil?.cec || '', dataFields.soil?.moisture || '',
-      st.TrialDesign || st.Design || 'RCBD',
-      trialConfig.targetValue, st.Result || 'Pending', isCompletedStr,
-      tGrouping, audpcVal, '', nueVal // placeholder for Root-to-Shoot which is observation-specific
+      st.TrialDesign || st.Design || 'RCBD'
     ];
+
+    // Push design fields values
+    designFields.forEach(f => {
+      if (f.key === 'PotLayout') {
+        baseRow.push(st.PotLayout || project?.PotLayout || '-');
+      } else if (f.key === 'PotObsMode') {
+        baseRow.push(st.PotObsMode || project?.PotObsMode || '-');
+      } else {
+        baseRow.push(st[f.key] !== undefined && st[f.key] !== null ? st[f.key] : '-');
+      }
+    });
+
+    baseRow.push(
+      trialConfig.targetValue, st.Result || 'Pending', isCompletedStr
+    );
+
+    // Push specific fields values
+    specificFields.forEach(f => {
+      baseRow.push(st[f.key] !== undefined && st[f.key] !== null ? st[f.key] : '');
+    });
+
+    baseRow.push(
+      tGrouping, audpcVal, '', nueVal // placeholder for Root-to-Shoot which is observation-specific
+    );
 
     if (efficacy.length) {
       const sortedObs = [...efficacy].sort((a, b) => (a.daa ?? 0) - (b.daa ?? 0));
