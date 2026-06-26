@@ -719,7 +719,8 @@ export default function Projects({ onMenuClick }) {
     potDataMethod: 'total',
     potFields: ['Plant Height', 'Branches', 'Flowers', 'Fruit Count', 'Yield'],
     potIdentifierFormat: 'row-col',
-    potBlocks: '3'
+    potBlocks: '3',
+    potAllocationMode: 'randomly'
   });
   const [selectedTreatments, setSelectedTreatments] = useState({});
   const [randomizeTreatments, setRandomizeTreatments] = useState([]);
@@ -1383,7 +1384,9 @@ export default function Projects({ onMenuClick }) {
       const f = activeFormulations.find(form => String(form.ID) === String(t.formulationId));
       return {
         name: t.name.trim() || f?.Name || 'Unnamed',
-        role: t.role
+        role: t.role,
+        mainFactor: t.mainFactor || '',
+        subFactor: t.subFactor || ''
       };
     });
 
@@ -1413,6 +1416,152 @@ export default function Projects({ onMenuClick }) {
       }
       return arr;
     };
+
+    const isPotTrial = randomizeForm.trialDesign === 'PotTrial';
+    const numReps = parseInt(randomizeForm.replications) || 4;
+
+    if (!isPotTrial) {
+      // Non-pot trial layouts (RCBD, CRD, Split-Plot, Lattice, Factorial, Strip-Plot)
+      const previewBlocks = [];
+
+      if (randomizeForm.trialDesign === 'CRD') {
+        const allPlots = [];
+        for (let r = 1; r <= numReps; r++) {
+          trts.forEach((t, i) => {
+            allPlots.push({ ...t, repNum: r });
+          });
+        }
+        const shuffled = shuffleDeterministic(allPlots, 123);
+        previewBlocks.push({
+          name: 'CRD Field Layout (Single Block)',
+          plots: shuffled.map((t, idx) => ({
+            plotNumber: 100 + idx + 1,
+            name: t.name,
+            role: t.role,
+            info: `Rep ${t.repNum}`
+          }))
+        });
+      } else if (randomizeForm.trialDesign === 'Split-Plot') {
+        for (let r = 1; r <= numReps; r++) {
+          const mainFactors = [...new Set(trts.map(t => t.mainFactor || 'Control'))];
+          const shuffledMainFactors = shuffleDeterministic(mainFactors, r + 50);
+          const blockPlots = [];
+          let plotIdx = 1;
+          shuffledMainFactors.forEach(mf => {
+            const subPlots = trts.filter(t => (t.mainFactor || 'Control') === mf);
+            const shuffledSubPlots = shuffleDeterministic(subPlots, r + 100);
+            shuffledSubPlots.forEach(t => {
+              blockPlots.push({
+                plotNumber: r * 100 + plotIdx,
+                name: t.name,
+                role: t.role,
+                info: `Main: ${mf}`
+              });
+              plotIdx++;
+            });
+          });
+          previewBlocks.push({
+            name: `Replication ${String.fromCharCode(64 + r)}`,
+            plots: blockPlots
+          });
+        }
+      } else if (randomizeForm.trialDesign === 'Strip-Plot') {
+        for (let r = 1; r <= numReps; r++) {
+          const mainFactors = [...new Set(trts.map(t => t.mainFactor || 'Control'))];
+          const subFactors = [...new Set(trts.map(t => t.subFactor || 'Control'))];
+          const shuffledRows = shuffleDeterministic(mainFactors, r + 50);
+          const shuffledCols = shuffleDeterministic(subFactors, r + 100);
+          const blockPlots = [];
+          let plotIdx = 1;
+          shuffledRows.forEach(rowFactor => {
+            shuffledCols.forEach(colFactor => {
+              const t = trts.find(x => (x.mainFactor || 'Control') === rowFactor && (x.subFactor || 'Control') === colFactor) || trts[0];
+              if (t) {
+                blockPlots.push({
+                  plotNumber: r * 100 + plotIdx,
+                  name: t.name,
+                  role: t.role,
+                  info: `Row: ${rowFactor} | Col: ${colFactor}`
+                });
+                plotIdx++;
+              }
+            });
+          });
+          previewBlocks.push({
+            name: `Replication ${String.fromCharCode(64 + r)}`,
+            plots: blockPlots
+          });
+        }
+      } else if (randomizeForm.trialDesign === 'Lattice') {
+        const k = Math.ceil(Math.sqrt(trts.length)) || 1;
+        for (let r = 1; r <= numReps; r++) {
+          const shuffledTrts = shuffleDeterministic(trts, r + 50);
+          const blockPlots = [];
+          for (let bNum = 1; bNum <= k; bNum++) {
+            const blockSlice = shuffledTrts.slice((bNum - 1) * k, bNum * k);
+            blockSlice.forEach((t, sliceIdx) => {
+              blockPlots.push({
+                plotNumber: r * 100 + ((bNum - 1) * k + sliceIdx + 1),
+                name: t.name,
+                role: t.role,
+                info: `Sub-Block ${String.fromCharCode(64 + r)}${bNum}`
+              });
+            });
+          }
+          previewBlocks.push({
+            name: `Replication ${String.fromCharCode(64 + r)}`,
+            plots: blockPlots
+          });
+        }
+      } else {
+        // RCBD & Factorial
+        for (let r = 1; r <= numReps; r++) {
+          const blockTrts = shuffleDeterministic(trts, r + 50);
+          previewBlocks.push({
+            name: `Replication ${String.fromCharCode(64 + r)}`,
+            plots: blockTrts.map((t, idx) => ({
+              plotNumber: r * 100 + idx + 1,
+              name: t.name,
+              role: t.role
+            }))
+          });
+        }
+      }
+
+      return (
+        <div className="mt-3 p-4 bg-slate-50/50 rounded-xl border border-slate-200 space-y-3">
+          <div className="flex justify-between items-center pb-2 border-b border-slate-200">
+            <span className="text-xs font-bold text-slate-700 uppercase tracking-wider font-semibold">Field Layout Preview</span>
+            <span className="text-[10px] bg-slate-100 text-slate-800 px-2 py-0.5 rounded-full font-bold">
+              {randomizeForm.trialDesign} · {numReps} Replications
+            </span>
+          </div>
+          <div className="max-h-[350px] overflow-auto p-3 bg-white rounded-lg border shadow-inner space-y-4">
+            {previewBlocks.map((blk, bIdx) => (
+              <div key={bIdx} className="space-y-1.5 p-3 rounded-lg border border-slate-100 bg-slate-50/50">
+                <div className="text-[10px] font-bold text-slate-600 uppercase tracking-wider">{blk.name}</div>
+                <div className="flex flex-wrap gap-2">
+                  {blk.plots.map((p, pIdx) => {
+                    const colorClasses = getTreatmentColor(p.name, uniqueTrts);
+                    return (
+                      <div
+                        key={pIdx}
+                        className={`w-24 h-12 border rounded flex flex-col items-center justify-center text-[9px] font-bold shadow-sm cursor-help relative group select-none transition-all hover:scale-105 ${colorClasses}`}
+                        title={`Plot ${p.plotNumber}: ${p.name}`}
+                      >
+                        <span className="text-[7px] text-slate-400 absolute top-0.5 left-1">#{p.plotNumber}</span>
+                        <span className="truncate max-w-[85px] mt-1 leading-tight">{p.name}</span>
+                        {p.info && <span className="text-[6px] text-slate-500 font-normal truncate max-w-[85px]">{p.info}</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
 
     // Generate grid matrix
     const matrix = [];
@@ -1460,7 +1609,17 @@ export default function Projects({ onMenuClick }) {
               }
             });
           }
-          const shuffledBlockTrts = shuffleDeterministic(blockTrts, b + 50);
+          let shuffledBlockTrts = [];
+          if (randomizeForm.potAllocationMode === 'beside') {
+            const uniqueNames = [...new Set(blockTrts.map(t => t.name))];
+            const shuffledUniqueNames = shuffleDeterministic(uniqueNames, b + 50);
+            shuffledUniqueNames.forEach(name => {
+              const matchedTrts = blockTrts.filter(t => t.name === name);
+              shuffledBlockTrts.push(...matchedTrts);
+            });
+          } else {
+            shuffledBlockTrts = shuffleDeterministic(blockTrts, b + 50);
+          }
           for (let j = 0; j < colsPerBlock; j++) {
             const c = b * colsPerBlock + j;
             if (c < potCols) {
@@ -1515,7 +1674,6 @@ export default function Projects({ onMenuClick }) {
     }
 
     const gridElements = [];
-    const colsPerBlock = Math.floor(potCols / blocksCount) || 1;
 
     for (let r = 0; r < potRows; r++) {
       const rowCells = [];
@@ -2806,7 +2964,8 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       potDataMethod: activeProject.PotDataMethod || 'total',
       potFields: activeProject.PotFields || ['Plant Height', 'Branches', 'Flowers', 'Fruit Count', 'Yield'],
       potIdentifierFormat: activeProject.PotIdentifierFormat || 'row-col',
-      potBlocks: String(activeProject.PotBlocks || 3)
+      potBlocks: String(activeProject.PotBlocks || 3),
+      potAllocationMode: activeProject.PotAllocationMode || 'randomly'
     });
     
     setIsRandomizeModalOpen(true);
@@ -3270,10 +3429,24 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
                 }
               });
             }
-            // Shuffle blockTrts
-            for (let i = blockTrts.length - 1; i > 0; i--) {
-              const j = Math.floor(Math.random() * (i + 1));
-              [blockTrts[i], blockTrts[j]] = [blockTrts[j], blockTrts[i]];
+            // Shuffle/Group blockTrts
+            if (randomizeForm.potAllocationMode === 'beside') {
+              const uniqueTrtNames = [...new Set(blockTrts.map(t => t.name))];
+              for (let i = uniqueTrtNames.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [uniqueTrtNames[i], uniqueTrtNames[j]] = [uniqueTrtNames[j], uniqueTrtNames[i]];
+              }
+              const groupedBlockTrts = [];
+              uniqueTrtNames.forEach(name => {
+                const matched = blockTrts.filter(t => t.name === name);
+                groupedBlockTrts.push(...matched);
+              });
+              blockTrts.splice(0, blockTrts.length, ...groupedBlockTrts);
+            } else {
+              for (let i = blockTrts.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [blockTrts[i], blockTrts[j]] = [blockTrts[j], blockTrts[i]];
+              }
             }
 
             for (let j = 0; j < colsPerBlock; j++) {
@@ -3788,7 +3961,8 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
         PotObsMode: potObsMode,
         PotDataMethod: potDataMethod,
         PotFields: randomizeForm.potFields || ['Plant Height', 'Branches', 'Flowers', 'Fruit Count', 'Yield'],
-        PotIdentifierFormat: randomizeForm.potIdentifierFormat || 'row-col'
+        PotIdentifierFormat: randomizeForm.potIdentifierFormat || 'row-col',
+        PotAllocationMode: randomizeForm.potAllocationMode || 'randomly'
       }, getAppState);
 
     } else {
@@ -3875,7 +4049,8 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
             PotDataMethod: potDataMethod,
             PotFields: randomizeForm.potFields || ['Plant Height', 'Branches', 'Flowers', 'Fruit Count', 'Yield'],
             PotIdentifierFormat: randomizeForm.potIdentifierFormat || 'row-col',
-            PotBlocks: parseInt(randomizeForm.potBlocks) || 3
+            PotBlocks: parseInt(randomizeForm.potBlocks) || 3,
+            PotAllocationMode: randomizeForm.potAllocationMode || 'randomly'
           };
         } else {
           return {
@@ -6034,9 +6209,20 @@ ${photosHtml}
                 )}
               </div>
             )}
-            <div className="md:col-span-3">
-              {renderLayoutPreview()}
-            </div>
+            {randomizeForm.potLayout === 'rcbd-pot' && parseInt(randomizeForm.potRows) === 1 && (
+              <div>
+                <label className="block text-[10px] font-bold text-emerald-800 uppercase mb-1">Treatment Placement</label>
+                <select
+                  value={randomizeForm.potAllocationMode || 'randomly'}
+                  onChange={e => setRandomizeForm(p => ({ ...p, potAllocationMode: e.target.value }))}
+                  className={INPUT}
+                >
+                  <option value="randomly">Randomly</option>
+                  <option value="beside">Beside</option>
+                </select>
+              </div>
+            )}
+            {/* Preview moved outside */}
              <div>
               <label className="block text-[10px] font-bold text-emerald-800 uppercase mb-1">Observation Mode</label>
               <select
@@ -6291,6 +6477,11 @@ ${photosHtml}
             </div>
           </div>
         )}
+
+        {/* Layout Preview for all designs */}
+        <div className="mt-4">
+          {renderLayoutPreview()}
+        </div>
 
           {/* Tabular Treatments Setup */}
           <div className="space-y-3">
