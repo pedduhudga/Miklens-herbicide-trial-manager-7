@@ -1975,6 +1975,21 @@ export function exportMultipleTrialsToCSV(trials) {
     });
   });
 
+  // Gather active specific parameters for these categories
+  const specificFields = [];
+  uniqueCategories.forEach(catId => {
+    const config = getCategoryConfig(catId);
+    config.specificFields?.forEach(f => {
+      const isSharedOrTarget = [
+        'WeedSpecies', 'DiseaseTarget', 'PestTarget', 'NutrientType', 'BiostimulantType',
+        'YieldValue', 'Yield', 'ApplicationMethod', 'CropStageAtApplication', 'CropStage'
+      ].includes(f.key);
+      if (!isSharedOrTarget && !specificFields.some(x => x.key === f.key)) {
+        specificFields.push(f);
+      }
+    });
+  });
+
   const header = [
     'Trial ID', 'Category', 'Formulation', 'Investigator', 'Date', 'Location', 'Dosage',
     'Crop', 'Variety', 'Previous Crop', 'Irrigation Method', 'Plant Population (plants/ha)',
@@ -1989,7 +2004,14 @@ export function exportMultipleTrialsToCSV(trials) {
     header.push('Target Label', 'Target Value');
   }
 
-  header.push('Overall Result', 'Trial Status', 'DAA', 'Obs Date');
+  header.push('Overall Result', 'Trial Status');
+
+  // Add category specific fields to header
+  specificFields.forEach(f => {
+    header.push(f.label);
+  });
+
+  header.push('DAA', 'Obs Date');
 
   // Dynamic observation fields
   obsFields.forEach(f => {
@@ -2027,6 +2049,11 @@ export function exportMultipleTrialsToCSV(trials) {
     }
 
     baseRow.push(trial.Result || 'Pending', isCompletedStr);
+
+    // Push specific fields values
+    specificFields.forEach(f => {
+      baseRow.push(trial[f.key] !== undefined && trial[f.key] !== null ? trial[f.key] : '');
+    });
 
     if (efficacy.length) {
       const sortedObs = [...efficacy].sort((a, b) => (a.daa ?? 0) - (b.daa ?? 0));
