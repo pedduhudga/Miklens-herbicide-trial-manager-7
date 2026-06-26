@@ -29,6 +29,7 @@ const AMBER50 = [255, 251, 235];
 function getReportConfig(trial) {
   const cat = trial?.Category || 'herbicide';
   const config = getCategoryConfig(cat);
+  const proj = getProjectForTrial(trial);
   
   // Custom colors for reports based on category configuration
   let primaryColor = TEAL;
@@ -38,7 +39,7 @@ function getReportConfig(trial) {
   else if (cat === 'biostimulant') primaryColor = [13, 148, 136]; // Teal
   
   const targetLabel = config.targetLabel || 'Weed Species';
-  const targetValue = trial ? (trial[config.targetField] || trial.WeedSpecies || 'N/A') : 'N/A';
+  const targetValue = trial ? (trial[config.targetField] || trial.WeedSpecies || trial.DiseaseTarget || trial.PestTarget || trial.NutrientType || trial.BiostimulantType || proj?.[config.targetField] || proj?.NutrientType || 'N/A') : 'N/A';
   const primaryMetricLabel = config.primaryMetric?.label || 'Weed Control Efficiency';
   const primaryMetricKey = config.primaryMetric?.key || 'WCE';
   const primaryMetricUnit = config.primaryMetric?.unit || '%';
@@ -1961,6 +1962,7 @@ export function exportMultipleTrialsToCSV(trials) {
   const firstTrial = trials[0];
   const repConfig = getReportConfig(firstTrial);
   const uniqueCategories = [...new Set(trials.map(t => t.Category || 'herbicide'))];
+  const allSameCategory = uniqueCategories.length === 1;
 
   // Gather active observation fields for these categories
   const obsFields = [];
@@ -1978,10 +1980,16 @@ export function exportMultipleTrialsToCSV(trials) {
     'Crop', 'Variety', 'Previous Crop', 'Irrigation Method', 'Plant Population (plants/ha)',
     'Yield', 'Application Timing', 'Growth Stage', 'BBCH Code', 'App Method', 'Spray Vol (L/ha)', 'Nozzle',
     'Soil pH', 'Soil Clay %', 'Soil Sand %', 'Soil OC', 'Soil Texture', 'Soil N (ppm)', 'Soil P (ppm)', 'Soil K (ppm)', 'Soil CEC', 'Soil Moisture %',
-    'Trial Design', 'Replication / Block ID',
-    'Target Label', 'Target Value', 'Overall Result', 'Trial Status',
-    'DAA', 'Obs Date'
+    'Trial Design', 'Replication / Block ID'
   ];
+
+  if (allSameCategory) {
+    header.push(repConfig.targetLabel);
+  } else {
+    header.push('Target Label', 'Target Value');
+  }
+
+  header.push('Overall Result', 'Trial Status', 'DAA', 'Obs Date');
 
   // Dynamic observation fields
   obsFields.forEach(f => {
@@ -2009,9 +2017,16 @@ export function exportMultipleTrialsToCSV(trials) {
       dataFields.applicationMethod, dataFields.sprayVolume, dataFields.nozzle,
       dataFields.soil?.ph || '', dataFields.soil?.clay || '', dataFields.soil?.sand || '', dataFields.soil?.organicCarbon || '', dataFields.soil?.texture || '',
       dataFields.soil?.nitrogen || '', dataFields.soil?.phosphorus || '', dataFields.soil?.potassium || '', dataFields.soil?.cec || '', dataFields.soil?.moisture || '',
-      trial.TrialDesign || trial.Design || 'RCBD', trial.Replication || trial.BlockID || 'R1',
-      trialConfig.targetLabel, trialConfig.targetValue, trial.Result || 'Pending', isCompletedStr
+      trial.TrialDesign || trial.Design || 'RCBD', trial.Replication || trial.BlockID || 'R1'
     ];
+
+    if (allSameCategory) {
+      baseRow.push(trialConfig.targetValue);
+    } else {
+      baseRow.push(trialConfig.targetLabel, trialConfig.targetValue);
+    }
+
+    baseRow.push(trial.Result || 'Pending', isCompletedStr);
 
     if (efficacy.length) {
       const sortedObs = [...efficacy].sort((a, b) => (a.daa ?? 0) - (b.daa ?? 0));
@@ -2073,7 +2088,11 @@ export function exportMultipleTrialsToCSV(trials) {
     }
   });
 
-  const csv = [header, ...rows].map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+  const csv = [header, ...rows].map(r => r.map(c => {
+    let val = String(c ?? '');
+    val = val.replace(/[\u2013\u2014]/g, '-');
+    return `"${val.replace(/"/g, '""')}"`;
+  }).join(',')).join('\n');
 
   let filename = 'Trials_Export.csv';
   if (trials.length === 1) {
@@ -2083,7 +2102,7 @@ export function exportMultipleTrialsToCSV(trials) {
     filename = `Selected_Trials_${new Date().toISOString().split('T')[0]}.csv`;
   }
 
-  dlBlob(new Blob([csv], { type: 'text/csv' }), filename);
+  dlBlob(new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8' }), filename);
   toast(`CSV exported (${trials.length} trial${trials.length > 1 ? 's' : ''})`, 'success');
 }
 
@@ -2119,8 +2138,12 @@ export function exportAllTrialsCSV(trials, projects = []) {
       safeJsonParse(t.PhotoURLs, []).length,
     ];
   });
-  const csv = [header, ...rows].map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
-  dlBlob(new Blob([csv], { type: 'text/csv' }), `All_Trials_${new Date().toISOString().split('T')[0]}.csv`);
+  const csv = [header, ...rows].map(r => r.map(c => {
+    let val = String(c ?? '');
+    val = val.replace(/[\u2013\u2014]/g, '-');
+    return `"${val.replace(/"/g, '""')}"`;
+  }).join(',')).join('\n');
+  dlBlob(new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8' }), `All_Trials_${new Date().toISOString().split('T')[0]}.csv`);
   toast(`Exported ${trials.length} trials to CSV`, 'success');
 }
 
@@ -4049,7 +4072,7 @@ export function exportMasterCSV(project, subTrials) {
     'Location', 'Dosage', 'Crop', 'Yield', 'Application Timing', 'Growth Stage', 'BBCH Code', 'App Method', 'Spray Vol (L/ha)', 'Nozzle',
     'Soil pH', 'Soil Clay %', 'Soil Sand %', 'Soil OC', 'Soil Texture', 'Soil N (ppm)', 'Soil P (ppm)', 'Soil K (ppm)', 'Soil CEC', 'Soil Moisture %',
     'Trial Design',
-    'Target Label', 'Target Value', 'Overall Result', 'Trial Status',
+    repConfig.targetLabel, 'Overall Result', 'Trial Status',
     'Tukey Grouping', 'AUDPC', 'Root-to-Shoot Ratio', 'NUE',
     'DAA', 'Obs Date'
   ];
@@ -4092,7 +4115,7 @@ export function exportMasterCSV(project, subTrials) {
       dataFields.soil?.ph || '', dataFields.soil?.clay || '', dataFields.soil?.sand || '', dataFields.soil?.organicCarbon || '', dataFields.soil?.texture || '',
       dataFields.soil?.nitrogen || '', dataFields.soil?.phosphorus || '', dataFields.soil?.potassium || '', dataFields.soil?.cec || '', dataFields.soil?.moisture || '',
       st.TrialDesign || st.Design || 'RCBD',
-      trialConfig.targetLabel, trialConfig.targetValue, st.Result || 'Pending', isCompletedStr,
+      trialConfig.targetValue, st.Result || 'Pending', isCompletedStr,
       tGrouping, audpcVal, '', nueVal // placeholder for Root-to-Shoot which is observation-specific
     ];
 
@@ -4157,8 +4180,12 @@ export function exportMasterCSV(project, subTrials) {
     }
   });
 
-  const csv = [header, ...rows].map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
-  dlBlob(new Blob([csv], { type: 'text/csv' }), `Master_Study_Export_${safeName(project.Name)}.csv`);
+  const csv = [header, ...rows].map(r => r.map(c => {
+    let val = String(c ?? '');
+    val = val.replace(/[\u2013\u2014]/g, '-');
+    return `"${val.replace(/"/g, '""')}"`;
+  }).join(',')).join('\n');
+  dlBlob(new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8' }), `Master_Study_Export_${safeName(project.Name)}.csv`);
   toast('Master CSV exported!', 'success');
 }
 
