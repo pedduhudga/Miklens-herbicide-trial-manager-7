@@ -397,10 +397,8 @@ const TrialCard = memo(function TrialCard({
               {trial.IsStandardCheck && <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">Standard</span>}
               {trial.IsCompleted && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded">Finalized</span>}
               {/* Task 57: Baseline indicator */}
-              {efficacyData.length > 0 && (
-                hasBaseline
-                  ? <span className="text-[10px] bg-emerald-50 text-emerald-600 border border-emerald-200 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5" title="Pre-spray baseline recorded"><CheckCircle className="w-2.5 h-2.5" /> Baseline</span>
-                  : <span className="text-[10px] bg-amber-50 text-amber-600 border border-amber-200 px-1.5 py-0.5 rounded font-bold" title="No pre-spray baseline">⚠ No Baseline</span>
+              {efficacyData.length > 0 && hasBaseline && (
+                <span className="text-[10px] bg-emerald-50 text-emerald-600 border border-emerald-200 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5" title="Pre-spray baseline recorded"><CheckCircle className="w-2.5 h-2.5" /> Baseline</span>
               )}
               {hasBeenShared && (
                 <span className="text-[10px] bg-teal-50 text-teal-700 border border-teal-200 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5" title={`Shared with ${trial.SharedWith.length} user(s)`}>
