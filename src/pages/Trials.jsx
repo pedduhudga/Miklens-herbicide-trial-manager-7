@@ -1458,18 +1458,49 @@ export default function Trials({ onMenuClick }) {
     setIsObsModalOpen(true);
   };
 
-  const calculateResultRating = (efficacyData, isControl = false, categoryId = 'herbicide') => {
+  const calculateResultRating = (efficacyData, isControl = false, categoryId = 'herbicide', trial = null) => {
     if (isControl) return 'Control';
     if (!efficacyData || efficacyData.length === 0) return 'Unrated';
     const sorted = [...efficacyData].sort((a, b) => (parseFloat(a.daa) || 0) - (parseFloat(b.daa) || 0));
-    if (sorted.length < 2) return 'Unrated';
+    const latest = sorted[sorted.length - 1];
+    if (!latest) return 'Unrated';
 
     const primaryObsField = getPrimaryObservationField(categoryId);
-    const baseline = sorted[0];
-    const baseVal = parseFloat(baseline?.[primaryObsField] ?? 100) || 100;
-    const latest = sorted[sorted.length - 1];
-    const val = parseFloat(latest?.[primaryObsField] ?? 0) || 0;
-    const efficacy = calculateEfficacy(categoryId, val, baseVal);
+    const val = parseFloat(latest[primaryObsField] ?? 0) || 0;
+
+    let controlVal = null;
+    
+    // For designs like RCBD or PotTrial, match the specific block/replication control if available
+    if (trial && trial.ProjectID) {
+      const projectTrials = (getAppState().trials || []).filter(t => String(t.ProjectID) === String(trial.ProjectID));
+      
+      let controlTrial = null;
+      if (trial.TrialDesign === 'PotTrial' || trial.TrialDesign === 'RCBD') {
+        controlTrial = projectTrials.find(t => t.IsControl && t.Replication === trial.Replication);
+      }
+      if (!controlTrial) {
+        controlTrial = projectTrials.find(t => t.IsControl);
+      }
+
+      if (controlTrial && controlTrial.EfficacyDataJSON) {
+        const controlEff = validateEfficacyData(safeJsonParse(controlTrial.EfficacyDataJSON, []), categoryId, true);
+        const targetDaa = latest.daa;
+        const matchingControlObs = controlEff.find(o => Number(o.daa) === Number(targetDaa));
+        if (matchingControlObs) {
+          controlVal = parseFloat(matchingControlObs[primaryObsField] ?? 0) || 0;
+        } else if (controlEff.length > 0) {
+          const sortedControl = [...controlEff].sort((a, b) => (parseFloat(a.daa) || 0) - (parseFloat(b.daa) || 0));
+          controlVal = parseFloat(sortedControl[sortedControl.length - 1]?.[primaryObsField] ?? 0) || 0;
+        }
+      }
+    }
+
+    if (controlVal === null || controlVal === undefined || controlVal === 0) {
+      const baseline = sorted[0];
+      controlVal = parseFloat(baseline?.[primaryObsField] ?? 100) || 100;
+    }
+
+    const efficacy = calculateEfficacy(categoryId, val, controlVal);
 
     if (categoryId === 'nutrition' || categoryId === 'biostimulant') {
       if (efficacy >= 15) return 'Excellent';
@@ -1579,7 +1610,7 @@ export default function Trials({ onMenuClick }) {
     }
     efficacyData.sort((a, b) => a.daa - b.daa);
 
-    const newResult = calculateResultRating(efficacyData, activeTrial.IsControl || false, activeCategory);
+    const newResult = calculateResultRating(efficacyData, activeTrial.IsControl || false, activeCategory, activeTrial);
 
     const updated = {
       ...activeTrial,
@@ -1625,7 +1656,7 @@ export default function Trials({ onMenuClick }) {
     efficacyData[quickEditObs.obsIdx] = obs;
     efficacyData.sort((a, b) => a.daa - b.daa);
     
-    const newResult = calculateResultRating(efficacyData, activeTrial.IsControl || false, activeCategory);
+    const newResult = calculateResultRating(efficacyData, activeTrial.IsControl || false, activeCategory, activeTrial);
     
     const updated = {
       ...activeTrial,
@@ -1652,7 +1683,7 @@ export default function Trials({ onMenuClick }) {
     const { newObs, efficacyData, activeTrial: trial } = pendingObsSave;
     efficacyData.push(newObs);
     efficacyData.sort((a, b) => a.daa - b.daa);
-    const newResult = calculateResultRating(efficacyData, trial.IsControl || false, activeCategory);
+    const newResult = calculateResultRating(efficacyData, trial.IsControl || false, activeCategory, trial);
     const updated = {
       ...trial,
       EfficacyDataJSON: JSON.stringify(efficacyData),
@@ -1815,7 +1846,7 @@ export default function Trials({ onMenuClick }) {
     const efficacyData = validateEfficacyData(safeJsonParse(activeTrial.EfficacyDataJSON, []), activeCategory, true);
     efficacyData.splice(idx, 1);
 
-    const resultRating = calculateResultRating(efficacyData, activeTrial?.IsControl === true || activeTrial?.IsControl === 'true', activeCategory);
+    const resultRating = calculateResultRating(efficacyData, activeTrial?.IsControl === true || activeTrial?.IsControl === 'true', activeCategory, activeTrial);
     const observedWeeds = getObservedWeedsList(efficacyData);
 
     const targetField = catConfig.targetField || 'WeedSpecies';
@@ -2450,7 +2481,7 @@ export default function Trials({ onMenuClick }) {
       }
     }
 
-    const resultRating = calculateResultRating(efficacyData, activeTrial?.IsControl === true || activeTrial?.IsControl === 'true');
+    const resultRating = calculateResultRating(efficacyData, activeTrial?.IsControl === true || activeTrial?.IsControl === 'true', activeTrial?.Category || activeCategory, activeTrial);
     const observedWeeds = getObservedWeedsList(efficacyData);
 
     const targetField = catConfig.targetField || 'WeedSpecies';
@@ -4657,7 +4688,7 @@ If none are present, write "None".`;
   useEffect(() => {
     if (!detailTrial) return;
     const efficacy = validateEfficacyData(safeJsonParse(detailTrial.EfficacyDataJSON, []), detailTrial.Category || activeCategory, true);
-    const calculated = calculateResultRating(efficacy, detailTrial?.IsControl === true || detailTrial?.IsControl === 'true');
+    const calculated = calculateResultRating(efficacy, detailTrial?.IsControl === true || detailTrial?.IsControl === 'true', detailTrial?.Category || activeCategory, detailTrial);
     if (calculated !== detailTrial.Result) {
       const updated = { ...detailTrial, Result: calculated };
       updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
