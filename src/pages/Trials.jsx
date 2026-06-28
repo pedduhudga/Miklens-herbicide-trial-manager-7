@@ -198,6 +198,7 @@ export default function Trials({ onMenuClick }) {
   // --- Observation modal ---
   const [isObsModalOpen, setIsObsModalOpen] = useState(false);
   const [editingObsIdx, setEditingObsIdx] = useState(null);
+  const [quickEditObs, setQuickEditObs] = useState(null); // { obsIdx, fieldKey, label, value }
   const [obsForm, setObsForm] = useState({ daa: '', date: toDatetimeLocal(new Date()), notes: '', weedDetails: [], weatherTemp: '', weatherHumidity: '', weatherWind: '', weatherRain: '', bbchStage: '', phytotoxicityPct: '', phytotoxicityNotes: '' });
 
   // --- Plot & Site Data collapsible ---
@@ -1594,6 +1595,54 @@ export default function Trials({ onMenuClick }) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Observation saved', type: 'success' } }));
     } catch (err) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Failed to save observation', type: 'error' } }));
+    }
+  };
+
+  const handleSaveQuickEdit = async (e) => {
+    e.preventDefault();
+    if (!activeTrial || !quickEditObs) return;
+    
+    const efficacyData = validateEfficacyData(safeJsonParse(activeTrial.EfficacyDataJSON, []), activeCategory, true);
+    const obs = efficacyData[quickEditObs.obsIdx];
+    if (!obs) return;
+    
+    const val = quickEditObs.value;
+    obs[quickEditObs.fieldKey] = (val === '' || val === undefined || val === null) ? null : Number(val);
+    obs[`_manual_${quickEditObs.fieldKey}`] = true;
+    if (obs.source === 'AI') {
+      obs.verified = true;
+    }
+    
+    // Real-time calculation of Root-to-Shoot Ratio if applicable
+    if (quickEditObs.fieldKey === 'rootBiomass' || quickEditObs.fieldKey === 'shootBiomass') {
+      const rb = parseFloat(obs.rootBiomass);
+      const sb = parseFloat(obs.shootBiomass);
+      if (!isNaN(rb) && !isNaN(sb) && sb > 0) {
+        obs.rootToShootRatio = parseFloat((rb / sb).toFixed(3));
+      }
+    }
+    
+    efficacyData[quickEditObs.obsIdx] = obs;
+    efficacyData.sort((a, b) => a.daa - b.daa);
+    
+    const newResult = calculateResultRating(efficacyData, activeTrial.IsControl || false, activeCategory);
+    
+    const updated = {
+      ...activeTrial,
+      EfficacyDataJSON: JSON.stringify(efficacyData),
+      Result: newResult
+    };
+    
+    updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
+    setActiveTrial(updated);
+    setQuickEditObs(null);
+    
+    try {
+      await updateTrial({ ID: updated.ID, EfficacyDataJSON: updated.EfficacyDataJSON, Result: updated.Result }, getAppState);
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `${quickEditObs.label} saved successfully!`, type: 'success' } }));
+    } catch (err) {
+      console.error(err);
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Failed to save parameter', type: 'error' } }));
     }
   };
 
@@ -6694,7 +6743,12 @@ If none are present, write "None".`;
                                               </div>
                                             ) : (
                                               <button 
-                                                onClick={() => openObsModal(detailEfficacy.indexOf(obs) !== -1 ? detailEfficacy.indexOf(obs) : idx)} 
+                                                onClick={() => setQuickEditObs({
+                                                  obsIdx: detailEfficacy.indexOf(obs) !== -1 ? detailEfficacy.indexOf(obs) : idx,
+                                                  fieldKey: f.key,
+                                                  label: f.label,
+                                                  value: val ?? ''
+                                                })} 
                                                 className="text-[9px] px-1 py-0.5 border border-dashed border-slate-300 text-slate-500 rounded bg-white hover:bg-slate-100 hover:text-slate-700 font-medium shrink-0 flex items-center gap-0.5"
                                                 title="Click to enter parameter manually"
                                               >
@@ -8751,6 +8805,34 @@ If none are present, write "None".`;
           <div className="pt-3 flex justify-end gap-3 border-t">
             <button type="button" onClick={() => setIsObsModalOpen(false)} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg font-medium">Cancel</button>
             <button type="submit" className="btn-primary px-5 py-2 rounded-lg text-sm font-semibold">Save Observation</button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* ── QUICK ENTRY PARAMETER MODAL ── */}
+      <Modal 
+        isOpen={quickEditObs !== null} 
+        onClose={() => setQuickEditObs(null)} 
+        title={`Enter ${quickEditObs?.label || 'Parameter'}`}
+      >
+        <form onSubmit={handleSaveQuickEdit} className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">
+              Value for DAA {quickEditObs?.obsIdx !== undefined && activeTrial ? (validateEfficacyData(safeJsonParse(activeTrial.EfficacyDataJSON, []), activeCategory, true)[quickEditObs.obsIdx]?.daa ?? '0') : ''}
+            </label>
+            <input
+              type="number"
+              step="0.1"
+              autoFocus
+              required
+              value={quickEditObs?.value ?? ''}
+              onChange={e => setQuickEditObs({ ...quickEditObs, value: e.target.value })}
+              className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400"
+            />
+          </div>
+          <div className="pt-3 flex justify-end gap-3 border-t">
+            <button type="button" onClick={() => setQuickEditObs(null)} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg font-medium">Cancel</button>
+            <button type="submit" className="btn-primary px-5 py-2 rounded-lg text-sm font-semibold">Save Parameter</button>
           </div>
         </form>
       </Modal>
