@@ -1441,7 +1441,7 @@ export default function Trials({ onMenuClick }) {
     });
 
     if (idx !== null) {
-      const obs = validateEfficacyData(safeJsonParse(activeTrial?.EfficacyDataJSON, []), activeCategory)[idx];
+      const obs = validateEfficacyData(safeJsonParse(activeTrial?.EfficacyDataJSON, []), activeCategory, true)[idx];
       const filledForm = { ...initialForm, ...obs };
       filledForm.daa = obs.daa ?? '';
       filledForm.date = obs.date || '';
@@ -1487,7 +1487,7 @@ export default function Trials({ onMenuClick }) {
     e.preventDefault();
     if (!activeTrial) return;
 
-    const efficacyData = validateEfficacyData(safeJsonParse(activeTrial.EfficacyDataJSON, []), activeCategory);
+    const efficacyData = validateEfficacyData(safeJsonParse(activeTrial.EfficacyDataJSON, []), activeCategory, true);
     const primaryObsField = getPrimaryObservationField(activeCategory);
 
     // Check if any fields that were previously recorded in this project are missing
@@ -1547,7 +1547,23 @@ export default function Trials({ onMenuClick }) {
       newObs.weedDetails = newObs.weedDetails || obsForm.weedDetails || [];
     }
 
-    if (editingObsIdx !== null) efficacyData[editingObsIdx] = newObs;
+    if (editingObsIdx !== null) {
+      const prevObs = efficacyData[editingObsIdx];
+      catConfig.observationFields?.forEach(f => {
+        if (newObs[f.key] !== prevObs[f.key]) {
+          newObs[`_manual_${f.key}`] = true;
+        } else if (prevObs[`_manual_${f.key}`]) {
+          newObs[`_manual_${f.key}`] = true;
+        }
+      });
+      if (prevObs.source === 'AI') {
+        newObs.source = 'AI';
+        newObs.verified = true;
+        if (prevObs.aiConfidence) newObs.aiConfidence = prevObs.aiConfidence;
+        if (prevObs.photoUrl) newObs.photoUrl = prevObs.photoUrl;
+      }
+      efficacyData[editingObsIdx] = newObs;
+    }
     else {
       // Task 57: Baseline check — warn if first post-spray obs added with no baseline
       const daaNum = Number(obsForm.daa);
@@ -1747,7 +1763,7 @@ export default function Trials({ onMenuClick }) {
 
   const handleDeleteObs = async (idx) => {
     if (!activeTrial || !window.confirm('Delete this observation?')) return;
-    const efficacyData = validateEfficacyData(safeJsonParse(activeTrial.EfficacyDataJSON, []), activeCategory);
+    const efficacyData = validateEfficacyData(safeJsonParse(activeTrial.EfficacyDataJSON, []), activeCategory, true);
     efficacyData.splice(idx, 1);
 
     const resultRating = calculateResultRating(efficacyData, activeTrial?.IsControl === true || activeTrial?.IsControl === 'true', activeCategory);
@@ -1778,7 +1794,7 @@ export default function Trials({ onMenuClick }) {
   };
 
   // ── DETAIL TRIAL DERIVATIONS ──────────────────────────────────────
-  const detailEfficacy = detailTrial ? validateEfficacyData(safeJsonParse(detailTrial.EfficacyDataJSON, []), activeCategory) : [];
+  const detailEfficacy = detailTrial ? validateEfficacyData(safeJsonParse(detailTrial.EfficacyDataJSON, []), activeCategory, true) : [];
   const detailPhotos = detailTrial ? safeJsonParse(detailTrial.PhotoURLs, []).filter(p => !p.deleted) : [];
   const detailIsCompleted = detailTrial?.IsCompleted === true || detailTrial?.IsCompleted === 'true';
 
@@ -2377,7 +2393,7 @@ export default function Trials({ onMenuClick }) {
     }
 
     // Find and delete the corresponding AI-generated observation(s) linked to this photo
-    let efficacyData = validateEfficacyData(safeJsonParse(activeTrial.EfficacyDataJSON, []), activeCategory);
+    let efficacyData = validateEfficacyData(safeJsonParse(activeTrial.EfficacyDataJSON, []), activeCategory, true);
     if (deletedPhoto) {
       const deletedUrl = typeof deletedPhoto === 'string' ? deletedPhoto : (deletedPhoto.fileData || deletedPhoto.url);
       if (deletedUrl) {
@@ -2427,7 +2443,7 @@ export default function Trials({ onMenuClick }) {
     const latestTrial = getAppState().trials.find(t => t.ID === trial.ID) || trial;
     const trialCat = latestTrial.Category || activeCategory;
     const catConfig = getCategoryConfig(trialCat);
-    const efficacyData = validateEfficacyData(safeJsonParse(latestTrial.EfficacyDataJSON, []), trialCat);
+    const efficacyData = validateEfficacyData(safeJsonParse(latestTrial.EfficacyDataJSON, []), trialCat, true);
 
     const getNormalizedTargetName = (name) => {
       if (!name) return 'Unknown';
@@ -3265,7 +3281,7 @@ Rules:
 
     allTrials.forEach(trial => {
       const photos = safeJsonParse(trial.PhotoURLs, []);
-      const existingObs = validateEfficacyData(safeJsonParse(trial.EfficacyDataJSON, []), trial.Category || activeCategory);
+      const existingObs = validateEfficacyData(safeJsonParse(trial.EfficacyDataJSON, []), trial.Category || activeCategory, true);
       const existingDAAs = new Set(existingObs.map(o => o.daa));
       daaCoverageMap.set(trial.ID, existingDAAs);
 
@@ -4244,7 +4260,7 @@ Rules:
   // DAA coverage analysis for photos/observations
   const daaCoverage = useMemo(() => {
     if (!activeTrial) return { allDAAs: [], obsDAAs: [], photoDAAs: [], hasGaps: false };
-    const obs = validateEfficacyData(safeJsonParse(activeTrial.EfficacyDataJSON, []), activeTrial.Category || activeCategory);
+    const obs = validateEfficacyData(safeJsonParse(activeTrial.EfficacyDataJSON, []), activeTrial.Category || activeCategory, true);
     const photoDAAs = activeTrial.Date 
       ? detailPhotos.map(p => p.date ? calculateDAA(p.date, activeTrial.Date) : null).filter(val => val !== null)
       : [];
@@ -4591,7 +4607,7 @@ If none are present, write "None".`;
   // Automatically correct existing stale ratings (e.g. legacy/deleted observations not matching Result field) on trial selection
   useEffect(() => {
     if (!detailTrial) return;
-    const efficacy = validateEfficacyData(safeJsonParse(detailTrial.EfficacyDataJSON, []), detailTrial.Category || activeCategory);
+    const efficacy = validateEfficacyData(safeJsonParse(detailTrial.EfficacyDataJSON, []), detailTrial.Category || activeCategory, true);
     const calculated = calculateResultRating(efficacy, detailTrial?.IsControl === true || detailTrial?.IsControl === 'true');
     if (calculated !== detailTrial.Result) {
       const updated = { ...detailTrial, Result: calculated };
@@ -4790,7 +4806,7 @@ If none are present, write "None".`;
 
     photos[photoEditModal.idx] = { ...oldPhoto, label: photoEditModal.label, date: formatPhotoDate(newDate) };
 
-    const efficacyData = validateEfficacyData(safeJsonParse(activeTrial.EfficacyDataJSON, []), activeTrial.Category || activeCategory);
+    const efficacyData = validateEfficacyData(safeJsonParse(activeTrial.EfficacyDataJSON, []), activeTrial.Category || activeCategory, true);
     let efficacyChanged = false;
 
     if (oldDate && newDate && oldDate !== newDate) {
@@ -6632,6 +6648,67 @@ If none are present, write "None".`;
                                   <p className="text-base font-bold text-slate-700">{(obs.weedDetails || []).filter(w => w.species && w.species !== 'Total').length || '—'}</p>
                                 </div>
                               </div>
+
+                              {/* Dynamic Category Parameters & Data Source Panel */}
+                              {(() => {
+                                const fieldsToShow = (catConfig.observationFields || []).filter(f => f.key !== 'weedDetails');
+                                if (fieldsToShow.length === 0) return null;
+                                
+                                // Calculate completeness
+                                const completedCount = fieldsToShow.filter(f => obs[f.key] !== undefined && obs[f.key] !== null && obs[f.key] !== '').length;
+                                
+                                return (
+                                  <div className="mt-2 border-t pt-2">
+                                    <div className="flex items-center justify-between mb-1.5">
+                                      <p className="text-[10px] font-bold text-slate-500 uppercase">
+                                        Parameters & Completeness ({completedCount}/{fieldsToShow.length})
+                                      </p>
+                                      {obs.source === 'AI' && !obs.verified && (
+                                        <span className="text-[9px] bg-purple-50 text-purple-600 border border-purple-200 px-1 py-0.2 rounded font-semibold animate-pulse">
+                                          Unverified AI Data
+                                        </span>
+                                      )}
+                                      {obs.source === 'AI' && obs.verified && (
+                                        <span className="text-[9px] bg-emerald-50 text-emerald-600 border border-emerald-200 px-1 py-0.2 rounded font-semibold">
+                                          Verified AI Data
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-1.5">
+                                      {fieldsToShow.map(f => {
+                                        const val = obs[f.key];
+                                        const hasVal = val !== undefined && val !== null && val !== '';
+                                        const isAI = obs.source === 'AI' && !obs[`_manual_${f.key}`];
+                                        
+                                        return (
+                                          <div key={f.key} className="flex items-center justify-between text-xs bg-slate-50 border border-slate-100 rounded p-1.5">
+                                            <span className="text-slate-500 truncate mr-1" title={f.label}>{f.label.replace(/\s*\(.*?\)/, '')}</span>
+                                            {hasVal ? (
+                                              <div className="flex items-center gap-1 shrink-0">
+                                                <span className="font-bold text-slate-800">{val}</span>
+                                                {isAI ? (
+                                                  <span className="text-[9px] px-1 bg-purple-100 text-purple-700 rounded font-bold" title="Captured by AI">AI</span>
+                                                ) : (
+                                                  <span className="text-[9px] px-1 bg-blue-100 text-blue-700 rounded font-bold" title="Manually Entered">Manual</span>
+                                                )}
+                                              </div>
+                                            ) : (
+                                              <button 
+                                                onClick={() => openObsModal(detailEfficacy.indexOf(obs) !== -1 ? detailEfficacy.indexOf(obs) : idx)} 
+                                                className="text-[9px] px-1 py-0.5 border border-dashed border-slate-300 text-slate-500 rounded bg-white hover:bg-slate-100 hover:text-slate-700 font-medium shrink-0 flex items-center gap-0.5"
+                                                title="Click to enter parameter manually"
+                                              >
+                                                <span>➕ Enter</span>
+                                              </button>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+
                               {(obs.weedDetails || []).length > 0 && (
                                 <div className="mt-2 border-t pt-2">
                                   <p className="text-[10px] font-bold text-slate-500 uppercase mb-1.5">

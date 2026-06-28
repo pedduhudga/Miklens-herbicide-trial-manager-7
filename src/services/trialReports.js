@@ -316,11 +316,13 @@ function safeJsonParse(val, fallback = []) {
 }
 function validateEfficacy(data, categoryId = null) {
   if (!Array.isArray(data)) return [];
+  // Exclude AI-only observations from reports
+  const cleanData = data.filter(o => o && o.source !== 'AI');
   if (categoryId) {
     const primaryField = getPrimaryObservationField(categoryId);
-    return data.filter(o => o && (o.daa !== undefined || o[primaryField] !== undefined || o.weedCover !== undefined));
+    return cleanData.filter(o => o && (o.daa !== undefined || o[primaryField] !== undefined || o.weedCover !== undefined));
   }
-  return data.filter(o => o && (
+  return cleanData.filter(o => o && (
     o.daa !== undefined || 
     o.weedCover !== undefined || 
     o.diseaseSeverity !== undefined || 

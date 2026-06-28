@@ -14,7 +14,7 @@ export { performBartlettsTest as calculateBartlettsTest };
 
 
 
-export function validateEfficacyData (efficacy, categoryId = 'herbicide') {
+export function validateEfficacyData (efficacy, categoryId = 'herbicide', includeAI = false) {
                 if (!Array.isArray(efficacy)) {
                     console.warn('EfficacyDataJSON is not an array');
                     return [];
@@ -27,9 +27,11 @@ export function validateEfficacyData (efficacy, categoryId = 'herbicide') {
                     return isFinite(n) ? n : null;
                 };
 
+                const dataToValidate = includeAI ? efficacy : efficacy.filter(o => o && o.source !== 'AI');
+
                 if (categoryId !== 'herbicide') {
                     const normalized = [];
-                    efficacy.forEach(rawObs => {
+                    dataToValidate.forEach(rawObs => {
                         if (!rawObs || typeof rawObs !== 'object') return;
                         const obs = normalizeObservation(rawObs, categoryId);
                         const daa = toNum(obs.daa);
@@ -86,7 +88,7 @@ export function validateEfficacyData (efficacy, categoryId = 'herbicide') {
 
                 const normalized = [];
 
-                efficacy.forEach(rawObs => {
+                dataToValidate.forEach(rawObs => {
                     if (!rawObs || typeof rawObs !== 'object') return;
 
                     // Normalize observation for category (adds primary field where possible)
