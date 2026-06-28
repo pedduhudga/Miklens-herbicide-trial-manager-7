@@ -6,6 +6,13 @@ import { safeJsonParse } from '../utils/helpers.js';
 import { _callGeminiApiWithRetries, resetGeminiState } from '../services/ai.js';
 import { getAiChatSessions, saveAiChatSession, deleteAiChatSession } from '../services/dataLayer.js';
 import { getCategoryConfig, getPrimaryObservationField } from '../utils/categoryConfig.js';
+import { 
+  validateAIAnalysisCategory, 
+  createCategoryAwareAIContext, 
+  enhancePromptWithCategoryIsolation,
+  validateAnalysisResults,
+  logCategoryIsolationMetrics 
+} from '../utils/aiCategoryIsolation.js';
 
 const CATEGORY_PROMPTS = {
   herbicide: [
@@ -45,6 +52,15 @@ const CATEGORY_PROMPTS = {
   ]
 };
 
+/**
+ * Validates category parameter for AI analysis functions
+ * Ensures AI services operate within proper category boundaries
+ * @deprecated Use validateAIAnalysisCategory from aiCategoryIsolation.js instead
+ */
+function validateAIAnalysisCategory_Legacy(category, functionName = 'AI analysis') {
+  return validateAIAnalysisCategory(category, functionName);
+}
+
 export default function AIAssistant({ onMenuClick }) {
   const { state, updateState, getAppState } = useAppState();
   const [input, setInput] = useState('');
@@ -63,6 +79,7 @@ export default function AIAssistant({ onMenuClick }) {
   const config = getCategoryConfig(activeCategory);
   const primaryObsField = getPrimaryObservationField(activeCategory);
   const suggestedPrompts = CATEGORY_PROMPTS[activeCategory] || CATEGORY_PROMPTS.herbicide;
+  const isViewer = state.user?.role === 'viewer';
 
   const sessions = state.aiChatSessions || [];
   const currentSessionId = state.currentAiChatSessionId;
@@ -208,10 +225,29 @@ export default function AIAssistant({ onMenuClick }) {
   const sendMessage = useCallback(async (text) => {
     const userMsg = text.trim();
     if (!userMsg || isLoading) return;
+    
+    // Check viewer permissions first
+    const isViewer = state.user?.role === 'viewer';
     if (isViewer) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Viewer role cannot send messages to AI Assistant.', type: 'error' } }));
       return;
     }
+    
+    // Validate category for AI analysis isolation
+    validateAIAnalysisCategory(activeCategory, 'AI Assistant analysis');
+    
+    // Validate user has access to this category
+    const userCategoryAccess = state.user?.categoryAccess || [];
+    if (userCategoryAccess.length > 0 && !userCategoryAccess.includes(activeCategory)) {
+      window.dispatchEvent(new CustomEvent('app:toast', { 
+        detail: { 
+          msg: `Access denied: You do not have permission to use AI analysis for ${activeCategory} category.`, 
+          type: 'error' 
+        } 
+      }));
+      return;
+    }
+    
     setInput('');
     const img = attachedImage;
     setAttachedImage(null);
@@ -245,9 +281,20 @@ export default function AIAssistant({ onMenuClick }) {
     updateState({ aiChatSessions: newSessions, currentAiChatSessionId: activeSessionId });
 
     try {
-      const trials = (state.trials || [])
-        .filter(t => t.Category === activeCategory || (!t.Category && activeCategory === 'herbicide'))
-        .sort((a, b) => new Date(b.Date || 0) - new Date(a.Date || 0));
+      // Create category-aware AI context with strict isolation
+      const aiContext = createCategoryAwareAIContext(
+        activeCategory,
+        state.trials,
+        state.projects,
+        state.formulations,
+        state.user
+      );
+      
+      // Log isolation metrics for monitoring
+      logCategoryIsolationMetrics('AI Assistant Chat', activeCategory, aiContext.isolationMetrics);
+      
+      // Process trials data for AI context
+      const trials = aiContext.trials.sort((a, b) => new Date(b.Date || 0) - new Date(a.Date || 0));
       
       const trialsCtx = trials.slice(0, 25).map(t => {
         const eff = safeJsonParse(t.EfficacyDataJSON, []);
@@ -337,11 +384,20 @@ export default function AIAssistant({ onMenuClick }) {
       });
 
       const systemCtx = `You are a Senior ${config.name} Scientist and expert agricultural research assistant specialized in analyzing ${config.name} efficacy/growth trials. 
+
+CRITICAL CATEGORY ISOLATION: You are currently analyzing data for the ${activeCategory.toUpperCase()} category ONLY. Do not reference, compare, or include data from other categories (${['herbicide', 'fungicide', 'pesticide', 'nutrition', 'biostimulant'].filter(c => c !== activeCategory).join(', ')}) in your analysis.
+
+Category-Specific Analysis Context:
+- Active Category: ${activeCategory.toUpperCase()}
+- AI Analysis Prompt: ${config.aiPhotoPrompt || `Analyze ${activeCategory} trial data with category-specific methodology`}
+- Primary Metric: ${config.primaryMetric?.label || 'Efficacy'}
+- Target Field: ${config.targetLabel || 'Target'}
+
 The user has ${trials.length} trial(s) on record for the ${config.name} category. Here is a detailed summary of up to 25 recent trials, including all of their observation records:
 ${JSON.stringify(trialsCtx, null, 2)}
 
-Projects: ${(state.projects || []).filter(p => p.Category === activeCategory).map(p => p.Name).join(', ') || 'None'}
-Formulations: ${(state.formulations || []).filter(f => f.Category === activeCategory).map(f => f.Name).join(', ') || 'None'}
+Projects: ${aiContext.projects.map(p => p.Name).join(', ') || 'None'}
+Formulations: ${aiContext.formulations.map(f => f.Name).join(', ') || 'None'}
 
 RIGOROUS SCIENTIFIC ANSWERING PROTOCOL:
 - **Scientific Persona**: Adopt a highly professional, objective, and analytical tone. Speak with scientific authority, using terms like "${config.primaryMetric.label}," "phytotoxicity/crop injury," and "sustained performance timeline."
@@ -393,6 +449,9 @@ RIGOROUS SCIENTIFIC ANSWERING PROTOCOL:
       };
 
       reply = await _callGeminiApiWithRetries(geminiCall, getAppState);
+
+      // Validate that AI results respect category boundaries
+      validateAnalysisResults(reply, activeCategory, 'AI Assistant Chat');
 
       const sessionIndex = newSessions.findIndex(s => s.id === activeSessionId);
       if (sessionIndex !== -1) {

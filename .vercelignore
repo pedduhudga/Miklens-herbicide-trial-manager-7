@@ -1,0 +1,24 @@
+# Dependencies and build artifacts
+node_modules/
+.next/
+.cache/
+dist/
+build/
+
+# Development files
+*.log
+.env
+.env.local
+.env.development
+.env.production
+
+# Generated files that might cause conflicts
+pnpm-lock.yaml
+
+# PWA testing files (not needed for deployment)
+generate-icons.html
+validate-pwa.js
+
+# Documentation (not needed for deployment)
+PWA_SETUP_GUIDE.md
+OPTIMIZATION_REPORT.md

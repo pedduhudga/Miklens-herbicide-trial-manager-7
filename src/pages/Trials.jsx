@@ -4,7 +4,7 @@ import { useAppState } from '../hooks/useAppState.jsx';
 import { useAuth } from '../hooks/useAuth.js';
 import TopBar from '../components/TopBar.jsx';
 import Modal from '../components/Modal.jsx';
-import { addTrial, deleteTrial, updateTrial, uploadPhoto, apiCall } from '../services/dataLayer.js';
+import { addTrial, deleteTrial, updateTrial, uploadPhoto, apiCall, validateCategoryDataOperation } from '../services/dataLayer.js';
 import {
   Plus, Trash2, Edit, Copy, ChevronRight, Activity, MapPin, Calendar,
   CheckCircle, Camera, Grid, Info, Sparkles, Search, Filter, X,
@@ -23,6 +23,7 @@ import { normalizeObservation } from '../utils/categoryObservationUtils.js';
 import { validateEfficacyData } from '../utils/analysisUtils.js';
 import CameraCapture from '../components/CameraCapture.jsx';
 import CropperModal from '../components/CropperModal.jsx';
+import CategoryValidationAlert, { showCategoryValidationToast } from '../components/CategoryValidationAlert.jsx';
 import GridWeedCoverTool from '../components/GridWeedCoverTool.jsx';
 import PhotoAnalyzerView from '../components/PhotoAnalyzerView.jsx';
 import { analyzePhoto, analyzePhotosBatch, identifyWeedFromPhoto as identifyWeedFromPhotoService, getAPIKeys, generateTextWithAI, parseHarvestTextLog } from '../services/multiProviderAI.js';
@@ -539,11 +540,13 @@ export default function Trials({ onMenuClick }) {
     }
   }, [state.trials, activeTrial]);
 
-  // Sync local selectedForBulk to global selectedTrials
+  // Sync local selectedForBulk to global selectedTrials - with category filtering
   useEffect(() => {
-    const matched = (state.trials || []).filter(t => selectedForBulk.has(t.ID));
+    const matched = (state.trials || []).filter(t => 
+      selectedForBulk.has(t.ID) && ((t.Category || 'herbicide') === activeCategory)
+    );
     updateState({ selectedTrials: matched });
-  }, [selectedForBulk, state.trials, updateState]);
+  }, [selectedForBulk, state.trials, updateState, activeCategory]);
 
 
 
@@ -869,6 +872,19 @@ export default function Trials({ onMenuClick }) {
       }),
     };
 
+    // Category validation before saving
+    try {
+      const operation = isEdit ? 'updateTrial' : 'addTrial';
+      await validateCategoryDataOperation(operation, payload, getAppState);
+    } catch (validationError) {
+      if (validationError.validationError) {
+        showCategoryValidationToast(validationError);
+        return; // Stop the save operation
+      }
+      // If it's not a validation error, log it but continue
+      console.warn('Validation check failed:', validationError);
+    }
+
     updateState({ trials: isEdit ? trials.map(t => t.ID === payload.ID ? payload : t) : [...trials, payload] });
     setIsModalOpen(false);
 
@@ -880,7 +896,12 @@ export default function Trials({ onMenuClick }) {
       }
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Trial ${isEdit ? 'updated' : 'saved'}`, type: 'success' } }));
     } catch (err) {
-      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Failed to save trial', type: 'error' } }));
+      // Check if it's a category validation error
+      if (err.validationError) {
+        showCategoryValidationToast(err);
+      } else {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Failed to save trial', type: 'error' } }));
+      }
     }
   };
 
@@ -953,7 +974,12 @@ export default function Trials({ onMenuClick }) {
     try {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'AI is analyzing your harvest photos...', type: 'info' } }));
       const primaryPhoto = photos[0];
-      const result = await analyzePhoto(primaryPhoto, { isHarvest: true, category: activeCategory });
+      const result = await analyzePhoto(primaryPhoto, { 
+        isHarvest: true, 
+        category: activeCategory,
+        treatment: activeTrial?.FormulationName,
+        daa: 0 // Harvest photos are typically end-of-trial
+      });
       if (result.success && result.data) {
         const data = result.data;
         setPendingHarvestAiResult({
@@ -2191,6 +2217,7 @@ export default function Trials({ onMenuClick }) {
 
       await updatePhotoAiStatus(targetTrial.ID, driveUrl || dataUrl, 'processing');
       const result = await analyzePhoto(dataUrl, {
+        category: targetTrial.Category || activeCategory, // Ensure category context for AI analysis
         treatment: targetTrial.FormulationName,
         daa,
         rep: targetTrial.Replication || 1,
@@ -3362,6 +3389,7 @@ Rules:
     try {
       await updatePhotoAiStatus(activeTrial.ID, photoSrc, 'processing');
       const result = await analyzePhoto(photoSrc, {
+        category: activeTrial.Category || activeCategory, // Ensure category context for AI analysis
         treatment: activeTrial.FormulationName,
         daa,
         rep: activeTrial.Replication || 1,
@@ -3486,7 +3514,23 @@ Rules:
   const toggleBulk = (id) => setSelectedForBulk(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const clearBulk = () => setSelectedForBulk(new Set());
   const navigateToCompare = () => {
-    updateState({ selectedTrials: trials.filter(t => selectedForBulk.has(t.ID)) });
+    // Filter selected trials to only include those from the active category
+    const categoryFilteredTrials = trials.filter(t => 
+      selectedForBulk.has(t.ID) && ((t.Category || 'herbicide') === activeCategory)
+    );
+    
+    // Show warning if some trials were filtered out due to category mismatch
+    if (categoryFilteredTrials.length < selectedForBulk.size) {
+      const filteredOutCount = selectedForBulk.size - categoryFilteredTrials.length;
+      window.dispatchEvent(new CustomEvent('app:toast', { 
+        detail: { 
+          msg: `${filteredOutCount} trial(s) from other categories excluded from comparison. Only ${activeCategory} trials can be compared.`, 
+          type: 'warning' 
+        } 
+      }));
+    }
+    
+    updateState({ selectedTrials: categoryFilteredTrials });
     navigate('/compare');
   };
   const handleBulkDelete = async () => {
@@ -4607,7 +4651,7 @@ If none are present, write "None".`;
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Download/Export permission is disabled for your account.', type: 'error' } }));
       return;
     }
-    exportToCSV(trial);
+    exportToCSV(trial, activeCategory);
   }, [canDownload]);
 
   const exportJson          = useCallback((trial) => {
@@ -4632,8 +4676,8 @@ If none are present, write "None".`;
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Download/Export permission is disabled for your account.', type: 'error' } }));
       return;
     }
-    exportAllTrialsCSV(trials, projects);
-  }, [trials, projects, canDownload]);
+    exportAllTrialsCSV(trials, projects, activeCategory);
+  }, [trials, projects, activeCategory, canDownload]);
 
   const shareTrial          = useCallback((trial) => {
     if (!canDownload) {
@@ -5371,13 +5415,45 @@ If none are present, write "None".`;
       {/* ── SELECTION BAR ── */}
       {selectedForBulk.size > 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-800 text-white px-5 py-3 rounded-full shadow-2xl flex items-center gap-4 z-50">
-          <span className="font-bold text-sm"><span className="bg-emerald-500 px-2 py-0.5 rounded-full mr-2">{selectedForBulk.size}</span>Selected</span>
-          <div className="h-4 w-px bg-slate-600" />
-          <button onClick={navigateToCompare} className="flex items-center gap-1.5 text-sm hover:text-emerald-400 transition"><BarChart3 className="w-4 h-4" />Compare</button>
+          {(() => {
+            const crossCategoryCount = Array.from(selectedForBulk).filter(id => {
+              const trial = trials.find(t => t.ID === id);
+              return trial && (trial.Category || 'herbicide') !== activeCategory;
+            }).length;
+            const validCount = selectedForBulk.size - crossCategoryCount;
+            
+            return (
+              <>
+                <span className="font-bold text-sm">
+                  <span className="bg-emerald-500 px-2 py-0.5 rounded-full mr-2">{selectedForBulk.size}</span>
+                  Selected
+                  {crossCategoryCount > 0 && (
+                    <span className="bg-amber-500 px-2 py-0.5 rounded-full ml-2 text-xs">
+                      {crossCategoryCount} cross-category
+                    </span>
+                  )}
+                </span>
+                <div className="h-4 w-px bg-slate-600" />
+                <button 
+                  onClick={navigateToCompare} 
+                  disabled={validCount < 2}
+                  className={`flex items-center gap-1.5 text-sm transition ${
+                    validCount < 2 
+                      ? 'text-slate-500 cursor-not-allowed' 
+                      : 'hover:text-emerald-400'
+                  }`}
+                  title={validCount < 2 ? `Need at least 2 ${activeCategory} trials to compare` : ''}
+                >
+                  <BarChart3 className="w-4 h-4" />
+                  Compare {validCount > 0 && `(${validCount})`}
+                </button>
+              </>
+            );
+          })()}
           {!isViewer && <button onClick={handleBulkFinalize} className="flex items-center gap-1.5 text-sm hover:text-emerald-400 transition"><CheckCircle className="w-4 h-4" />Finalize</button>}
           {!isViewer && <button onClick={() => setIsBulkEditOpen(true)} className="flex items-center gap-1.5 text-sm hover:text-amber-400 transition"><Edit className="w-4 h-4" />Bulk Edit</button>}
           {!isViewer && <button onClick={() => setIsBulkQrModalOpen(true)} className="flex items-center gap-1.5 text-sm hover:text-blue-400 transition"><Printer className="w-4 h-4" />Print Cards</button>}
-          {canDownload && <button onClick={() => { const sel = trials.filter(t => selectedForBulk.has(t.ID)); exportMultipleTrialsToCSV(sel); }} className="flex items-center gap-1.5 text-sm hover:text-emerald-400 transition"><FileSpreadsheet className="w-4 h-4" />Export CSV</button>}
+          {canDownload && <button onClick={() => { const sel = trials.filter(t => selectedForBulk.has(t.ID)); exportMultipleTrialsToCSV(sel, activeCategory); }} className="flex items-center gap-1.5 text-sm hover:text-emerald-400 transition"><FileSpreadsheet className="w-4 h-4" />Export CSV</button>}
           {!isViewer && <button onClick={handleBulkDelete} className="flex items-center gap-1.5 text-sm hover:text-red-400 transition"><Trash2 className="w-4 h-4" />Delete</button>}
           <button onClick={clearBulk} className="ml-1 text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
         </div>
@@ -8324,6 +8400,7 @@ If none are present, write "None".`;
 
                       // 2. Run AI analysis
                       const result = await analyzePhoto(dataUrl, {
+                        category: activeTrial?.Category || activeCategory, // Ensure category context for AI analysis
                         treatment: activeTrial?.FormulationName,
                         daa: obsForm.daa || daa,
                         rep: activeTrial?.Replication || 1,

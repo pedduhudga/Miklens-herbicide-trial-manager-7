@@ -1,0 +1,339 @@
+// Firestore Security Rules for Category Isolation Enforcement
+// This file contains database-level constraints to prevent cross-category data violations
+// Deploy these rules to Firebase to enforce category boundaries at the database level
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ═══ HELPER FUNCTIONS ═══════════════════════════════════════════════════════
+    
+    // Valid categories in the application
+    function isValidCategory(category) {
+      return category in ['herbicide', 'fungicide', 'pesticide', 'nutrition', 'biostimulant'];
+    }
+    
+    // Check if document has a valid category field
+    function hasValidCategory(data) {
+      let category = 'Category' in data ? data.Category : ('category' in data ? data.category : null);
+      return category != null && isValidCategory(category);
+    }
+    
+    // Get category from document data
+    function getCategory(data) {
+      return 'Category' in data ? data.Category : ('category' in data ? data.category : 'herbicide');
+    }
+    
+    // Check if user has access to specific category
+    function hasCategoryAccess(category) {
+      // Get user document to check permissions
+      let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid));
+      let user = userDoc.data;
+      
+      // Admin users have access to all categories
+      if ('Role' in user && user.Role == 'admin') {
+        return true;
+      }
+      
+      // Check category access list
+      if ('categoryAccess' in user && category in user.categoryAccess) {
+        return true;
+      }
+      
+      if ('CategoryAccess' in user && category in user.CategoryAccess) {
+        return true;
+      }
+      
+      // Default: allow access (for backward compatibility)
+      return true;
+    }
+    
+    // Check if user is admin
+    function isAdmin() {
+      let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid));
+      return 'Role' in userDoc.data && userDoc.data.Role == 'admin';
+    }
+    
+    // Check if user owns the document
+    function isOwner(docData) {
+      return request.auth != null && 
+             ('CreatedBy' in docData ? docData.CreatedBy == request.auth.uid : true);
+    }
+    
+    // Check if user has edit permission
+    function canEdit(docData) {
+      return isOwner(docData) || 
+             isAdmin() ||
+             ('SharedWithEdit' in docData && request.auth.uid in docData.SharedWithEdit);
+    }
+    
+    // Check if trial category matches project category
+    function trialProjectCategoryMatch(trialData) {
+      // If no project reference, allow
+      if (!('ProjectId' in trialData)) {
+        return true;
+      }
+      
+      // Get project document
+      let trialCategory = getCategory(trialData);
+      let projectPath = /databases/$(database)/documents/projects-$(trialCategory)/$(trialData.ProjectId);
+      
+      // Check if project exists and has matching category
+      return exists(projectPath) && 
+             getCategory(get(projectPath).data) == trialCategory;
+    }
+    
+    // Check if formulation ingredients are category-compatible
+    function formulationIngredientCategoryMatch(formulationData) {
+      // If no ingredients specified, allow
+      if (!('ingredients' in formulationData)) {
+        return true;
+      }
+      
+      let formulationCategory = getCategory(formulationData);
+      
+      // For now, we'll allow ingredient mixing for backward compatibility
+      // In a stricter implementation, you could validate each ingredient category
+      return true;
+    }
+    
+    // Comprehensive category isolation check
+    function enforcesCategoryIsolation(data) {
+      return hasValidCategory(data) && 
+             hasCategoryAccess(getCategory(data)) &&
+             trialProjectCategoryMatch(data) &&
+             formulationIngredientCategoryMatch(data);
+    }
+    
+    // ═══ USER MANAGEMENT ════════════════════════════════════════════════════════
+    
+    match /users/{userId} {
+      allow read: if request.auth != null && 
+                     (request.auth.uid == userId || isAdmin());
+      
+      allow write: if request.auth != null && 
+                      (request.auth.uid == userId || isAdmin());
+    }
+    
+    // ═══ CATEGORY-SPECIFIC COLLECTIONS ═════════════════════════════════════════
+    
+    // Trials collections (category-specific)
+    match /trials-{category}/{trialId} {
+      allow read: if request.auth != null && 
+                     isValidCategory(category) &&
+                     hasCategoryAccess(category);
+      
+      allow create: if request.auth != null && 
+                       isValidCategory(category) &&
+                       hasCategoryAccess(category) &&
+                       getCategory(request.resource.data) == category &&
+                       enforcesCategoryIsolation(request.resource.data) &&
+                       request.resource.data.CreatedBy == request.auth.uid;
+      
+      allow update: if request.auth != null && 
+                       isValidCategory(category) &&
+                       hasCategoryAccess(category) &&
+                       getCategory(request.resource.data) == category &&
+                       enforcesCategoryIsolation(request.resource.data) &&
+                       canEdit(resource.data) &&
+                       // Prevent category changes
+                       getCategory(request.resource.data) == getCategory(resource.data);
+      
+      allow delete: if request.auth != null && 
+                       isValidCategory(category) &&
+                       hasCategoryAccess(category) &&
+                       canEdit(resource.data);
+    }
+    
+    // Projects collections (category-specific)
+    match /projects-{category}/{projectId} {
+      allow read: if request.auth != null && 
+                     isValidCategory(category) &&
+                     hasCategoryAccess(category);
+      
+      allow create: if request.auth != null && 
+                       isValidCategory(category) &&
+                       hasCategoryAccess(category) &&
+                       getCategory(request.resource.data) == category &&
+                       hasValidCategory(request.resource.data) &&
+                       request.resource.data.CreatedBy == request.auth.uid;
+      
+      allow update: if request.auth != null && 
+                       isValidCategory(category) &&
+                       hasCategoryAccess(category) &&
+                       getCategory(request.resource.data) == category &&
+                       canEdit(resource.data) &&
+                       // Prevent category changes
+                       getCategory(request.resource.data) == getCategory(resource.data);
+      
+      allow delete: if request.auth != null && 
+                       isValidCategory(category) &&
+                       hasCategoryAccess(category) &&
+                       canEdit(resource.data);
+    }
+    
+    // Formulations collections (category-specific)
+    match /formulations-{category}/{formulationId} {
+      allow read: if request.auth != null && 
+                     isValidCategory(category) &&
+                     hasCategoryAccess(category);
+      
+      allow create: if request.auth != null && 
+                       isValidCategory(category) &&
+                       hasCategoryAccess(category) &&
+                       getCategory(request.resource.data) == category &&
+                       hasValidCategory(request.resource.data) &&
+                       formulationIngredientCategoryMatch(request.resource.data) &&
+                       request.resource.data.CreatedBy == request.auth.uid;
+      
+      allow update: if request.auth != null && 
+                       isValidCategory(category) &&
+                       hasCategoryAccess(category) &&
+                       getCategory(request.resource.data) == category &&
+                       formulationIngredientCategoryMatch(request.resource.data) &&
+                       canEdit(resource.data) &&
+                       // Prevent category changes
+                       getCategory(request.resource.data) == getCategory(resource.data);
+      
+      allow delete: if request.auth != null && 
+                       isValidCategory(category) &&
+                       hasCategoryAccess(category) &&
+                       canEdit(resource.data);
+    }
+    
+    // Blocks collections (category-specific)
+    match /blocks-{category}/{blockId} {
+      allow read: if request.auth != null && 
+                     isValidCategory(category) &&
+                     hasCategoryAccess(category);
+      
+      allow create: if request.auth != null && 
+                       isValidCategory(category) &&
+                       hasCategoryAccess(category) &&
+                       getCategory(request.resource.data) == category &&
+                       hasValidCategory(request.resource.data) &&
+                       request.resource.data.CreatedBy == request.auth.uid;
+      
+      allow update: if request.auth != null && 
+                       isValidCategory(category) &&
+                       hasCategoryAccess(category) &&
+                       getCategory(request.resource.data) == category &&
+                       canEdit(resource.data) &&
+                       // Prevent category changes
+                       getCategory(request.resource.data) == getCategory(resource.data);
+      
+      allow delete: if request.auth != null && 
+                       isValidCategory(category) &&
+                       hasCategoryAccess(category) &&
+                       canEdit(resource.data);
+    }
+    
+    // ═══ SHARED COLLECTIONS ════════════════════════════════════════════════════
+    
+    // Ingredients (shared across categories but with category metadata)
+    match /ingredients/{ingredientId} {
+      allow read: if request.auth != null;
+      
+      allow create: if request.auth != null && 
+                       request.resource.data.CreatedBy == request.auth.uid &&
+                       // If category is specified, validate it
+                       (!('Category' in request.resource.data) || 
+                        (isValidCategory(getCategory(request.resource.data)) && 
+                         hasCategoryAccess(getCategory(request.resource.data))));
+      
+      allow update: if request.auth != null && 
+                       canEdit(resource.data) &&
+                       // If category is specified, validate it and prevent changes
+                       (!('Category' in request.resource.data) || 
+                        (isValidCategory(getCategory(request.resource.data)) && 
+                         hasCategoryAccess(getCategory(request.resource.data)) &&
+                         (!('Category' in resource.data) || 
+                          getCategory(request.resource.data) == getCategory(resource.data))));
+      
+      allow delete: if request.auth != null && canEdit(resource.data);
+    }
+    
+    // Organizations (not category-specific)
+    match /organisations/{organisationId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && 
+                       request.resource.data.CreatedBy == request.auth.uid;
+      allow update: if request.auth != null && canEdit(resource.data);
+      allow delete: if request.auth != null && canEdit(resource.data);
+    }
+    
+    // ═══ AI AND EMBEDDINGS ═════════════════════════════════════════════════════
+    
+    // Embeddings (category-specific for AI isolation)
+    match /embeddingsAll/{embeddingId} {
+      allow read: if request.auth != null;
+      
+      allow create: if request.auth != null && 
+                       request.resource.data.CreatedBy == request.auth.uid &&
+                       // Embeddings must have valid category for AI isolation
+                       hasValidCategory(request.resource.data) &&
+                       hasCategoryAccess(getCategory(request.resource.data));
+      
+      allow update: if request.auth != null && 
+                       canEdit(resource.data) &&
+                       hasValidCategory(request.resource.data) &&
+                       hasCategoryAccess(getCategory(request.resource.data)) &&
+                       // Prevent category changes
+                       getCategory(request.resource.data) == getCategory(resource.data);
+      
+      allow delete: if request.auth != null && canEdit(resource.data);
+    }
+    
+    // AI Chat Sessions (category-specific)
+    match /aiChatSessions/{sessionId} {
+      allow read: if request.auth != null && 
+                     (resource.data.CreatedBy == request.auth.uid || isAdmin());
+      
+      allow create: if request.auth != null && 
+                       request.resource.data.CreatedBy == request.auth.uid &&
+                       // AI sessions should have category for isolation
+                       hasValidCategory(request.resource.data) &&
+                       hasCategoryAccess(getCategory(request.resource.data));
+      
+      allow update: if request.auth != null && 
+                       resource.data.CreatedBy == request.auth.uid &&
+                       hasValidCategory(request.resource.data) &&
+                       hasCategoryAccess(getCategory(request.resource.data)) &&
+                       // Prevent category changes
+                       getCategory(request.resource.data) == getCategory(resource.data);
+      
+      allow delete: if request.auth != null && 
+                       (resource.data.CreatedBy == request.auth.uid || isAdmin());
+    }
+    
+    // ═══ LEGACY COLLECTIONS (for backward compatibility) ══════════════════════
+    
+    // Legacy trials collection (should redirect to category-specific collections)
+    match /trials/{trialId} {
+      allow read: if request.auth != null;
+      // Prevent writes to encourage migration to category-specific collections
+      allow write: if false;
+    }
+    
+    // Legacy projects collection
+    match /projects/{projectId} {
+      allow read: if request.auth != null;
+      // Prevent writes to encourage migration to category-specific collections
+      allow write: if false;
+    }
+    
+    // Legacy formulations collection
+    match /formulations/{formulationId} {
+      allow read: if request.auth != null;
+      // Prevent writes to encourage migration to category-specific collections
+      allow write: if false;
+    }
+    
+    // ═══ CATCH-ALL (DENY BY DEFAULT) ══════════════════════════════════════════
+    
+    // Deny all other document access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

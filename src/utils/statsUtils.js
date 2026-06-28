@@ -173,7 +173,24 @@ function computeAnovaInternal(treatments, design) {
  * Returns complete ANOVA table and significance test
  */
 export function performANOVA(trials, options = {}) {
-  const { metric = 'controlPct', daa = null, species = null, design = 'RCBD', excludeOutliers = false } = options;
+  const { metric = 'controlPct', daa = null, species = null, design = 'RCBD', excludeOutliers = false, activeCategory = null } = options;
+  
+  // Category validation: Ensure all trials belong to the same category when activeCategory is specified
+  if (activeCategory) {
+    const categoryViolations = trials.filter(trial => {
+      const trialCategory = trial.Category || 'herbicide';
+      return trialCategory !== activeCategory;
+    });
+    
+    if (categoryViolations.length > 0) {
+      const violatedCategories = [...new Set(categoryViolations.map(t => t.Category || 'herbicide'))];
+      return { 
+        error: `Category boundary violation: Expected only '${activeCategory}' category trials, but found trials from categories: ${violatedCategories.join(', ')}`,
+        fStatistic: null, 
+        pValue: null 
+      };
+    }
+  }
   
   // Group trials by treatment
   const treatments = {};
@@ -378,7 +395,24 @@ export function performANOVA(trials, options = {}) {
 }
 
 export function performTukeyHSD(trials, options = {}) {
-  const { metric = 'controlPct', alpha = 0.05, anova: precalculatedAnova = null } = options;
+  const { metric = 'controlPct', alpha = 0.05, anova: precalculatedAnova = null, activeCategory = null } = options;
+  
+  // Category validation: Ensure all trials belong to the same category when activeCategory is specified
+  if (activeCategory) {
+    const categoryViolations = trials.filter(trial => {
+      const trialCategory = trial.Category || 'herbicide';
+      return trialCategory !== activeCategory;
+    });
+    
+    if (categoryViolations.length > 0) {
+      const violatedCategories = [...new Set(categoryViolations.map(t => t.Category || 'herbicide'))];
+      return { 
+        error: `Category boundary violation: Expected only '${activeCategory}' category trials, but found trials from categories: ${violatedCategories.join(', ')}`,
+        fStatistic: null, 
+        pValue: null 
+      };
+    }
+  }
   
   const anova = precalculatedAnova || performANOVA(trials, options);
   if (anova.error) return anova;
@@ -445,7 +479,24 @@ export function performTukeyHSD(trials, options = {}) {
  * Dunnett's Test - Compare all treatments vs control (adjusted for unequal sample sizes)
  */
 export function performDunnettTest(trials, controlName, options = {}) {
-  const { metric = 'controlPct', alpha = 0.05 } = options;
+  const { metric = 'controlPct', alpha = 0.05, activeCategory = null } = options;
+  
+  // Category validation: Ensure all trials belong to the same category when activeCategory is specified
+  if (activeCategory) {
+    const categoryViolations = trials.filter(trial => {
+      const trialCategory = trial.Category || 'herbicide';
+      return trialCategory !== activeCategory;
+    });
+    
+    if (categoryViolations.length > 0) {
+      const violatedCategories = [...new Set(categoryViolations.map(t => t.Category || 'herbicide'))];
+      return { 
+        error: `Category boundary violation: Expected only '${activeCategory}' category trials, but found trials from categories: ${violatedCategories.join(', ')}`,
+        fStatistic: null, 
+        pValue: null 
+      };
+    }
+  }
   
   const anova = performANOVA(trials, options);
   if (anova.error) return anova;
@@ -816,7 +867,24 @@ function approximatePValue(f, df1, df2) {
 }
 
 export function performDuncanMRT(trials, options = {}) {
-  const { metric = 'controlPct', alpha = 0.05 } = options;
+  const { metric = 'controlPct', alpha = 0.05, activeCategory = null } = options;
+  
+  // Category validation: Ensure all trials belong to the same category when activeCategory is specified
+  if (activeCategory) {
+    const categoryViolations = trials.filter(trial => {
+      const trialCategory = trial.Category || 'herbicide';
+      return trialCategory !== activeCategory;
+    });
+    
+    if (categoryViolations.length > 0) {
+      const violatedCategories = [...new Set(categoryViolations.map(t => t.Category || 'herbicide'))];
+      return { 
+        error: `Category boundary violation: Expected only '${activeCategory}' category trials, but found trials from categories: ${violatedCategories.join(', ')}`,
+        fStatistic: null, 
+        pValue: null 
+      };
+    }
+  }
   
   const anova = performANOVA(trials, options);
   if (anova.error) return anova;
@@ -908,7 +976,24 @@ function getDuncanCriticalRange(alpha, p, df) {
 }
 
 export function performTwoWayANOVA(trials, options = {}) {
-  const { metric = 'controlPct', daa = null, species = null, excludeOutliers = false } = options;
+  const { metric = 'controlPct', daa = null, species = null, excludeOutliers = false, activeCategory = null } = options;
+  
+  // Category validation: Ensure all trials belong to the same category when activeCategory is specified
+  if (activeCategory) {
+    const categoryViolations = trials.filter(trial => {
+      const trialCategory = trial.Category || 'herbicide';
+      return trialCategory !== activeCategory;
+    });
+    
+    if (categoryViolations.length > 0) {
+      const violatedCategories = [...new Set(categoryViolations.map(t => t.Category || 'herbicide'))];
+      return { 
+        error: `Category boundary violation: Expected only '${activeCategory}' category trials, but found trials from categories: ${violatedCategories.join(', ')}`,
+        fStatistic: null, 
+        pValue: null 
+      };
+    }
+  }
   
   const rawDataPoints = [];
   
@@ -1133,7 +1218,24 @@ export function detectOutliers(values, threshold = 1.5) {
  * Adjusts primary treatment metric using a covariate (e.g. baseline or temperature).
  */
 export function performANCOVA(trials, covariateMetric, options = {}) {
-  const { metric = 'controlPct', alpha = 0.05, daa = null } = options;
+  const { metric = 'controlPct', alpha = 0.05, daa = null, activeCategory = null } = options;
+  
+  // Category validation: Ensure all trials belong to the same category when activeCategory is specified
+  if (activeCategory) {
+    const categoryViolations = trials.filter(trial => {
+      const trialCategory = trial.Category || 'herbicide';
+      return trialCategory !== activeCategory;
+    });
+    
+    if (categoryViolations.length > 0) {
+      const violatedCategories = [...new Set(categoryViolations.map(t => t.Category || 'herbicide'))];
+      return { 
+        error: `Category boundary violation: Expected only '${activeCategory}' category trials, but found trials from categories: ${violatedCategories.join(', ')}`,
+        fStatistic: null, 
+        pValue: null 
+      };
+    }
+  }
   
   // Gather data pairs (Y = dependent variable, X = covariate) grouped by treatment
   const treatments = {};
@@ -1254,7 +1356,40 @@ export function performANCOVA(trials, covariateMetric, options = {}) {
  * Run combined ANOVA across multiple projects (locations) to identify Treatment, Location, and Treatment x Location effects.
  */
 export function performMetaAnalysis(projects, allTrials, options = {}) {
-  const { metric = 'controlPct', alpha = 0.05, daa = null } = options;
+  const { metric = 'controlPct', alpha = 0.05, daa = null, activeCategory = null } = options;
+  
+  // Category validation: Ensure all projects and trials belong to the same category when activeCategory is specified
+  if (activeCategory) {
+    // Validate projects
+    const projectViolations = projects.filter(project => {
+      const projectCategory = project.Category || 'herbicide';
+      return projectCategory !== activeCategory;
+    });
+    
+    if (projectViolations.length > 0) {
+      const violatedCategories = [...new Set(projectViolations.map(p => p.Category || 'herbicide'))];
+      return { 
+        error: `Category boundary violation in projects: Expected only '${activeCategory}' category projects, but found projects from categories: ${violatedCategories.join(', ')}`,
+        fStatistic: null, 
+        pValue: null 
+      };
+    }
+    
+    // Validate trials
+    const trialViolations = allTrials.filter(trial => {
+      const trialCategory = trial.Category || 'herbicide';
+      return trialCategory !== activeCategory;
+    });
+    
+    if (trialViolations.length > 0) {
+      const violatedCategories = [...new Set(trialViolations.map(t => t.Category || 'herbicide'))];
+      return { 
+        error: `Category boundary violation in trials: Expected only '${activeCategory}' category trials, but found trials from categories: ${violatedCategories.join(', ')}`,
+        fStatistic: null, 
+        pValue: null 
+      };
+    }
+  }
 
   const dataPoints = [];
   const locations = new Set();
@@ -1457,7 +1592,25 @@ function fitRegression(X, Y) {
 // Approximate p-value from F-distribution using regularized incomplete beta function (declared in this file)
 // We declare performTypeIIIANOVA:
 export function performTypeIIIANOVA(trials, options = {}) {
-  const { metric = 'controlPct', daa = null } = options;
+  const { metric = 'controlPct', daa = null, activeCategory = null } = options;
+  
+  // Category validation: Ensure all trials belong to the same category when activeCategory is specified
+  if (activeCategory) {
+    const categoryViolations = trials.filter(trial => {
+      const trialCategory = trial.Category || 'herbicide';
+      return trialCategory !== activeCategory;
+    });
+    
+    if (categoryViolations.length > 0) {
+      const violatedCategories = [...new Set(categoryViolations.map(t => t.Category || 'herbicide'))];
+      return { 
+        error: `Category boundary violation: Expected only '${activeCategory}' category trials, but found trials from categories: ${violatedCategories.join(', ')}`,
+        fStatistic: null, 
+        pValue: null 
+      };
+    }
+  }
+  
   const data = [];
   const trtSet = new Set();
   const blockSet = new Set();
@@ -1710,7 +1863,24 @@ export function checkLeveneTest(groups) {
 }
 
 export function performKruskalWallis(trials, options = {}) {
-  const { metric = 'controlPct', daa = null } = options;
+  const { metric = 'controlPct', daa = null, activeCategory = null } = options;
+  
+  // Category validation: Ensure all trials belong to the same category when activeCategory is specified
+  if (activeCategory) {
+    const categoryViolations = trials.filter(trial => {
+      const trialCategory = trial.Category || 'herbicide';
+      return trialCategory !== activeCategory;
+    });
+    
+    if (categoryViolations.length > 0) {
+      const violatedCategories = [...new Set(categoryViolations.map(t => t.Category || 'herbicide'))];
+      return { 
+        error: `Category boundary violation: Expected only '${activeCategory}' category trials, but found trials from categories: ${violatedCategories.join(', ')}`,
+        fStatistic: null, 
+        pValue: null 
+      };
+    }
+  }
   
   const groups = {};
   trials.forEach(trial => {
@@ -2228,7 +2398,24 @@ export function transformData(values, method = 'none') {
  * @returns {Object} Split-plot ANOVA results
  */
 export function performSplitPlotANOVA(trials, options = {}) {
-  const { metric = 'controlPct', daa = null, mainFactor = 'FormulationName', subFactor = 'BlockID' } = options;
+  const { metric = 'controlPct', daa = null, mainFactor = 'FormulationName', subFactor = 'BlockID', activeCategory = null } = options;
+  
+  // Category validation: Ensure all trials belong to the same category when activeCategory is specified
+  if (activeCategory) {
+    const categoryViolations = trials.filter(trial => {
+      const trialCategory = trial.Category || 'herbicide';
+      return trialCategory !== activeCategory;
+    });
+    
+    if (categoryViolations.length > 0) {
+      const violatedCategories = [...new Set(categoryViolations.map(t => t.Category || 'herbicide'))];
+      return { 
+        error: `Category boundary violation: Expected only '${activeCategory}' category trials, but found trials from categories: ${violatedCategories.join(', ')}`,
+        fStatistic: null, 
+        pValue: null 
+      };
+    }
+  }
   
   // Group data by main plot and sub-plot
   const mainPlots = {};
@@ -2345,7 +2532,24 @@ export function performSplitPlotANOVA(trials, options = {}) {
  * @returns {Object} Repeated measures results
  */
 export function performRepeatedMeasuresANOVA(trials, options = {}) {
-  const { metric = 'controlPct', timePoints = null } = options;
+  const { metric = 'controlPct', timePoints = null, activeCategory = null } = options;
+  
+  // Category validation: Ensure all trials belong to the same category when activeCategory is specified
+  if (activeCategory) {
+    const categoryViolations = trials.filter(trial => {
+      const trialCategory = trial.Category || 'herbicide';
+      return trialCategory !== activeCategory;
+    });
+    
+    if (categoryViolations.length > 0) {
+      const violatedCategories = [...new Set(categoryViolations.map(t => t.Category || 'herbicide'))];
+      return { 
+        error: `Category boundary violation: Expected only '${activeCategory}' category trials, but found trials from categories: ${violatedCategories.join(', ')}`,
+        fStatistic: null, 
+        pValue: null 
+      };
+    }
+  }
   
   // Group by treatment and time
   const treatmentTimeData = {};
@@ -2507,8 +2711,26 @@ export function performMixedModel(trials, options = {}) {
     metric = 'controlPct', 
     fixedEffect = 'FormulationName', 
     randomEffect = 'BlockID',
-    daa = null 
+    daa = null,
+    activeCategory = null 
   } = options;
+  
+  // Category validation: Ensure all trials belong to the same category when activeCategory is specified
+  if (activeCategory) {
+    const categoryViolations = trials.filter(trial => {
+      const trialCategory = trial.Category || 'herbicide';
+      return trialCategory !== activeCategory;
+    });
+    
+    if (categoryViolations.length > 0) {
+      const violatedCategories = [...new Set(categoryViolations.map(t => t.Category || 'herbicide'))];
+      return { 
+        error: `Category boundary violation: Expected only '${activeCategory}' category trials, but found trials from categories: ${violatedCategories.join(', ')}`,
+        fStatistic: null, 
+        pValue: null 
+      };
+    }
+  }
   
   // Group data
   const fixedGroups = {};
@@ -2888,8 +3110,25 @@ if (typeof window !== 'undefined') {
  * @returns {Object} SNK result — same shape as performTukeyHSD
  */
 export function performSNKTest(trials, options = {}) {
-  const { metric = 'controlPct', alpha = 0.05, anova: precalculatedAnova = null } = options;
-
+  const { metric = 'controlPct', alpha = 0.05, anova: precalculatedAnova = null, activeCategory = null } = options;
+  
+  // Category validation: Ensure all trials belong to the same category when activeCategory is specified
+  if (activeCategory) {
+    const categoryViolations = trials.filter(trial => {
+      const trialCategory = trial.Category || 'herbicide';
+      return trialCategory !== activeCategory;
+    });
+    
+    if (categoryViolations.length > 0) {
+      const violatedCategories = [...new Set(categoryViolations.map(t => t.Category || 'herbicide'))];
+      return { 
+        error: `Category boundary violation: Expected only '${activeCategory}' category trials, but found trials from categories: ${violatedCategories.join(', ')}`,
+        fStatistic: null, 
+        pValue: null 
+      };
+    }
+  }
+  
   const anova = precalculatedAnova || performANOVA(trials, options);
   if (anova.error) return anova;
 
@@ -2982,8 +3221,25 @@ if (typeof window !== 'undefined') {
  * @returns {Object} Bonferroni result with comparisons[], groups (CLD), adjustedAlpha, m, advisory
  */
 export function performBonferroniTest(trials, options = {}) {
-  const { metric = 'controlPct', alpha = 0.05, anova: precalculatedAnova = null } = options;
-
+  const { metric = 'controlPct', alpha = 0.05, anova: precalculatedAnova = null, activeCategory = null } = options;
+  
+  // Category validation: Ensure all trials belong to the same category when activeCategory is specified
+  if (activeCategory) {
+    const categoryViolations = trials.filter(trial => {
+      const trialCategory = trial.Category || 'herbicide';
+      return trialCategory !== activeCategory;
+    });
+    
+    if (categoryViolations.length > 0) {
+      const violatedCategories = [...new Set(categoryViolations.map(t => t.Category || 'herbicide'))];
+      return { 
+        error: `Category boundary violation: Expected only '${activeCategory}' category trials, but found trials from categories: ${violatedCategories.join(', ')}`,
+        fStatistic: null, 
+        pValue: null 
+      };
+    }
+  }
+  
   const anova = precalculatedAnova || performANOVA(trials, options);
   if (anova.error) return anova;
 

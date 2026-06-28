@@ -4,7 +4,7 @@ import { useAppState } from '../hooks/useAppState.jsx';
 import { useAuth } from '../hooks/useAuth.js';
 import TopBar from '../components/TopBar.jsx';
 import Modal from '../components/Modal.jsx';
-import { addProject, deleteProject, addBlock, deleteBlock, updateProject, addBatchTrials, deleteTrial } from '../services/dataLayer.js';
+import { addProject, deleteProject, addBlock, deleteBlock, updateProject, addBatchTrials, deleteTrial, validateCategoryDataOperation } from '../services/dataLayer.js';
 import {
   Plus, Trash2, Edit, Layers, Beaker, Activity, ChevronRight, ArrowLeft,
   Lock, Unlock, Download, FileText, RefreshCw, BarChart2, Shuffle,
@@ -25,6 +25,7 @@ import { Info } from 'lucide-react';
 import { AdvancedReportGenerator } from '../services/advancedReportGenerator.js';
 import { generateTextWithAI } from '../services/multiProviderAI.js';
 import AppSharingModal from '../components/AppSharingModal.jsx';
+import CategoryValidationAlert, { showCategoryValidationToast } from '../components/CategoryValidationAlert.jsx';
 import {
   generateMasterComprehensivePdf,
   exportMasterDocx,
@@ -4497,12 +4498,30 @@ ${photosHtml}
         Narrative: '',
         CreatedBy: state.auth?.user?.id || 'system',
       };
+      
+      // Category validation before saving
+      try {
+        await validateCategoryDataOperation('addProject', payload, getAppState);
+      } catch (validationError) {
+        if (validationError.validationError) {
+          showCategoryValidationToast(validationError);
+          return; // Stop the save operation
+        }
+        console.warn('Validation check failed:', validationError);
+      }
+      
       updateState({ projects: [...(state.projects || []), payload] });
       setIsModalOpen(false);
       try {
         await addProject(payload, getAppState);
         toast('Project created');
-      } catch { toast('Failed to create project', 'error'); }
+      } catch (err) {
+        if (err.validationError) {
+          showCategoryValidationToast(err);
+        } else {
+          toast('Failed to create project', 'error');
+        }
+      }
     }
   };
 

@@ -137,10 +137,22 @@ export default function DataManagement({ onMenuClick }) {
       toast("Download permission is disabled for your account", "error");
       return;
     }
-    const data = state[key] || [];
+    let data = state[key] || [];
     if (!data.length) { toast(`No ${label} to export`, 'info'); return; }
-    exportCSV(data, `${label}_${new Date().toISOString().split('T')[0]}`);
-    toast(`${label} CSV exported`);
+    
+    // Apply category filtering for trials and projects
+    if (key === 'trials' || key === 'projects') {
+      data = data.filter(item => 
+        (item.Category === activeCategory) || (!item.Category && activeCategory === 'herbicide')
+      );
+      if (!data.length) { 
+        toast(`No ${label} for category "${activeCategory}" to export`, 'info'); 
+        return; 
+      }
+    }
+    
+    exportCSV(data, `${label}_${activeCategory}_${new Date().toISOString().split('T')[0]}`, activeCategory);
+    toast(`${label} CSV exported for category "${activeCategory}"`);
   };
 
   // ── Import ────────────────────────────────────────────────────────────────

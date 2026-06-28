@@ -567,6 +567,14 @@ export async function analyzePhoto(imageData, context = {}, onProgress = null) {
     return { success: false, error: 'Photo has no valid URL or image data. Re-upload the photo and try again.' };
   }
   imageData = resolved;
+  
+  // Validate category isolation if category is provided in context
+  if (context.category) {
+    const { validateAIAnalysisCategory } = await import('../utils/aiCategoryIsolation.js');
+    validateAIAnalysisCategory(context.category, 'multiProvider photo analysis');
+    console.log(`[MultiProvider AI] Category isolation enforced: analyzing ${context.category} photo`);
+  }
+  
   let usage = loadUsage();
   const delay = ms => new Promise(res => setTimeout(res, ms));
   let imageErrorCount = 0; // track how many providers say image is bad

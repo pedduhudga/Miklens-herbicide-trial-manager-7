@@ -357,8 +357,25 @@ export function performDoseResponseAnalysis(trials, options = {}) {
     daa = null,
     doseField = 'Dosage',
     compareBy = 'FormulationName',
-    minDose = 0
+    minDose = 0,
+    activeCategory = null
   } = options;
+  
+  // Category validation: Ensure all trials belong to the same category when activeCategory is specified
+  if (activeCategory) {
+    const categoryViolations = trials.filter(trial => {
+      const trialCategory = trial.Category || 'herbicide';
+      return trialCategory !== activeCategory;
+    });
+    
+    if (categoryViolations.length > 0) {
+      const violatedCategories = [...new Set(categoryViolations.map(t => t.Category || 'herbicide'))];
+      return { 
+        error: `Category boundary violation: Expected only '${activeCategory}' category trials, but found trials from categories: ${violatedCategories.join(', ')}`,
+        success: false
+      };
+    }
+  }
   
   // Extract dose-response data
   const treatmentData = {};

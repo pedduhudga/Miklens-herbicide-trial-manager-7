@@ -135,7 +135,27 @@ export default function Reports({ onMenuClick }) {
     const projectId = e.target.value;
     setSelectedProjectId(projectId);
     setSelectedTrialId('');
-    const projectTrials = (state.trials || []).filter(t => t.ProjectID === projectId);
+    
+    // Validate that selected project belongs to the active category
+    if (projectId) {
+      const project = (state.projects || []).find(p => p.ID === projectId);
+      if (project && project.Category && project.Category !== activeCategory) {
+        window.dispatchEvent(new CustomEvent('app:toast', { 
+          detail: { 
+            msg: `Selected project belongs to ${project.Category} category, not ${activeCategory}. Please select a project from the ${activeCategory} category.`, 
+            type: 'warning' 
+          } 
+        }));
+        setSelectedProjectId('');
+        return;
+      }
+    }
+    
+    // Ensure trials are category-filtered when populating trial selection
+    const projectTrials = (state.trials || []).filter(t => 
+      t.ProjectID === projectId && 
+      (t.Category === activeCategory || (!t.Category && activeCategory === 'herbicide'))
+    );
     setSelectedTrialIds(projectTrials.map(t => t.ID));
   };
 
@@ -154,6 +174,18 @@ export default function Reports({ onMenuClick }) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Trial data not found.', type: 'error' } }));
       return;
     }
+    
+    // Validate that the selected trial belongs to the active category
+    if (trial.Category && trial.Category !== activeCategory) {
+      window.dispatchEvent(new CustomEvent('app:toast', { 
+        detail: { 
+          msg: `Selected trial belongs to ${trial.Category} category, not ${activeCategory}. Please select a trial from the ${activeCategory} category.`, 
+          type: 'error' 
+        } 
+      }));
+      return;
+    }
+    
     await exportScientificReportAsDOC({ trialId: selectedTrialId }, state, { templateConfig: ['block-exec-summary', 'block-trial-design', 'block-table-means', 'block-env-suitability'] });
   };
 
@@ -166,13 +198,29 @@ export default function Reports({ onMenuClick }) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Please select a project first.', type: 'warning' } }));
       return;
     }
-    const projectTrials = (state.trials || []).filter(t => t.ProjectID === selectedProjectId);
+    
+    // Validate that selected project belongs to active category
+    const project = (state.projects || []).find(p => p.ID === selectedProjectId);
+    if (project && project.Category && project.Category !== activeCategory) {
+      window.dispatchEvent(new CustomEvent('app:toast', { 
+        detail: { 
+          msg: `Selected project belongs to ${project.Category} category, not ${activeCategory}. Please select a project from the ${activeCategory} category.`, 
+          type: 'error' 
+        } 
+      }));
+      return;
+    }
+    
+    // Category-filter trials before generating cards
+    const projectTrials = (state.trials || []).filter(t => 
+      t.ProjectID === selectedProjectId && 
+      (t.Category === activeCategory || (!t.Category && activeCategory === 'herbicide'))
+    );
     if (projectTrials.length === 0) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'No trials found for the selected project.', type: 'warning' } }));
       return;
     }
-    const project = (state.projects || []).find(p => p.ID === selectedProjectId);
-    await exportTrialCardsPDF(projectTrials, project);
+    await exportTrialCardsPDF(projectTrials, project, activeCategory);
   };
 
   const handleGenerateAdvancedExcel = async () => {
@@ -189,6 +237,18 @@ export default function Reports({ onMenuClick }) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Trial data not found.', type: 'error' } }));
       return;
     }
+    
+    // Validate that the selected trial belongs to the active category
+    if (trial.Category && trial.Category !== activeCategory) {
+      window.dispatchEvent(new CustomEvent('app:toast', { 
+        detail: { 
+          msg: `Selected trial belongs to ${trial.Category} category, not ${activeCategory}. Please select a trial from the ${activeCategory} category.`, 
+          type: 'error' 
+        } 
+      }));
+      return;
+    }
+    
     window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Generating Advanced Excel Report...', type: 'info' } }));
     try {
       const generator = new AdvancedReportGenerator(trial, activeCategory);
@@ -213,10 +273,31 @@ export default function Reports({ onMenuClick }) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Please select a project or trials to report on.', type: 'warning' } }));
       return;
     }
+    
+    // Validate that selected project belongs to active category
+    if (selectedProjectId) {
+      const project = (state.projects || []).find(p => p.ID === selectedProjectId);
+      if (project && project.Category && project.Category !== activeCategory) {
+        window.dispatchEvent(new CustomEvent('app:toast', { 
+          detail: { 
+            msg: `Selected project belongs to ${project.Category} category, not ${activeCategory}. Please select a project from the ${activeCategory} category.`, 
+            type: 'error' 
+          } 
+        }));
+        return;
+      }
+    }
+    
+    // Ensure trials are category-filtered for custom report generation
+    const categoryFilteredTrials = selectedTrialIds.filter(trialId => {
+      const trial = (state.trials || []).find(t => t.ID === trialId);
+      return trial && (trial.Category === activeCategory || (!trial.Category && activeCategory === 'herbicide'));
+    });
+    
     window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Generating Custom Report...', type: 'info' } }));
     try {
       const templateConfig = templateBlocks.map(b => b.id);
-      await exportScientificReportAsDOC({ projectId: selectedProjectId, trials: selectedTrialIds }, state, { templateConfig });
+      await exportScientificReportAsDOC({ projectId: selectedProjectId, trials: categoryFilteredTrials }, state, { templateConfig });
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Custom Report Generated Successfully!', type: 'success' } }));
     } catch(e) {
       console.error('Custom Report Error:', e);
@@ -233,12 +314,28 @@ export default function Reports({ onMenuClick }) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Please select a project first.', type: 'warning' } }));
       return;
     }
-    const projectTrials = (state.trials || []).filter(t => t.ProjectID === selectedProjectId);
+    
+    // Validate that selected project belongs to active category
+    const project = (state.projects || []).find(p => p.ID === selectedProjectId);
+    if (project && project.Category && project.Category !== activeCategory) {
+      window.dispatchEvent(new CustomEvent('app:toast', { 
+        detail: { 
+          msg: `Selected project belongs to ${project.Category} category, not ${activeCategory}. Please select a project from the ${activeCategory} category.`, 
+          type: 'error' 
+        } 
+      }));
+      return;
+    }
+    
+    // Apply category filtering to ensure ARM export only includes trials from the active category
+    const projectTrials = (state.trials || []).filter(t => 
+      t.ProjectID === selectedProjectId && 
+      (t.Category === activeCategory || (!t.Category && activeCategory === 'herbicide'))
+    );
     if (projectTrials.length === 0) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'No trials found for the selected project.', type: 'warning' } }));
       return;
     }
-    const project = (state.projects || []).find(p => p.ID === selectedProjectId);
     window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Generating ARM exchange file...', type: 'info' } }));
     try {
       const blob = exportToARM(projectTrials, activeCategory, project);
@@ -264,7 +361,24 @@ export default function Reports({ onMenuClick }) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Please select a project first.', type: 'warning' } }));
       return;
     }
-    const projectTrials = (state.trials || []).filter(t => t.ProjectID === selectedProjectId);
+    
+    // Validate that selected project belongs to active category
+    const project = (state.projects || []).find(p => p.ID === selectedProjectId);
+    if (project && project.Category && project.Category !== activeCategory) {
+      window.dispatchEvent(new CustomEvent('app:toast', { 
+        detail: { 
+          msg: `Selected project belongs to ${project.Category} category, not ${activeCategory}. Please select a project from the ${activeCategory} category.`, 
+          type: 'error' 
+        } 
+      }));
+      return;
+    }
+    
+    // Apply category filtering to ensure tidy CSV export only includes trials from the active category
+    const projectTrials = (state.trials || []).filter(t => 
+      t.ProjectID === selectedProjectId && 
+      (t.Category === activeCategory || (!t.Category && activeCategory === 'herbicide'))
+    );
     if (projectTrials.length === 0) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'No trials found for this project.', type: 'warning' } }));
       return;
@@ -280,7 +394,11 @@ export default function Reports({ onMenuClick }) {
 
   // ── Project Report: derived data ─────────────────────────────────────────
   const selectedProject = (state.projects || []).find(p => p.ID === projectReportProjectId) || null;
-  const projectSubTrials = (state.trials || []).filter(t => t.ProjectID === projectReportProjectId);
+  // Ensure project-specific trials are also category-filtered
+  const projectSubTrials = (state.trials || []).filter(t => 
+    t.ProjectID === projectReportProjectId && 
+    (t.Category === activeCategory || (!t.Category && activeCategory === 'herbicide'))
+  );
 
   // Build treatment group summary for preview
   const treatmentGroups = (() => {
@@ -312,7 +430,11 @@ export default function Reports({ onMenuClick }) {
       setProgressPercent(10);
       const reportData = await buildReportData(
         projectReportProjectId,
-        state.trials.filter(t => t.ProjectID === projectReportProjectId),
+        // Apply category filtering before passing trials to report data builder
+        state.trials.filter(t => 
+          t.ProjectID === projectReportProjectId && 
+          (t.Category === activeCategory || (!t.Category && activeCategory === 'herbicide'))
+        ),
         { ...reportOptions, project: selectedProject, category: activeCategory },
         state
       );
@@ -409,7 +531,23 @@ export default function Reports({ onMenuClick }) {
                   <select
                     value={projectReportProjectId}
                     onChange={e => {
-                      setProjectReportProjectId(e.target.value);
+                      const projectId = e.target.value;
+                      
+                      // Validate that selected project belongs to the active category
+                      if (projectId) {
+                        const project = (state.projects || []).find(p => p.ID === projectId);
+                        if (project && project.Category && project.Category !== activeCategory) {
+                          window.dispatchEvent(new CustomEvent('app:toast', { 
+                            detail: { 
+                              msg: `Selected project belongs to ${project.Category} category, not ${activeCategory}. Please select a project from the ${activeCategory} category.`, 
+                              type: 'warning' 
+                            } 
+                          }));
+                          return;
+                        }
+                      }
+                      
+                      setProjectReportProjectId(projectId);
                       setTreatmentPreviewOpen(false);
                     }}
                     className="w-full p-3 border border-slate-200 rounded-xl bg-slate-50 text-slate-700 text-sm outline-none focus:border-purple-500"
@@ -535,12 +673,33 @@ export default function Reports({ onMenuClick }) {
                       <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Trial</label>
                       <select
                         value={selectedTrialId}
-                        onChange={(e) => setSelectedTrialId(e.target.value)}
+                        onChange={(e) => {
+                          const trialId = e.target.value;
+                          
+                          // Validate that selected trial belongs to the active category
+                          if (trialId) {
+                            const trial = (state.trials || []).find(t => t.ID === trialId);
+                            if (trial && trial.Category && trial.Category !== activeCategory) {
+                              window.dispatchEvent(new CustomEvent('app:toast', { 
+                                detail: { 
+                                  msg: `Selected trial belongs to ${trial.Category} category, not ${activeCategory}. Please select a trial from the ${activeCategory} category.`, 
+                                  type: 'warning' 
+                                } 
+                              }));
+                              return;
+                            }
+                          }
+                          
+                          setSelectedTrialId(trialId);
+                        }}
                         className="w-full p-3 border border-slate-200 rounded-xl bg-slate-50 text-slate-700 text-sm outline-none focus:border-purple-500"
                         disabled={!selectedProjectId}
                       >
                         <option value="">-- Select a Trial --</option>
-                        {(state.trials || []).filter(t => t.ProjectID === selectedProjectId).map(t => (
+                        {(state.trials || []).filter(t => 
+                          t.ProjectID === selectedProjectId && 
+                          (t.Category === activeCategory || (!t.Category && activeCategory === 'herbicide'))
+                        ).map(t => (
                           <option key={t.ID} value={t.ID}>{t.FormulationName || t.ID} ({t.Date || 'No Date'})</option>
                         ))}
                       </select>

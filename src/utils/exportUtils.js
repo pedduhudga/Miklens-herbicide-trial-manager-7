@@ -451,8 +451,32 @@ export async function exportRegulatoryReportAsDOC(project, state, options = {}) 
     }
 }
 
-export async function exportTrialCardsPDF(trials, project) {
+export async function exportTrialCardsPDF(trials, project, category = null) {
     if (!trials || trials.length === 0) return;
+
+    // Category filtering and validation
+    if (category) {
+        const validCategories = ['herbicide', 'fungicide', 'pesticide', 'nutrition', 'biostimulant'];
+        if (!validCategories.includes(category)) {
+            console.warn(`Invalid category "${category}" provided to exportTrialCardsPDF. Proceeding without category filter.`);
+            category = null;
+        } else {
+            // Filter trials to only include those matching the specified category
+            trials = trials.filter(t => 
+                (t.Category === category) || (!t.Category && category === 'herbicide')
+            );
+            
+            // Validate project category if provided
+            if (project && project.Category && project.Category !== category) {
+                console.warn(`Project category "${project.Category}" does not match specified category "${category}". Consider updating project category.`);
+            }
+            
+            if (trials.length === 0) {
+                console.warn(`No trials found for category "${category}". Export cancelled.`);
+                return;
+            }
+        }
+    }
 
     // Simple pdf generation logic equivalent
     const doc = new jsPDF();
@@ -462,8 +486,8 @@ export async function exportTrialCardsPDF(trials, project) {
     doc.text('Trial Plot Cards', 20, y);
     y += 10;
 
-    const category = project?.Category || trials[0]?.Category || 'herbicide';
-    const catConfig = getCategoryConfig(category);
+    const trialCategory = category || project?.Category || trials[0]?.Category || 'herbicide';
+    const catConfig = getCategoryConfig(trialCategory);
     const targetLabel = catConfig.targetLabel || 'Target';
     const targetField = catConfig.targetField || 'WeedSpecies';
 
@@ -668,8 +692,30 @@ export async function exportTrialToPPTX(trial, options = {}) {
     window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'PowerPoint exported successfully!', type: 'success' } }));
 }
 
-export function exportCSV(data, filename) {
+export function exportCSV(data, filename, category = null) {
     if (!data || !data.length) return;
+    
+    // Category validation and filtering for data collections
+    if (category) {
+        const validCategories = ['herbicide', 'fungicide', 'pesticide', 'nutrition', 'biostimulant'];
+        if (!validCategories.includes(category)) {
+            console.warn(`Invalid category "${category}" provided to exportCSV. Proceeding without category filter.`);
+            category = null;
+        } else if (data[0] && typeof data[0] === 'object') {
+            // If data has Category field, filter by it
+            if ('Category' in data[0]) {
+                data = data.filter(item => 
+                    (item.Category === category) || (!item.Category && category === 'herbicide')
+                );
+                
+                if (data.length === 0) {
+                    console.warn(`No data found for category "${category}". Export cancelled.`);
+                    return;
+                }
+            }
+        }
+    }
+    
     const replacer = (key, value) => value === null ? '' : value;
     const header = Object.keys(data[0]);
     const csv = [
@@ -739,8 +785,27 @@ export function importCSV(file, callback) {
     reader.readAsText(file);
 }
 
-export async function exportZIP(trials) {
+export async function exportZIP(trials, category = null) {
     if(!trials || trials.length === 0) return;
+    
+    // Category filtering and validation
+    if (category) {
+        const validCategories = ['herbicide', 'fungicide', 'pesticide', 'nutrition', 'biostimulant'];
+        if (!validCategories.includes(category)) {
+            console.warn(`Invalid category "${category}" provided to exportZIP. Proceeding without category filter.`);
+            category = null;
+        } else {
+            // Filter trials to only include those matching the specified category
+            trials = trials.filter(t => 
+                (t.Category === category) || (!t.Category && category === 'herbicide')
+            );
+            
+            if (trials.length === 0) {
+                console.warn(`No trials found for category "${category}". Export cancelled.`);
+                return;
+            }
+        }
+    }
 
     const zip = new JSZip();
 

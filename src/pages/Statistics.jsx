@@ -27,7 +27,9 @@ export default function Statistics() {
     return (state.projects || []).filter(p => p.Category === activeCategory || (!p.Category && activeCategory === 'herbicide'));
   }, [state.projects, activeCategory]);
   
-  const { trials } = state;
+  const trials = useMemo(() => {
+    return (state.trials || []).filter(t => t.Category === activeCategory || (!t.Category && activeCategory === 'herbicide'));
+  }, [state.trials, activeCategory]);
   
   const [selectedProject, setSelectedProject] = useState('');
   const [selectedMetaProjects, setSelectedMetaProjects] = useState([]);
@@ -117,7 +119,8 @@ export default function Statistics() {
         alpha,
         daa: daa ? parseInt(daa) : null,
         design: activeProject?.Design || 'RCBD',
-        excludeOutliers
+        excludeOutliers,
+        activeCategory
       };
       
       let result;
@@ -258,6 +261,7 @@ export default function Statistics() {
     setExportingPDF(true);
     try {
       await exportStatsPDF(results, {
+        category: activeCategory,
         projectName: activeProject?.Name || 'Project',
         metric,
         alpha,
@@ -275,6 +279,7 @@ export default function Statistics() {
     setExportingExcel(true);
     try {
       await exportStatsExcel(results, {
+        category: activeCategory,
         projectName: activeProject?.Name || 'Project',
         metric,
         alpha,

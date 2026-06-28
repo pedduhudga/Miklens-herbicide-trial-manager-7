@@ -30,7 +30,11 @@ import {
   ToggleLeft,
   ToggleRight,
   AlertTriangle,
+  FileSearch,
+  Zap,
 } from "lucide-react";
+import LegacyDataMigrationModal from "../components/LegacyDataMigrationModal.jsx";
+import { quickMigrationAnalysis } from "../services/legacyMigrationService.js";
 
 const QR_FIELDS = [
   "FormulationName",
@@ -100,6 +104,11 @@ export default function Settings({ onMenuClick }) {
     CONFLICTS: 0,
   });
 
+  // Legacy Data Migration state
+  const [migrationModalOpen, setMigrationModalOpen] = useState(false);
+  const [migrationAnalysis, setMigrationAnalysis] = useState(null);
+  const [loadingMigrationAnalysis, setLoadingMigrationAnalysis] = useState(false);
+
   useEffect(() => {
     let active = true;
     async function loadStats() {
@@ -113,10 +122,31 @@ export default function Settings({ onMenuClick }) {
       }
     }
     loadStats();
+    
+    // Load migration analysis
+    async function loadMigrationAnalysis() {
+      if (!isAdminUser) return; // Only admins can see migration analysis
+      
+      try {
+        setLoadingMigrationAnalysis(true);
+        const analysis = await quickMigrationAnalysis(getAppState);
+        if (active) {
+          setMigrationAnalysis(analysis);
+        }
+      } catch (err) {
+        console.error("Failed to load migration analysis:", err);
+      } finally {
+        if (active) {
+          setLoadingMigrationAnalysis(false);
+        }
+      }
+    }
+    loadMigrationAnalysis();
+    
     return () => {
       active = false;
     };
-  }, []);
+  }, [isAdminUser, getAppState]);
 
   // Multi-provider AI keys from localStorage
   const [aiKeys, setAiKeys] = useState({
@@ -530,6 +560,24 @@ export default function Settings({ onMenuClick }) {
       } catch (err) {
         toast("Firebase init error: " + err.message, "error");
       }
+    }
+  };
+
+  // ── Legacy Data Migration ────────────────────────────────────────────────
+  const handleOpenMigrationModal = () => {
+    setMigrationModalOpen(true);
+  };
+
+  const handleMigrationApplied = async (appliedSuggestions) => {
+    // Refresh migration analysis after applying changes
+    try {
+      setLoadingMigrationAnalysis(true);
+      const analysis = await quickMigrationAnalysis(getAppState);
+      setMigrationAnalysis(analysis);
+    } catch (err) {
+      console.error("Failed to refresh migration analysis:", err);
+    } finally {
+      setLoadingMigrationAnalysis(false);
     }
   };
 
@@ -1453,6 +1501,113 @@ export default function Settings({ onMenuClick }) {
           </div>
         </div>
 
+        {/* ── Legacy Data Migration ── */}
+        {isAdminUser && (
+          <div className="bg-white p-6 rounded-lg shadow space-y-4">
+            <h2 className="text-xl font-semibold text-gray-700 mb-1 flex items-center gap-2">
+              <FileSearch className="w-5 h-5 text-blue-500" /> Legacy Data Migration
+            </h2>
+            <p className="text-sm text-gray-600">
+              Analyze and migrate legacy records that lack proper category assignments. 
+              Prevents all uncategorized data from defaulting to 'herbicide' category.
+            </p>
+
+            {loadingMigrationAnalysis ? (
+              <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg">
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                <span className="text-sm text-gray-600">Analyzing legacy data...</span>
+              </div>
+            ) : migrationAnalysis?.hasLegacyData ? (
+              <div className="space-y-4">
+                {/* Migration Status Cards */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <span className="block text-red-500 text-xs font-semibold uppercase">Legacy Records</span>
+                    <span className="text-lg font-bold text-red-600">{migrationAnalysis.legacyRecordCount}</span>
+                  </div>
+                  <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                    <span className="block text-green-600 text-xs font-semibold uppercase">High Confidence</span>
+                    <span className="text-lg font-bold text-green-600">{migrationAnalysis.highConfidenceCount}</span>
+                  </div>
+                  <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                    <span className="block text-yellow-600 text-xs font-semibold uppercase">Needs Review</span>
+                    <span className="text-lg font-bold text-yellow-600">{migrationAnalysis.needsReviewCount}</span>
+                  </div>
+                  <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                    <span className="block text-blue-600 text-xs font-semibold uppercase">Collections</span>
+                    <span className="text-lg font-bold text-blue-600">{migrationAnalysis.collectionsAffected.length}</span>
+                  </div>
+                </div>
+
+                {/* Migration Actions */}
+                <div className="flex gap-3 flex-wrap">
+                  <button
+                    onClick={handleOpenMigrationModal}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition flex items-center gap-2"
+                  >
+                    <FileSearch className="w-4 h-4" />
+                    Open Migration Tool
+                  </button>
+                  
+                  {migrationAnalysis.highConfidenceCount > 0 && (
+                    <button
+                      onClick={async () => {
+                        if (!window.confirm(`Auto-migrate ${migrationAnalysis.highConfidenceCount} high-confidence records?`)) return;
+                        
+                        try {
+                          const { LegacyMigrationService } = await import('../services/legacyMigrationService.js');
+                          const result = await LegacyMigrationService.performAutoMigration(getAppState, 'high');
+                          
+                          if (result.success) {
+                            toast(`Successfully migrated ${result.applied} records`, 'success');
+                            handleMigrationApplied([]);
+                          } else {
+                            toast(`Migration failed: ${result.error}`, 'error');
+                          }
+                        } catch (error) {
+                          toast(`Migration error: ${error.message}`, 'error');
+                        }
+                      }}
+                      className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition flex items-center gap-2"
+                    >
+                      <Zap className="w-4 h-4" />
+                      Auto-Migrate ({migrationAnalysis.highConfidenceCount})
+                    </button>
+                  )}
+                </div>
+
+                {/* Affected Collections */}
+                {migrationAnalysis.collectionsAffected.length > 0 && (
+                  <div className="p-4 bg-gray-50 rounded-lg">
+                    <span className="text-sm font-medium text-gray-700">Affected Collections: </span>
+                    <span className="text-sm text-gray-600">
+                      {migrationAnalysis.collectionsAffected.join(', ')}
+                    </span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 p-4 bg-green-50 border border-green-200 rounded-lg">
+                <CheckCircle className="w-5 h-5 text-green-600" />
+                <div className="text-sm">
+                  <span className="font-medium text-green-800">No legacy data found.</span>
+                  <span className="text-green-700"> All records have proper category assignments.</span>
+                </div>
+              </div>
+            )}
+
+            {migrationAnalysis?.error && (
+              <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+                <div className="flex items-center gap-2 text-red-600">
+                  <AlertTriangle className="w-5 h-5" />
+                  <span className="font-medium">Analysis Error</span>
+                </div>
+                <p className="text-red-700 mt-1 text-sm">{migrationAnalysis.error}</p>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
           <h3 className="font-bold text-slate-800 mb-3 flex items-center gap-2">
             <Info className="w-4 h-4 text-slate-500" /> Account
@@ -1506,6 +1661,15 @@ export default function Settings({ onMenuClick }) {
           {new Date().getFullYear()}
         </div>
       </div>
+
+      {/* Legacy Data Migration Modal */}
+      <LegacyDataMigrationModal
+        isOpen={migrationModalOpen}
+        onClose={() => setMigrationModalOpen(false)}
+        onApplyMigration={handleMigrationApplied}
+        state={state}
+        updateState={updateState}
+      />
     </div>
   );
 }

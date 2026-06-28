@@ -109,6 +109,21 @@ export async function exportStatsPDF(results, options = {}) {
   // Guard: silently return when there is an error in results
   if (!results || results.error) return;
 
+  // Category validation
+  const { category } = options;
+  if (category) {
+    const validCategories = ['herbicide', 'fungicide', 'pesticide', 'nutrition', 'biostimulant'];
+    if (!validCategories.includes(category)) {
+      console.warn(`Invalid category "${category}" provided to exportStatsPDF. Proceeding without category-specific formatting.`);
+    } else {
+      // Validate that results are for the specified category
+      if (results.metadata && results.metadata.category && results.metadata.category !== category) {
+        console.warn(`Results category "${results.metadata.category}" does not match specified category "${category}".`);
+        return;
+      }
+    }
+  }
+
   const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4', compress: true });
   const pw  = doc.internal.pageSize.getWidth();
   const ph  = doc.internal.pageSize.getHeight();
@@ -486,6 +501,21 @@ export async function exportStatsPDF(results, options = {}) {
  */
 export async function exportStatsExcel(results, options = {}) {
   if (!results || results.error) return;
+
+  // Category validation
+  const { category } = options;
+  if (category) {
+    const validCategories = ['herbicide', 'fungicide', 'pesticide', 'nutrition', 'biostimulant'];
+    if (!validCategories.includes(category)) {
+      console.warn(`Invalid category "${category}" provided to exportStatsExcel. Proceeding without category-specific formatting.`);
+    } else {
+      // Validate that results are for the specified category
+      if (results.metadata && results.metadata.category && results.metadata.category !== category) {
+        console.warn(`Results category "${results.metadata.category}" does not match specified category "${category}".`);
+        return;
+      }
+    }
+  }
 
   // Lazy-load ExcelJS to keep the module lightweight when not used
   let ExcelJS;

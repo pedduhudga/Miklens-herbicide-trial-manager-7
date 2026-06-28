@@ -1951,13 +1951,47 @@ export async function generatePpt(trial) {
 // ═════════════════════════════════════════════════════════════════════════════
 //  EXPORT 4 — exportToCSV  (observations spreadsheet — same as legacy)
 // ═════════════════════════════════════════════════════════════════════════════
-export function exportToCSV(trial) {
-  exportMultipleTrialsToCSV([trial]);
+export function exportToCSV(trial, category = null) {
+  // Category validation for single trial export
+  if (category && trial) {
+    const validCategories = ['herbicide', 'fungicide', 'pesticide', 'nutrition', 'biostimulant'];
+    if (!validCategories.includes(category)) {
+      console.warn(`Invalid category "${category}" provided to exportToCSV. Proceeding without category validation.`);
+    } else {
+      // Validate that the trial belongs to the specified category
+      const trialCategory = trial.Category || 'herbicide';
+      if (trialCategory !== category) {
+        console.warn(`Trial category "${trialCategory}" does not match specified category "${category}". Export cancelled.`);
+        return;
+      }
+    }
+  }
+  
+  exportMultipleTrialsToCSV([trial], category);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-export function exportMultipleTrialsToCSV(trials) {
+export function exportMultipleTrialsToCSV(trials, category = null) {
   if (!trials || !trials.length) return;
+  
+  // Category filtering and validation
+  if (category) {
+    const validCategories = ['herbicide', 'fungicide', 'pesticide', 'nutrition', 'biostimulant'];
+    if (!validCategories.includes(category)) {
+      console.warn(`Invalid category "${category}" provided to exportMultipleTrialsToCSV. Proceeding without category filter.`);
+      category = null;
+    } else {
+      // Filter trials to only include those matching the specified category
+      trials = trials.filter(t => 
+        (t.Category === category) || (!t.Category && category === 'herbicide')
+      );
+      
+      if (trials.length === 0) {
+        console.warn(`No trials found for category "${category}". Export cancelled.`);
+        return;
+      }
+    }
+  }
 
   const firstTrial = trials[0];
   const repConfig = getReportConfig(firstTrial);
@@ -2191,8 +2225,33 @@ export function exportMultipleTrialsToCSV(trials) {
 // ═════════════════════════════════════════════════════════════════════════════
 //  EXPORT 5 — exportAllTrialsCSV  (all trials summary)
 // ═════════════════════════════════════════════════════════════════════════════
-export function exportAllTrialsCSV(trials, projects = []) {
+export function exportAllTrialsCSV(trials, projects = [], category = null) {
   if (!trials || !trials.length) return;
+  
+  // Category filtering and validation
+  if (category) {
+    const validCategories = ['herbicide', 'fungicide', 'pesticide', 'nutrition', 'biostimulant'];
+    if (!validCategories.includes(category)) {
+      console.warn(`Invalid category "${category}" provided to exportAllTrialsCSV. Proceeding without category filter.`);
+      category = null;
+    } else {
+      // Filter trials to only include those matching the specified category
+      trials = trials.filter(t => 
+        (t.Category === category) || (!t.Category && category === 'herbicide')
+      );
+      
+      // Filter projects to only include those matching the specified category
+      projects = projects.filter(p => 
+        (p.Category === category) || (!p.Category && category === 'herbicide')
+      );
+      
+      if (trials.length === 0) {
+        console.warn(`No trials found for category "${category}". Export cancelled.`);
+        return;
+      }
+    }
+  }
+  
   const firstTrial = trials[0];
   const repConfig = getReportConfig(firstTrial);
   const allSameCategory = trials.every(t => (t.Category || 'herbicide') === (firstTrial.Category || 'herbicide'));

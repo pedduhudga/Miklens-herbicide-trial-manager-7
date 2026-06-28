@@ -3,7 +3,7 @@ import { useAppState } from '../hooks/useAppState.jsx';
 import TopBar from '../components/TopBar.jsx';
 import { safeJsonParse } from '../utils/helpers.js';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, Loader2, Activity, ArrowLeft, CheckCircle, X, Download, FileText, Table, LineChart, Cpu, DollarSign, Cloud, Compass } from 'lucide-react';
+import { Sparkles, Loader2, Activity, ArrowLeft, CheckCircle, X, Download, FileText, Table, LineChart, Cpu, DollarSign, Cloud, Compass, AlertTriangle } from 'lucide-react';
 import { exportComparisonCsv, exportComparisonHtml, exportComparisonPdf } from '../services/compareReports.js';
 import { generateTextWithAI } from '../services/multiProviderAI.js';
 import { useAuth } from '../hooks/useAuth.js';
@@ -35,10 +35,47 @@ export default function CompareTrials({ onMenuClick }) {
   const formulations = state.formulations || [];
   const ingredientsList = state.ingredients || [];
 
+  // Category validation for selected trials
+  const categoryValidation = useMemo(() => {
+    if (selectedTrials.length === 0) return { isValid: true, warning: null };
+    
+    // Get all unique categories from selected trials
+    const categories = [...new Set(selectedTrials.map(t => t.Category || 'herbicide'))];
+    
+    // Check if all trials belong to the same category
+    const isValid = categories.length === 1;
+    
+    // Check if the category matches the active category
+    const matchesActiveCategory = categories.length === 1 && categories[0] === activeCategory;
+    
+    let warning = null;
+    if (!isValid) {
+      const categoryList = categories.join(', ');
+      warning = {
+        type: 'error',
+        title: 'Cross-Category Comparison Detected',
+        message: `Selected trials belong to different categories: ${categoryList}. Only trials from the same category can be compared.`
+      };
+    } else if (!matchesActiveCategory) {
+      warning = {
+        type: 'warning', 
+        title: 'Category Mismatch',
+        message: `Selected trials are from ${categories[0]} category but current active category is ${activeCategory}. Switch to ${categories[0]} category or reselect trials.`
+      };
+    }
+    
+    return { isValid: matchesActiveCategory, warning, categories };
+  }, [selectedTrials, activeCategory]);
+
+  // Filter selected trials to only include those from active category
+  const categoryFilteredTrials = useMemo(() => {
+    return selectedTrials.filter(t => (t.Category || 'herbicide') === activeCategory);
+  }, [selectedTrials, activeCategory]);
+
   // Automatically fetch missing weather parameters dynamically when mounting
   useEffect(() => {
     if (isViewer) return;
-    selectedTrials.forEach(async (t) => {
+    categoryFilteredTrials.forEach(async (t) => {
       const weatherData = safeJsonParse(t.WeatherJSON, null);
       const hasAvgWeather = t.Temperature || t.Humidity || t.Windspeed || t.Rain || (weatherData && Object.keys(weatherData).length > 0);
       if (!hasAvgWeather && t.Lat && t.Lon && t.Date) {
@@ -80,14 +117,20 @@ export default function CompareTrials({ onMenuClick }) {
         }
       }
     });
-  }, [selectedTrials, state.trials, updateState, getAppState]);
+  }, [categoryFilteredTrials, state.trials, updateState, getAppState]);
 
   const removeFromComparison = (id) => {
     updateState({ selectedTrials: selectedTrials.filter(t => t.ID !== id) });
   };
 
-  // Build per-trial efficacy series and calculate parameters
-  const trialSeries = useMemo(() => selectedTrials.map(t => {
+  // Function to remove cross-category trials
+  const removeCrossCategoryTrials = () => {
+    const filteredTrials = selectedTrials.filter(t => (t.Category || 'herbicide') === activeCategory);
+    updateState({ selectedTrials: filteredTrials });
+  };
+
+  // Build per-trial efficacy series and calculate parameters - using category filtered trials
+  const trialSeries = useMemo(() => categoryFilteredTrials.map(t => {
     const eff = safeJsonParse(t.EfficacyDataJSON, []).sort((a, b) => (a.daa ?? 0) - (b.daa ?? 0));
     const baselineValue = eff.length > 0 ? (Number(eff[0][primaryObsField]) || 0) : null;
     
@@ -168,7 +211,7 @@ export default function CompareTrials({ onMenuClick }) {
       baselineCover: baselineValue,
       finalWce: finalEfficacy,
     };
-  }), [selectedTrials, formulations, ingredientsList, primaryObsField, activeCategory]);
+  }), [categoryFilteredTrials, formulations, ingredientsList, primaryObsField, activeCategory]);
 
   // Collect all unique DAA points across all trials
   const allDaa = useMemo(() => {
@@ -290,7 +333,7 @@ export default function CompareTrials({ onMenuClick }) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Viewer role cannot generate AI reports.', type: 'error' } }));
       return;
     }
-    if (selectedTrials.length < 2) return;
+    if (categoryFilteredTrials.length < 2) return;
     setIsGenerating(true);
     setAiSummary(null);
 
@@ -419,14 +462,51 @@ ${contextData}`;
     exportComparisonPdf(trialSeries, allDaa, aiSummary, activeCategory);
   };
 
-  if (selectedTrials.length === 0) {
+  if (categoryFilteredTrials.length === 0) {
+    // Show different messages based on whether there are selected trials but wrong category
+    const hasSelectedTrials = selectedTrials.length > 0;
     return (
       <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50">
         <TopBar title="Compare Trials" onMenuClick={onMenuClick} />
+        
+        {/* Category Validation Warning */}
+        {categoryValidation.warning && (
+          <div className={`mx-4 mt-4 p-4 rounded-xl border ${
+            categoryValidation.warning.type === 'error' 
+              ? 'bg-red-50 border-red-200 text-red-800' 
+              : 'bg-amber-50 border-amber-200 text-amber-800'
+          }`}>
+            <div className="flex items-start gap-3">
+              <AlertTriangle className={`w-5 h-5 mt-0.5 ${
+                categoryValidation.warning.type === 'error' ? 'text-red-500' : 'text-amber-500'
+              }`} />
+              <div className="flex-1">
+                <h4 className="font-semibold">{categoryValidation.warning.title}</h4>
+                <p className="text-sm mt-1">{categoryValidation.warning.message}</p>
+                {categoryValidation.warning.type === 'error' && (
+                  <button
+                    onClick={removeCrossCategoryTrials}
+                    className="mt-3 px-3 py-1.5 bg-red-600 text-white text-sm font-semibold rounded-lg hover:bg-red-700 transition"
+                  >
+                    Remove Cross-Category Trials
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+        
         <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-8 text-center">
           <Activity className="w-12 h-12 mb-4 opacity-30" />
-          <p className="font-semibold text-lg">No trials selected</p>
-          <p className="text-sm mt-2 max-w-sm">Go to the Trials page, select 2+ trials using the bulk selection bar, then click Compare.</p>
+          <p className="font-semibold text-lg">
+            {hasSelectedTrials ? `No ${activeCategory} trials selected` : 'No trials selected'}
+          </p>
+          <p className="text-sm mt-2 max-w-sm">
+            {hasSelectedTrials 
+              ? `Switch to the correct category or select ${activeCategory} trials from the Trials page to compare.`
+              : 'Go to the Trials page, select 2+ trials using the bulk selection bar, then click Compare.'
+            }
+          </p>
           <button onClick={() => navigate('/trials')} className="mt-5 flex items-center gap-2 px-5 py-2.5 rounded-lg font-semibold text-white transition" style={{ backgroundColor: config.color.hex }}>
             <ArrowLeft className="w-4 h-4" />Go to Trials
           </button>
@@ -439,13 +519,40 @@ ${contextData}`;
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50">
       <TopBar title="Compare Trials" onMenuClick={onMenuClick} />
 
+      {/* Category Validation Warning */}
+      {categoryValidation.warning && (
+        <div className={`mx-4 mt-4 p-4 rounded-xl border ${
+          categoryValidation.warning.type === 'error' 
+            ? 'bg-red-50 border-red-200 text-red-800' 
+            : 'bg-amber-50 border-amber-200 text-amber-800'
+        }`}>
+          <div className="flex items-start gap-3">
+            <AlertTriangle className={`w-5 h-5 mt-0.5 ${
+              categoryValidation.warning.type === 'error' ? 'text-red-500' : 'text-amber-500'
+            }`} />
+            <div className="flex-1">
+              <h4 className="font-semibold">{categoryValidation.warning.title}</h4>
+              <p className="text-sm mt-1">{categoryValidation.warning.message}</p>
+              {categoryValidation.warning.type === 'error' && (
+                <button
+                  onClick={removeCrossCategoryTrials}
+                  className="mt-3 px-3 py-1.5 bg-red-600 text-white text-sm font-semibold rounded-lg hover:bg-red-700 transition"
+                >
+                  Remove Cross-Category Trials
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto p-4 max-w-7xl mx-auto w-full space-y-5">
 
         {/* Header Action Bar */}
         <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
           <div className="flex flex-wrap gap-2 items-center">
             <span className="text-sm font-semibold text-slate-500">Comparing:</span>
-            {selectedTrials.map((t, i) => (
+            {categoryFilteredTrials.map((t, i) => (
               <span key={t.ID} className="flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-semibold text-white" style={{ backgroundColor: COLORS[i % COLORS.length] }}>
                 {t.FormulationName}
                 <button onClick={() => removeFromComparison(t.ID)} className="opacity-70 hover:opacity-100"><X className="w-3.5 h-3.5" /></button>

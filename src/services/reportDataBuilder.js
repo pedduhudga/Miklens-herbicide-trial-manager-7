@@ -134,6 +134,21 @@ export function getParametersWithData(subTrials, categoryId) {
  * @returns {{ [treatmentName]: { mean, sd, se, n } }}
  */
 export function computeTreatmentMeans(subTrials, paramKey, daa, categoryId) {
+  // Category validation: Ensure all trials belong to the specified category
+  if (categoryId) {
+    const categoryViolations = subTrials.filter(trial => {
+      const trialCategory = trial.Category || 'herbicide';
+      return trialCategory !== categoryId;
+    });
+    
+    if (categoryViolations.length > 0) {
+      const violatedCategories = [...new Set(categoryViolations.map(t => t.Category || 'herbicide'))];
+      console.warn(`Category boundary violation in computeTreatmentMeans: Expected only '${categoryId}' category trials, but found trials from categories: ${violatedCategories.join(', ')}`);
+      // Filter to only include trials from the correct category
+      subTrials = subTrials.filter(trial => (trial.Category || 'herbicide') === categoryId);
+    }
+  }
+
   const treatmentValues = {};
 
   for (const trial of subTrials) {
@@ -181,6 +196,21 @@ export function computeTreatmentMeans(subTrials, paramKey, daa, categoryId) {
  * @returns {{ matrix: Object, params: string[] }}
  */
 export function computeCorrelationMatrix(subTrials, paramsWithData, categoryId) {
+  // Category validation: Ensure all trials belong to the specified category
+  if (categoryId) {
+    const categoryViolations = subTrials.filter(trial => {
+      const trialCategory = trial.Category || 'herbicide';
+      return trialCategory !== categoryId;
+    });
+    
+    if (categoryViolations.length > 0) {
+      const violatedCategories = [...new Set(categoryViolations.map(t => t.Category || 'herbicide'))];
+      console.warn(`Category boundary violation in computeCorrelationMatrix: Expected only '${categoryId}' category trials, but found trials from categories: ${violatedCategories.join(', ')}`);
+      // Filter to only include trials from the correct category
+      subTrials = subTrials.filter(trial => (trial.Category || 'herbicide') === categoryId);
+    }
+  }
+  
   const params = paramsWithData || [];
   const matrix = {};
 

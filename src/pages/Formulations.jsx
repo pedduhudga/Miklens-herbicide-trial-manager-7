@@ -3,7 +3,7 @@ import { useAppState } from '../hooks/useAppState.jsx';
 import { useAuth } from '../hooks/useAuth.js';
 import TopBar from '../components/TopBar.jsx';
 import Modal from '../components/Modal.jsx';
-import { addFormulation, deleteFormulation, updateFormulation } from '../services/dataLayer.js';
+import { addFormulation, deleteFormulation, updateFormulation, validateCategoryDataOperation } from '../services/dataLayer.js';
 import { safeJsonParse } from '../utils/helpers.js';
 import { getCategoryConfig } from '../utils/categoryConfig.js';
 import { Plus, X, Share2 } from 'lucide-react';
@@ -196,11 +196,29 @@ export default function Formulations({ onMenuClick }) {
     updateState({ formulations: newForms });
     setIsModalOpen(false);
 
+    // Category validation before saving
+    try {
+      const operation = editingFormulation ? 'updateFormulation' : 'addFormulation';
+      await validateCategoryDataOperation(operation, payload, getAppState);
+    } catch (validationError) {
+      if (validationError.validationError) {
+        const { showCategoryValidationToast } = await import('../components/CategoryValidationAlert.jsx');
+        showCategoryValidationToast(validationError);
+        return; // Stop the save operation
+      }
+      console.warn('Validation check failed:', validationError);
+    }
+
     try {
       await addFormulation(payload, getAppState);
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Formulation saved', type: 'success' } }));
     } catch (err) {
-      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Failed to save formulation', type: 'error' } }));
+      if (err.validationError) {
+        const { showCategoryValidationToast } = await import('../components/CategoryValidationAlert.jsx');
+        showCategoryValidationToast(err);
+      } else {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Failed to save formulation', type: 'error' } }));
+      }
     }
   };
 

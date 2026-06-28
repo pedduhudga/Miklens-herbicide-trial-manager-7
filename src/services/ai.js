@@ -21718,6 +21718,34 @@ export function callGeminiApi(description, apiCallFunction, getAppState) {
 }
 
 /**
+ * Enhanced AI analysis wrapper that ensures category isolation
+ * Validates category parameter and filters data accordingly before AI processing
+ */
+export async function analyzeWithCategoryContext(analysisType, data, category, getAppState) {
+    // Validate category parameter for AI analysis isolation
+    const validCategories = ['herbicide', 'fungicide', 'pesticide', 'nutrition', 'biostimulant'];
+    if (!validCategories.includes(category)) {
+        throw new Error(`Invalid category '${category}' for AI analysis. Must be one of: ${validCategories.join(', ')}`);
+    }
+    
+    // Filter data by category to ensure AI processes only relevant data
+    const categoryFilteredData = Array.isArray(data) ? 
+        data.filter(item => {
+            const itemCategory = item?.Category || item?.category;
+            return itemCategory === category || (!itemCategory && category === 'herbicide');
+        }) : data;
+    
+    console.log(`[AI Service] Category isolation: Processing ${Array.isArray(categoryFilteredData) ? categoryFilteredData.length : 'single'} ${category} record(s)`);
+    
+    return {
+        type: analysisType,
+        category: category,
+        data: categoryFilteredData,
+        timestamp: new Date().toISOString()
+    };
+}
+
+/**
  * Initialize AI service - binds internal implementations to window
  * Must be called with getAppState before using exported functions
  */
@@ -21731,8 +21759,33 @@ export function initAI(getAppState) {
 }
 
 export async function analyzePhotoForEfficacy(fileData, mimeType, analysisContext = {}) {
+    // Enhanced category isolation for photo analysis
+    const category = analysisContext.category || (analysisContext.trial && analysisContext.trial.Category) || 'herbicide';
+    
+    // Import category isolation utilities
+    const { validateAIAnalysisCategory, getCategoryConfig } = await import('../utils/aiCategoryIsolation.js');
+    const { getCategoryConfig: getCategoryConfigDirect } = await import('../utils/categoryConfig.js');
+    
+    // Validate category for AI analysis
+    validateAIAnalysisCategory(category, 'photo efficacy analysis');
+    
+    // Get category-specific configuration for prompts
+    const config = getCategoryConfigDirect(category);
+    
+    // Enhanced category-aware context with isolation validation
+    const categoryAwareContext = {
+        ...analysisContext,
+        category: category,
+        categoryName: config.name,
+        categoryPrompt: config.aiPhotoPrompt,
+        categoryFeatures: config.aiFeatures || [],
+        isolationEnforced: true
+    };
+    
+    console.log(`[AI Photo Analysis] Category isolation enforced: analyzing ${category} photo with category-specific prompts`);
+    
     if (typeof window !== 'undefined' && window.analyzePhotoForEfficacy) {
-        return window.analyzePhotoForEfficacy(fileData, mimeType, analysisContext);
+        return window.analyzePhotoForEfficacy(fileData, mimeType, categoryAwareContext);
     }
     throw new Error("analyzePhotoForEfficacy is not bound to window. Ensure the app is fully initialized.");
 }
