@@ -347,14 +347,16 @@ export function getTimelineData(efficacy, categoryId = 'herbicide', trial = null
   }
 
   // Build headers
-  const headers = ['DAA', categoryId === 'herbicide' ? 'Weed Species' : config.targetLabel];
-  
+  const headers = ['DAA'];
+  if (categoryId !== 'herbicide') {
+    headers.push(config.targetLabel);
+  }
 
-    const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
+  const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
   if (isVigor) {
     headers.push('Visual Vigor Rating (0–10)');
   } else if (categoryId === 'herbicide') {
-    headers.push('Weed Cover (%)');
+    headers.push('Overall Plot Weed Cover (%)');
   } else {
     headers.push(`${config.primaryMetric?.label || 'Efficacy'} (${config.primaryMetric?.unit || '%'})`);
   }
@@ -384,10 +386,7 @@ export function getTimelineData(efficacy, categoryId = 'herbicide', trial = null
     row.push(String(getDaaVal(o)));
     
     // 2. Weed Species / Target value
-    if (categoryId === 'herbicide') {
-      const species = (o.weedDetails || []).map(w => w.species).filter(Boolean).join(', ') || 'Total';
-      row.push(species);
-    } else {
+    if (categoryId !== 'herbicide') {
       row.push(targetValue);
     }
     
@@ -497,13 +496,18 @@ function safeFormatDate(d) {
   } catch { return 'N/A'; }
 }
 function getCleanPhotoLabel(photo, index, trialDaa) {
-  if (photo.label && !/^photo_[a-f0-9]/i.test(photo.label) && !/\.[a-z]{3,4}$/i.test(photo.label)) {
+  const isDefaultLabel = !photo.label || 
+    /^photo_[a-f0-9]/i.test(photo.label) || 
+    /\.[a-z]{3,4}$/i.test(photo.label) || 
+    /field\s*observation/i.test(photo.label);
+
+  if (!isDefaultLabel) {
     return photo.label;
   }
   if (trialDaa !== undefined && trialDaa !== null) {
     const daaNum = Number(trialDaa);
     if (daaNum === 0) {
-      return 'Before Application (0 DAA)';
+      return '0 DAA (Before Application)';
     }
     return `${trialDaa} DAA`;
   }
@@ -1657,7 +1661,8 @@ export async function generateComprehensivePdf(trial, options = {}) {
 
   // Timeline
   if (withTimeline && efficacy.length) {
-    y = secHeading(doc, `${nextSec++}. ${repConfig.config.name} Status Timeline`, y, ph);
+    const timelineTitle = categoryId === 'herbicide' ? 'Treatment Timeline' : `${repConfig.config.name} Status Timeline`;
+    y = secHeading(doc, `${nextSec++}. ${timelineTitle}`, y, ph);
     const timelineData = getTimelineData(efficacy, categoryId, trial);
     autoTable(doc, {
       startY: y,
@@ -2093,7 +2098,8 @@ export async function generateScientificReport(trial, options = {}) {
 
   // Timeline
   if (efficacy.length) {
-    y = secHeading(doc, `${nextSec++}. ${repConfig.config.name} Status Timeline`, y, ph);
+    const timelineTitle = categoryId === 'herbicide' ? 'Treatment Timeline' : `${repConfig.config.name} Status Timeline`;
+    y = secHeading(doc, `${nextSec++}. ${timelineTitle}`, y, ph);
     const timelineData = getTimelineData(efficacy, categoryId, trial);
     autoTable(doc, {
       startY: y,
