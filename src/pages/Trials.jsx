@@ -4676,7 +4676,7 @@ Exactly 1 sentence. Follow this structure:
 5. Agronomic Conclusion & Performance Assessment
 Exactly 2 concise sentences:
 - Detail the duration of effective control (if completed) or current active days of control (if ongoing), peak control level, and which targets were successfully addressed without regrowth.
-- If the trial status is "Ongoing", write: "The treatment shows highly promising initial efficacy, and continued observation is required to fully validate its agronomic performance profile." If the trial status is "Completed/Finalized", conclude with a final factual agronomic performance assessment statement for the treatment under the evaluated conditions. Do NOT include future trial recommendations, suggestions for further evaluations, or speculative remarks.
+- If the trial status is "Ongoing", write: "The treatment shows highly promising initial efficacy, and continued observation is required to fully validate its agronomic performance profile." If the trial status is "Completed/Finalized", conclude with a final factual agronomic performance assessment statement for the treatment under the evaluated conditions. Do NOT include future trial recommendations, suggestions for further evaluations, or speculative remarks."
 
 DETAILED ANOMALIES & SUGGESTIONS (APPEND SEPARATELY):
 At the very end of your response, after the 5 sections, write a delimiter line: "---ANOMALIES---"

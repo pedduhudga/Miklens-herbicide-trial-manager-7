@@ -1364,7 +1364,7 @@ export async function generateComprehensivePdf(trial, options = {}) {
   const meta2 = [];
   meta2.push([`Investigator: ${trial.InvestigatorName || 'N/A'}`, `Date: ${trialDate}`]);
   meta2.push([`Location: ${trial.Location || 'N/A'}`,              `Dosage: ${trial.Dosage || 'N/A'}`]);
-  meta2.push([`${cropLabel}: ${cropValue}`,                           categoryId === 'herbicide' ? `Weed Growth Stage: ${trial.WeedGrowthStage || '—'}` : `Growth Stage: ${dataFields.cropStage}`]);
+  meta2.push([`${dataFields.cropLabel}: ${dataFields.crop}`,                           categoryId === 'herbicide' ? `Weed Growth Stage: ${trial.WeedGrowthStage || '—'}` : `Growth Stage: ${dataFields.cropStage}`]);
   if (categoryId !== 'herbicide') {
     meta2.push([`Yield: ${dataFields.yieldValue}`,                  `BBCH Code: ${dataFields.bbchCode}`]);
   }
@@ -1623,7 +1623,7 @@ export async function generateScientificReport(trial, options = {}) {
   const metaRows = [];
   metaRows.push(['Investigator', trial.InvestigatorName || 'N/A', 'Date', trialDate]);
   metaRows.push(['Location', trial.Location || 'N/A', 'Dosage', trial.Dosage || 'N/A']);
-  metaRows.push([cropLabel, cropValue, categoryId === 'herbicide' ? 'Weed Growth Stage' : 'Growth Stage', categoryId === 'herbicide' ? (trial.WeedGrowthStage || '—') : dataFields.cropStage]);
+  metaRows.push([dataFields.cropLabel, dataFields.crop, categoryId === 'herbicide' ? 'Weed Growth Stage' : 'Growth Stage', categoryId === 'herbicide' ? (trial.WeedGrowthStage || '—') : dataFields.cropStage]);
   if (categoryId !== 'herbicide') {
     metaRows.push(['Yield', dataFields.yieldValue, 'BBCH Code', dataFields.bbchCode]);
   }
