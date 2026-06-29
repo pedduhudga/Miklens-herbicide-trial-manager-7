@@ -261,7 +261,13 @@ export function getTimelineData(efficacy, categoryId = 'herbicide', trial = null
     // 3. Primary Metric Value
     const pVal = getObservationPrimaryValue(categoryId, o) ?? 0;
     const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
-    row.push(`${pVal}${isVigor ? '/10' : (config.primaryMetric?.unit || '')}`);
+    const isControlEfficiencyMetric = (categoryId === 'herbicide' || categoryId === 'fungicide' || categoryId === 'pesticide');
+    if (isControlEfficiencyMetric) {
+      const effVal = baseVal > 0 ? ((baseVal - pVal) / baseVal) * 100 : 0;
+      row.push(`${Math.max(0, Math.min(100, effVal)).toFixed(1)}%`);
+    } else {
+      row.push(`${pVal}${isVigor ? '/10' : (config.primaryMetric?.unit || '')}`);
+    }
     
     // 4. Secondary fields
     activeFields.forEach(f => {
