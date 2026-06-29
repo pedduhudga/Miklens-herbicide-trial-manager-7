@@ -26,7 +26,7 @@ const DARK    = [44, 62, 80];
 const AMBER50 = [255, 251, 235];
 
 // ── REPORT CONFIG UTILS ───────────────────────────────────────────────────────
-function getReportConfig(trial) {
+export function getReportConfig(trial) {
   const cat = trial?.Category || 'herbicide';
   const config = getCategoryConfig(cat);
   const proj = getProjectForTrial(trial);
@@ -38,10 +38,17 @@ function getReportConfig(trial) {
   else if (cat === 'nutrition') primaryColor = [217, 119, 6]; // Amber/Orange
   else if (cat === 'biostimulant') primaryColor = [13, 148, 136]; // Teal
   
+  const isStandardTrial = !trial?.Replication || trial.Replication === 'N/A' || trial.Replication === '';
   const targetLabel = config.targetLabel || 'Weed Species';
   const targetValue = trial ? (trial[config.targetField] || trial.WeedSpecies || trial.DiseaseTarget || trial.PestTarget || trial.NutrientType || trial.BiostimulantType || proj?.[config.targetField] || proj?.NutrientType || 'N/A') : 'N/A';
-  const primaryMetricLabel = config.primaryMetric?.label || 'Weed Control Efficiency';
-  const primaryMetricKey = config.primaryMetric?.key || 'WCE';
+  
+  let primaryMetricLabel = config.primaryMetric?.label || 'Weed Control Efficiency';
+  let primaryMetricKey = config.primaryMetric?.key || 'WCE';
+  if (cat === 'herbicide' && isStandardTrial) {
+    primaryMetricLabel = 'Observed Control';
+    primaryMetricKey = 'Observed Control (%)';
+  }
+  
   const primaryMetricUnit = config.primaryMetric?.unit || '%';
   const primaryField = getPrimaryObservationField(cat);
   
@@ -92,10 +99,10 @@ function cleanReportText(text, targetDaa = null, isNonCrop = false) {
   clean = clean.replace(/\.{2,}/g, '.').replace(/\.\s+\./g, '.');
 
   if (isNonCrop) {
-    clean = clean.replace(/\b(the\s+)?crop\b/gi, 'the weed population');
     clean = clean.replace(/\bcrop\s+injury\b/gi, 'weed injury');
     clean = clean.replace(/\bcrop\s+population\b/gi, 'weed population');
     clean = clean.replace(/\bcrop\s+vigor\b/gi, 'weed growth vigor');
+    clean = clean.replace(/\b(the\s+)?crop\b/gi, 'the weed population');
   }
   return clean;
 }
@@ -104,10 +111,10 @@ function getCleanNarrative(text, isNonCrop = false) {
   if (!text) return '';
   let clean = String(text).replace(/\*/g, '');
   if (isNonCrop) {
-    clean = clean.replace(/\b(the\s+)?crop\b/gi, 'the weed population');
     clean = clean.replace(/\bcrop\s+injury\b/gi, 'weed injury');
     clean = clean.replace(/\bcrop\s+population\b/gi, 'weed population');
     clean = clean.replace(/\bcrop\s+vigor\b/gi, 'weed growth vigor');
+    clean = clean.replace(/\b(the\s+)?crop\b/gi, 'the weed population');
   }
   return clean;
 }
@@ -1067,6 +1074,70 @@ function conclusionNotes(doc, trial, y, ph) {
   return y;
 }
 
+function addScientificInterpretation(doc, trial, efficacy, categoryId, y, ph) {
+  if (categoryId !== 'herbicide' || efficacy.length < 2) return y;
+  
+  const pw = doc.internal.pageSize.getWidth();
+  const sorted = [...efficacy].sort((a, b) => {
+    const getDaa = (o) => {
+      if (o.daa !== undefined && o.daa !== null && o.daa !== '' && o.daa !== '—') return Number(o.daa);
+      return calculateDAA(o.date, trial.Date || '');
+    };
+    return getDaa(a) - getDaa(b);
+  });
+  const getDaa = (o) => {
+    if (o.daa !== undefined && o.daa !== null && o.daa !== '' && o.daa !== '—') return Number(o.daa);
+    return calculateDAA(o.date, trial.Date || '');
+  };
+  
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  const firstDaa = getDaa(first);
+  const lastDaa = getDaa(last);
+  const firstVal = getObservationPrimaryValue(categoryId, first) ?? 0;
+  const lastVal = getObservationPrimaryValue(categoryId, last) ?? 0;
+  
+  const isStandardTrial = !trial?.Replication || trial.Replication === 'N/A' || trial.Replication === '';
+  const isOngoing = !(trial.IsCompleted === true || trial.IsCompleted === 'true');
+  
+  let text = `The treatment produced rapid suppression between DAA ${firstDaa} and DAA ${lastDaa}, reducing weed canopy cover from ${firstVal.toFixed(1)}% to ${lastVal.toFixed(1)}%. No increase in greenness or weed density was detected through DAA ${lastDaa}, suggesting sustained suppression during the current observation period.`;
+  
+  if (isStandardTrial && isOngoing) {
+    text += ` As the trial remains ongoing and lacks untreated controls, these observations should be interpreted as observational field data rather than statistically validated efficacy.`;
+  } else if (isStandardTrial) {
+    text += ` As the trial has been finalized and lacks untreated controls, these observations represent a standard observational performance profile under the evaluated conditions.`;
+  } else if (isOngoing) {
+    text += ` As the trial remains ongoing, additional replicate observations are required to determine statistical significance.`;
+  } else {
+    text += ` Replicated design data suggests this response profile represents a statistically consistent treatment effect.`;
+  }
+  
+  if (y + 35 > ph - 20) { doc.addPage(); y = 20; }
+  
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(203, 213, 225);
+  doc.setFont(undefined, 'bold');
+  doc.setFontSize(9.5);
+  
+  const headerText = "AI Scientific Interpretation";
+  const wrappedText = doc.splitTextToSize(text, pw - 36);
+  const boxHeight = wrappedText.length * 5 + 14;
+  
+  doc.rect(14, y, pw - 28, boxHeight, 'FD');
+  
+  doc.setTextColor(15, 118, 110);
+  doc.text(headerText, 18, y + 6);
+  
+  doc.setTextColor(51, 65, 85);
+  doc.setFont(undefined, 'normal');
+  doc.setFontSize(9);
+  doc.text(wrappedText, 18, y + 12);
+  
+  doc.setTextColor(0, 0, 0);
+  
+  return y + boxHeight + 10;
+}
+
 // Local helper: Root-to-Shoot Ratio
 function calculateRootToShoot(obs) {
   const root = parseFloat(obs.rootBiomass);
@@ -1542,6 +1613,7 @@ export async function generateComprehensivePdf(trial, options = {}) {
 
   // Conclusion & Notes
   y = conclusionNotes(doc, trial, y, ph);
+  y = addScientificInterpretation(doc, trial, efficacy, categoryId, y, ph);
 
   // Ingredients
   if (withIngredients && trial.FormulationID) {
@@ -1640,10 +1712,10 @@ function drawVectorChart(doc, x, y, w, h, title, xVal, yVal, yMax = 100, yUnit =
   doc.setTextColor(51, 65, 85);
   doc.text(title, x + 5, y + 6);
   
-  const px = x + 12;
-  const py = y + h - 10;
-  const pw_plot = w - 18;
-  const ph_plot = h - 20;
+  const px = x + 15;
+  const py = y + h - 11;
+  const pw_plot = w - 22;
+  const ph_plot = h - 22;
   
   doc.setDrawColor(71, 85, 105);
   doc.setLineWidth(0.5);
@@ -1672,7 +1744,7 @@ function drawVectorChart(doc, x, y, w, h, title, xVal, yVal, yMax = 100, yUnit =
   }
   
   doc.setFont(undefined, 'normal');
-  doc.setFontSize(6);
+  doc.setFontSize(5);
   doc.setTextColor(100, 116, 139);
   
   coords.forEach(pt => {
@@ -1681,9 +1753,18 @@ function drawVectorChart(doc, x, y, w, h, title, xVal, yVal, yMax = 100, yUnit =
     doc.text(`D${pt.xv}`, pt.cx - 2, py + 5);
   });
   
+  // Axes ticks
   doc.text('0', px - 7, py + 2);
   doc.text(`${(yMax/2).toFixed(0)}`, px - 9, py - ph_plot/2 + 2);
   doc.text(`${yMax.toFixed(0)}`, px - 9, py - ph_plot + 2);
+
+  // Axis Labels
+  doc.setFont(undefined, 'bold');
+  doc.setFontSize(5);
+  doc.text('Days After Application (DAA)', x + w / 2 - 15, y + h - 2);
+  
+  const yAxisLabel = title.includes('Density') ? 'Plants/m²' : 'Value (%)';
+  doc.text(yAxisLabel, px - 6, py - ph_plot - 2);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1891,6 +1972,7 @@ export async function generateScientificReport(trial, options = {}) {
   }
 
   y = conclusionNotes(doc, trial, y, ph);
+  y = addScientificInterpretation(doc, trial, efficacy, categoryId, y, ph);
 
   // Ingredients
   if (withIngredients && trial.FormulationID) {

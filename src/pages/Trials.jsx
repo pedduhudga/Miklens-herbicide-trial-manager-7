@@ -4503,13 +4503,14 @@ Rules:
       };
       const sorted = [...efficacy].sort((a, b) => getDaaVal(a) - getDaaVal(b));
 
+      const isStandardTrial = !detailTrial.Replication || detailTrial.Replication === 'N/A' || detailTrial.Replication === '';
       const trialCat = detailTrial.Category || 'herbicide';
       const cConf = getCategoryConfig(trialCat);
       const targetLabel = cConf.targetLabel || 'Weed Species';
       const targetField = cConf.targetField || 'WeedSpecies';
       const targetValue = detailTrial[targetField] || detailTrial.WeedSpecies || 'Not specified';
-      const primaryMetricKey = cConf.primaryMetric?.key || 'WCE';
-      const primaryMetricLabel = cConf.primaryMetric?.label || 'Weed Control Efficiency';
+      const primaryMetricKey = (trialCat === 'herbicide' && isStandardTrial) ? 'Observed Control (%)' : (cConf.primaryMetric?.key || 'WCE');
+      const primaryMetricLabel = (trialCat === 'herbicide' && isStandardTrial) ? 'Observed Control' : (cConf.primaryMetric?.label || 'Weed Control Efficiency');
       const primaryMetricUnit = cConf.primaryMetric?.unit || '%';
       const primaryField = getPrimaryObservationField(trialCat);
 
@@ -4604,7 +4605,7 @@ Rules:
 
       const fmtTrialDate = formatDate(detailTrial.Date) || 'N/A';
 
-      const isStandardTrial = !detailTrial.Replication || detailTrial.Replication === 'N/A';
+
 
       const prompt = `You are a senior agronomist/scientist writing a professional ${cConf.name} field trial narrative for an official regulatory-style report (SOP/TDS validation standard).
       
