@@ -4509,8 +4509,23 @@ Rules:
       const targetLabel = cConf.targetLabel || 'Weed Species';
       const targetField = cConf.targetField || 'WeedSpecies';
       const targetValue = detailTrial[targetField] || detailTrial.WeedSpecies || 'Not specified';
-      const primaryMetricKey = (trialCat === 'herbicide' && isStandardTrial) ? 'Observed Control' : (cConf.primaryMetric?.key || 'WCE');
-      const primaryMetricLabel = (trialCat === 'herbicide' && isStandardTrial) ? 'Observed Control' : (cConf.primaryMetric?.label || 'Weed Control Efficiency');
+      let primaryMetricKey = cConf.primaryMetric?.key || 'WCE';
+      let primaryMetricLabel = cConf.primaryMetric?.label || 'Weed Control Efficiency';
+      if (isStandardTrial) {
+        if (trialCat === 'herbicide') {
+          primaryMetricKey = 'Observed Control';
+          primaryMetricLabel = 'Observed Control';
+        } else if (trialCat === 'fungicide') {
+          primaryMetricKey = 'Observed Disease Suppression';
+          primaryMetricLabel = 'Observed Disease Suppression';
+        } else if (trialCat === 'pesticide') {
+          primaryMetricKey = 'Observed Pest Suppression';
+          primaryMetricLabel = 'Observed Pest Suppression';
+        } else if (trialCat === 'nutrition' || trialCat === 'biostimulant') {
+          primaryMetricKey = 'Observed Crop Vigor';
+          primaryMetricLabel = 'Observed Crop Vigor';
+        }
+      }
       const primaryMetricUnit = cConf.primaryMetric?.unit || '%';
       const primaryField = getPrimaryObservationField(trialCat);
 

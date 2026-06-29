@@ -44,9 +44,20 @@ export function getReportConfig(trial) {
   
   let primaryMetricLabel = config.primaryMetric?.label || 'Weed Control Efficiency';
   let primaryMetricKey = config.primaryMetric?.key || 'WCE';
-  if (cat === 'herbicide' && isStandardTrial) {
-    primaryMetricLabel = 'Observed Control';
-    primaryMetricKey = 'Observed Control';
+  if (isStandardTrial) {
+    if (cat === 'herbicide') {
+      primaryMetricLabel = 'Observed Control';
+      primaryMetricKey = 'Observed Control';
+    } else if (cat === 'fungicide') {
+      primaryMetricLabel = 'Observed Disease Suppression';
+      primaryMetricKey = 'Observed Disease Suppression';
+    } else if (cat === 'pesticide') {
+      primaryMetricLabel = 'Observed Pest Suppression';
+      primaryMetricKey = 'Observed Pest Suppression';
+    } else if (cat === 'nutrition' || cat === 'biostimulant') {
+      primaryMetricLabel = 'Observed Crop Vigor';
+      primaryMetricKey = 'Observed Crop Vigor';
+    }
   }
   
   const primaryMetricUnit = config.primaryMetric?.unit || '%';
@@ -71,25 +82,35 @@ export function getReportConfig(trial) {
 
 function calculateStatus(categoryId, pVal, baseVal = 0, prevVal = null) {
   const isPositive = (categoryId === 'nutrition' || categoryId === 'biostimulant');
+  const hasPrev = prevVal !== null && prevVal !== undefined;
+  
   if (isPositive) {
-    if (pVal <= 10) {
-      return pVal >= 8 ? 'Excellent Response' : pVal >= 6 ? 'Moderate Response' : pVal >= 4 ? 'Mild Response' : 'No Response';
+    const isSPAD = baseVal > 15;
+    if (isSPAD) {
+      if (pVal > baseVal + 5) return hasPrev && pVal > prevVal ? 'Sustained Greening' : 'Greening Response';
+      if (pVal >= baseVal) return 'Nutrient Sufficiency';
+      return 'Nutrient Deficiency';
     }
-    return pVal >= 80 ? 'Excellent Response' : pVal >= 60 ? 'Moderate Response' : pVal >= 40 ? 'Mild Response' : 'No Response';
+    if (pVal >= 8) return hasPrev && prevVal >= 8 ? 'Peak Vigor (Sustained)' : 'Peak Vigor Reached';
+    if (pVal >= 6) return 'Strong Vigor';
+    if (pVal >= 4) return 'Moderate Growth';
+    return 'Weak Growth';
   } else if (categoryId === 'pesticide') {
     const pctReduction = (baseVal > 0) ? ((baseVal - pVal) / baseVal) * 100 : 0;
-    if (pctReduction >= 95) return 'Complete Suppression';
-    if (pctReduction >= 80) return 'High Suppression';
-    if (pctReduction >= 50) return 'Partial Suppression';
-    if (pctReduction >= 20) return 'Low Suppression';
-    return 'No Effect';
+    const isIncreasing = hasPrev && pVal > prevVal;
+    if (pVal <= 0.1) return hasPrev && prevVal <= 0.1 ? 'Pest-Free (Sustained)' : 'Population Cleared';
+    if (pctReduction >= 85) return 'High Suppression';
+    if (isIncreasing) return 'Pest Resurgence';
+    if (pctReduction >= 50) return 'Population Controlled';
+    return 'Minimal Suppression';
   } else if (categoryId === 'fungicide') {
     const pctReduction = (baseVal > 0) ? ((baseVal - pVal) / baseVal) * 100 : 0;
-    if (pctReduction >= 95) return 'Complete Inhibition';
-    if (pctReduction >= 80) return 'Strong Inhibition';
-    if (pctReduction >= 50) return 'Moderate Inhibition';
-    if (pctReduction >= 20) return 'Mild Inhibition';
-    return 'No Inhibition';
+    const isSpreading = hasPrev && pVal > prevVal;
+    if (pVal <= 0.1) return hasPrev && prevVal <= 0.1 ? 'Disease-Free (Sustained)' : 'Disease Cleared';
+    if (pctReduction >= 85) return 'Complete Inhibition';
+    if (isSpreading) return 'Disease Progression';
+    if (pctReduction >= 50) return 'Infection Controlled';
+    return 'Initial Infection';
   } else {
     // Herbicide — biologically meaningful weed status terms
     return getHerbicideStatus(pVal, baseVal, prevVal);
@@ -348,15 +369,15 @@ export function getTimelineData(efficacy, categoryId = 'herbicide', trial = null
 
   // Build headers
   const headers = ['DAA'];
-  if (categoryId !== 'herbicide') {
-    headers.push(config.targetLabel);
-  }
-
   const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
   if (isVigor) {
-    headers.push('Visual Vigor Rating (0–10)');
+    headers.push('Overall Crop Vigor (0–10)');
   } else if (categoryId === 'herbicide') {
     headers.push('Overall Plot Weed Cover (%)');
+  } else if (categoryId === 'fungicide') {
+    headers.push('Overall Disease Severity (%)');
+  } else if (categoryId === 'pesticide') {
+    headers.push('Overall Pest Density');
   } else {
     headers.push(`${config.primaryMetric?.label || 'Efficacy'} (${config.primaryMetric?.unit || '%'})`);
   }
@@ -385,24 +406,16 @@ export function getTimelineData(efficacy, categoryId = 'herbicide', trial = null
     // 1. DAA
     row.push(String(getDaaVal(o)));
     
-    // 2. Weed Species / Target value
-    if (categoryId !== 'herbicide') {
-      row.push(targetValue);
-    }
-    
-    // 3. Primary Metric Value
+    // 2. Primary Metric Value
     const pVal = getObservationPrimaryValue(categoryId, o) ?? 0;
-    const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
     if (categoryId === 'herbicide') {
       row.push(`${pVal.toFixed(1)}%`);
+    } else if (categoryId === 'fungicide') {
+      row.push(`${pVal.toFixed(1)}%`);
+    } else if (categoryId === 'pesticide') {
+      row.push(`${pVal.toFixed(1)}`);
     } else {
-      const isControlEfficiencyMetric = (categoryId === 'fungicide' || categoryId === 'pesticide');
-      if (isControlEfficiencyMetric) {
-        const effVal = baseVal > 0 ? ((baseVal - pVal) / baseVal) * 100 : 0;
-        row.push(`${Math.max(0, Math.min(100, effVal)).toFixed(1)}%`);
-      } else {
-        row.push(`${pVal}${isVigor ? '/10' : (config.primaryMetric?.unit || '')}`);
-      }
+      row.push(`${pVal.toFixed(1)}/10`);
     }
     
     // 4. Secondary fields
@@ -1661,7 +1674,11 @@ export async function generateComprehensivePdf(trial, options = {}) {
 
   // Timeline
   if (withTimeline && efficacy.length) {
-    const timelineTitle = categoryId === 'herbicide' ? 'Treatment Timeline' : `${repConfig.config.name} Status Timeline`;
+    const timelineTitle = 
+      categoryId === 'herbicide' ? 'Treatment Timeline' : 
+      categoryId === 'fungicide' ? 'Disease Progress Timeline' :
+      categoryId === 'pesticide' ? 'Pest Population Timeline' :
+      'Crop Development Timeline';
     y = secHeading(doc, `${nextSec++}. ${timelineTitle}`, y, ph);
     const timelineData = getTimelineData(efficacy, categoryId, trial);
     autoTable(doc, {
@@ -2098,7 +2115,11 @@ export async function generateScientificReport(trial, options = {}) {
 
   // Timeline
   if (efficacy.length) {
-    const timelineTitle = categoryId === 'herbicide' ? 'Treatment Timeline' : `${repConfig.config.name} Status Timeline`;
+    const timelineTitle = 
+      categoryId === 'herbicide' ? 'Treatment Timeline' : 
+      categoryId === 'fungicide' ? 'Disease Progress Timeline' :
+      categoryId === 'pesticide' ? 'Pest Population Timeline' :
+      'Crop Development Timeline';
     y = secHeading(doc, `${nextSec++}. ${timelineTitle}`, y, ph);
     const timelineData = getTimelineData(efficacy, categoryId, trial);
     autoTable(doc, {
