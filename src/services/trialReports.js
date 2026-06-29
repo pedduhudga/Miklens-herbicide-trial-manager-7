@@ -316,8 +316,8 @@ function safeJsonParse(val, fallback = []) {
 }
 function validateEfficacy(data, categoryId = null) {
   if (!Array.isArray(data)) return [];
-  // Exclude AI-only observations from reports
-  const cleanData = data.filter(o => o && o.source !== 'AI');
+  // Include all observations (both manual and AI-sourced) in reports
+  const cleanData = data;
   if (categoryId) {
     const primaryField = getPrimaryObservationField(categoryId);
     return cleanData.filter(o => o && (o.daa !== undefined || o[primaryField] !== undefined || o.weedCover !== undefined));
@@ -339,6 +339,8 @@ function fmtDate(d) {
   return formatDateTime(d);
 }
 function safeName(s) { return (s || 'trial').replace(/[^a-z0-9_\-]/gi, '_'); }
+
+
 function safeFormatDate(d) {
   if (!d) return 'N/A';
   try {
@@ -1227,7 +1229,8 @@ function yieldAnovaTable(doc, y, ph, trial) {
   }
   return y;
 }
-async function addWeedIdSection(doc, weedPhotos, trial, y, ph) {
+
+async function addWeedIdSection(doc, weedPhotos, trial, y, ph, sectionNumber = 6) {
   if (!weedPhotos.length) return y;
   doc.addPage(); y = 20;
   const repConfig = getReportConfig(trial);
@@ -1235,7 +1238,7 @@ async function addWeedIdSection(doc, weedPhotos, trial, y, ph) {
                       repConfig.cat === 'fungicide' ? 'Disease Identification Record' :
                       repConfig.cat === 'pesticide' ? 'Pest Identification Record' :
                       'Target Identification Record';
-  y = secHeading(doc, `6. ${recordLabel}`, y, ph);
+  y = secHeading(doc, `${sectionNumber}. ${recordLabel}`, y, ph);
   const targetVal = trial[repConfig.config.targetField] || trial.WeedSpecies;
   if (targetVal?.trim()) {
     doc.setFont(undefined, 'bold'); doc.text(`${repConfig.targetLabel}:`, 14, y); y += 5;
@@ -1342,12 +1345,17 @@ export async function generateComprehensivePdf(trial, options = {}) {
   // Trial Design heading
   y = secHeading(doc, '1. Trial Design & Conditions', y, ph);
 
-  // ANOVA
-  y = secHeading(doc, '2. Statistical Analysis (ANOVA)', y, ph);
-  y = anovaTable(doc, safeJsonParse(trial.StatisticsJSON, {}), y, ph, trial, options);
+  let nextSec = 2;
+
+  // ANOVA - only for project-grouped/replicated trials
+  if (trial.ProjectID) {
+    y = secHeading(doc, `${nextSec++}. Statistical Analysis (ANOVA)`, y, ph);
+    y = anovaTable(doc, safeJsonParse(trial.StatisticsJSON, {}), y, ph, trial, options);
+  }
 
   // Efficacy Analysis
-  y = secHeading(doc, '3. Efficacy Analysis', y, ph);
+  const effSecNum = nextSec++;
+  y = secHeading(doc, `${effSecNum}. Efficacy Analysis`, y, ph);
   const summary = coverSummary(efficacy, trial);
   if (summary) {
     const cls = doc.splitTextToSize('Analysis: ' + summary, pw - 28);
@@ -1374,7 +1382,7 @@ export async function generateComprehensivePdf(trial, options = {}) {
   // Advanced Agronomic Indices Section
   const advIndices = getAdvancedIndicesTableData(trial, efficacy, categoryId);
   if (advIndices.length > 0) {
-    y = secHeading(doc, '3.1 Advanced Agronomic Indices', y, ph);
+    y = secHeading(doc, `${effSecNum}.1 Advanced Agronomic Indices`, y, ph);
     autoTable(doc, {
       startY: y,
       head: [['Replication / Treatment', 'Index parameter', 'Value']],
@@ -1393,7 +1401,7 @@ export async function generateComprehensivePdf(trial, options = {}) {
 
   // Timeline
   if (withTimeline && efficacy.length) {
-    y = secHeading(doc, `4. ${repConfig.config.name} Status Timeline`, y, ph);
+    y = secHeading(doc, `${nextSec++}. ${repConfig.config.name} Status Timeline`, y, ph);
     const timelineData = getTimelineData(efficacy, categoryId, trial);
     autoTable(doc, {
       startY: y,
@@ -1431,14 +1439,14 @@ export async function generateComprehensivePdf(trial, options = {}) {
 
   // Photos
   if (photos.length) {
-    y = secHeading(doc, '5. Field Photo Log', y, ph);
+    y = secHeading(doc, `${nextSec++}. Field Photo Log`, y, ph);
     y = await addPhotoGrid(doc, photos, y, ph, 50, showPhotoDates, trial.Date);
   }
 
   // Harvest & Yield Report Section
   const harvest = safeJsonParse(trial.HarvestDataJSON, null);
   if (harvest && (harvest.actualFruitCount || harvest.actualMarketableWeight || harvest.actualUnmarketableWeight || harvest.notes)) {
-    y = secHeading(doc, '6. Harvest & Yield Report', y, ph);
+    y = secHeading(doc, `${nextSec++}. Harvest & Yield Report`, y, ph);
     const totalW = (parseFloat(harvest.actualMarketableWeight || 0) + parseFloat(harvest.actualUnmarketableWeight || 0));
     const avgW = harvest.actualFruitCount > 0 ? (totalW / harvest.actualFruitCount).toFixed(1) : '—';
     const markPct = totalW > 0 ? ((parseFloat(harvest.actualMarketableWeight || 0) / totalW) * 100).toFixed(1) : '—';
@@ -1473,7 +1481,7 @@ export async function generateComprehensivePdf(trial, options = {}) {
   }
 
   // Target Identification Record Section
-  if (withWeeds) y = await addWeedIdSection(doc, weedPhotos, trial, y, ph);
+  if (withWeeds) y = await addWeedIdSection(doc, weedPhotos, trial, y, ph, nextSec++);
 
   // Executive Brief
   doc.addPage(); y = 20;
@@ -1589,12 +1597,17 @@ export async function generateScientificReport(trial, options = {}) {
     y += 24;
   }
 
-  // ANOVA
-  y = secHeading(doc, '2. Statistical Analysis (ANOVA)', y, ph);
-  y = anovaTable(doc, safeJsonParse(trial.StatisticsJSON, {}), y, ph, trial, options);
+  let nextSec = 2;
+
+  // ANOVA - only for project-grouped/replicated trials
+  if (trial.ProjectID) {
+    y = secHeading(doc, `${nextSec++}. Statistical Analysis (ANOVA)`, y, ph);
+    y = anovaTable(doc, safeJsonParse(trial.StatisticsJSON, {}), y, ph, trial, options);
+  }
 
   // Efficacy
-  y = secHeading(doc, '3. Efficacy Analysis', y, ph);
+  const effSecNum = nextSec++;
+  y = secHeading(doc, `${effSecNum}. Efficacy Analysis`, y, ph);
   const wce = calcWCE(efficacy, categoryId, trial);
   if (wce.length) {
     const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
@@ -1617,7 +1630,7 @@ export async function generateScientificReport(trial, options = {}) {
   // Advanced Agronomic Indices
   const advIndicesSci = getAdvancedIndicesTableData(trial, efficacy, categoryId);
   if (advIndicesSci.length > 0) {
-    y = secHeading(doc, '3.1 Advanced Agronomic Indices', y, ph);
+    y = secHeading(doc, `${effSecNum}.1 Advanced Agronomic Indices`, y, ph);
     autoTable(doc, {
       startY: y,
       head: [['Replication / Treatment', 'Index parameter', 'Value']],
@@ -1636,7 +1649,7 @@ export async function generateScientificReport(trial, options = {}) {
 
   // Timeline
   if (efficacy.length) {
-    y = secHeading(doc, `4. ${repConfig.config.name} Status Timeline`, y, ph);
+    y = secHeading(doc, `${nextSec++}. ${repConfig.config.name} Status Timeline`, y, ph);
     const timelineData = getTimelineData(efficacy, categoryId, trial);
     autoTable(doc, {
       startY: y,
@@ -1668,14 +1681,14 @@ export async function generateScientificReport(trial, options = {}) {
 
   // Photos
   if (photos.length) {
-    y = secHeading(doc, '5. Field Photo Log', y, ph);
+    y = secHeading(doc, `${nextSec++}. Field Photo Log`, y, ph);
     y = await addPhotoGrid(doc, photos, y, ph, 50, showPhotoDates, trial.Date);
   }
 
   // Harvest & Yield Report Section
   const harvest = safeJsonParse(trial.HarvestDataJSON, null);
   if (harvest && (harvest.actualFruitCount || harvest.actualMarketableWeight || harvest.actualUnmarketableWeight || harvest.notes)) {
-    y = secHeading(doc, '6. Harvest & Yield Report', y, ph);
+    y = secHeading(doc, `${nextSec++}. Harvest & Yield Report`, y, ph);
     const totalW = (parseFloat(harvest.actualMarketableWeight || 0) + parseFloat(harvest.actualUnmarketableWeight || 0));
     const avgW = harvest.actualFruitCount > 0 ? (totalW / harvest.actualFruitCount).toFixed(1) : '—';
     const markPct = totalW > 0 ? ((parseFloat(harvest.actualMarketableWeight || 0) / totalW) * 100).toFixed(1) : '—';
@@ -1710,7 +1723,7 @@ export async function generateScientificReport(trial, options = {}) {
   }
 
   // Target Identification Record Section
-  y = await addWeedIdSection(doc, weedPhotos, trial, y, ph);
+  y = await addWeedIdSection(doc, weedPhotos, trial, y, ph, nextSec++);
   pdfAddFooter(doc, trial.FormulationName || 'Trial');
   doc.save(`Scientific_Report_${safeName(trial.FormulationName)}_${trial.Date || 'nodate'}.pdf`);
   toast('Scientific Report downloaded!', 'success');
