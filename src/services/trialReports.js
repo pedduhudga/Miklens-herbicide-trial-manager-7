@@ -1506,6 +1506,13 @@ export async function generateComprehensivePdf(trial, options = {}) {
     if (y + 55 > ph - 20) { doc.addPage(); y = 20; }
     y = secHeading(doc, `${nextSec++}. Visual Analytics & Trajectories`, y, ph);
     
+    const getDaaVal = (o) => {
+      if (o.daa !== undefined && o.daa !== null && o.daa !== '' && o.daa !== '—') {
+        const parsed = Number(o.daa);
+        if (!isNaN(parsed)) return parsed;
+      }
+      return calculateDAA(o.date, trial.Date || '');
+    };
     const sorted = [...efficacy].sort((a,b) => getDaaVal(a) - getDaaVal(b));
     const xVal = sorted.map(o => getDaaVal(o));
     
@@ -1849,6 +1856,13 @@ export async function generateScientificReport(trial, options = {}) {
     if (y + 55 > ph - 20) { doc.addPage(); y = 20; }
     y = secHeading(doc, `${nextSec++}. Visual Analytics & Trajectories`, y, ph);
     
+    const getDaaVal = (o) => {
+      if (o.daa !== undefined && o.daa !== null && o.daa !== '' && o.daa !== '—') {
+        const parsed = Number(o.daa);
+        if (!isNaN(parsed)) return parsed;
+      }
+      return calculateDAA(o.date, trial.Date || '');
+    };
     const sorted = [...efficacy].sort((a,b) => getDaaVal(a) - getDaaVal(b));
     const xVal = sorted.map(o => getDaaVal(o));
     
