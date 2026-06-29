@@ -1,6 +1,6 @@
 import { AVAILABLE_GEMINI_MODELS } from '../utils/aiConstants.js';
 import { analyzeWeedCover } from '../utils/imageAnalysis.js';
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { formatSignificance } from '../utils/helpers.js';
 import { AnalysisEngine, validateEfficacyData } from '../utils/analysisUtils.js';
 import { buildAiObservationPayload, normalizeObservation } from '../utils/categoryObservationUtils.js';
@@ -7005,6 +7005,8 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions. Foc
 
                     // Build category-aware prompt
                     let prompt;
+                    let responseSchema;
+
                     if (categoryId === 'herbicide') {
                         prompt = `As an agricultural expert analyzing a photo from a herbicide trial, identify up to 2 dominant weed species and estimate their cover/status. Respond ONLY with a single minified JSON object in this exact format: {"weedDetails": [{"species": "...", "cover": NUMBER, "status": "Controlled|Burndown|Re-emerged|Resistant|Unaffected", "notes": "..."}]}.
                     - "weedDetails": An array of objects.
@@ -7016,35 +7018,187 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions. Foc
                     - Do NOT introduce a new species unless clearly visible.
                     - On day 0 to day 1, avoid reporting increased cover unless there is clear regrowth evidence.
                     ${historyPrompt}`;
+
+                        responseSchema = {
+                            type: Type.OBJECT,
+                            properties: {
+                                weedDetails: {
+                                    type: Type.ARRAY,
+                                    items: {
+                                        type: Type.OBJECT,
+                                        properties: {
+                                            species: { type: Type.STRING },
+                                            cover: { type: Type.NUMBER },
+                                            status: { type: Type.STRING },
+                                            notes: { type: Type.STRING }
+                                        },
+                                        required: ["species", "cover", "status", "notes"]
+                                    }
+                                }
+                            },
+                            required: ["weedDetails"]
+                        };
+                    } else if (categoryId === 'fungicide') {
+                        prompt = `Act as an expert plant pathologist. Analyze this fungicide trial plot photo to identify disease symptoms (such as lesions, spots, rusts, blights, or mildews). To prevent hallucinations, only report symptoms and diseases that are clearly and indisputably visible on the leaves or canopy.
+                        
+                        Estimate the following observation metrics:
+                        - "diseaseSeverity": Percentage of leaf/canopy area affected by disease symptoms (0-100%).
+                        - "diseaseIncidence": Percentage of plants/leaves displaying visible disease symptoms (0-100%).
+                        - "greenLeafArea": Percentage of healthy, active green leaf area remaining (0-100%).
+                        - "plantHealthScore": Overall plant health rating on a scale of 1-10 (10 being perfect health, 1 being dead/severely diseased).
+                        - "phytotoxicity": Percentage of crop displaying pesticide/chemical injury symptoms (0-100%).
+                        
+                        Respond ONLY with a single minified JSON object in this exact format:
+                        {
+                          "metrics": {
+                            "diseaseSeverity": NUMBER,
+                            "diseaseIncidence": NUMBER,
+                            "greenLeafArea": NUMBER,
+                            "plantHealthScore": NUMBER,
+                            "phytotoxicity": NUMBER
+                          },
+                          "details": {
+                            "identifiedDiseases": ["Scientific Name / Common Name"],
+                            "symptoms": ["e.g. chlorotic spots, powdery lesions"],
+                            "confidence": "High|Medium|Low",
+                            "notes": "..."
+                          }
+                        }
+                        ${historyPrompt}`;
+
+                        responseSchema = {
+                            type: Type.OBJECT,
+                            properties: {
+                                metrics: {
+                                    type: Type.OBJECT,
+                                    properties: {
+                                        diseaseSeverity: { type: Type.NUMBER },
+                                        diseaseIncidence: { type: Type.NUMBER },
+                                        greenLeafArea: { type: Type.NUMBER },
+                                        plantHealthScore: { type: Type.NUMBER },
+                                        phytotoxicity: { type: Type.NUMBER }
+                                    },
+                                    required: ["diseaseSeverity", "diseaseIncidence"]
+                                },
+                                details: {
+                                    type: Type.OBJECT,
+                                    properties: {
+                                        identifiedDiseases: {
+                                            type: Type.ARRAY,
+                                            items: { type: Type.STRING }
+                                        },
+                                        symptoms: {
+                                            type: Type.ARRAY,
+                                            items: { type: Type.STRING }
+                                        },
+                                        confidence: { type: Type.STRING },
+                                        notes: { type: Type.STRING }
+                                    },
+                                    required: ["identifiedDiseases", "confidence", "notes"]
+                                }
+                            },
+                            required: ["metrics", "details"]
+                        };
+                    } else if (categoryId === 'pesticide') {
+                        prompt = `Act as an expert agricultural entomologist. Analyze this pesticide trial plot photo to identify pests, insect infestations, or crop damage. To prevent hallucinations and ensure 100% accuracy, only report pest species, insects, or feeding damage (e.g., holes, chewing) that are directly and clearly visible in the photo.
+                        
+                        Estimate the following observation metrics:
+                        - "pestCount": Total visual count of target pests per unit/plant.
+                        - "liveInsectCount": Visual count of active live insects.
+                        - "deadInsectCount": Visual count of dead target pests.
+                        - "feedingDamagePct": Estimated percentage of feeding damage on the leaves/crop (0-100%).
+                        - "damageRating": Overall crop damage rating on a scale of 0-9 (0 being no damage, 9 being completely destroyed).
+                        - "phytotoxicity": Percentage of crop displaying chemical injury symptoms (0-100%).
+                        
+                        Respond ONLY with a single minified JSON object in this exact format:
+                        {
+                          "metrics": {
+                            "pestCount": NUMBER,
+                            "liveInsectCount": NUMBER,
+                            "deadInsectCount": NUMBER,
+                            "feedingDamagePct": NUMBER,
+                            "damageRating": NUMBER,
+                            "phytotoxicity": NUMBER
+                          },
+                          "details": {
+                            "identifiedPests": ["Scientific Name / Common Name"],
+                            "damageTypes": ["e.g. foliar chewing, leaf skeletonizing"],
+                            "confidence": "High|Medium|Low",
+                            "notes": "..."
+                          }
+                        }
+                        ${historyPrompt}`;
+
+                        responseSchema = {
+                            type: Type.OBJECT,
+                            properties: {
+                                metrics: {
+                                    type: Type.OBJECT,
+                                    properties: {
+                                        pestCount: { type: Type.NUMBER },
+                                        liveInsectCount: { type: Type.NUMBER },
+                                        deadInsectCount: { type: Type.NUMBER },
+                                        feedingDamagePct: { type: Type.NUMBER },
+                                        damageRating: { type: Type.NUMBER },
+                                        phytotoxicity: { type: Type.NUMBER }
+                                    },
+                                    required: ["pestCount"]
+                                },
+                                details: {
+                                    type: Type.OBJECT,
+                                    properties: {
+                                        identifiedPests: {
+                                            type: Type.ARRAY,
+                                            items: { type: Type.STRING }
+                                        },
+                                        damageTypes: {
+                                            type: Type.ARRAY,
+                                            items: { type: Type.STRING }
+                                        },
+                                        confidence: { type: Type.STRING },
+                                        notes: { type: Type.STRING }
+                                    },
+                                    required: ["identifiedPests", "confidence", "notes"]
+                                }
+                            },
+                            required: ["metrics", "details"]
+                        };
                     } else {
-                        // Generic category prompt: ask for primary metric for the category
-                        prompt = `As an agricultural expert analyzing a photo from a ${categoryId} trial, estimate the trial's primary observation metric named \"${primaryField}\". Respond ONLY with a single minified JSON object in this exact format: {"metrics": {"${primaryField}": NUMBER}, "details": { ... optional diagnostics ... }}. Provide numeric values where possible (0-100 for percentages, or raw numeric for counts). ${historyPrompt}`;
+                        prompt = `As an agricultural expert analyzing a photo from a ${categoryId} trial, estimate the trial's primary observation metric named \"${primaryField}\". Respond ONLY with a single minified JSON object in this exact format: {"metrics": {"${primaryField}": NUMBER}, "details": {"observations": ["..."], "confidence": "High|Medium|Low", "notes": "..."}}. Provide numeric values where possible (0-100 for percentages, or raw numeric for counts). ${historyPrompt}`;
+
+                        const properties = {};
+                        properties[primaryField] = { type: Type.NUMBER };
+                        responseSchema = {
+                            type: Type.OBJECT,
+                            properties: {
+                                metrics: {
+                                    type: Type.OBJECT,
+                                    properties: properties,
+                                    required: [primaryField]
+                                },
+                                details: {
+                                    type: Type.OBJECT,
+                                    properties: {
+                                        observations: {
+                                            type: Type.ARRAY,
+                                            items: { type: Type.STRING }
+                                        },
+                                        confidence: { type: Type.STRING },
+                                        notes: { type: Type.STRING }
+                                    },
+                                    required: ["observations", "confidence", "notes"]
+                                }
+                            },
+                            required: ["metrics", "details"]
+                        };
                     }
 
-                        const geminiCall = (genAI) => genAI.models.generateContent({
+                    const geminiCall = (genAI) => genAI.models.generateContent({
                         model: getActiveApiModel(),
                         contents: [{ text: prompt }, { inlineData: { mimeType: mimeType, data: fileData.split(',')[1] } }],
                         config: {
                             responseMimeType: "application/json",
-                            responseSchema: {
-                                type: Type.OBJECT,
-                                properties: {
-                                    weedDetails: {
-                                        type: Type.ARRAY,
-                                        items: {
-                                            type: Type.OBJECT,
-                                            properties: {
-                                                species: { type: Type.STRING },
-                                                cover: { type: Type.NUMBER },
-                                                status: { type: Type.STRING },
-                                                notes: { type: Type.STRING }
-                                            },
-                                            required: ["species", "cover", "status", "notes"]
-                                        }
-                                    }
-                                },
-                                required: ["weedDetails"]
-                            }
+                            responseSchema: responseSchema
                         }
                     });
 
