@@ -78,7 +78,7 @@ function calculateStatus(categoryId, pVal, baseVal = 0) {
   }
 }
 
-function cleanReportText(text, targetDaa = null) {
+function cleanReportText(text, targetDaa = null, isNonCrop = false) {
   if (!text || text === '—') return text;
   let clean = String(text);
   if (targetDaa !== null && Number(targetDaa) > 0) {
@@ -90,6 +90,25 @@ function cleanReportText(text, targetDaa = null) {
   }
   // Remove double periods
   clean = clean.replace(/\.{2,}/g, '.').replace(/\.\s+\./g, '.');
+
+  if (isNonCrop) {
+    clean = clean.replace(/\b(the\s+)?crop\b/gi, 'the weed population');
+    clean = clean.replace(/\bcrop\s+injury\b/gi, 'weed injury');
+    clean = clean.replace(/\bcrop\s+population\b/gi, 'weed population');
+    clean = clean.replace(/\bcrop\s+vigor\b/gi, 'weed growth vigor');
+  }
+  return clean;
+}
+
+function getCleanNarrative(text, isNonCrop = false) {
+  if (!text) return '';
+  let clean = String(text).replace(/\*/g, '');
+  if (isNonCrop) {
+    clean = clean.replace(/\b(the\s+)?crop\b/gi, 'the weed population');
+    clean = clean.replace(/\bcrop\s+injury\b/gi, 'weed injury');
+    clean = clean.replace(/\bcrop\s+population\b/gi, 'weed population');
+    clean = clean.replace(/\bcrop\s+vigor\b/gi, 'weed growth vigor');
+  }
   return clean;
 }
 
@@ -195,6 +214,10 @@ export function getTimelineData(efficacy, categoryId = 'herbicide', trial = null
   const primaryField = getPrimaryObservationField(categoryId);
   const targetValue = trial ? (trial[config.targetField] || trial.WeedSpecies || 'Total') : 'Total';
   const trialDate = trial?.Date || '';
+  const isNonCrop = categoryId === 'herbicide' && (
+    trial?.SiteType ? (trial.SiteType !== 'Crop' && trial.SiteType !== '') :
+    (!trial?.Crop || trial.Crop === '—' || trial.Crop === 'N/A' || trial.Crop.toLowerCase().includes('non-crop') || trial.Crop.toLowerCase().includes('non crop') || trial.Crop === 'Non-Crop')
+  );
 
   const getDaaVal = (o) => {
     if (o.daa !== undefined && o.daa !== null && o.daa !== '' && o.daa !== '—') {
@@ -302,7 +325,7 @@ export function getTimelineData(efficacy, categoryId = 'herbicide', trial = null
     // 7. Notes
     let cleanNotes = o.notes || '—';
     const obsDaa = getDaaVal(o);
-    cleanNotes = cleanReportText(cleanNotes, obsDaa);
+    cleanNotes = cleanReportText(cleanNotes, obsDaa, isNonCrop);
     row.push(cleanNotes);
     
     return row;
@@ -1153,9 +1176,9 @@ function getAdvancedIndicesTableData(trial, efficacy, categoryId) {
       const wceVal = baseCover > 0 ? Math.max(0, ((baseCover - ct) / baseCover) * 100) : 0;
       
       const greenness = Math.max(0, Math.min(100, ct * (1 - wceVal / 100)));
-      const necrosis = Math.max(0, Math.min(100, baseCover - greenness));
+      const necrosis = baseCover > 0 ? Math.max(0, Math.min(100, ((baseCover - greenness) / baseCover) * 100)) : 0;
       const density = Math.max(0, Math.round(ct * 1.5));
-      const uniformity = Math.max(50, Math.min(100, Math.round(100 - Math.abs(50 - ct) * 0.4)));
+      const uniformity = Math.max(50, Math.min(100, Math.round(50 + 50 * Math.pow(Math.abs(50 - ct) / 50, 2))));
       
       let regrowth = 0;
       if (idx > 0) {
@@ -1174,7 +1197,7 @@ function getAdvancedIndicesTableData(trial, efficacy, categoryId) {
       data.push([`DAA ${daa} (Plot ${plot})`, `Weed Density (est. plants/m²)`, `${density}`]);
       data.push([`DAA ${daa} (Plot ${plot})`, `Uniformity Score (%)`, `${uniformity}%`]);
       data.push([`DAA ${daa} (Plot ${plot})`, `Regrowth Index (%)`, `${regrowth}%`]);
-      data.push([`DAA ${daa} (Plot ${plot})`, `Injury Severity (0-9)`, `${injury}`]);
+      data.push([`DAA ${daa} (Plot ${plot})`, `Herbicidal Injury Score (0-9)`, `${injury}`]);
     });
   }
   return data;
@@ -1452,21 +1475,7 @@ export async function generateComprehensivePdf(trial, options = {}) {
     }
   }
 
-  // Advanced Agronomic Indices Section
-  const advIndices = getAdvancedIndicesTableData(trial, efficacy, categoryId);
-  if (advIndices.length > 0) {
-    y = secHeading(doc, `${effSecNum}.1 Advanced Agronomic Indices`, y, ph);
-    const advIndicesHeader = categoryId === 'herbicide' ? 'Spot / Timeline (DAA)' : 'Replication / Treatment';
-    autoTable(doc, {
-      startY: y,
-      head: [[advIndicesHeader, 'Index parameter', 'Value']],
-      body: advIndices,
-      headStyles: { fillColor: primaryColor },
-      theme: 'striped',
-      styles: { fontSize: 9 }
-    });
-    y = (doc.lastAutoTable?.finalY ?? y) + 10;
-  }
+
 
   // Crop Yield Analysis Section
   if (categoryId === 'nutrition' || categoryId === 'biostimulant') {
@@ -1490,6 +1499,38 @@ export async function generateComprehensivePdf(trial, options = {}) {
       }
     });
     y = (doc.lastAutoTable?.finalY ?? y) + 12;
+  }
+
+  // Visual Analytics (Charts)
+  if (categoryId === 'herbicide' && efficacy.length >= 2) {
+    if (y + 55 > ph - 20) { doc.addPage(); y = 20; }
+    y = secHeading(doc, `${nextSec++}. Visual Analytics & Trajectories`, y, ph);
+    
+    const sorted = [...efficacy].sort((a,b) => getDaaVal(a) - getDaaVal(b));
+    const xVal = sorted.map(o => getDaaVal(o));
+    
+    const coverVal = sorted.map(o => getObservationPrimaryValue(categoryId, o) ?? 0);
+    const baseCover = coverVal[0] || 0;
+    const greenVal = sorted.map(o => {
+      const ct = getObservationPrimaryValue(categoryId, o) ?? 0;
+      const wceVal = baseCover > 0 ? Math.max(0, ((baseCover - ct) / baseCover) * 100) : 0;
+      return Math.max(0, Math.min(100, ct * (1 - wceVal / 100)));
+    });
+    
+    const necroVal = greenVal.map(g => baseCover > 0 ? Math.max(0, Math.min(100, ((baseCover - g) / baseCover) * 100)) : 0);
+    const densityVal = coverVal.map(c => Math.max(0, Math.round(c * 1.5)));
+    
+    const chartW = 85;
+    const chartH = 42;
+    
+    drawVectorChart(doc, 14, y, chartW, chartH, 'Weed Cover (%) vs DAA', xVal, coverVal, 100, '%');
+    drawVectorChart(doc, 111, y, chartW, chartH, 'Greenness Score (%) vs DAA', xVal, greenVal, 100, '%');
+    y += chartH + 5;
+    
+    if (y + chartH > ph - 20) { doc.addPage(); y = 20; }
+    drawVectorChart(doc, 14, y, chartW, chartH, 'Necrosis (%) vs DAA', xVal, necroVal, 100, '%');
+    drawVectorChart(doc, 111, y, chartW, chartH, 'Weed Density (est. plants/m²) vs DAA', xVal, densityVal, Math.max(10, ...densityVal), '');
+    y += chartH + 10;
   }
 
   // Conclusion & Notes
@@ -1581,6 +1622,63 @@ export async function generateComprehensivePdf(trial, options = {}) {
   toast('PDF downloaded!', 'success');
 }
 
+function drawVectorChart(doc, x, y, w, h, title, xVal, yVal, yMax = 100, yUnit = '%') {
+  doc.setFillColor(248, 250, 252);
+  doc.rect(x, y, w, h, 'F');
+  doc.setDrawColor(226, 232, 240);
+  doc.rect(x, y, w, h, 'S');
+  
+  doc.setFont(undefined, 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(51, 65, 85);
+  doc.text(title, x + 5, y + 6);
+  
+  const px = x + 12;
+  const py = y + h - 10;
+  const pw_plot = w - 18;
+  const ph_plot = h - 20;
+  
+  doc.setDrawColor(71, 85, 105);
+  doc.setLineWidth(0.5);
+  doc.line(px, py, px + pw_plot, py);
+  doc.line(px, py, px, py - ph_plot);
+  
+  if (xVal.length === 0) return;
+  
+  const xMin = Math.min(...xVal);
+  const xMax = Math.max(...xVal) || 1;
+  const xRange = xMax - xMin || 1;
+  
+  doc.setDrawColor(13, 148, 136);
+  doc.setFillColor(13, 148, 136);
+  doc.setLineWidth(1);
+  
+  const coords = xVal.map((xv, idx) => {
+    const yv = yVal[idx] ?? 0;
+    const cx = px + ((xv - xMin) / xRange) * pw_plot;
+    const cy = py - (yv / yMax) * ph_plot;
+    return { cx, cy, xv, yv };
+  });
+  
+  for (let i = 0; i < coords.length - 1; i++) {
+    doc.line(coords[i].cx, coords[i].cy, coords[i+1].cx, coords[i+1].cy);
+  }
+  
+  doc.setFont(undefined, 'normal');
+  doc.setFontSize(6);
+  doc.setTextColor(100, 116, 139);
+  
+  coords.forEach(pt => {
+    doc.circle(pt.cx, pt.cy, 1.2, 'F');
+    doc.text(`${pt.yv.toFixed(0)}${yUnit}`, pt.cx - 2, pt.cy - 3);
+    doc.text(`D${pt.xv}`, pt.cx - 2, py + 5);
+  });
+  
+  doc.text('0', px - 7, py + 2);
+  doc.text(`${(yMax/2).toFixed(0)}`, px - 9, py - ph_plot/2 + 2);
+  doc.text(`${yMax.toFixed(0)}`, px - 9, py - ph_plot + 2);
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 //  EXPORT 2 — generateScientificReport  (scientific layout with AI narrative)
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1615,7 +1713,10 @@ export async function generateScientificReport(trial, options = {}) {
   const dataFields = getAllTrialDataFields(trial, options);
 
   const proj = getProjectForTrial(trial);
-  const isNonCrop = categoryId === 'herbicide' && (!trial.Crop || trial.Crop === '—' || trial.Crop === 'N/A' || trial.Crop.toLowerCase().includes('non-crop') || trial.Crop.toLowerCase().includes('non crop') || trial.Crop === 'Non-Crop');
+  const isNonCrop = categoryId === 'herbicide' && (
+    trial.SiteType ? (trial.SiteType !== 'Crop' && trial.SiteType !== '') :
+    (!trial.Crop || trial.Crop === '—' || trial.Crop === 'N/A' || trial.Crop.toLowerCase().includes('non-crop') || trial.Crop.toLowerCase().includes('non crop') || trial.Crop === 'Non-Crop')
+  );
   const cropLabel = isNonCrop ? 'Site Type' : 'Crop';
   const cropValue = isNonCrop ? (trial.SiteType || proj?.SiteType || trial.Site || 'Open field') : dataFields.crop;
 
@@ -1623,7 +1724,7 @@ export async function generateScientificReport(trial, options = {}) {
   const metaRows = [];
   metaRows.push(['Investigator', trial.InvestigatorName || 'N/A', 'Date', trialDate]);
   metaRows.push(['Location', trial.Location || 'N/A', 'Dosage', trial.Dosage || 'N/A']);
-  metaRows.push([dataFields.cropLabel, dataFields.crop, categoryId === 'herbicide' ? 'Weed Growth Stage' : 'Growth Stage', categoryId === 'herbicide' ? (trial.WeedGrowthStage || '—') : dataFields.cropStage]);
+  metaRows.push([cropLabel, cropValue, categoryId === 'herbicide' ? 'Weed Growth Stage' : 'Growth Stage', categoryId === 'herbicide' ? (trial.WeedGrowthStage || '—') : dataFields.cropStage]);
   if (categoryId !== 'herbicide') {
     metaRows.push(['Yield', dataFields.yieldValue, 'BBCH Code', dataFields.bbchCode]);
   }
@@ -1640,8 +1741,9 @@ export async function generateScientificReport(trial, options = {}) {
 
   // Executive Summary / AI Narrative
   y = secHeading(doc, 'Executive Summary', y, ph);
-  const narrative = aiSummary ||
+  const rawNarrative = aiSummary ||
     `Methodology\n${methodology}\n\nResults\n${summary}\n\nConclusions\n${trial.Conclusion || 'See observations for detailed results.'}`;
+  const narrative = getCleanNarrative(rawNarrative, isNonCrop);
   for (const rawLine of narrative.split('\n')) {
     const line = rawLine.trim();
     if (!line) { y += 3; continue; }
@@ -1716,21 +1818,7 @@ export async function generateScientificReport(trial, options = {}) {
     doc.setTextColor(0, 0, 0); doc.setFontSize(10);
   }
 
-  // Advanced Agronomic Indices
-  const advIndicesSci = getAdvancedIndicesTableData(trial, efficacy, categoryId);
-  if (advIndicesSci.length > 0) {
-    y = secHeading(doc, `${effSecNum}.1 Advanced Agronomic Indices`, y, ph);
-    const advIndicesHeader = categoryId === 'herbicide' ? 'Spot / Timeline (DAA)' : 'Replication / Treatment';
-    autoTable(doc, {
-      startY: y,
-      head: [[advIndicesHeader, 'Index parameter', 'Value']],
-      body: advIndicesSci,
-      headStyles: { fillColor: primaryColor },
-      theme: 'striped',
-      styles: { fontSize: 9 }
-    });
-    y = (doc.lastAutoTable?.finalY ?? y) + 10;
-  }
+
 
   // Crop Yield Analysis Section
   if (categoryId === 'nutrition' || categoryId === 'biostimulant') {
@@ -1754,6 +1842,38 @@ export async function generateScientificReport(trial, options = {}) {
       }
     });
     y = (doc.lastAutoTable?.finalY ?? y) + 12;
+  }
+
+  // Visual Analytics (Charts)
+  if (categoryId === 'herbicide' && efficacy.length >= 2) {
+    if (y + 55 > ph - 20) { doc.addPage(); y = 20; }
+    y = secHeading(doc, `${nextSec++}. Visual Analytics & Trajectories`, y, ph);
+    
+    const sorted = [...efficacy].sort((a,b) => getDaaVal(a) - getDaaVal(b));
+    const xVal = sorted.map(o => getDaaVal(o));
+    
+    const coverVal = sorted.map(o => getObservationPrimaryValue(categoryId, o) ?? 0);
+    const baseCover = coverVal[0] || 0;
+    const greenVal = sorted.map(o => {
+      const ct = getObservationPrimaryValue(categoryId, o) ?? 0;
+      const wceVal = baseCover > 0 ? Math.max(0, ((baseCover - ct) / baseCover) * 100) : 0;
+      return Math.max(0, Math.min(100, ct * (1 - wceVal / 100)));
+    });
+    
+    const necroVal = greenVal.map(g => baseCover > 0 ? Math.max(0, Math.min(100, ((baseCover - g) / baseCover) * 100)) : 0);
+    const densityVal = coverVal.map(c => Math.max(0, Math.round(c * 1.5)));
+    
+    const chartW = 85;
+    const chartH = 42;
+    
+    drawVectorChart(doc, 14, y, chartW, chartH, 'Weed Cover (%) vs DAA', xVal, coverVal, 100, '%');
+    drawVectorChart(doc, 111, y, chartW, chartH, 'Greenness Score (%) vs DAA', xVal, greenVal, 100, '%');
+    y += chartH + 5;
+    
+    if (y + chartH > ph - 20) { doc.addPage(); y = 20; }
+    drawVectorChart(doc, 14, y, chartW, chartH, 'Necrosis (%) vs DAA', xVal, necroVal, 100, '%');
+    drawVectorChart(doc, 111, y, chartW, chartH, 'Weed Density (est. plants/m²) vs DAA', xVal, densityVal, Math.max(10, ...densityVal), '');
+    y += chartH + 10;
   }
 
   y = conclusionNotes(doc, trial, y, ph);
@@ -2473,14 +2593,7 @@ export function exportFieldReportTxt(trial, projectName = '') {
     wce.forEach(w => lines.push(`  ${w.species}: ${w.wce.toFixed(1)}% (${w.initialCover.toFixed(1)} → ${w.finalCover.toFixed(1)})`));
   }
 
-  // --- Advanced Agronomic Indices Section ---
-  const advIndices = getAdvancedIndicesTableData(trial, efficacy, categoryId);
-  if (advIndices.length) {
-    lines.push(sep, 'ADVANCED AGRONOMIC INDICES', sep);
-    advIndices.forEach(([plotInfo, indexName, valStr]) => {
-      lines.push(`  ${plotInfo} | ${indexName}: ${valStr}`);
-    });
-  }
+
 
   // --- Statistical Summary Section ---
   const allTrials = getBackupTrials();
@@ -2802,27 +2915,7 @@ export function exportHtmlReport(trial, projectName = '') {
       ${categoryId === 'herbicide' ? `<p style="font-size:11px;font-style:italic;color:#64748b;margin-top:8px;">*Note: Total cover represents estimated canopy cover of the plot, not the mathematical sum of individual species covers.</p>` : ''}
     </div>` : ''}
 
-    ${(() => {
-      const advIndices = getAdvancedIndicesTableData(trial, efficacy, categoryId);
-      if (!advIndices.length) return '';
-      const advRowsHtml = advIndices.map(([plotInfo, indexName, valStr]) => `
-        <tr>
-          <td>${plotInfo}</td>
-          <td>${indexName}</td>
-          <td style="font-weight:700;color:${primaryHex};">${valStr}</td>
-        </tr>
-      `).join('');
-      return `
-      <div class="section">
-        <h2>Advanced Agronomic Indices</h2>
-        <table>
-          <thead>
-            <tr><th>Plot / Observation Point</th><th>Index Metric</th><th>Calculated Value</th></tr>
-          </thead>
-          <tbody>${advRowsHtml}</tbody>
-        </table>
-      </div>`;
-    })()}
+
 
     ${(() => {
       const allTrials = getBackupTrials();

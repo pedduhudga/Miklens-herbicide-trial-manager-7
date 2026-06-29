@@ -77,7 +77,7 @@ const emptyForm = (category = 'herbicide') => {
     IsLive: true,
     ApplicationTiming: '',
     // Agronomic metadata
-    Crop: '', Variety: '',
+    Crop: '', Variety: '', SiteType: '',
     PreviousCrop: '', IrrigationMethod: '', PlantPopulation: '',
   };
   // Add category-specific fields with empty defaults
@@ -714,6 +714,7 @@ export default function Trials({ onMenuClick }) {
         PreviousCrop: trial.PreviousCrop || '',
         IrrigationMethod: trial.IrrigationMethod || '',
         PlantPopulation: trial.PlantPopulation || '',
+        SiteType: trial.SiteType || '',
       });
     } else {
       setFormData({ ...emptyForm(activeCategory), InvestigatorName: state.auth?.user?.Name || state.auth?.user?.Username || '' });
@@ -4653,6 +4654,8 @@ LANGUAGE AND TONE RULES — follow strictly:
     ${isStandardTrial 
       ? `This is a standard, non-replicated trial (Replication = N/A). Do NOT use any statistical validation terms (avoid: ANOVA, replication, variance, SD, SE, CV, proved, significant, achieved). Use purely observational language (e.g., observed, recorded, estimated, measured, detected). Do NOT claim statistical significance.` 
       : `This is a replicated trial design. You may use statistical terms (e.g., ANOVA, replications, variance, SD, SE, CV, significant, achieved) where appropriate to describe the statistical validity of the trial.`}
+12. TIME-QUALIFY ALL EFFICACY AND REGROWTH STATEMENTS: Every statement of control or regrowth must be time-qualified (e.g. write "100% control was observed up to X DAA" instead of "achieved 100% control" or "successfully addressed", and "No regrowth was observed through the final assessment (X DAA)" instead of "No regrowth"). Do NOT overstate conclusions.
+13. CROP-FREE LANGUAGE FOR NON-CROP TRIALS: Since this is a non-crop weed trial, you must NEVER refer to "the crop" or "crop population" or "crop injury". Instead, write "the weed population", "weed canopy", or "weed vegetation". E.g., write "The weed population exhibited dense vegetative growth prior to herbicide application." instead of "the crop exhibited full vegetative vigor".
 
 OUTPUT STRUCTURE — write exactly these 5 sections, nothing else (keep the entire narrative concise and short to avoid repetitive summaries):
 
@@ -5903,6 +5906,13 @@ If none are present, write "None".`;
                   <select value={formData.WeedGrowthStage} onChange={e => setFormData({...formData, WeedGrowthStage: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
                     <option value="">— Select Growth Stage —</option>
                     {BBCH_STAGES.map(s => <option key={s.value} value={s.label}>{s.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Site Type</label>
+                  <select value={formData.SiteType || ''} onChange={e => setFormData({...formData, SiteType: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                    <option value="">— Select Site Type —</option>
+                    {['Open field', 'Fallow land', 'Roadside', 'Bund', 'Non-Crop', 'Crop'].map(st => <option key={st} value={st}>{st}</option>)}
                   </select>
                 </div>
               </>
