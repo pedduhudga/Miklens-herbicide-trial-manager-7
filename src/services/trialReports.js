@@ -1298,17 +1298,18 @@ export async function generateComprehensivePdf(trial, options = {}) {
   // 2-column metadata
   doc.setFontSize(10);
   const lx = 14, rx = pw / 2 + 10;
-  const meta2 = [
-    [`Investigator: ${trial.InvestigatorName || 'N/A'}`, `Date: ${trialDate}`],
-    [`Location: ${trial.Location || 'N/A'}`,              `Dosage: ${trial.Dosage || 'N/A'}`],
-    [`Crop: ${dataFields.crop}`,                           `Yield: ${dataFields.yieldValue}`],
-    [`Application Timing: ${dataFields.applicationTiming}`, `Growth Stage: ${dataFields.cropStage}`],
-    [`BBCH Code: ${dataFields.bbchCode}`,                  `Application Method: ${dataFields.applicationMethod}`],
-    [`Spray Volume: ${dataFields.sprayVolume}`,            `Nozzle: ${dataFields.nozzle}`],
-    [`Result: ${trial.Result || 'Pending'}`,               `Replication: ${trial.Replication || 'N/A'}`],
-    [`Status: ${(trial.IsCompleted === true || trial.IsCompleted === 'true') ? 'Finalized' : 'Ongoing'}`,
-     trial.PlotNumber ? `Plot #: ${trial.PlotNumber}` : ''],
-  ];
+  const meta2 = [];
+  meta2.push([`Investigator: ${trial.InvestigatorName || 'N/A'}`, `Date: ${trialDate}`]);
+  meta2.push([`Location: ${trial.Location || 'N/A'}`,              `Dosage: ${trial.Dosage || 'N/A'}`]);
+  meta2.push([`Crop: ${dataFields.crop}`,                           categoryId === 'herbicide' ? `Weed Growth Stage: ${trial.WeedGrowthStage || '—'}` : `Growth Stage: ${dataFields.cropStage}`]);
+  if (categoryId !== 'herbicide') {
+    meta2.push([`Yield: ${dataFields.yieldValue}`,                  `BBCH Code: ${dataFields.bbchCode}`]);
+  }
+  meta2.push([`Application Timing: ${dataFields.applicationTiming}`, `Application Method: ${dataFields.applicationMethod}`]);
+  meta2.push([`Spray Volume: ${dataFields.sprayVolume}`,            `Nozzle: ${dataFields.nozzle}`]);
+  meta2.push([`Result: ${trial.Result || 'Pending'}`,               `Replication: ${trial.Replication || 'N/A'}`]);
+  meta2.push([`Status: ${(trial.IsCompleted === true || trial.IsCompleted === 'true') ? 'Finalized' : 'Ongoing'}`,
+              trial.PlotNumber ? `Plot #: ${trial.PlotNumber}` : '']);
   meta2.forEach(([l, r]) => { doc.text(l, lx, y); if (r) doc.text(r, rx, y); y += 6; });
   y += 2;
 
@@ -1541,16 +1542,17 @@ export async function generateScientificReport(trial, options = {}) {
   const dataFields = getAllTrialDataFields(trial, options);
 
   // Metadata table (4-column)
-  const metaRows = [
-    ['Investigator', trial.InvestigatorName || 'N/A', 'Date', trialDate],
-    ['Location', trial.Location || 'N/A', 'Dosage', trial.Dosage || 'N/A'],
-    ['Crop', dataFields.crop, 'Yield', dataFields.yieldValue],
-    ['App Timing', dataFields.applicationTiming, 'Growth Stage', dataFields.cropStage],
-    ['BBCH Code', dataFields.bbchCode, 'App Method', dataFields.applicationMethod],
-    ['Spray Volume', dataFields.sprayVolume, 'Nozzle', dataFields.nozzle],
-    ['Status', (trial.IsCompleted === true || trial.IsCompleted === 'true') ? 'Finalized' : 'Ongoing', 'Result', trial.Result || 'Pending'],
-    [repConfig.targetLabel, repConfig.targetValue, 'Replication', trial.Replication || 'N/A'],
-  ];
+  const metaRows = [];
+  metaRows.push(['Investigator', trial.InvestigatorName || 'N/A', 'Date', trialDate]);
+  metaRows.push(['Location', trial.Location || 'N/A', 'Dosage', trial.Dosage || 'N/A']);
+  metaRows.push(['Crop', dataFields.crop, categoryId === 'herbicide' ? 'Weed Growth Stage' : 'Growth Stage', categoryId === 'herbicide' ? (trial.WeedGrowthStage || '—') : dataFields.cropStage]);
+  if (categoryId !== 'herbicide') {
+    metaRows.push(['Yield', dataFields.yieldValue, 'BBCH Code', dataFields.bbchCode]);
+  }
+  metaRows.push(['App Timing', dataFields.applicationTiming, 'App Method', dataFields.applicationMethod]);
+  metaRows.push(['Spray Volume', dataFields.sprayVolume, 'Nozzle', dataFields.nozzle]);
+  metaRows.push(['Status', (trial.IsCompleted === true || trial.IsCompleted === 'true') ? 'Finalized' : 'Ongoing', 'Result', trial.Result || 'Pending']);
+  metaRows.push([repConfig.targetLabel, repConfig.targetValue, 'Replication', trial.Replication || 'N/A']);
   autoTable(doc, {
     startY: y, body: metaRows, theme: 'plain',
     styles: { fontSize: 10, cellPadding: 2 },
