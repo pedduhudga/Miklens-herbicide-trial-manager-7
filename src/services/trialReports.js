@@ -218,14 +218,15 @@ export function getTimelineData(efficacy, categoryId = 'herbicide', trial = null
   // Build headers
   const headers = ['DAA', categoryId === 'herbicide' ? 'Weed Species' : config.targetLabel];
   
-  const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
+
+    const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
   if (isVigor) {
     headers.push('Visual Vigor Rating (0–10)');
+  } else if (categoryId === 'herbicide') {
+    headers.push('Weed Cover (%)');
   } else {
     headers.push(`${config.primaryMetric?.label || 'Efficacy'} (${config.primaryMetric?.unit || '%'})`);
   }
-  
-  // Add secondary observation fields as actual columns!
   activeFields.forEach(f => {
     headers.push(f.label);
   });
@@ -261,12 +262,16 @@ export function getTimelineData(efficacy, categoryId = 'herbicide', trial = null
     // 3. Primary Metric Value
     const pVal = getObservationPrimaryValue(categoryId, o) ?? 0;
     const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
-    const isControlEfficiencyMetric = (categoryId === 'herbicide' || categoryId === 'fungicide' || categoryId === 'pesticide');
-    if (isControlEfficiencyMetric) {
-      const effVal = baseVal > 0 ? ((baseVal - pVal) / baseVal) * 100 : 0;
-      row.push(`${Math.max(0, Math.min(100, effVal)).toFixed(1)}%`);
+    if (categoryId === 'herbicide') {
+      row.push(`${pVal.toFixed(1)}%`);
     } else {
-      row.push(`${pVal}${isVigor ? '/10' : (config.primaryMetric?.unit || '')}`);
+      const isControlEfficiencyMetric = (categoryId === 'fungicide' || categoryId === 'pesticide');
+      if (isControlEfficiencyMetric) {
+        const effVal = baseVal > 0 ? ((baseVal - pVal) / baseVal) * 100 : 0;
+        row.push(`${Math.max(0, Math.min(100, effVal)).toFixed(1)}%`);
+      } else {
+        row.push(`${pVal}${isVigor ? '/10' : (config.primaryMetric?.unit || '')}`);
+      }
     }
     
     // 4. Secondary fields
@@ -276,7 +281,7 @@ export function getTimelineData(efficacy, categoryId = 'herbicide', trial = null
     });
     
     // 5. Status
-    const status = calculateStatus(categoryId, pVal, baseVal);
+    const status = getDaaVal(o) === 0 ? 'Baseline' : calculateStatus(categoryId, pVal, baseVal);
     row.push(status);
     
     // 6. Weather columns
