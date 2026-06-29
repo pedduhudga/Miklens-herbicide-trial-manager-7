@@ -3536,11 +3536,12 @@ Rules:
     // Collect all unique weed species/targets across all observations
     const allSpecies = new Set();
     const speciesControlStatus = {};
+    const baselineDaaVal = sorted.length > 0 ? (sorted[0].daa ?? 0) : 0;
     sorted.forEach(obs => {
       (obs.weedDetails || []).forEach(wd => {
         allSpecies.add(wd.species);
         if (!speciesControlStatus[wd.species]) {
-          speciesControlStatus[wd.species] = { initial: wd.cover, final: wd.cover, status: wd.status };
+          speciesControlStatus[wd.species] = { initial: wd.cover, final: wd.cover, status: wd.status, firstDaa: obs.daa ?? 0 };
         } else {
           speciesControlStatus[wd.species].final = wd.cover;
           speciesControlStatus[wd.species].status = wd.status;
@@ -3566,12 +3567,17 @@ Rules:
     summaryText += `**Targets Observed:** ${Array.from(allSpecies).join(', ') || 'None identified'}\n`;
     summaryText += `**Status by Target:**\n`;
     Object.entries(speciesControlStatus).forEach(([sp, data]) => {
-      const spEfficacy = data.initial > 0
-        ? (activeCategory === 'nutrition' || activeCategory === 'biostimulant'
+      const presentAtBaseline = (data.firstDaa ?? 0) <= baselineDaaVal;
+      if (presentAtBaseline && data.initial > 0) {
+        const spEfficacy = (activeCategory === 'nutrition' || activeCategory === 'biostimulant'
            ? ((data.final / data.initial - 1) * 100).toFixed(0)
-           : ((1 - data.final / data.initial) * 100).toFixed(0))
-        : 0;
-      summaryText += `- ${sp}: ${data.initial}% → ${data.final}% (${metricKey}: ${spEfficacy}%, Status: ${data.status || 'Unknown'})\n`;
+           : ((1 - data.final / data.initial) * 100).toFixed(0));
+        summaryText += `- ${sp}: ${data.initial}% → ${data.final}% (${metricKey}: ${spEfficacy}%, Status: ${data.status || 'Unknown'})\n`;
+      } else if (!presentAtBaseline) {
+        summaryText += `- ${sp}: First detected at DAA ${data.firstDaa} as ${data.status || 'controlled'} (not at baseline)\n`;
+      } else {
+        summaryText += `- ${sp}: ${data.initial}% → ${data.final}% (Status: ${data.status || 'Unknown'})\n`;
+      }
     });
 
     summaryText += `\n**Conclusion:** `;
@@ -4537,28 +4543,53 @@ Rules:
       });
 
       const speciesMap = {};
+      const baselineDaaVal = sorted.length > 0 ? getDaaVal(sorted[0]) : 0;
       allSpecies.forEach(sp => {
         speciesMap[sp] = [];
         sorted.forEach(o => {
           const match = (o.weedDetails || []).find(wd => wd.species === sp);
           if (match) {
-            speciesMap[sp].push({ daa: o.daa, cover: match.cover ?? 0, status: match.status || '' });
-          } else {
-            speciesMap[sp].push({ daa: o.daa, cover: 0, status: 'Not detected' });
+            speciesMap[sp].push({ daa: getDaaVal(o), cover: match.cover ?? 0, status: match.status || '' });
           }
+          // Do NOT fabricate entries for species not present in this observation
         });
       });
 
       const speciesAnalysis = Object.entries(speciesMap).map(([sp, pts]) => {
+        if (pts.length === 0) return null;
         const spSorted = pts.sort((a, b) => a.daa - b.daa);
         const spInit = spSorted[0]?.cover ?? 0;
         const spFinal = spSorted[spSorted.length - 1]?.cover ?? 0;
-        const spMin = Math.min(...spSorted.map(p => p.cover));
-        const spMinDaa = spSorted.find(p => p.cover === spMin)?.daa ?? 0;
-        const spWce = spInit > 0 ? Math.max(0, ((spInit - spFinal) / spInit) * 100).toFixed(1) : '0';
-        const trajectory = spSorted.map(p => `DAA${p.daa}:${p.cover}%`).join(' → ');
-        return `  ${sp}: ${trajectory} | WCE ${spWce}% | Best suppression ${spMin}% at DAA${spMinDaa} | Final ${spFinal}%`;
-      }).join('\n') || '  No per-species data recorded.';
+        const firstDetectedDaa = spSorted[0]?.daa ?? 0;
+        const presentAtBaseline = firstDetectedDaa <= baselineDaaVal;
+
+        // Include status in trajectory so AI can distinguish dead/desiccated vs unaffected at 0%
+        const trajectory = spSorted.map(p => {
+          const statusStr = p.status ? ` [${p.status}]` : '';
+          return `DAA${p.daa}:${p.cover}%${statusStr}`;
+        }).join(' → ');
+
+        let analysis = `  ${sp}: ${trajectory}`;
+
+        if (presentAtBaseline && spInit > 0) {
+          const spWce = Math.max(0, ((spInit - spFinal) / spInit) * 100).toFixed(1);
+          const spMin = Math.min(...spSorted.map(p => p.cover));
+          const spMinDaa = spSorted.find(p => p.cover === spMin)?.daa ?? 0;
+          analysis += ` | WCE ${spWce}% | Best suppression ${spMin}% at DAA${spMinDaa} | Final ${spFinal}%`;
+        } else if (!presentAtBaseline) {
+          const deadStatuses = ['dead', 'desiccated', 'dead/desiccated', 'top-kill', 'necrotic', 'killed', 'controlled'];
+          const allDead = spSorted.every(p => (p.cover ?? 0) <= 2 && deadStatuses.some(ds => (p.status || '').toLowerCase().includes(ds)));
+          if (allDead) {
+            analysis += ` | First detected at DAA${firstDetectedDaa} as dead/controlled (not present at baseline — likely controlled by treatment)`;
+          } else {
+            analysis += ` | First detected at DAA${firstDetectedDaa} (not present at baseline)`;
+          }
+        } else {
+          analysis += ` | Present at baseline with 0% cover | Final ${spFinal}%`;
+        }
+
+        return analysis;
+      }).filter(Boolean).join('\n') || '  No per-species data recorded.';
 
       const fmtTrialDate = formatDate(detailTrial.Date) || 'N/A';
 
@@ -4619,9 +4650,11 @@ Exactly 3 sentences. Follow this structure precisely:
 
 3. Species-wise / Target Performance
 For EACH target in the breakdown — write the heading, then 1-2 sentences:
-- Begin each paragraph with "At DAA X,".
-- State value at each observed DAA factually.
-- For no-control cases use: "No measurable suppression or reduction was observed for this target."
+- ONLY report DAA data points that are actually listed in the species trajectory. Do NOT fabricate or assume values for DAAs where a species was not observed.
+- If a species was present at baseline (DAA 0), begin with "At DAA X," and track the cover change across observed DAAs.
+- If a species was NOT present at baseline but was first detected post-treatment with a dead/desiccated/controlled status at 0% cover, write: "This species was not recorded at baseline but was identified at DAA X as dead/desiccated, indicating effective treatment control." Do NOT say "0% to 0% — no suppression" for species found dead post-treatment.
+- Use the [status] tags (e.g. [Dead/Desiccated], [Top-kill], [Unaffected]) from the trajectory to accurately describe the condition of each species.
+- For genuine no-control cases (species present at baseline with no reduction, or species found alive and unaffected post-treatment) use: "No measurable suppression or reduction was observed for this target."
 - After ALL targets, write ONE closing summary sentence on its own line summarizing the overall control trajectory.
 
 4. Control Duration Interpretation
