@@ -3515,7 +3515,7 @@ Rules:
   // ── AI SUMMARY GENERATION ─────────────────────────────────────────
   const generateAISummary = async (trial = activeTrial) => {
     if (!trial) return;
-    const efficacyData = validateEfficacyData(safeJsonParse(trial.EfficacyDataJSON, []), trial.Category || activeCategory);
+    const efficacyData = validateEfficacyData(safeJsonParse(trial.EfficacyDataJSON, []), trial.Category || activeCategory, true);
     if (efficacyData.length < 2) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Need at least 2 observations to generate summary', type: 'warning' } }));
       return;
@@ -4475,7 +4475,7 @@ Rules:
     setAiLoading(true);
     setAiSummary('');
     try {
-      const efficacy = validateEfficacyData(safeJsonParse(detailTrial.EfficacyDataJSON, []), detailTrial.Category || activeCategory);
+      const efficacy = validateEfficacyData(safeJsonParse(detailTrial.EfficacyDataJSON, []), detailTrial.Category || activeCategory, true);
       const trialDate = detailTrial.Date || '';
       const getDaaVal = (o) => {
         if (o.daa !== undefined && o.daa !== null && o.daa !== '' && o.daa !== '—') {
