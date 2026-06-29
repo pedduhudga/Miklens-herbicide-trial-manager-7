@@ -7,6 +7,7 @@ import autoTable from 'jspdf-autotable';
 import pptxgen from 'pptxgenjs';
 import { formatPhotoDate, formatDate, formatDateTime, calculateDAA, parseCustomDate } from '../utils/dateUtils.js';
 import { getCategoryConfig, calculateEfficacy, getPrimaryObservationField, getObservationPrimaryValue } from '../utils/categoryConfig.js';
+import { validateEfficacyData } from '../utils/analysisUtils.js';
 import {
   performANOVA,
   performTukeyHSD,
@@ -18,7 +19,6 @@ import {
   checkLeveneTest,
   performKruskalWallis
 } from '../utils/statsUtils.js';
-
 
 // ── COLORS ────────────────────────────────────────────────────────────────────
 const TEAL    = [13, 148, 136];
@@ -1283,7 +1283,7 @@ export async function generateComprehensivePdf(trial, options = {}) {
   const doc      = createDoc();
   const pw       = doc.internal.pageSize.getWidth();
   const ph       = doc.internal.pageSize.getHeight();
-  const efficacy = validateEfficacy(safeJsonParse(trial.EfficacyDataJSON, []));
+  const efficacy = validateEfficacyData(safeJsonParse(trial.EfficacyDataJSON, []), categoryId, true);
   const photos   = safeJsonParse(trial.PhotoURLs, []);
   const weedPhotos = safeJsonParse(trial.WeedPhotosJSON, []);
   const trialDate = fmtDate(trial.Date);
@@ -1520,7 +1520,7 @@ export async function generateScientificReport(trial, options = {}) {
   const doc      = createDoc();
   const pw       = doc.internal.pageSize.getWidth();
   const ph       = doc.internal.pageSize.getHeight();
-  const efficacy = validateEfficacy(safeJsonParse(trial.EfficacyDataJSON, []));
+  const efficacy = validateEfficacyData(safeJsonParse(trial.EfficacyDataJSON, []), categoryId, true);
   const photos   = safeJsonParse(trial.PhotoURLs, []);
   const weedPhotos = safeJsonParse(trial.WeedPhotosJSON, []);
   const trialDate  = fmtDate(trial.Date);
