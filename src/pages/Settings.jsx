@@ -33,7 +33,7 @@ import {
   FileSearch,
   Zap,
 } from "lucide-react";
-import LegacyDataMigrationModal from "../components/LegacyDataMigrationModal.jsx";
+const LegacyDataMigrationModal = React.lazy(() => import("../components/LegacyDataMigrationModal.jsx"));
 import { quickMigrationAnalysis } from "../utils/legacyDataMigration.js";
 
 const QR_FIELDS = [
@@ -1663,13 +1663,17 @@ export default function Settings({ onMenuClick }) {
       </div>
 
       {/* Legacy Data Migration Modal */}
-      <LegacyDataMigrationModal
-        isOpen={migrationModalOpen}
-        onClose={() => setMigrationModalOpen(false)}
-        onApplyMigration={handleMigrationApplied}
-        state={state}
-        updateState={updateState}
-      />
+      {migrationModalOpen && (
+        <React.Suspense fallback={null}>
+          <LegacyDataMigrationModal
+            isOpen={migrationModalOpen}
+            onClose={() => setMigrationModalOpen(false)}
+            onApplyMigration={handleMigrationApplied}
+            state={state}
+            updateState={updateState}
+          />
+        </React.Suspense>
+      )}
     </div>
   );
 }
