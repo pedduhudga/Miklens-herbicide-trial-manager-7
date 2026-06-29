@@ -4660,14 +4660,14 @@ For EACH target in the breakdown — write the heading, then 1-2 sentences:
 4. Control Duration Interpretation
 Exactly 2 sentences. Follow this structure:
 - Sentence 1: Dynamically describe the change or reduction in target level over the observation period based on the data.
-- Sentence 2: "Treatment performance was classified as [Poor/Fair/Good/Excellent], indicating [sufficient/highly effective/moderate/insufficient] control performance under the evaluated field conditions."
+- Sentence 2: If the trial status is "Ongoing", write: "As the trial remains ongoing, additional days of monitoring are required to determine the final control duration and classification under the evaluated field conditions." If the trial status is "Completed/Finalized", write: "Treatment performance was classified as [Poor/Fair/Good/Excellent], indicating [sufficient/highly effective/moderate/insufficient] control performance under the evaluated field conditions."
 
 5. Agronomic Conclusion & Performance Assessment
 Write 3 to 4 detailed sentences providing a proper scientific conclusion:
-- Sentence 1: Detail the duration of effective control and peak control percentage/level.
+- Sentence 1: Detail the duration of effective control (if completed) or current active days of control (if ongoing) and peak control percentage/level.
 - Sentence 2: Detail which targets were successfully addressed.
-- Sentence 3: Detail which targets re-emerged or regrew during the trial and at which DAA.
-- Sentence 4: Conclude with a final factual agronomic performance assessment statement for the treatment under the evaluated conditions. Do NOT include future trial recommendations, suggestions for further evaluations, or speculative remarks.
+- Sentence 3: Detail which targets re-emerged or regrew during the trial and at which DAA, or state that no regrowth has been observed to date.
+- Sentence 4: If the trial status is "Ongoing", write: "The treatment shows highly promising initial efficacy, and continued observation is required to fully validate its agronomic performance profile." If the trial status is "Completed/Finalized", conclude with a final factual agronomic performance assessment statement for the treatment under the evaluated conditions. Do NOT include future trial recommendations, suggestions for further evaluations, or speculative remarks.
 
 DETAILED ANOMALIES & SUGGESTIONS (APPEND SEPARATELY):
 At the very end of your response, after the 5 sections, write a delimiter line: "---ANOMALIES---"
