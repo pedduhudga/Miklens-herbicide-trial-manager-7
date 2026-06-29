@@ -44,13 +44,22 @@ function safeFormatDate(d) {
 }
 
 function getCleanPhotoLabel(photo, index, trialDaa) {
-  if (photo.label && !/^photo_[a-f0-9]/i.test(photo.label) && !/\.[a-z]{3,4}$/i.test(photo.label)) {
+  const isDefaultLabel = !photo.label || 
+    /^photo_[a-f0-9]/i.test(photo.label) || 
+    /\.[a-z]{3,4}$/i.test(photo.label) || 
+    /field\s*observation/i.test(photo.label);
+
+  if (!isDefaultLabel) {
     return photo.label;
   }
   if (trialDaa !== undefined && trialDaa !== null) {
-    return `Field Observation \u2013 DAA ${trialDaa}`;
+    const daaNum = Number(trialDaa);
+    if (daaNum === 0) {
+      return '0 DAA (Before Application)';
+    }
+    return `${trialDaa} DAA`;
   }
-  return `Field Observation #${index + 1}`;
+  return `Observation #${index + 1}`;
 }
 
 export async function exportScientificReportAsDOC(scope, state, options = {}) {
@@ -64,6 +73,15 @@ export async function exportScientificReportAsDOC(scope, state, options = {}) {
         const category = trial.Category || 'herbicide';
         const catConfig = getCategoryConfig(category);
         const targetLabel = catConfig.targetLabel || 'Target';
+        
+        const isStandardTrial = !trial.Replication || trial.Replication === 'N/A' || trial.Replication === '';
+        let metricLabel = catConfig.primaryMetric?.label || 'Efficacy';
+        if (isStandardTrial) {
+            if (category === 'herbicide') metricLabel = 'Observed Control';
+            else if (category === 'fungicide') metricLabel = 'Observed Disease Suppression';
+            else if (category === 'pesticide') metricLabel = 'Observed Pest Suppression';
+            else if (category === 'nutrition' || category === 'biostimulant') metricLabel = 'Observed Crop Vigor';
+        }
         const targetField = catConfig.targetField || 'WeedSpecies';
         const targetVal = trial[targetField] || trial.WeedSpecies || trial.DiseaseTarget || trial.PestTarget || trial.NutrientType || trial.BiostimulantType || 'N/A';
 
@@ -103,7 +121,6 @@ export async function exportScientificReportAsDOC(scope, state, options = {}) {
                         break;
                     }
                     case 'block-table-means': {
-                        const metricLabel = catConfig.primaryMetric.label;
                         const metricUnit = catConfig.primaryMetric.unit;
                         contentHtml += `<h2>Efficacy Data Table</h2>
                         <table border="1">
@@ -116,7 +133,6 @@ export async function exportScientificReportAsDOC(scope, state, options = {}) {
                         contentHtml += "<h2>Environmental Suitability</h2><p>Weather conditions during application were optimal with no critical alerts flagged.</p>"; break;
                     case 'block-chart-wce': {
                         const efficacyList = JSON.parse(trial.EfficacyDataJSON || '[]');
-                        const metricLabel = catConfig.primaryMetric.label;
                         const metricUnit = catConfig.primaryMetric.unit;
                         let effRows = efficacyList.map(o => `<tr><td>Day ${o.daa}</td><td>${getObservationPrimaryValue(category, o) ?? 0}${metricUnit}</td><td>${o.notes || ''}</td></tr>`).join('');
                         contentHtml += `
