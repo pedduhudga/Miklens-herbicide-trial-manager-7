@@ -8,7 +8,7 @@ import {
   fbSaveUserSettings,
   fbSaveGlobalQRSettings,
 } from "../services/firebaseDB.js";
-import { apiCall } from "../services/dataLayer.js";
+
 import {
   Link,
   Key,
@@ -425,7 +425,8 @@ export default function Settings({ onMenuClick }) {
         // Also sync settings to Google Sheets if user is an admin and scriptUrl is set
         if (isAdminUser && s.scriptUrl) {
           try {
-            await apiCall(
+            const { apiCall: apiCallFn1 } = await import("../services/dataLayer.js");
+            await apiCallFn1(
               "saveAllSettings",
               { 
                 settings: settingsToPersist,
@@ -448,7 +449,8 @@ export default function Settings({ onMenuClick }) {
       // - Admins can save all global settings.
       // - Non-admin users only sync their personal config.
       if (isAdminUser) {
-        const result = await apiCall(
+        const { apiCall: apiCallFn2 } = await import("../services/dataLayer.js");
+        const result = await apiCallFn2(
           "saveAllSettings",
           { 
             settings: settingsToPersist,
@@ -475,7 +477,8 @@ export default function Settings({ onMenuClick }) {
             .filter(Boolean)
         : [];
 
-      const userConfig = await apiCall(
+      const { apiCall: apiCallFn3 } = await import("../services/dataLayer.js");
+      const userConfig = await apiCallFn3(
         "updateMyUserConfig",
         {
           DriveFolderId: s.folderId || "",
