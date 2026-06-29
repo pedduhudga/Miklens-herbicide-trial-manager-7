@@ -34,7 +34,7 @@ import {
   Zap,
 } from "lucide-react";
 import LegacyDataMigrationModal from "../components/LegacyDataMigrationModal.jsx";
-import { quickMigrationAnalysis } from "../services/legacyMigrationService.js";
+import { quickMigrationAnalysis } from "../utils/legacyDataMigration.js";
 
 const QR_FIELDS = [
   "FormulationName",

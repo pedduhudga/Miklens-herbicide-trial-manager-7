@@ -397,31 +397,3 @@ export class LegacyMigrationService {
     }
   }
 }
-
-/**
- * Convenience function for quick migration analysis
- * @param {Function} getAppState - Function to get current app state
- * @returns {Promise<Object>} - Quick analysis results
- */
-export async function quickMigrationAnalysis(getAppState) {
-  try {
-    const state = getAppState();
-    const report = generateLegacyMigrationReport(state);
-    
-    return {
-      hasLegacyData: report.summary.legacyRecords > 0,
-      legacyRecordCount: report.summary.legacyRecords,
-      highConfidenceCount: report.summary.highConfidenceSuggestions,
-      needsReviewCount: report.summary.ambiguousRecords,
-      collectionsAffected: Object.keys(report.collections).filter(
-        col => report.collections[col].legacy > 0
-      )
-    };
-  } catch (error) {
-    console.error('Error in quick migration analysis:', error);
-    return {
-      hasLegacyData: false,
-      error: error.message
-    };
-  }
-}
