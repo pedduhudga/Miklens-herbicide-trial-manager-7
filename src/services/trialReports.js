@@ -1724,7 +1724,7 @@ export async function generateScientificReport(trial, options = {}) {
     autoTable(doc, {
       startY: y,
       head: [[advIndicesHeader, 'Index parameter', 'Value']],
-      body: advIndices,
+      body: advIndicesSci,
       headStyles: { fillColor: primaryColor },
       theme: 'striped',
       styles: { fontSize: 9 }
