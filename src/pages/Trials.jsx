@@ -4509,7 +4509,7 @@ Rules:
       const targetLabel = cConf.targetLabel || 'Weed Species';
       const targetField = cConf.targetField || 'WeedSpecies';
       const targetValue = detailTrial[targetField] || detailTrial.WeedSpecies || 'Not specified';
-      const primaryMetricKey = (trialCat === 'herbicide' && isStandardTrial) ? 'Observed Control (%)' : (cConf.primaryMetric?.key || 'WCE');
+      const primaryMetricKey = (trialCat === 'herbicide' && isStandardTrial) ? 'Observed Control' : (cConf.primaryMetric?.key || 'WCE');
       const primaryMetricLabel = (trialCat === 'herbicide' && isStandardTrial) ? 'Observed Control' : (cConf.primaryMetric?.label || 'Weed Control Efficiency');
       const primaryMetricUnit = cConf.primaryMetric?.unit || '%';
       const primaryField = getPrimaryObservationField(trialCat);

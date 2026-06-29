@@ -46,7 +46,7 @@ export function getReportConfig(trial) {
   let primaryMetricKey = config.primaryMetric?.key || 'WCE';
   if (cat === 'herbicide' && isStandardTrial) {
     primaryMetricLabel = 'Observed Control';
-    primaryMetricKey = 'Observed Control (%)';
+    primaryMetricKey = 'Observed Control';
   }
   
   const primaryMetricUnit = config.primaryMetric?.unit || '%';
@@ -104,19 +104,47 @@ function cleanReportText(text, targetDaa = null, isNonCrop = false) {
     clean = clean.replace(/\bcrop\s+vigor\b/gi, 'weed growth vigor');
     clean = clean.replace(/\b(the\s+)?crop\b/gi, 'the weed population');
   }
-  return clean;
+  return wrapScientificNames(clean);
 }
 
 function getCleanNarrative(text, isNonCrop = false) {
   if (!text) return '';
-  let clean = String(text).replace(/\*/g, '');
+  let clean = String(text);
   if (isNonCrop) {
     clean = clean.replace(/\bcrop\s+injury\b/gi, 'weed injury');
     clean = clean.replace(/\bcrop\s+population\b/gi, 'weed population');
     clean = clean.replace(/\bcrop\s+vigor\b/gi, 'weed growth vigor');
     clean = clean.replace(/\b(the\s+)?crop\b/gi, 'the weed population');
   }
-  return clean;
+  return wrapScientificNames(clean);
+}
+
+function wrapScientificNames(text) {
+  if (!text) return '';
+  let wrapped = String(text);
+  wrapped = wrapped.replace(/\*Dactyloctenium aegyptium\*/gi, 'Dactyloctenium aegyptium');
+  wrapped = wrapped.replace(/\*Cynodon dactylon\*/gi, 'Cynodon dactylon');
+  wrapped = wrapped.replace(/\*Poaceae spp\.\*/gi, 'Poaceae spp.');
+  wrapped = wrapped.replace(/\*Poaceae\*/gi, 'Poaceae');
+  
+  wrapped = wrapped.replace(/Dactyloctenium aegyptium/gi, '*Dactyloctenium aegyptium*');
+  wrapped = wrapped.replace(/Cynodon dactylon/gi, '*Cynodon dactylon*');
+  wrapped = wrapped.replace(/Poaceae spp\./gi, '*Poaceae spp.*');
+  wrapped = wrapped.replace(/Poaceae(?! spp\.)/gi, '*Poaceae*');
+  return wrapped;
+}
+
+function htmlItalicizeScientificNames(text) {
+  if (!text) return '';
+  let html = String(text);
+  html = html.replace(/Dactyloctenium aegyptium/gi, '<em>Dactyloctenium aegyptium</em>');
+  html = html.replace(/Cynodon dactylon/gi, '<em>Cynodon dactylon</em>');
+  html = html.replace(/Poaceae spp\./gi, '<em>Poaceae spp.</em>');
+  html = html.replace(/Poaceae(?! spp\.)/gi, '<em>Poaceae</em>');
+  html = html.replace(/Cyperus rotundus/gi, '<em>Cyperus rotundus</em>');
+  html = html.replace(/Echinochloa colona/gi, '<em>Echinochloa colona</em>');
+  html = html.replace(/Digitaria sanguinalis/gi, '<em>Digitaria sanguinalis</em>');
+  return html;
 }
 
 function getBackupProjects() {
@@ -404,9 +432,13 @@ function getCleanPhotoLabel(photo, index, trialDaa) {
     return photo.label;
   }
   if (trialDaa !== undefined && trialDaa !== null) {
-    return `Field Observation \u2013 DAA ${trialDaa}`;
+    const daaNum = Number(trialDaa);
+    if (daaNum === 0) {
+      return 'Before Application (0 DAA)';
+    }
+    return `${trialDaa} DAA`;
   }
-  return `Field Observation #${index + 1}`;
+  return `Observation #${index + 1}`;
 }
 function dlBlob(blob, name) {
   const url = URL.createObjectURL(blob);
@@ -1767,6 +1799,92 @@ function drawVectorChart(doc, x, y, w, h, title, xVal, yVal, yMax = 100, yUnit =
   doc.text(yAxisLabel, px - 6, py - ph_plot - 2);
 }
 
+function drawTextWithItalics(doc, text, x, y, maxWidth, lineHeight = 5) {
+  const lines = text.split('\n');
+  let currentY = y;
+  const ph = doc.internal.pageSize.getHeight();
+  
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      currentY += 3;
+      continue;
+    }
+    
+    const isHeader = /^(Methodology|Results|Conclusions?)\s*:?\s*$/i.test(line);
+    if (isHeader) {
+      if (currentY + 12 > ph - 20) { doc.addPage(); currentY = 20; }
+      doc.setFont(undefined, 'bold');
+      doc.setFontSize(11);
+      doc.text(line, x, currentY);
+      currentY += 7;
+      doc.setFont(undefined, 'normal');
+      doc.setFontSize(10);
+      continue;
+    }
+    
+    if (currentY + 10 > ph - 20) {
+      doc.addPage();
+      currentY = 20;
+    }
+    
+    const segments = [];
+    const parts = line.split('*');
+    parts.forEach((part, index) => {
+      const isItalic = (index % 2 === 1);
+      if (part) {
+        segments.push({ text: part, isItalic });
+      }
+    });
+    
+    let currentX = x;
+    let lineSegments = [];
+    const words = [];
+    
+    segments.forEach(seg => {
+      const segWords = seg.text.split(/(\s+)/);
+      segWords.forEach(w => {
+        if (w) {
+          words.push({ text: w, isItalic: seg.isItalic });
+        }
+      });
+    });
+    
+    for (const word of words) {
+      doc.setFont(undefined, word.isItalic ? 'italic' : 'normal');
+      const wordWidth = doc.getTextWidth(word.text);
+      
+      if (currentX + wordWidth > x + maxWidth && word.text.trim()) {
+        lineSegments.forEach(ls => {
+          doc.setFont(undefined, ls.isItalic ? 'italic' : 'normal');
+          doc.text(ls.text, ls.x, currentY);
+        });
+        
+        currentY += lineHeight;
+        if (currentY > ph - 20) {
+          doc.addPage();
+          currentY = 20;
+        }
+        currentX = x;
+        lineSegments = [];
+      }
+      
+      lineSegments.push({ text: word.text, isItalic: word.isItalic, x: currentX });
+      currentX += wordWidth;
+    }
+    
+    lineSegments.forEach(ls => {
+      doc.setFont(undefined, ls.isItalic ? 'italic' : 'normal');
+      doc.text(ls.text, ls.x, currentY);
+    });
+    
+    currentY += lineHeight + 2;
+  }
+  
+  doc.setFont(undefined, 'normal');
+  return currentY;
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 //  EXPORT 2 — generateScientificReport  (scientific layout with AI narrative)
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1832,20 +1950,8 @@ export async function generateScientificReport(trial, options = {}) {
   const rawNarrative = aiSummary ||
     `Methodology\n${methodology}\n\nResults\n${summary}\n\nConclusions\n${trial.Conclusion || 'See observations for detailed results.'}`;
   const narrative = getCleanNarrative(rawNarrative, isNonCrop);
-  for (const rawLine of narrative.split('\n')) {
-    const line = rawLine.trim();
-    if (!line) { y += 3; continue; }
-    if (/^(Methodology|Results|Conclusions?)\s*:?\s*$/i.test(line)) {
-      if (y + 12 > ph - 20) { doc.addPage(); y = 20; }
-      doc.setFont(undefined, 'bold'); doc.setFontSize(11);
-      doc.text(line, 14, y); y += 7;
-      doc.setFont(undefined, 'normal'); doc.setFontSize(10);
-    } else {
-      const wrapped = doc.splitTextToSize(line, pw - 28);
-      if (y + wrapped.length * 5 > ph - 20) { doc.addPage(); y = 20; }
-      doc.text(wrapped, 14, y); y += wrapped.length * 5 + 2;
-    }
-  }
+  doc.setFont(undefined, 'normal'); doc.setFontSize(10); doc.setTextColor(0, 0, 0);
+  y = drawTextWithItalics(doc, narrative, 14, y, pw - 28);
   y += 8;
 
   // Trial Design
@@ -2080,7 +2186,7 @@ export async function generatePpt(trial) {
     const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
     const hasYield = parseFloat(trial.YieldValue || trial.Yield || 0) > 0;
     let slideTitle = `Efficacy Analysis – ${repConfig.primaryMetricKey} per ${repConfig.targetLabel}`;
-    let metricHeaderCell = `${repConfig.primaryMetricKey} (%)`;
+    let metricHeaderCell = repConfig.primaryMetricKey.includes('(%)') ? repConfig.primaryMetricKey : `${repConfig.primaryMetricKey} (%)`;
     if (isVigor) {
       if (hasYield) {
         slideTitle = `Efficacy Analysis – Yield Improvement per ${repConfig.targetLabel}`;
@@ -2835,8 +2941,8 @@ export function exportHtmlReport(trial, projectName = '') {
   const primaryHex = repConfig.config.color?.hex || '#0d9488';
   const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
   const hasYield = parseFloat(trial.YieldValue || trial.Yield || 0) > 0;
-  let sectionMetricLabel = `${repConfig.primaryMetricLabel} (${repConfig.primaryMetricKey})`;
-  let metricColHeader = `${repConfig.primaryMetricKey} %`;
+  let sectionMetricLabel = `${repConfig.primaryMetricLabel} (${repConfig.primaryMetricUnit})`;
+  let metricColHeader = `${repConfig.primaryMetricLabel} (${repConfig.primaryMetricUnit})`;
   if (isVigor) {
     if (hasYield) {
       sectionMetricLabel = 'Comparative Yield Improvement (%)';
@@ -3321,8 +3427,8 @@ export async function exportTrialDocx(trial, options = {}) {
   const primaryHex = repConfig.config.color?.hex || '#0d9488';
   const isVigor = (categoryId === 'nutrition' || categoryId === 'biostimulant');
   const hasYield = parseFloat(trial.YieldValue || trial.Yield || 0) > 0;
-  let sectionMetricLabel = `${repConfig.primaryMetricLabel} (${repConfig.primaryMetricKey})`;
-  let metricColHeader = `${repConfig.primaryMetricKey} %`;
+  let sectionMetricLabel = `${repConfig.primaryMetricLabel} (${repConfig.primaryMetricUnit})`;
+  let metricColHeader = `${repConfig.primaryMetricLabel} (${repConfig.primaryMetricUnit})`;
   if (isVigor) {
     if (hasYield) {
       sectionMetricLabel = 'Comparative Yield Improvement (%)';
@@ -3939,14 +4045,9 @@ export async function generateMasterComprehensivePdf(project, subTrials, options
   // AI Narrative Summary
   if (aiSummary) {
     y = secHeading(doc, `${sectionCounter++}. Master AI Synthesis & Narrative`, y, ph, 14, primaryColor);
-    const narrativeLines = aiSummary.split('\n');
-    for (const rawLine of narrativeLines) {
-      const line = rawLine.trim();
-      if (!line) { y += 3; continue; }
-      const wrapped = doc.splitTextToSize(line, pw - 28);
-      if (y + wrapped.length * 5 > ph - 20) { doc.addPage(); y = 20; }
-      doc.setFontSize(9); doc.text(wrapped, 14, y); y += wrapped.length * 5 + 2;
-    }
+    const narrativeClean = wrapScientificNames(aiSummary);
+    doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(0, 0, 0);
+    y = drawTextWithItalics(doc, narrativeClean, 14, y, pw - 28, 4);
     y += 6;
     doc.setFontSize(10);
   }
@@ -3975,8 +4076,8 @@ export async function generateMasterComprehensivePdf(project, subTrials, options
   }
 
   // Consolidated comparative efficacy
-  let sectionMetricLabel = `Comparative ${repConfig.primaryMetricLabel} (${repConfig.primaryMetricKey}%)`;
-  let metricColHeader = `${repConfig.primaryMetricKey} %`;
+  let sectionMetricLabel = `Comparative ${repConfig.primaryMetricLabel} (${repConfig.primaryMetricUnit})`;
+  let metricColHeader = `${repConfig.primaryMetricLabel} (${repConfig.primaryMetricUnit})`;
   if ((categoryId === 'nutrition' || categoryId === 'biostimulant') && yields.length === 0) {
     sectionMetricLabel = 'Comparative Vigor Improvement (%)';
     metricColHeader = 'Vigor Improvement (%)';
@@ -4157,14 +4258,8 @@ export async function generateMasterScientificReport(project, subTrials, options
   y = secHeading(doc, 'Executive Summary', y, ph, 14, primaryColor);
   const narrativeRaw = aiSummary || `This master scientific report aggregates findings from ${subTrials.length} Sub-Trial monitoring locations evaluated within the ${project.Name} area. Localized efficacy tracking, target species distribution timelines, and photographic logs were evaluated. Overall efficacy profiles and target responses are compiled below.`;
   const narrative = cleanReportText(narrativeRaw);
-  const narrativeLines = narrative.split('\n');
-  for (const rawLine of narrativeLines) {
-    const line = rawLine.trim();
-    if (!line) { y += 3; continue; }
-    const wrapped = doc.splitTextToSize(line, pw - 28);
-    if (y + wrapped.length * 5 > ph - 20) { doc.addPage(); y = 20; }
-    doc.setFontSize(10); doc.text(wrapped, 14, y); y += wrapped.length * 5 + 2;
-  }
+  doc.setFont(undefined, 'normal'); doc.setFontSize(10); doc.setTextColor(0, 0, 0);
+  y = drawTextWithItalics(doc, narrative, 14, y, pw - 28);
   y += 8;
 
   if (analysis?.anova) {
@@ -4896,7 +4991,7 @@ export function exportMasterHtml(project, subTrials, options = {}) {
 
   const aiSummaryHtml = aiSummary ? `
     <h2 style="color:${primaryHex};font-size:14pt;border-bottom:2px solid ${primaryHex};padding-bottom:4px;margin-top:24px;">AI Narrative Summary</h2>
-    <div style="background:#f8fafc;border:1px solid #cbd5e1;padding:12px;margin-bottom:16px;white-space:pre-wrap;line-height:1.45;">${aiSummary.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+    <div style="background:#f8fafc;border:1px solid #cbd5e1;padding:12px;margin-bottom:16px;white-space:pre-wrap;line-height:1.45;">${htmlItalicizeScientificNames(aiSummary.replace(/</g, '&lt;').replace(/>/g, '&gt;'))}</div>
   ` : '';
 
   const subTrialRowsHtml = subTrials.map(st => {
