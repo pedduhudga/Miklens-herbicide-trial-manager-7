@@ -886,7 +886,11 @@ export default function Trials({ onMenuClick }) {
       console.warn('Validation check failed:', validationError);
     }
 
-    updateState({ trials: isEdit ? trials.map(t => t.ID === payload.ID ? payload : t) : [...trials, payload] });
+    const allTrials = getAppState().trials || [];
+    const updatedTrials = isEdit
+      ? allTrials.map(t => String(t.ID) === String(payload.ID) ? payload : t)
+      : [...allTrials, payload];
+    updateState({ trials: updatedTrials });
     setIsModalOpen(false);
 
     try {
