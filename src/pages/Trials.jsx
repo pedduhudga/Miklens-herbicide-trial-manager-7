@@ -21,8 +21,8 @@ import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryVal
 import { calculateDAA, toDateKey, formatPhotoDate, toDatetimeLocal, formatDate, formatDateTime, parseDateFromFilename } from '../utils/dateUtils.js';
 import { normalizeObservation } from '../utils/categoryObservationUtils.js';
 import { validateEfficacyData } from '../utils/analysisUtils.js';
+import { canonicalizeWeedSpecies } from '../utils/weedUtils.js';
 import CameraCapture from '../components/CameraCapture.jsx';
-import CropperModal from '../components/CropperModal.jsx';
 import CategoryValidationAlert, { showCategoryValidationToast } from '../components/CategoryValidationAlert.jsx';
 import GridWeedCoverTool from '../components/GridWeedCoverTool.jsx';
 import PhotoAnalyzerView from '../components/PhotoAnalyzerView.jsx';
@@ -3541,12 +3541,13 @@ Rules:
     const baselineDaaVal = sorted.length > 0 ? (sorted[0].daa ?? 0) : 0;
     sorted.forEach(obs => {
       (obs.weedDetails || []).forEach(wd => {
-        allSpecies.add(wd.species);
-        if (!speciesControlStatus[wd.species]) {
-          speciesControlStatus[wd.species] = { initial: wd.cover, final: wd.cover, status: wd.status, firstDaa: obs.daa ?? 0 };
+        const canonicalSp = canonicalizeWeedSpecies(wd.species);
+        allSpecies.add(canonicalSp);
+        if (!speciesControlStatus[canonicalSp]) {
+          speciesControlStatus[canonicalSp] = { initial: wd.cover, final: wd.cover, status: wd.status, firstDaa: obs.daa ?? 0 };
         } else {
-          speciesControlStatus[wd.species].final = wd.cover;
-          speciesControlStatus[wd.species].status = wd.status;
+          speciesControlStatus[canonicalSp].final = wd.cover;
+          speciesControlStatus[canonicalSp].status = wd.status;
         }
       });
     });
@@ -4539,7 +4540,7 @@ Rules:
       sorted.forEach(o => {
         (o.weedDetails || []).forEach(wd => {
           if (wd.species && wd.species.toLowerCase() !== 'total') {
-            allSpecies.add(wd.species);
+            allSpecies.add(canonicalizeWeedSpecies(wd.species));
           }
         });
       });
@@ -4549,7 +4550,7 @@ Rules:
       allSpecies.forEach(sp => {
         speciesMap[sp] = [];
         sorted.forEach(o => {
-          const match = (o.weedDetails || []).find(wd => wd.species === sp);
+          const match = (o.weedDetails || []).find(wd => canonicalizeWeedSpecies(wd.species) === sp);
           if (match) {
             speciesMap[sp].push({ daa: getDaaVal(o), cover: match.cover ?? 0, status: match.status || '' });
           }
