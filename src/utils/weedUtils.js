@@ -42,6 +42,7 @@ export function canonicalizeWeedSpecies (rawName) {
 
                 if (aliasMap[lower]) return aliasMap[lower];
                 if (lower.includes('cynodon') || lower.includes('bermuda')) return 'Cynodon dactylon';
+                if (lower.includes('crowfoot') || lower.includes('dactyloctenium')) return 'Crowfoot Grass (Dactyloctenium aegyptium)';
                 if (lower.includes('broadleaf')) return 'Broadleaf weed (unidentified)';
                 if (lower.includes('leafminer') || lower.includes('leaf miner') || lower.includes('leaf mining')) return 'Leafminer Damage';
                 if (lower.includes('plant vigor') || lower.includes('general vigor') || lower.includes('visual vigor') || lower === 'vigor') return 'General Plant Vigor';
