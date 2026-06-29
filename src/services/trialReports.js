@@ -2429,7 +2429,12 @@ export async function generatePpt(trial) {
   // Slide 4 – Timeline
   if (efficacy.length) {
     const s4 = pptx.addSlide();
-    s4.addText(`${repConfig.config.name} Status Timeline`, { x: 0.4, y: 0.2, w: 9, h: 0.7, fontSize: 22, bold: true, color: primaryHex });
+    const timelineTitle = 
+      categoryId === 'herbicide' ? 'Treatment Timeline' : 
+      categoryId === 'fungicide' ? 'Disease Progress Timeline' :
+      categoryId === 'pesticide' ? 'Pest Population Timeline' :
+      'Crop Development Timeline';
+    s4.addText(timelineTitle, { x: 0.4, y: 0.2, w: 9, h: 0.7, fontSize: 22, bold: true, color: primaryHex });
     
     const timelineData = getTimelineData(efficacy, categoryId, trial);
     const pptHdr = timelineData.headers.map(h => ({
