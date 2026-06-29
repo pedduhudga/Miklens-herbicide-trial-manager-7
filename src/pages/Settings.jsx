@@ -109,6 +109,10 @@ export default function Settings({ onMenuClick }) {
   const [migrationAnalysis, setMigrationAnalysis] = useState(null);
   const [loadingMigrationAnalysis, setLoadingMigrationAnalysis] = useState(false);
 
+  const s = state.settings || {};
+  const isAdminUser =
+    String(user?.Role || user?.role || "").toLowerCase() === "admin";
+
   useEffect(() => {
     let active = true;
     async function loadStats() {
@@ -228,9 +232,7 @@ export default function Settings({ onMenuClick }) {
       new CustomEvent("app:toast", { detail: { msg, type } }),
     );
 
-  const s = state.settings || {};
-  const isAdminUser =
-    String(user?.Role || user?.role || "").toLowerCase() === "admin";
+  // isAdminUser and s are declared above (before useEffect that depends on them)
 
   // ── API Keys ──────────────────────────────────────────────────────────────
   const handleAddKey = () => {
