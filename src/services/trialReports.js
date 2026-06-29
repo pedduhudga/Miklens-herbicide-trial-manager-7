@@ -69,20 +69,62 @@ export function getReportConfig(trial) {
   };
 }
 
-function calculateStatus(categoryId, pVal, baseVal = 0) {
+function calculateStatus(categoryId, pVal, baseVal = 0, prevVal = null) {
   const isPositive = (categoryId === 'nutrition' || categoryId === 'biostimulant');
   if (isPositive) {
-    // Detect 0-10 scale values (visualVigor, overallVigor) vs 0-100 percentage scale
     if (pVal <= 10) {
-      return pVal >= 8 ? 'Excellent' : pVal >= 6 ? 'Good' : pVal >= 4 ? 'Fair' : 'Poor';
+      return pVal >= 8 ? 'Excellent Response' : pVal >= 6 ? 'Moderate Response' : pVal >= 4 ? 'Mild Response' : 'No Response';
     }
-    return pVal >= 80 ? 'Excellent' : pVal >= 60 ? 'Good' : pVal >= 40 ? 'Fair' : 'Poor';
+    return pVal >= 80 ? 'Excellent Response' : pVal >= 60 ? 'Moderate Response' : pVal >= 40 ? 'Mild Response' : 'No Response';
   } else if (categoryId === 'pesticide') {
     const pctReduction = (baseVal > 0) ? ((baseVal - pVal) / baseVal) * 100 : 0;
-    return pctReduction >= 90 ? 'Excellent' : pctReduction >= 70 ? 'Good' : pctReduction >= 40 ? 'Fair' : 'Poor';
+    if (pctReduction >= 95) return 'Complete Suppression';
+    if (pctReduction >= 80) return 'High Suppression';
+    if (pctReduction >= 50) return 'Partial Suppression';
+    if (pctReduction >= 20) return 'Low Suppression';
+    return 'No Effect';
+  } else if (categoryId === 'fungicide') {
+    const pctReduction = (baseVal > 0) ? ((baseVal - pVal) / baseVal) * 100 : 0;
+    if (pctReduction >= 95) return 'Complete Inhibition';
+    if (pctReduction >= 80) return 'Strong Inhibition';
+    if (pctReduction >= 50) return 'Moderate Inhibition';
+    if (pctReduction >= 20) return 'Mild Inhibition';
+    return 'No Inhibition';
   } else {
-    return pVal <= 10 ? 'Excellent' : pVal <= 30 ? 'Good' : pVal <= 60 ? 'Fair' : 'Poor';
+    // Herbicide — biologically meaningful weed status terms
+    return getHerbicideStatus(pVal, baseVal, prevVal);
   }
+}
+
+function getHerbicideStatus(weedCover, baseVal, prevVal) {
+  // weedCover = current weed cover %; baseVal = initial weed cover %; prevVal = previous observation weed cover %
+  const reduction = baseVal > 0 ? ((baseVal - weedCover) / baseVal) * 100 : 0;
+  const hasPrev = prevVal !== null && prevVal !== undefined;
+  const prevWasZero = hasPrev && prevVal <= 1;
+  const isRegrowing = hasPrev && weedCover > prevVal + 2;
+
+  if (weedCover <= 1) {
+    // ~0% weed cover
+    if (prevWasZero) return 'Sustained Control';
+    return 'Complete Desiccation';
+  }
+  if (weedCover <= 10) {
+    if (isRegrowing) return 'Early Regrowth';
+    if (reduction >= 80) return 'Near-Complete Desiccation';
+    return 'Advanced Desiccation';
+  }
+  if (weedCover <= 30) {
+    if (isRegrowing) return 'Active Regrowth';
+    if (reduction >= 50) return 'Rapid Desiccation';
+    return 'Partial Desiccation';
+  }
+  if (weedCover <= 60) {
+    if (isRegrowing) return 'Significant Regrowth';
+    if (reduction >= 20) return 'Initial Chlorosis';
+    return 'Minimal Effect';
+  }
+  if (reduction < 5) return 'No Visible Effect';
+  return 'Initial Symptoms';
 }
 
 function cleanReportText(text, targetDaa = null, isNonCrop = false) {
@@ -145,6 +187,31 @@ function htmlItalicizeScientificNames(text) {
   html = html.replace(/Echinochloa colona/gi, '<em>Echinochloa colona</em>');
   html = html.replace(/Digitaria sanguinalis/gi, '<em>Digitaria sanguinalis</em>');
   return html;
+}
+
+const SCIENTIFIC_NAME_PATTERNS = [
+  /Dactyloctenium\s+aegyptium/i,
+  /Cynodon\s+dactylon/i,
+  /Poaceae\s+spp/i,
+  /Poaceae/i,
+  /Cyperus\s+rotundus/i,
+  /Echinochloa\s+colona/i,
+  /Digitaria\s+sanguinalis/i,
+  /Eleusine\s+indica/i,
+  /Amaranthus\s+viridis/i,
+  /Parthenium\s+hysterophorus/i,
+];
+
+function containsScientificName(text) {
+  if (!text) return false;
+  const str = String(text);
+  return SCIENTIFIC_NAME_PATTERNS.some(rx => rx.test(str));
+}
+
+function italicCellHook(data) {
+  if (data.section === 'body' && data.cell && containsScientificName(data.cell.raw)) {
+    data.cell.styles.fontStyle = 'italic';
+  }
 }
 
 function getBackupProjects() {
@@ -310,7 +377,8 @@ export function getTimelineData(efficacy, categoryId = 'herbicide', trial = null
   const baseVal = baseObs ? (getObservationPrimaryValue(categoryId, baseObs) ?? 0) : 0;
 
   // Build rows
-  const rows = sortedEfficacy.map(o => {
+  let prevPVal = null;
+  const rows = sortedEfficacy.map((o, idx) => {
     const row = [];
     // 1. DAA
     row.push(String(getDaaVal(o)));
@@ -344,9 +412,10 @@ export function getTimelineData(efficacy, categoryId = 'herbicide', trial = null
       row.push((val !== undefined && val !== null && val !== '') ? String(val) : '—');
     });
     
-    // 5. Status
-    const status = getDaaVal(o) === 0 ? 'Baseline' : calculateStatus(categoryId, pVal, baseVal);
+    // 5. Status — biologically meaningful
+    const status = getDaaVal(o) === 0 ? 'Baseline' : calculateStatus(categoryId, pVal, baseVal, prevPVal);
     row.push(status);
+    prevPVal = pVal;
     
     // 6. Weather columns
     if (hasWeather) {
@@ -1568,7 +1637,8 @@ export async function generateComprehensivePdf(trial, options = {}) {
       startY: y,
       head: [[repConfig.targetLabel, `Initial ${repConfig.primaryObsLabel}`, `Final ${repConfig.primaryObsLabel}`, metricColHeader]],
       body: wce.map(w => [w.species, w.initialCover.toFixed(1) + obsUnit, w.finalCover.toFixed(1) + obsUnit, w.wce.toFixed(1)]),
-      headStyles: { fillColor: primaryColor }, theme: 'striped', styles: { fontSize: 9 }
+      headStyles: { fillColor: primaryColor }, theme: 'striped', styles: { fontSize: 9 },
+      didParseCell: italicCellHook
     });
     y = (doc.lastAutoTable?.finalY ?? y) + 10;
     if (categoryId === 'herbicide') {
@@ -1599,7 +1669,8 @@ export async function generateComprehensivePdf(trial, options = {}) {
         fontSize: Math.max(5.5, Math.min(8, 9 - timelineData.headers.length * 0.4)),
         overflow: 'linebreak',
         cellPadding: 1.5
-      }
+      },
+      didParseCell: italicCellHook
     });
     y = (doc.lastAutoTable?.finalY ?? y) + 12;
   }
@@ -1998,7 +2069,8 @@ export async function generateScientificReport(trial, options = {}) {
       startY: y,
       head: [[repConfig.targetLabel, `Initial ${repConfig.primaryObsLabel}`, `Final ${repConfig.primaryObsLabel}`, metricColHeader]],
       body: wce.map(w => [w.species, w.initialCover.toFixed(1) + obsUnit, w.finalCover.toFixed(1) + obsUnit, w.wce.toFixed(1)]),
-      headStyles: { fillColor: primaryColor }, theme: 'striped', styles: { fontSize: 9 }
+      headStyles: { fillColor: primaryColor }, theme: 'striped', styles: { fontSize: 9 },
+      didParseCell: italicCellHook
     });
     y = (doc.lastAutoTable?.finalY ?? y) + 10;
     if (categoryId === 'herbicide') {
@@ -2033,7 +2105,8 @@ export async function generateScientificReport(trial, options = {}) {
         fontSize: Math.max(5.5, Math.min(8, 9 - timelineData.headers.length * 0.4)),
         overflow: 'linebreak',
         cellPadding: 1.5
-      }
+      },
+      didParseCell: italicCellHook
     });
     y = (doc.lastAutoTable?.finalY ?? y) + 12;
   }
@@ -4145,7 +4218,8 @@ export async function generateMasterComprehensivePdf(project, subTrials, options
           fontSize: Math.max(5.5, Math.min(8, 9 - timelineData.headers.length * 0.4)),
           overflow: 'linebreak',
           cellPadding: 1.5
-        }
+        },
+        didParseCell: italicCellHook
       });
       y = (doc.lastAutoTable?.finalY ?? y) + 8;
     }
@@ -4316,7 +4390,8 @@ export async function generateMasterScientificReport(project, subTrials, options
       startY: y,
       head: [['Sub-Trial / Spot', 'Rep', repConfig.targetLabel, `Initial ${repConfig.primaryObsLabel}`, `Final ${repConfig.primaryObsLabel}`, metricColHeader]],
       body: wceRows,
-      headStyles: { fillColor: primaryColor }, theme: 'striped', styles: { fontSize: 9 }
+      headStyles: { fillColor: primaryColor }, theme: 'striped', styles: { fontSize: 9 },
+      didParseCell: italicCellHook
     });
     y = (doc.lastAutoTable?.finalY ?? y) + 10;
   }
@@ -4348,7 +4423,8 @@ export async function generateMasterScientificReport(project, subTrials, options
           fontSize: Math.max(5.5, Math.min(8, 9 - timelineData.headers.length * 0.4)),
           overflow: 'linebreak',
           cellPadding: 1.5
-        }
+        },
+        didParseCell: italicCellHook
       });
       y = (doc.lastAutoTable?.finalY ?? y) + 8;
     }
