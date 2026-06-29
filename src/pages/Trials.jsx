@@ -326,6 +326,8 @@ export default function Trials({ onMenuClick }) {
   // --- AI Summary ---
   const [aiSummary, setAiSummary] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
+  const [isEditingAiSummary, setIsEditingAiSummary] = useState(false);
+  const [editedAiSummary, setEditedAiSummary] = useState('');
   const [syncingPhotos, setSyncingPhotos] = useState(false);
   const [syncingAllPhotos, setSyncingAllPhotos] = useState(false);
   const [syncHealOnly, setSyncHealOnly] = useState(true);
@@ -4713,10 +4715,36 @@ If none are present, write "None".`;
     }
   }, [detailTrial, state.settings, trials, updateState, getAppState]);
 
+  const handleSaveEditedAiSummary = async () => {
+    if (!detailTrial) return;
+    try {
+      const existing = safeJsonParse(detailTrial.AISummariesJSON, {});
+      const updatedSummaries = {
+        ...existing,
+        narrative: editedAiSummary,
+        narrativeGeneratedAt: new Date().toISOString()
+      };
+      const updatedTrial = { ...detailTrial, AISummariesJSON: JSON.stringify(updatedSummaries) };
+      
+      const allTrials = getAppState().trials || [];
+      updateState({ trials: allTrials.map(t => String(t.ID) === String(updatedTrial.ID) ? updatedTrial : t) });
+      setActiveTrial(updatedTrial);
+      setAiSummary(editedAiSummary);
+      setIsEditingAiSummary(false);
+
+      await updateTrial({ ID: updatedTrial.ID, AISummariesJSON: updatedTrial.AISummariesJSON }, getAppState);
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'AI narrative updated', type: 'success' } }));
+    } catch (err) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Failed to save: ${err.message}`, type: 'error' } }));
+    }
+  };
+
   // Load saved AI narrative when switching to AI tab or changing trial
   useEffect(() => {
     const saved = safeJsonParse(detailTrial?.AISummariesJSON, {});
     setAiSummary(saved.narrative || '');
+    setIsEditingAiSummary(false);
+    setEditedAiSummary(saved.narrative || '');
     setQrGenerated(false);
     setExportMenuOpen(false);
   }, [detailTrial?.ID]);
@@ -7574,11 +7602,25 @@ If none are present, write "None".`;
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
                       <h3 className="font-semibold text-slate-700 flex items-center gap-2"><BrainCircuit className="w-4 h-4 text-violet-500" /> AI Trial Narrative</h3>
-                      <button onClick={generateAiSummary} disabled={aiLoading}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50">
-                        {aiLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                        {aiLoading ? 'Generating...' : (savedAi.narrative ? 'Regenerate' : 'Generate Summary')}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        {aiSummary && !isEditingAiSummary && (
+                          <button
+                            onClick={() => {
+                              setEditedAiSummary(aiSummary);
+                              setIsEditingAiSummary(true);
+                            }}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold border border-slate-300 text-slate-700 bg-white rounded-lg hover:bg-slate-50 transition"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                            Edit
+                          </button>
+                        )}
+                        <button onClick={generateAiSummary} disabled={aiLoading}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50">
+                          {aiLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                          {aiLoading ? 'Generating...' : (savedAi.narrative ? 'Regenerate' : 'Generate Summary')}
+                        </button>
+                      </div>
                     </div>
                     {isStale && (
                       <div className="flex items-start gap-2 bg-amber-50 border border-amber-300 rounded-xl px-3 py-2 text-xs text-amber-800">
@@ -7595,7 +7637,31 @@ If none are present, write "None".`;
                         </div>
                       </div>
                     )}
-                    {aiSummary ? (
+                    {isEditingAiSummary ? (
+                      <div className="space-y-3">
+                        <textarea
+                          value={editedAiSummary}
+                          onChange={(e) => setEditedAiSummary(e.target.value)}
+                          rows={15}
+                          className="w-full p-4 border border-violet-200 rounded-xl text-sm text-slate-700 leading-relaxed font-mono focus:ring-2 focus:ring-violet-400 focus:border-transparent outline-none resize-y"
+                          placeholder="Type or edit the AI trial narrative..."
+                        />
+                        <div className="flex justify-end gap-2">
+                          <button
+                            onClick={() => setIsEditingAiSummary(false)}
+                            className="px-3 py-1.5 text-xs font-semibold border border-slate-300 text-slate-700 bg-white rounded-lg hover:bg-slate-50 transition"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={handleSaveEditedAiSummary}
+                            className="px-3 py-1.5 text-xs font-semibold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition"
+                          >
+                            Save Changes
+                          </button>
+                        </div>
+                      </div>
+                    ) : aiSummary ? (
                       <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
                         {aiSummary}
                         {savedAi.narrativeGeneratedAt && (
