@@ -396,7 +396,7 @@ export function validateEfficacyData (efficacy, categoryId = 'herbicide', includ
                                     const isPresentLater = ordered.some(o => {
                                         if ((parseFloat(o.daa) || 0) <= baselineDaa) return false;
                                         const match = (o.weedDetails || []).find(wd => String(wd.species || '').trim().toLowerCase() === spLower);
-                                        return (toNum(match?.cover) || 0) > 0.1;
+                                        return match && String(match.status || '').toLowerCase() !== 'not detected';
                                     });
                                     if (isMentioned || isPresentLater) {
                                         toRedistribute.push(x);
