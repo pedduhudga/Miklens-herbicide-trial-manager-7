@@ -4,11 +4,13 @@ export function canonicalizeWeedSpecies (rawName) {
 
                 const lower = name.toLowerCase().replace(/\s+/g, ' ');
                 const aliasMap = {
-                    'bermudagrass': 'Cynodon dactylon',
-                    'couch grass': 'Cynodon dactylon',
-                    'doob grass': 'Cynodon dactylon',
-                    'durva grass': 'Cynodon dactylon',
-                    'cynodon dactylon': 'Cynodon dactylon',
+                    'bermudagrass': 'Bermuda Grass (Cynodon dactylon)',
+                    'couch grass': 'Bermuda Grass (Cynodon dactylon)',
+                    'doob grass': 'Bermuda Grass (Cynodon dactylon)',
+                    'durva grass': 'Bermuda Grass (Cynodon dactylon)',
+                    'cynodon dactylon': 'Bermuda Grass (Cynodon dactylon)',
+                    'poaceae': 'Unknown Grass Species (Poaceae spp.)',
+                    'poaceae spp.': 'Unknown Grass Species (Poaceae spp.)',
                     'ricinus communis': 'Ricinus communis',
                     'castor bean': 'Ricinus communis',
                     'castor': 'Ricinus communis',
@@ -41,7 +43,9 @@ export function canonicalizeWeedSpecies (rawName) {
                 };
 
                 if (aliasMap[lower]) return aliasMap[lower];
-                if (lower.includes('cynodon') || lower.includes('bermuda')) return 'Cynodon dactylon';
+                if (lower.includes('cynodon') || lower.includes('bermuda')) return 'Bermuda Grass (Cynodon dactylon)';
+                if (lower.includes('crowfoot') || lower.includes('dactyloctenium')) return 'Crowfoot Grass (Dactyloctenium aegyptium)';
+                if (lower.includes('poaceae')) return 'Unknown Grass Species (Poaceae spp.)';
                 if (lower.includes('broadleaf')) return 'Broadleaf weed (unidentified)';
                 if (lower.includes('leafminer') || lower.includes('leaf miner') || lower.includes('leaf mining')) return 'Leafminer Damage';
                 if (lower.includes('plant vigor') || lower.includes('general vigor') || lower.includes('visual vigor') || lower === 'vigor') return 'General Plant Vigor';
@@ -109,15 +113,20 @@ export function canonicalizeWeedSpecies (rawName) {
             // Classify weed biology so logic is lifecycle-driven for any species.
             export function getWeedBiology (speciesName) {
                 const s = String(speciesName || '').trim().toLowerCase();
+                let cleanS = s;
+                const parenMatch = s.match(/\(([^)]+)\)/);
+                if (parenMatch) {
+                    cleanS = parenMatch[1].trim();
+                }
                 const perennialSet = PERENNIAL_WEEDS || new Set();
                 const annualSet = ANNUAL_WEEDS || new Set();
                 const sedgeSet = SEDGE_WEEDS || new Set();
-                const type = sedgeSet.has(s)
+                const type = sedgeSet.has(cleanS) || sedgeSet.has(s)
                     ? 'Sedge'
                     : (/(grass|poa|panicum|digitaria|cynodon|paspalum|sorghum|echinochloa)/i.test(s) ? 'Grass' : 'Broadleaf');
                 let lifecycle = 'Unknown';
-                if (perennialSet.has(s)) lifecycle = 'Perennial';
-                else if (annualSet.has(s)) lifecycle = 'Annual';
+                if (perennialSet.has(cleanS) || perennialSet.has(s)) lifecycle = 'Perennial';
+                else if (annualSet.has(cleanS) || annualSet.has(s)) lifecycle = 'Annual';
                 return {
                     type,
                     lifecycle,

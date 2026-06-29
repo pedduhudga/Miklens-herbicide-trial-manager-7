@@ -21,10 +21,10 @@ import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryVal
 import { calculateDAA, toDateKey, formatPhotoDate, toDatetimeLocal, formatDate, formatDateTime, parseDateFromFilename } from '../utils/dateUtils.js';
 import { normalizeObservation } from '../utils/categoryObservationUtils.js';
 import { validateEfficacyData } from '../utils/analysisUtils.js';
+import { canonicalizeWeedSpecies } from '../utils/weedUtils.js';
 import CameraCapture from '../components/CameraCapture.jsx';
 import CropperModal from '../components/CropperModal.jsx';
 import CategoryValidationAlert, { showCategoryValidationToast } from '../components/CategoryValidationAlert.jsx';
-import GridWeedCoverTool from '../components/GridWeedCoverTool.jsx';
 import PhotoAnalyzerView from '../components/PhotoAnalyzerView.jsx';
 import { analyzePhoto, analyzePhotosBatch, identifyWeedFromPhoto as identifyWeedFromPhotoService, getAPIKeys, generateTextWithAI, parseHarvestTextLog } from '../services/multiProviderAI.js';
 import TrialCard from '../components/TrialCard.jsx';
@@ -326,6 +326,8 @@ export default function Trials({ onMenuClick }) {
   // --- AI Summary ---
   const [aiSummary, setAiSummary] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
+  const [isEditingAiSummary, setIsEditingAiSummary] = useState(false);
+  const [editedAiSummary, setEditedAiSummary] = useState('');
   const [syncingPhotos, setSyncingPhotos] = useState(false);
   const [syncingAllPhotos, setSyncingAllPhotos] = useState(false);
   const [syncHealOnly, setSyncHealOnly] = useState(true);
@@ -886,7 +888,11 @@ export default function Trials({ onMenuClick }) {
       console.warn('Validation check failed:', validationError);
     }
 
-    updateState({ trials: isEdit ? trials.map(t => t.ID === payload.ID ? payload : t) : [...trials, payload] });
+    const allTrials = getAppState().trials || [];
+    const updatedTrials = isEdit
+      ? allTrials.map(t => String(t.ID) === String(payload.ID) ? payload : t)
+      : [...allTrials, payload];
+    updateState({ trials: updatedTrials });
     setIsModalOpen(false);
 
     try {
@@ -1817,6 +1823,10 @@ export default function Trials({ onMenuClick }) {
           temp: weather.temp !== undefined ? String(weather.temp) : prev.temp,
           humidity: weather.humidity !== undefined ? String(weather.humidity) : prev.humidity,
           windspeed: weather.windspeed !== undefined ? String(weather.windspeed) : prev.windspeed,
+          rain: weather.rain !== undefined ? String(weather.rain) : prev.rain,
+          dewPoint: weather.dewPoint !== undefined ? String(weather.dewPoint) : prev.dewPoint,
+          cloudCover: weather.cloudCover !== undefined ? String(weather.cloudCover) : prev.cloudCover,
+          sunlight: weather.sunlight !== undefined ? String(weather.sunlight) : prev.sunlight,
         }));
         window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Weather data fetched successfully!', type: 'success' } }));
       }
@@ -3511,7 +3521,7 @@ Rules:
   // ── AI SUMMARY GENERATION ─────────────────────────────────────────
   const generateAISummary = async (trial = activeTrial) => {
     if (!trial) return;
-    const efficacyData = validateEfficacyData(safeJsonParse(trial.EfficacyDataJSON, []), trial.Category || activeCategory);
+    const efficacyData = validateEfficacyData(safeJsonParse(trial.EfficacyDataJSON, []), trial.Category || activeCategory, true);
     if (efficacyData.length < 2) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Need at least 2 observations to generate summary', type: 'warning' } }));
       return;
@@ -3532,14 +3542,16 @@ Rules:
     // Collect all unique weed species/targets across all observations
     const allSpecies = new Set();
     const speciesControlStatus = {};
+    const baselineDaaVal = sorted.length > 0 ? (sorted[0].daa ?? 0) : 0;
     sorted.forEach(obs => {
       (obs.weedDetails || []).forEach(wd => {
-        allSpecies.add(wd.species);
-        if (!speciesControlStatus[wd.species]) {
-          speciesControlStatus[wd.species] = { initial: wd.cover, final: wd.cover, status: wd.status };
+        const canonicalSp = canonicalizeWeedSpecies(wd.species);
+        allSpecies.add(canonicalSp);
+        if (!speciesControlStatus[canonicalSp]) {
+          speciesControlStatus[canonicalSp] = { initial: wd.cover, final: wd.cover, status: wd.status, firstDaa: obs.daa ?? 0 };
         } else {
-          speciesControlStatus[wd.species].final = wd.cover;
-          speciesControlStatus[wd.species].status = wd.status;
+          speciesControlStatus[canonicalSp].final = wd.cover;
+          speciesControlStatus[canonicalSp].status = wd.status;
         }
       });
     });
@@ -3562,12 +3574,17 @@ Rules:
     summaryText += `**Targets Observed:** ${Array.from(allSpecies).join(', ') || 'None identified'}\n`;
     summaryText += `**Status by Target:**\n`;
     Object.entries(speciesControlStatus).forEach(([sp, data]) => {
-      const spEfficacy = data.initial > 0
-        ? (activeCategory === 'nutrition' || activeCategory === 'biostimulant'
+      const presentAtBaseline = (data.firstDaa ?? 0) <= baselineDaaVal;
+      if (presentAtBaseline && data.initial > 0) {
+        const spEfficacy = (activeCategory === 'nutrition' || activeCategory === 'biostimulant'
            ? ((data.final / data.initial - 1) * 100).toFixed(0)
-           : ((1 - data.final / data.initial) * 100).toFixed(0))
-        : 0;
-      summaryText += `- ${sp}: ${data.initial}% → ${data.final}% (${metricKey}: ${spEfficacy}%, Status: ${data.status || 'Unknown'})\n`;
+           : ((1 - data.final / data.initial) * 100).toFixed(0));
+        summaryText += `- ${sp}: ${data.initial}% → ${data.final}% (${metricKey}: ${spEfficacy}%, Status: ${data.status || 'Unknown'})\n`;
+      } else if (!presentAtBaseline) {
+        summaryText += `- ${sp}: First detected at DAA ${data.firstDaa} as ${data.status || 'controlled'} (not at baseline)\n`;
+      } else {
+        summaryText += `- ${sp}: ${data.initial}% → ${data.final}% (Status: ${data.status || 'Unknown'})\n`;
+      }
     });
 
     summaryText += `\n**Conclusion:** `;
@@ -4248,7 +4265,10 @@ Rules:
             Temperature: weather.temp !== undefined ? String(weather.temp) : (trial.Temperature || ''),
             Humidity: weather.humidity !== undefined ? String(weather.humidity) : (trial.Humidity || ''),
             Windspeed: weather.wind !== undefined ? String(weather.wind) : (trial.Windspeed || ''),
-            Rain: weather.rain !== undefined ? String(weather.rain) : (trial.Rain || '')
+            Rain: weather.rain !== undefined ? String(weather.rain) : (trial.Rain || ''),
+            DewPoint: weather.dewPoint !== undefined ? String(weather.dewPoint) : (trial.DewPoint || ''),
+            CloudCover: weather.cloudCover !== undefined ? String(weather.cloudCover) : (trial.CloudCover || ''),
+            Sunlight: weather.sunlight !== undefined ? String(weather.sunlight) : (trial.Sunlight || '')
           };
           const updated = { ...trial, ...patch };
           updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
@@ -4471,7 +4491,7 @@ Rules:
     setAiLoading(true);
     setAiSummary('');
     try {
-      const efficacy = validateEfficacyData(safeJsonParse(detailTrial.EfficacyDataJSON, []), detailTrial.Category || activeCategory);
+      const efficacy = validateEfficacyData(safeJsonParse(detailTrial.EfficacyDataJSON, []), detailTrial.Category || activeCategory, true);
       const trialDate = detailTrial.Date || '';
       const getDaaVal = (o) => {
         if (o.daa !== undefined && o.daa !== null && o.daa !== '' && o.daa !== '—') {
@@ -4527,36 +4547,63 @@ Rules:
       sorted.forEach(o => {
         (o.weedDetails || []).forEach(wd => {
           if (wd.species && wd.species.toLowerCase() !== 'total') {
-            allSpecies.add(wd.species);
+            allSpecies.add(canonicalizeWeedSpecies(wd.species));
           }
         });
       });
 
       const speciesMap = {};
+      const baselineDaaVal = sorted.length > 0 ? getDaaVal(sorted[0]) : 0;
       allSpecies.forEach(sp => {
         speciesMap[sp] = [];
         sorted.forEach(o => {
-          const match = (o.weedDetails || []).find(wd => wd.species === sp);
+          const match = (o.weedDetails || []).find(wd => canonicalizeWeedSpecies(wd.species) === sp);
           if (match) {
-            speciesMap[sp].push({ daa: o.daa, cover: match.cover ?? 0, status: match.status || '' });
-          } else {
-            speciesMap[sp].push({ daa: o.daa, cover: 0, status: 'Not detected' });
+            speciesMap[sp].push({ daa: getDaaVal(o), cover: match.cover ?? 0, status: match.status || '' });
           }
+          // Do NOT fabricate entries for species not present in this observation
         });
       });
 
       const speciesAnalysis = Object.entries(speciesMap).map(([sp, pts]) => {
+        if (pts.length === 0) return null;
         const spSorted = pts.sort((a, b) => a.daa - b.daa);
         const spInit = spSorted[0]?.cover ?? 0;
         const spFinal = spSorted[spSorted.length - 1]?.cover ?? 0;
-        const spMin = Math.min(...spSorted.map(p => p.cover));
-        const spMinDaa = spSorted.find(p => p.cover === spMin)?.daa ?? 0;
-        const spWce = spInit > 0 ? Math.max(0, ((spInit - spFinal) / spInit) * 100).toFixed(1) : '0';
-        const trajectory = spSorted.map(p => `DAA${p.daa}:${p.cover}%`).join(' → ');
-        return `  ${sp}: ${trajectory} | WCE ${spWce}% | Best suppression ${spMin}% at DAA${spMinDaa} | Final ${spFinal}%`;
-      }).join('\n') || '  No per-species data recorded.';
+        const firstDetectedDaa = spSorted[0]?.daa ?? 0;
+        const presentAtBaseline = firstDetectedDaa <= baselineDaaVal;
+
+        // Include status in trajectory so AI can distinguish dead/desiccated vs unaffected at 0%
+        const trajectory = spSorted.map(p => {
+          const statusStr = p.status ? ` [${p.status}]` : '';
+          return `DAA${p.daa}:${p.cover}%${statusStr}`;
+        }).join(' → ');
+
+        let analysis = `  ${sp}: ${trajectory}`;
+
+        if (presentAtBaseline && spInit > 0) {
+          const spWce = Math.max(0, ((spInit - spFinal) / spInit) * 100).toFixed(1);
+          const spMin = Math.min(...spSorted.map(p => p.cover));
+          const spMinDaa = spSorted.find(p => p.cover === spMin)?.daa ?? 0;
+          analysis += ` | WCE ${spWce}% | Best suppression ${spMin}% at DAA${spMinDaa} | Final ${spFinal}%`;
+        } else if (!presentAtBaseline) {
+          const deadStatuses = ['dead', 'desiccated', 'dead/desiccated', 'top-kill', 'necrotic', 'killed', 'controlled'];
+          const allDead = spSorted.every(p => (p.cover ?? 0) <= 2 && deadStatuses.some(ds => (p.status || '').toLowerCase().includes(ds)));
+          if (allDead) {
+            analysis += ` | First detected at DAA${firstDetectedDaa} as dead/controlled (not present at baseline — likely controlled by treatment)`;
+          } else {
+            analysis += ` | First detected at DAA${firstDetectedDaa} (not present at baseline)`;
+          }
+        } else {
+          analysis += ` | Present at baseline with 0% cover | Final ${spFinal}%`;
+        }
+
+        return analysis;
+      }).filter(Boolean).join('\n') || '  No per-species data recorded.';
 
       const fmtTrialDate = formatDate(detailTrial.Date) || 'N/A';
+
+      const isStandardTrial = !detailTrial.Replication || detailTrial.Replication === 'N/A';
 
       const prompt = `You are a senior agronomist/scientist writing a professional ${cConf.name} field trial narrative for an official regulatory-style report (SOP/TDS validation standard).
       
@@ -4572,6 +4619,7 @@ TRIAL DATA:
 - Control days tracked: ${controlDaysVal != null ? controlDaysVal + ' days' : 'Ongoing'}
 - Trial status: ${(detailTrial.IsCompleted === true || detailTrial.IsCompleted === 'true') ? 'Completed/Finalized' : 'Ongoing'}
 - Rated result: ${detailTrial.Result || 'Not yet rated'}
+- Replication: ${detailTrial.Replication || 'N/A'}
 - Overall ${primaryMetricKey}: ${wce.toFixed(1)}% (initial ${baseCover}${primaryMetricUnit} → final ${finalCover}${primaryMetricUnit})
 - Best overall suppression: ${Number(getObservationPrimaryValue(trialCat, minObs) ?? '?')}% at DAA ${minObs.daa ?? '?'}
 
@@ -4593,44 +4641,42 @@ LANGUAGE AND TONE RULES — follow strictly:
 1. Regulatory-neutral tone. Do NOT use aggressive or emotive language (avoid: "complete lack of efficacy", "product failed", "unacceptable", "benchmark for effective suppression"). Use neutral, factual phrasing: "inadequate control under the evaluated conditions", "no measurable suppression was observed", "no observable response attributable to the treatment", "indicating insufficient performance".
 2. Do NOT speculate beyond observed data. Use level % data only.
 3. Do NOT write "best or worst performance" comparisons — only state observed values objectively.
-4. Do NOT use any markdown formatting (no **, no *, no #, no bullet dashes, no hyphens as bullets). Plain text only.
+4. Do NOT use any markdown formatting (no **, no #, no bullet dashes, no hyphens as bullets) EXCEPT for single asterisks (*) to italicize scientific names and target headings. Plain text only otherwise.
 5. Section headings as plain numbered text: "1. Application & Setup" on its own line.
-6. SPECIES/TARGET HEADING RULE: Each target heading must be written as "Common Name (Scientific Name)" if scientific name is available. If no common name is known, write only the scientific name.
-6a. SCIENTIFIC NAME CAPITALISATION: Always format scientific names as "Genus species" — Genus is capitalised, species epithet is fully lowercase.
+6. SPECIES/TARGET HEADING RULE: Each target heading must be written as "*Common Name (Scientific Name)*" (using asterisks for italics) if scientific name is available. If no common name is known, write only the scientific name in italics like "*Scientific Name*".
+6a. SCIENTIFIC NAME FORMATTING: Always italicize scientific names with asterisks (e.g., *Cynodon dactylon*, *Poaceae* spp., *Dactyloctenium aegyptium*). Capitalise only the Genus name; species/spp. must be lowercase. Keep casing consistent (e.g. use *Poaceae* spp. consistently, not poaceae Spp.).
 7. Application date must be formatted as DD-Mon-YYYY (e.g. 19-Apr-2026). Dosage units: write "mL" not "ml". Write coordinates as provided. Use "at coordinates X, Y" — never "at location X, Y".
 8. Do NOT use herbicide-only terminology like "phytotoxic" or "weed control efficiency" unless this is a herbicide trial. Use generic equivalents like "treatment injury symptoms" or "${primaryMetricLabel}" respectively.
 9. Write in third person. Past tense for finalized trials, present tense for ongoing.
-10. Include a detailed, scientific conclusion in Section 5. If overall level dropped significantly, do NOT conclude that the treatment failed. Keep all comments about observation anomalies, data mismatch, suggestions, recommendations, or potential incorrect uploads completely out of the 5 main sections.
+10. Include a concise, scientific conclusion in Section 5. If overall level dropped significantly, do NOT conclude that the treatment failed. Keep all comments about observation anomalies, data mismatch, suggestions, recommendations, or potential incorrect uploads completely out of the 5 main sections.
+11. STATISTICAL TERMINOLOGY BY DESIGN TYPE: Since this trial has Replication = "${detailTrial.Replication || 'N/A'}", follow this rule:
+    ${isStandardTrial 
+      ? `This is a standard, non-replicated trial (Replication = N/A). Do NOT use any statistical validation terms (avoid: ANOVA, replication, variance, SD, SE, CV, proved, significant, achieved). Use purely observational language (e.g., observed, recorded, estimated, measured, detected). Do NOT claim statistical significance.` 
+      : `This is a replicated trial design. You may use statistical terms (e.g., ANOVA, replications, variance, SD, SE, CV, significant, achieved) where appropriate to describe the statistical validity of the trial.`}
 
-OUTPUT STRUCTURE — write exactly these 5 sections, nothing else:
+OUTPUT STRUCTURE — write exactly these 5 sections, nothing else (keep the entire narrative concise and short to avoid repetitive summaries):
 
 1. Application & Setup
-One sentence. Start directly with the product name (no "Product X was applied" prefix — just "[Product name] was applied…"). Include dosage (with proper units), application date (DD-Mon-YYYY), coordinates, and all target species with scientific names in parentheses.
+One sentence. Start directly with the product name (no "Product X was applied" prefix — just "[Product name] was applied…"). Include dosage (with proper units), application date (DD-Mon-YYYY), coordinates, and all target species with scientific names in parentheses (italicized with asterisks).
 
 2. Overall Efficacy Trajectory
-Exactly 3 sentences. Follow this structure precisely:
-- Sentence 1: "At DAA ${baseline ? getDaaVal(baseline) : 0}, total ${targetLabel.toLowerCase()} level was recorded at X%."
-- Sentence 2: Dynamically describe the final level and its control interpretation based on the actual data.
-- Sentence 3: Dynamically describe the presence, progression, or absence of treatment injury symptoms observed in the timeline notes.
+Exactly 1 or 2 concise sentences. Follow this structure:
+- "At DAA ${baseline ? getDaaVal(baseline) : 0}, total ${targetLabel.toLowerCase()} level was recorded at X%." Describe the final level and the presence, progression, or absence of treatment injury symptoms observed in the timeline notes.
 
 3. Species-wise / Target Performance
-For EACH target in the breakdown — write the heading, then 1-2 sentences:
-- Begin each paragraph with "At DAA X,".
-- State value at each observed DAA factually.
-- For no-control cases use: "No measurable suppression or reduction was observed for this target."
-- After ALL targets, write ONE closing summary sentence on its own line summarizing the overall control trajectory.
+For EACH target in the breakdown — write the italicized heading, then exactly 1 concise sentence:
+- ONLY report DAA data points that are actually listed in the species trajectory. Do NOT fabricate or assume values.
+- Track the cover change across observed DAAs using the [status] tags (e.g. [*Dead/Desiccated*], [*Top-kill*], [*Unaffected*]) in italics to describe the condition of each species.
+- Write ONE closing summary sentence on its own line after all targets.
 
 4. Control Duration Interpretation
-Exactly 2 sentences. Follow this structure:
-- Sentence 1: Dynamically describe the change or reduction in target level over the observation period based on the data.
-- Sentence 2: "Treatment performance was classified as [Poor/Fair/Good/Excellent], indicating [sufficient/highly effective/moderate/insufficient] control performance under the evaluated field conditions."
+Exactly 1 sentence. Follow this structure:
+- Describe the change or reduction in target level over the observation period based on the data, and append the appropriate status sentence: If trial is "Ongoing", write: "As the trial remains ongoing, additional days of monitoring are required to determine the final control duration and classification under the evaluated field conditions." If trial is "Completed/Finalized", write: "Treatment performance was classified as [Poor/Fair/Good/Excellent], indicating [sufficient/highly effective/moderate/insufficient] control performance under the evaluated field conditions."
 
 5. Agronomic Conclusion & Performance Assessment
-Write 3 to 4 detailed sentences providing a proper scientific conclusion:
-- Sentence 1: Detail the duration of effective control and peak control percentage/level.
-- Sentence 2: Detail which targets were successfully addressed.
-- Sentence 3: Detail which targets re-emerged or regrew during the trial and at which DAA.
-- Sentence 4: Conclude with a final factual agronomic performance assessment statement for the treatment under the evaluated conditions. Do NOT include future trial recommendations, suggestions for further evaluations, or speculative remarks.
+Exactly 2 concise sentences:
+- Detail the duration of effective control (if completed) or current active days of control (if ongoing), peak control level, and which targets were successfully addressed without regrowth.
+- If the trial status is "Ongoing", write: "The treatment shows highly promising initial efficacy, and continued observation is required to fully validate its agronomic performance profile." If the trial status is "Completed/Finalized", conclude with a final factual agronomic performance assessment statement for the treatment under the evaluated conditions. Do NOT include future trial recommendations, suggestions for further evaluations, or speculative remarks.
 
 DETAILED ANOMALIES & SUGGESTIONS (APPEND SEPARATELY):
 At the very end of your response, after the 5 sections, write a delimiter line: "---ANOMALIES---"
@@ -4676,10 +4722,36 @@ If none are present, write "None".`;
     }
   }, [detailTrial, state.settings, trials, updateState, getAppState]);
 
+  const handleSaveEditedAiSummary = async () => {
+    if (!detailTrial) return;
+    try {
+      const existing = safeJsonParse(detailTrial.AISummariesJSON, {});
+      const updatedSummaries = {
+        ...existing,
+        narrative: editedAiSummary,
+        narrativeGeneratedAt: new Date().toISOString()
+      };
+      const updatedTrial = { ...detailTrial, AISummariesJSON: JSON.stringify(updatedSummaries) };
+      
+      const allTrials = getAppState().trials || [];
+      updateState({ trials: allTrials.map(t => String(t.ID) === String(updatedTrial.ID) ? updatedTrial : t) });
+      setActiveTrial(updatedTrial);
+      setAiSummary(editedAiSummary);
+      setIsEditingAiSummary(false);
+
+      await updateTrial({ ID: updatedTrial.ID, AISummariesJSON: updatedTrial.AISummariesJSON }, getAppState);
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'AI narrative updated', type: 'success' } }));
+    } catch (err) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Failed to save: ${err.message}`, type: 'error' } }));
+    }
+  };
+
   // Load saved AI narrative when switching to AI tab or changing trial
   useEffect(() => {
     const saved = safeJsonParse(detailTrial?.AISummariesJSON, {});
     setAiSummary(saved.narrative || '');
+    setIsEditingAiSummary(false);
+    setEditedAiSummary(saved.narrative || '');
     setQrGenerated(false);
     setExportMenuOpen(false);
   }, [detailTrial?.ID]);
@@ -7537,11 +7609,25 @@ If none are present, write "None".`;
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
                       <h3 className="font-semibold text-slate-700 flex items-center gap-2"><BrainCircuit className="w-4 h-4 text-violet-500" /> AI Trial Narrative</h3>
-                      <button onClick={generateAiSummary} disabled={aiLoading}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50">
-                        {aiLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                        {aiLoading ? 'Generating...' : (savedAi.narrative ? 'Regenerate' : 'Generate Summary')}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        {aiSummary && !isEditingAiSummary && (
+                          <button
+                            onClick={() => {
+                              setEditedAiSummary(aiSummary);
+                              setIsEditingAiSummary(true);
+                            }}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold border border-slate-300 text-slate-700 bg-white rounded-lg hover:bg-slate-50 transition"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                            Edit
+                          </button>
+                        )}
+                        <button onClick={generateAiSummary} disabled={aiLoading}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50">
+                          {aiLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                          {aiLoading ? 'Generating...' : (savedAi.narrative ? 'Regenerate' : 'Generate Summary')}
+                        </button>
+                      </div>
                     </div>
                     {isStale && (
                       <div className="flex items-start gap-2 bg-amber-50 border border-amber-300 rounded-xl px-3 py-2 text-xs text-amber-800">
@@ -7558,7 +7644,31 @@ If none are present, write "None".`;
                         </div>
                       </div>
                     )}
-                    {aiSummary ? (
+                    {isEditingAiSummary ? (
+                      <div className="space-y-3">
+                        <textarea
+                          value={editedAiSummary}
+                          onChange={(e) => setEditedAiSummary(e.target.value)}
+                          rows={15}
+                          className="w-full p-4 border border-violet-200 rounded-xl text-sm text-slate-700 leading-relaxed font-mono focus:ring-2 focus:ring-violet-400 focus:border-transparent outline-none resize-y"
+                          placeholder="Type or edit the AI trial narrative..."
+                        />
+                        <div className="flex justify-end gap-2">
+                          <button
+                            onClick={() => setIsEditingAiSummary(false)}
+                            className="px-3 py-1.5 text-xs font-semibold border border-slate-300 text-slate-700 bg-white rounded-lg hover:bg-slate-50 transition"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={handleSaveEditedAiSummary}
+                            className="px-3 py-1.5 text-xs font-semibold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition"
+                          >
+                            Save Changes
+                          </button>
+                        </div>
+                      </div>
+                    ) : aiSummary ? (
                       <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
                         {aiSummary}
                         {savedAi.narrativeGeneratedAt && (

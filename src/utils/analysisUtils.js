@@ -179,6 +179,51 @@ export function validateEfficacyData (efficacy, categoryId = 'herbicide', includ
                 // and keep observation total cover aligned with species covers.
                 const ordered = normalized.slice().sort((a, b) => (parseFloat(a.daa) || 0) - (parseFloat(b.daa) || 0));
                 const baselineDaa = ordered.length > 0 ? (parseFloat(ordered[0].daa) || 0) : 0;
+
+                // 1. Gather all unique species observed in any DAA (excluding 'Total')
+                const allObservedSpecies = new Set();
+                ordered.forEach(obs => {
+                    if (Array.isArray(obs.weedDetails)) {
+                        obs.weedDetails.forEach(wd => {
+                            const sp = String(wd.species || wd.name || wd.weed || '').trim();
+                            if (sp && sp.toLowerCase() !== 'total' && !(isMixedWeedPlaceholder && isMixedWeedPlaceholder(sp))) {
+                                allObservedSpecies.add(sp);
+                            }
+                        });
+                    }
+                });
+
+                // 2. Align species list across all observations to ensure they are represented at baseline
+                // and correctly transitioned to 0% [Controlled/Dead] in later stages if missing
+                ordered.forEach(obs => {
+                    const isBaselineObs = (parseFloat(obs.daa) || 0) === baselineDaa;
+                    if (!Array.isArray(obs.weedDetails)) {
+                        obs.weedDetails = [];
+                    }
+                    allObservedSpecies.forEach(sp => {
+                        const hasSp = obs.weedDetails.some(wd => String(wd.species || '').trim().toLowerCase() === sp.toLowerCase());
+                        if (!hasSp) {
+                            if (isBaselineObs) {
+                                // Add to baseline with 0% cover so redistribution logic can assign initial cover if it was present later
+                                obs.weedDetails.push({
+                                    species: sp,
+                                    cover: 0,
+                                    status: 'Unaffected',
+                                    notes: 'Auto-added for baseline tracking'
+                                });
+                            } else {
+                                // Add to later observations with 0% cover and controlled status since it is no longer detected/present
+                                obs.weedDetails.push({
+                                    species: sp,
+                                    cover: 0,
+                                    status: categoryId === 'herbicide' ? 'Dead/Desiccated' : 'Controlled',
+                                    notes: 'Auto-controlled (not detected)'
+                                });
+                            }
+                        }
+                    });
+                });
+
                 const lastSeenBySpecies = new Map();
 
                 // Global baseline DAA authority across duplicate baseline observations.
@@ -351,7 +396,7 @@ export function validateEfficacyData (efficacy, categoryId = 'herbicide', includ
                                     const isPresentLater = ordered.some(o => {
                                         if ((parseFloat(o.daa) || 0) <= baselineDaa) return false;
                                         const match = (o.weedDetails || []).find(wd => String(wd.species || '').trim().toLowerCase() === spLower);
-                                        return (toNum(match?.cover) || 0) > 0.1;
+                                        return match && String(match.status || '').toLowerCase() !== 'not detected';
                                     });
                                     if (isMentioned || isPresentLater) {
                                         toRedistribute.push(x);

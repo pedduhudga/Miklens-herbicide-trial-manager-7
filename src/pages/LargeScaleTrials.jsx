@@ -1689,7 +1689,7 @@ Rules:
     }
     const targetTrial = trial || activeSubTrial;
     if (!targetTrial) return;
-    const efficacyData = validateEfficacyData(safeJsonParse(targetTrial.EfficacyDataJSON, []));
+    const efficacyData = validateEfficacyData(safeJsonParse(targetTrial.EfficacyDataJSON, []), targetTrial.Category || 'herbicide', true);
     if (efficacyData.length < 2) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Need at least 2 observations to generate summary', type: 'warning' } }));
       return;

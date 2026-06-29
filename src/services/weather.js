@@ -60,6 +60,8 @@ export async function fetchWeather(lat, lon, date = null, getAppState) {
                             humidity: w.humidity,
                             wind: w.wind_speed,
                             rain: w.rain ? (w.rain['1h'] || 0) : 0,
+                            dewPoint: w.dew_point,
+                            cloudCover: w.clouds,
                             provider: 'OpenWeatherMap'
                         };
                     }
@@ -84,6 +86,9 @@ export async function fetchWeather(lat, lon, date = null, getAppState) {
                                 humidity: w.humidity,
                                 wind: w.windspeed,
                                 rain: w.precip || 0,
+                                dewPoint: w.dew,
+                                cloudCover: w.cloudcover,
+                                sunlight: w.solarradiation,
                                 provider: 'Visual Crossing'
                             };
                         }
@@ -108,6 +113,9 @@ export async function fetchWeather(lat, lon, date = null, getAppState) {
                                 humidity: w.humidityAvg,
                                 wind: w.windSpeedMax,
                                 rain: w.precipitationAccumulation || 0,
+                                dewPoint: w.dewPointAvg,
+                                cloudCover: w.cloudCoverAvg,
+                                sunlight: w.solarRadiationAvg,
                                 provider: 'Tomorrow.io'
                             };
                         }
@@ -119,9 +127,9 @@ export async function fetchWeather(lat, lon, date = null, getAppState) {
         // 2. PRIMARY: Open-Meteo
         const isOldArchive = diffDays > 14;
         if (isOldArchive) {
-            url = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&start_date=${dateStr}&end_date=${dateStr}&daily=temperature_2m_max,relative_humidity_2m_mean,wind_speed_10m_max,rain_sum&timezone=auto`;
+            url = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&start_date=${dateStr}&end_date=${dateStr}&daily=temperature_2m_max,relative_humidity_2m_mean,wind_speed_10m_max,rain_sum,dew_point_2m_mean,cloud_cover_mean,shortwave_radiation_sum&timezone=auto`;
         } else {
-            url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,relative_humidity_2m_mean,wind_speed_10m_max,rain_sum&start_date=${dateStr}&end_date=${dateStr}&timezone=auto`;
+            url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,relative_humidity_2m_mean,wind_speed_10m_max,rain_sum,dew_point_2m_mean,cloud_cover_mean,shortwave_radiation_sum&start_date=${dateStr}&end_date=${dateStr}&timezone=auto`;
         }
 
         const res = await fetchWithRetry(url);
@@ -157,6 +165,9 @@ export async function fetchWeather(lat, lon, date = null, getAppState) {
                 humidity: data.daily.relative_humidity_2m_mean[safeIndex],
                 wind: data.daily.wind_speed_10m_max[safeIndex],
                 rain: data.daily.rain_sum[safeIndex],
+                dewPoint: data.daily.dew_point_2m_mean ? data.daily.dew_point_2m_mean[safeIndex] : null,
+                cloudCover: data.daily.cloud_cover_mean ? data.daily.cloud_cover_mean[safeIndex] : null,
+                sunlight: data.daily.shortwave_radiation_sum ? data.daily.shortwave_radiation_sum[safeIndex] : null,
                 provider: 'Open-Meteo'
             };
         }
