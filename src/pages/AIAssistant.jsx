@@ -82,7 +82,8 @@ export default function AIAssistant({ onMenuClick }) {
   const suggestedPrompts = CATEGORY_PROMPTS[activeCategory] || CATEGORY_PROMPTS.herbicide;
   const isViewer = state.auth?.user?.role === 'viewer';
 
-  const sessions = state.aiChatSessions || [];
+  const allSessions = state.aiChatSessions || [];
+  const sessions = allSessions.filter(s => (s.category || 'herbicide') === activeCategory);
   const currentSessionId = state.currentAiChatSessionId;
   const currentSession = sessions.find(s => s.id === currentSessionId) || { id: null, messages: [] };
   const history = currentSession.messages;
@@ -258,7 +259,7 @@ export default function AIAssistant({ onMenuClick }) {
     const newHistory = [...history, { role: 'user', content: displayContent }];
 
     let activeSessionId = currentSessionId;
-    let newSessions = [...sessions];
+    let newSessions = [...allSessions];
 
     if (!activeSessionId) {
       activeSessionId = Date.now().toString();
@@ -266,7 +267,8 @@ export default function AIAssistant({ onMenuClick }) {
         id: activeSessionId,
         title: userMsg.substring(0, 30) + (userMsg.length > 30 ? '...' : ''),
         messages: newHistory,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        category: activeCategory
       };
       newSessions = [newSession, ...newSessions];
     } else {
@@ -274,7 +276,8 @@ export default function AIAssistant({ onMenuClick }) {
       if (sessionIndex !== -1) {
         newSessions[sessionIndex] = {
           ...newSessions[sessionIndex],
-          messages: newHistory
+          messages: newHistory,
+          category: newSessions[sessionIndex].category || activeCategory
         };
       }
     }
@@ -475,7 +478,7 @@ RIGOROUS SCIENTIFIC ANSWERING PROTOCOL:
       setIsLoading(false);
       setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [isLoading, attachedImage, history, currentSessionId, sessions, activeCategory, state.trials, state.projects, state.formulations, primaryObsField, config, updateState, getAppState]);
+  }, [isLoading, attachedImage, history, currentSessionId, allSessions, activeCategory, state.trials, state.projects, state.formulations, primaryObsField, config, updateState, getAppState]);
 
   const handleSubmit = (e) => { e.preventDefault(); sendMessage(input); };
 
@@ -491,10 +494,11 @@ RIGOROUS SCIENTIFIC ANSWERING PROTOCOL:
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Viewer role cannot clear chat sessions.', type: 'error' } }));
       return;
     }
-    if (window.confirm('Clear all chat sessions?')) {
+    if (window.confirm(`Clear all ${activeCategory} chat sessions?`)) {
       const sessionsToDelete = [...sessions];
-      updateState({ aiChatSessions: [], currentAiChatSessionId: null });
-      localStorage.removeItem('aiChatSessions');
+      const remainingSessions = allSessions.filter(s => (s.category || 'herbicide') !== activeCategory);
+      updateState({ aiChatSessions: remainingSessions, currentAiChatSessionId: null });
+      localStorage.setItem('aiChatSessions', JSON.stringify(remainingSessions));
 
       try {
           for (const session of sessionsToDelete) {
@@ -515,7 +519,7 @@ RIGOROUS SCIENTIFIC ANSWERING PROTOCOL:
       const newHistory = [...history];
       newHistory.splice(idx, 1);
 
-      const newSessions = [...sessions];
+      const newSessions = [...allSessions];
       const sessionIndex = newSessions.findIndex(s => s.id === currentSessionId);
       if (sessionIndex !== -1) {
         newSessions[sessionIndex] = { ...newSessions[sessionIndex], messages: newHistory };
