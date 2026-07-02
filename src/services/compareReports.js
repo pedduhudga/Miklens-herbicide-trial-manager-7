@@ -271,7 +271,7 @@ export function exportComparisonPdf(trialSeries, allDaa, aiSummaryText, activeCa
     return row;
   });
 
-  doc.autoTable({
+  autoTable(doc, {
     startY: y,
     head: [timelineHeaders],
     body: timelineRows,
@@ -384,7 +384,7 @@ export function exportComparisonPdf(trialSeries, allDaa, aiSummaryText, activeCa
     doc.text(`DESCRIPTIVE STATISTICS (${config.primaryMetric.label.toUpperCase()})`, MARGIN, y);
     y += 4;
 
-    doc.autoTable({
+    autoTable(doc, {
       startY: y,
       head: [['Treatment/Formulation', 'Mean ± SE', 'SD', 'CV%', '95% Confidence Interval', 'N (Replications)']],
       body: descRows.map(r => [r.treatment, r.meanSE, r.sd, r.cv, r.ciRange, String(r.n)]),
@@ -422,7 +422,7 @@ export function exportComparisonPdf(trialSeries, allDaa, aiSummaryText, activeCa
         y += 4;
 
         const nf = (v, d = 2) => Number.isFinite(v) ? Number(v).toFixed(d) : '—';
-        doc.autoTable({
+        autoTable(doc, {
           startY: y,
           head: [['Source of Variation', 'DF', 'SS', 'MS', 'F-Value', 'P-Value', 'Sig']],
           body: anova.anovaTable.source.map((src, i) => {
@@ -455,7 +455,7 @@ export function exportComparisonPdf(trialSeries, allDaa, aiSummaryText, activeCa
 
           const tukey = performTukeyHSD(projectTrials, { metric: primaryObsField });
           if (tukey && tukey.groups) {
-            doc.autoTable({
+            autoTable(doc, {
               startY: y,
               head: [['Treatment', 'Mean with Significance Grouping']],
               body: descRows.map(r => {
@@ -516,7 +516,7 @@ export function exportComparisonPdf(trialSeries, allDaa, aiSummaryText, activeCa
     return [label, ...trialSeries.map(s => getter(s.trial))];
   });
 
-  doc.autoTable({
+  autoTable(doc, {
     startY: y,
     head: [specHeaders],
     body: specRows,
