@@ -186,7 +186,7 @@ export function exportComparisonHtml(trialSeries, allDaa, aiSummaryText, activeC
 /**
  * Generate and download a PDF comparative report using jsPDF
  */
-export function exportComparisonPdf(trialSeries, allDaa, aiSummaryText, activeCategory = 'herbicide') {
+export function exportComparisonPdf(trialSeries, allDaa, aiSummaryText, activeCategory = 'herbicide', chartImgData = null) {
   const config = getCategoryConfig(activeCategory);
   const primaryObsField = getPrimaryObservationField(activeCategory);
   const doc = new jsPDF({
@@ -203,18 +203,21 @@ export function exportComparisonPdf(trialSeries, allDaa, aiSummaryText, activeCa
 
   // 1. Header Banner
   doc.setFillColor(...TEAL);
-  doc.rect(0, 0, PAGE_WIDTH, 35, 'F');
+  doc.rect(0, 0, PAGE_WIDTH, 45, 'F');
 
   doc.setTextColor(255, 255, 255);
   doc.setFont('Helvetica', 'bold');
-  doc.setFontSize(14);
-  doc.text(`MIKLENS ${config.name.toUpperCase()} TRIAL COMPARISON REPORT`, MARGIN, 15);
+  doc.setFontSize(18);
+  doc.text(`SCIENTIFIC ${config.name.toUpperCase()} COMPARATIVE REPORT`, PAGE_WIDTH / 2, 20, { align: 'center' });
 
-  doc.setFontSize(8.5);
+  doc.setFontSize(11);
   doc.setFont('Helvetica', 'normal');
-  doc.text(`Generated on: ${formatDateTime(new Date())}`, MARGIN, 25);
+  doc.text(`Comparing: ${trialSeries.map(s => s.trial.FormulationName).join(' vs ')}`, PAGE_WIDTH / 2, 30, { align: 'center' });
+  
+  doc.setFontSize(8.5);
+  doc.text(`Generated on: ${formatDateTime(new Date())}`, PAGE_WIDTH / 2, 38, { align: 'center' });
 
-  let y = 45;
+  let y = 55;
 
   // 2. AI Executive summary box
   doc.setFont('Helvetica', 'bold');
@@ -279,6 +282,25 @@ export function exportComparisonPdf(trialSeries, allDaa, aiSummaryText, activeCa
   });
 
   y = doc.lastAutoTable.finalY + 10;
+
+  // Embedded Chart Visual
+  if (chartImgData) {
+    try {
+      if (y + 70 > PAGE_HEIGHT - 20) {
+        doc.addPage();
+        y = 15;
+      }
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(...DARK);
+      doc.text('PERFORMANCE TIMELINE VISUALIZATION', MARGIN, y);
+      y += 4;
+      doc.addImage(chartImgData, 'PNG', MARGIN, y, PAGE_WIDTH - (MARGIN * 2), 60);
+      y += 65;
+    } catch (e) {
+      console.warn("Failed to embed chart image in comparison PDF:", e);
+    }
+  }
 
   // --- Statistical Analysis Block ---
   const treatments = {};

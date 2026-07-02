@@ -461,7 +461,9 @@ ${contextData}`;
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Download permission is disabled for your account.', type: 'error' } }));
       return;
     }
-    exportComparisonPdf(trialSeries, allDaa, aiSummary, activeCategory);
+    const canvas = canvasRef.current;
+    const chartImgData = canvas ? canvas.toDataURL('image/png') : null;
+    exportComparisonPdf(trialSeries, allDaa, aiSummary, activeCategory, chartImgData);
   };
 
   if (categoryFilteredTrials.length === 0) {
@@ -569,31 +571,8 @@ ${contextData}`;
             <button onClick={handleExportHtml} className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 hover:bg-slate-50 rounded-lg text-xs font-semibold text-slate-600 transition">
               <FileText className="w-3.5 h-3.5" /> HTML
             </button>
-            <button onClick={handleExportPdf} className="flex items-center gap-1.5 px-3 py-1.5 text-white rounded-lg text-xs font-semibold transition" style={{ backgroundColor: config.color.hex }}>
-              <Download className="w-3.5 h-3.5" /> PDF Report
-            </button>
-            <button
-              onClick={() => {
-                if (!canDownload) {
-                  window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Download permission is disabled for your account.', type: 'error' } }));
-                  return;
-                }
-                categoryFilteredTrials.forEach((trial, index) => {
-                  setTimeout(() => {
-                    const saved = safeJsonParse(trial.AISummariesJSON, {});
-                    const aiSummary = saved.narrative || saved.cover || '';
-                    generateScientificReport(trial, {
-                      withIngredients: true,
-                      aiSummary,
-                      formulations: formulations
-                    });
-                  }, index * 1000);
-                });
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 hover:bg-slate-50 rounded-lg text-xs font-semibold text-slate-600 transition"
-              title="Export all compared trials as PDF Scientific Reports"
-            >
-              <FileText className="w-3.5 h-3.5" /> PDF Scientific Report
+            <button onClick={handleExportPdf} className="flex items-center gap-1.5 px-3 py-1.5 text-white rounded-lg text-xs font-semibold transition" style={{ backgroundColor: config.color.hex }} title="Export Comparison as PDF Scientific Report">
+              <Download className="w-3.5 h-3.5" /> PDF Scientific Report
             </button>
           </div>
         </div>
