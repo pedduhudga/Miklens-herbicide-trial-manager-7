@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useAppState } from '../hooks/useAppState.jsx';
 import TopBar from '../components/TopBar.jsx';
 import L from 'leaflet';
+import { X, Calendar, MapPin, Target, ChevronRight } from 'lucide-react';
 
 const RESULT_COLORS = {
   Excellent: '#22c55e',
@@ -16,6 +17,7 @@ export default function FieldMap({ onMenuClick }) {
   const mapRef = useRef(null);
   const containerRef = useRef(null);
   const [colorMode, setColorMode] = useState('result');
+  const [selectedTrial, setSelectedTrial] = useState(null);
 
   useEffect(() => {
     if (!containerRef.current || typeof L === 'undefined') return;
@@ -66,6 +68,10 @@ export default function FieldMap({ onMenuClick }) {
         opacity: 1,
         fillOpacity: 0.9,
       }).addTo(map);
+
+      circle.on('click', () => {
+        setSelectedTrial(trial);
+      });
 
       circle.bindPopup(`
         <div style="min-width:180px;font-family:sans-serif;">
@@ -130,13 +136,90 @@ export default function FieldMap({ onMenuClick }) {
           </div>
         </div>
 
-        <div className="flex-1 bg-white rounded-xl shadow-lg border border-slate-100 overflow-hidden relative" style={{ minHeight: '400px' }}>
+        <div className="flex-1 bg-white rounded-xl shadow-lg border border-slate-100 overflow-hidden relative flex flex-row" style={{ minHeight: '400px' }}>
           {geoTrialsCount > 0 ? (
-            <div ref={containerRef} className="w-full h-full" style={{ zIndex: 10 }} />
+            <div ref={containerRef} className="flex-grow h-full" style={{ zIndex: 10 }} />
           ) : (
             <div className="flex flex-col items-center justify-center h-full text-slate-500 gap-3">
               <p className="font-semibold text-lg">No GPS-tagged trials found.</p>
               <p className="text-sm">Add GPS coordinates when creating trials to see them on the map.</p>
+            </div>
+          )}
+
+          {/* Sidebar Drawer */}
+          {selectedTrial && (
+            <div className="w-80 border-l border-slate-200 bg-white flex flex-col z-20 shadow-xl animate-in slide-in-from-right duration-200">
+              <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Trial Preview</span>
+                <button onClick={() => setSelectedTrial(null)} className="p-1 hover:bg-slate-200 rounded-lg text-slate-400 hover:text-slate-600 transition">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                <div>
+                  <h4 className="font-bold text-slate-800 text-sm">{selectedTrial.FormulationName || 'Unknown Formulation'}</h4>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="px-2 py-0.5 rounded-full text-xs font-semibold text-slate-600 bg-slate-100">
+                      {selectedTrial.Result || 'Unrated'}
+                    </span>
+                    {selectedTrial.Dosage && (
+                      <span className="text-xs text-slate-500 font-medium">{selectedTrial.Dosage}</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-2 text-xs text-slate-600">
+                  <div className="flex items-center gap-2">
+                    <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span className="truncate">{selectedTrial.Location || 'No location details'}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span>{selectedTrial.Date ? new Date(selectedTrial.Date).toLocaleDateString() : 'No date'}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Target className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span className="truncate">Target: {selectedTrial.WeedSpecies || selectedTrial.PestSpecies || selectedTrial.Target || 'N/A'}</span>
+                  </div>
+                </div>
+
+                {selectedTrial.EfficacyDataJSON && (
+                  <div className="border-t border-slate-100 pt-3">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wide block mb-2">Efficacy Timeline</span>
+                    {(() => {
+                      try {
+                        const obs = JSON.parse(selectedTrial.EfficacyDataJSON || '[]');
+                        if (obs.length === 0) return <p className="text-xs text-slate-400">No observations recorded yet</p>;
+                        return (
+                          <div className="space-y-1">
+                            {obs.slice(-3).map((o, idx) => (
+                              <div key={idx} className="flex justify-between items-center text-xs py-1 border-b border-slate-50">
+                                <span className="font-medium text-slate-600">DAA {o.daa ?? o.day ?? 0}</span>
+                                <span className="font-bold text-slate-800">{o.controlPct ?? o.wce ?? o.efficacy ?? o.value ?? 0}%</span>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      } catch {
+                        return null;
+                      }
+                    })()}
+                  </div>
+                )}
+              </div>
+              <div className="p-4 border-t border-slate-100 bg-slate-50">
+                <button
+                  onClick={() => {
+                    navigate('/trials');
+                    window.dispatchEvent(
+                      new CustomEvent('app:openTrial', { detail: { id: selectedTrial.ID } }),
+                    );
+                  }}
+                  className="w-full flex items-center justify-center gap-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white py-2 rounded-xl text-sm font-bold shadow-md transition-all"
+                >
+                  View Full Details <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           )}
         </div>

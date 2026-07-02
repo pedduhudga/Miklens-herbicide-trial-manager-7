@@ -422,6 +422,83 @@ function getTreatmentAverageEfficacy(trtTrials) {
   return avgEfficacy.sort((a, b) => a.daa - b.daa);
 }
 
+export function checkStagnationAndAnomalies(trial, activeCategory) {
+  const alerts = [];
+  const observations = safeJsonParse(trial.EfficacyDataJSON, []);
+  
+  // 1. Check Stagnation
+  const isCompleted = trial.IsCompleted === true || trial.IsCompleted === 'true';
+  if (!isCompleted && trial.Date) {
+    const startDate = new Date(trial.Date);
+    const today = new Date();
+    const elapsedDays = Math.round((today - startDate) / 86400000);
+    
+    // Check if trial was started more than 14 days ago
+    if (elapsedDays > 14) {
+      const postBaselineObs = observations.filter(obs => {
+        const daa = obs.daa ?? obs.day ?? obs.DAA ?? 0;
+        return daa > 0;
+      });
+      
+      if (postBaselineObs.length === 0) {
+        alerts.push({
+          id: `${trial.ID}-stagnant`,
+          type: 'stagnant',
+          severity: ALERT_SEVERITY.HIGH,
+          title: 'Trial Stagnation Flag',
+          message: `Active trial has no observations recorded for ${elapsedDays} days since start date.`,
+          trialId: trial.ID,
+          trialName: trial.FormulationName || 'Unknown Formulation',
+          timestamp: new Date().toISOString(),
+          actionable: true,
+          actionLabel: 'Record Observation'
+        });
+      }
+    }
+  }
+  
+  // 2. Check Outliers/Anomalies in Observations
+  observations.forEach((obs, idx) => {
+    const daa = obs.daa ?? obs.day ?? obs.DAA ?? 0;
+    
+    // Check efficacy bounds (typically controlPct, wce, etc.)
+    const control = obs.controlPct ?? obs.control ?? obs.efficacy ?? null;
+    if (control !== null && (control > 100 || control < -100)) {
+      alerts.push({
+        id: `${trial.ID}-anomaly-efficacy-${idx}`,
+        type: 'anomaly',
+        severity: ALERT_SEVERITY.HIGH,
+        title: 'Data Anomaly: Invalid Efficacy Value',
+        message: `Observation at DAA ${daa} has an out-of-bounds efficacy value of ${control}%.`,
+        trialId: trial.ID,
+        trialName: trial.FormulationName || 'Unknown Formulation',
+        timestamp: new Date().toISOString(),
+        actionable: true,
+        actionLabel: 'Edit Observation'
+      });
+    }
+    
+    // Check crop injury bounds
+    const injury = obs.cropInjury ?? obs.injury ?? obs.injuryPct ?? null;
+    if (injury !== null && (injury > 100 || injury < 0)) {
+      alerts.push({
+        id: `${trial.ID}-anomaly-injury-${idx}`,
+        type: 'anomaly',
+        severity: ALERT_SEVERITY.HIGH,
+        title: 'Data Anomaly: Invalid Injury Value',
+        message: `Observation at DAA ${daa} has an out-of-bounds crop injury value of ${injury}%.`,
+        trialId: trial.ID,
+        trialName: trial.FormulationName || 'Unknown Formulation',
+        timestamp: new Date().toISOString(),
+        actionable: true,
+        actionLabel: 'Edit Observation'
+      });
+    }
+  });
+
+  return alerts;
+}
+
 /**
  * Generate all alerts for all projects/trials, aggregated at treatment level and filtered by active category
  */
@@ -435,6 +512,12 @@ export function generateAllAlerts(state) {
   
   // 1. Filter trials by the active category
   const categoryTrials = trials.filter(t => t.Category === activeCategory || (!t.Category && activeCategory === 'herbicide'));
+  
+  // 1b. Check for stagnant trials and data anomalies on individual trials
+  categoryTrials.forEach(t => {
+    const individualAlerts = checkStagnationAndAnomalies(t, activeCategory);
+    alerts.push(...individualAlerts);
+  });
   
   // 2. Group trials by ProjectID
   const trialsByProject = {};

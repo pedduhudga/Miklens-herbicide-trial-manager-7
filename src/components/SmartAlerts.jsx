@@ -57,6 +57,12 @@ export default function SmartAlerts({ onViewTrial, compact = false }) {
       case 'regrowth':
         filtered = filtered.filter(a => a.type === ALERT_TYPES.REGROWTH_DETECTED);
         break;
+      case 'stagnant':
+        filtered = filtered.filter(a => a.type === 'stagnant');
+        break;
+      case 'anomaly':
+        filtered = filtered.filter(a => a.type === 'anomaly');
+        break;
     }
     
     return filtered;
@@ -85,7 +91,10 @@ export default function SmartAlerts({ onViewTrial, compact = false }) {
       case ALERT_TYPES.RESCUE_RECOMMENDED:
         return <AlertTriangle className={iconClass} />;
       case ALERT_TYPES.OBSERVATION_DUE:
+      case 'stagnant':
         return <Clock className={iconClass} />;
+      case 'anomaly':
+        return <AlertCircle className={iconClass} />;
       default:
         return <Info className={iconClass} />;
     }
@@ -179,7 +188,9 @@ export default function SmartAlerts({ onViewTrial, compact = false }) {
           { id: 'critical', label: 'Critical', count: counts.critical },
           { id: 'rescue', label: 'Rescue', count: alerts.filter(a => a.type === ALERT_TYPES.RESCUE_RECOMMENDED && !dismissed.has(a.id)).length },
           { id: 'observation', label: 'Due', count: alerts.filter(a => a.type === ALERT_TYPES.OBSERVATION_DUE && !dismissed.has(a.id)).length },
-          { id: 'regrowth', label: 'Regrowth', count: alerts.filter(a => a.type === ALERT_TYPES.REGROWTH_DETECTED && !dismissed.has(a.id)).length }
+          { id: 'regrowth', label: 'Regrowth', count: alerts.filter(a => a.type === ALERT_TYPES.REGROWTH_DETECTED && !dismissed.has(a.id)).length },
+          { id: 'stagnant', label: 'Stagnant', count: alerts.filter(a => a.type === 'stagnant' && !dismissed.has(a.id)).length },
+          { id: 'anomaly', label: 'Anomalies', count: alerts.filter(a => a.type === 'anomaly' && !dismissed.has(a.id)).length }
         ].map(tab => (
           <button
             key={tab.id}

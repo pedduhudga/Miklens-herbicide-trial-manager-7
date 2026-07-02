@@ -376,10 +376,47 @@ export default function PlotScanner({ onMenuClick }) {
 
   // ── Scan result handler ───────────────────────────────────────────────────
   const handleScan = useCallback(
-    (raw) => {
+    async (raw) => {
       setScannerOpen(false);
       const parsed = parseQrData(raw);
-      const trial = resolveTrialFromQr(parsed, state.trials);
+      let trial = resolveTrialFromQr(parsed, state.trials);
+
+      // Perform offline cache lookup in Dexie DB if not found in memory
+      if (!trial && parsed?.data) {
+        try {
+          const { db } = await import('../services/dexieDB.js');
+          const offlineTrial = await db.trials.get(String(parsed.data));
+          if (offlineTrial) {
+            trial = offlineTrial;
+          }
+        } catch (err) {
+          console.warn('Failed offline Dexie DB lookup:', err);
+        }
+      }
+
+      if (trial) {
+        // Haptic feedback vibration
+        if ('vibrate' in navigator) {
+          navigator.vibrate(200);
+        }
+        // Synth confirmation beep using Web Audio API
+        try {
+          const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(880, audioCtx.currentTime); // A5 note
+          gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+          osc.start();
+          osc.stop(audioCtx.currentTime + 0.15);
+        } catch (err) {
+          console.warn('Web Audio beep failed:', err);
+        }
+      }
+
       const now = new Date().toLocaleTimeString([], {
         hour: "2-digit",
         minute: "2-digit",
