@@ -340,6 +340,21 @@ export default function DoseResponse({ onMenuClick }) {
                 </button>
                 <button
                   onClick={() => {
+                    const canvas = canvasRef.current;
+                    if (!canvas) return;
+                    const url = canvas.toDataURL('image/png');
+                    const link = document.createElement('a');
+                    link.download = `${selectedFormulation.toLowerCase().replace(/\s+/g, '_')}_dose_response.png`;
+                    link.href = url;
+                    link.click();
+                  }}
+                  className="flex items-center gap-1 text-xs text-emerald-600 hover:text-emerald-700 font-medium px-3 py-1.5 rounded-lg hover:bg-emerald-50 transition"
+                  title="Export Chart as PNG"
+                >
+                  <Download className="w-3.5 h-3.5" /> Export PNG
+                </button>
+                <button
+                  onClick={() => {
                     // Task 21.9: generateDoseResponsePDF — opens print dialog with canvas chart
                     const canvas = canvasRef.current;
                     if (!canvas) { window.print(); return; }

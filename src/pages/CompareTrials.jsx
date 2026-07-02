@@ -577,10 +577,27 @@ ${contextData}`;
         {/* Efficacy Timeline Line Chart */}
         {allDaa.length > 0 && (
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <LineChart className="w-4 h-4" style={{ color: config.color.hex }} />
-              Performance Timeline ({config.primaryMetric.label} vs Days After Application)
-            </h3>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                <LineChart className="w-4 h-4" style={{ color: config.color.hex }} />
+                Performance Timeline ({config.primaryMetric.label} vs Days After Application)
+              </h3>
+              <button
+                onClick={() => {
+                  const canvas = canvasRef.current;
+                  if (!canvas) return;
+                  const url = canvas.toDataURL('image/png');
+                  const link = document.createElement('a');
+                  link.download = `trial_comparison_timeline.png`;
+                  link.href = url;
+                  link.click();
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 hover:bg-slate-50 rounded-lg text-xs font-semibold text-slate-600 transition"
+                title="Export Comparison Chart as PNG"
+              >
+                <Download className="w-3.5 h-3.5" /> Export PNG
+              </button>
+            </div>
             <div className="relative overflow-hidden w-full h-64 border rounded-lg bg-slate-50/50">
               <canvas ref={canvasRef} width={800} height={256} className="w-full h-full" />
             </div>
