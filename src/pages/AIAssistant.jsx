@@ -80,7 +80,7 @@ export default function AIAssistant({ onMenuClick }) {
   const config = getCategoryConfig(activeCategory);
   const primaryObsField = getPrimaryObservationField(activeCategory);
   const suggestedPrompts = CATEGORY_PROMPTS[activeCategory] || CATEGORY_PROMPTS.herbicide;
-  const isViewer = state.user?.role === 'viewer';
+  const isViewer = state.auth?.user?.role === 'viewer';
 
   const sessions = state.aiChatSessions || [];
   const currentSessionId = state.currentAiChatSessionId;
@@ -228,7 +228,7 @@ export default function AIAssistant({ onMenuClick }) {
     if (!userMsg || isLoading) return;
     
     // Check viewer permissions first
-    const isViewer = state.user?.role === 'viewer';
+    const isViewer = state.auth?.user?.role === 'viewer';
     if (isViewer) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Viewer role cannot send messages to AI Assistant.', type: 'error' } }));
       return;
@@ -238,7 +238,7 @@ export default function AIAssistant({ onMenuClick }) {
     validateAIAnalysisCategory(activeCategory, 'AI Assistant analysis');
     
     // Validate user has access to this category
-    const userCategoryAccess = state.user?.categoryAccess || [];
+    const userCategoryAccess = state.auth?.user?.categoryAccess || [];
     if (userCategoryAccess.length > 0 && !userCategoryAccess.includes(activeCategory)) {
       window.dispatchEvent(new CustomEvent('app:toast', { 
         detail: { 
@@ -288,7 +288,7 @@ export default function AIAssistant({ onMenuClick }) {
         state.trials,
         state.projects,
         state.formulations,
-        state.user
+        state.auth?.user
       );
       
       // Log isolation metrics for monitoring
