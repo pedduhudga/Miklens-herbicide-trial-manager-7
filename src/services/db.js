@@ -37,6 +37,11 @@ export async function apiCall(action, payload = {}, showOverlay = true, getAppSt
                     // PERSIST TO INDEXEDDB FIRST (primary storage - no quota limit)
                     try {
                         await saveSyncQueueOffline(queue);
+                        if ('serviceWorker' in navigator && 'SyncManager' in window) {
+                            navigator.serviceWorker.ready.then(reg => {
+                                return reg.sync.register('background-sync-trials');
+                            }).catch(err => console.warn('[BackgroundSync] Registration failed:', err));
+                        }
                     } catch (idbErr) {
                         console.error('[OfflineQueue] IndexedDB write failed:', idbErr);
                     }
@@ -151,7 +156,7 @@ export async function apiCall(action, payload = {}, showOverlay = true, getAppSt
             spreadsheetId: state.settings.sheetId,
             folderId: getEffectiveFolderId(),
         };
-        const appSecretToken = payload.handshakeTokenOverride || (state.settings && state.settings.appSecretToken) || 'miklens-secure-api-token-2026';
+        const appSecretToken = payload.handshakeTokenOverride || (state.settings && state.settings.appSecretToken) || '';
         const res = await fetch(String(state.settings.scriptUrl).replace(/\s/g, ''), {
             method: 'POST',
             body: JSON.stringify({ action, payload: fullPayload, auth: getAuthPayload(), appSecretToken }),

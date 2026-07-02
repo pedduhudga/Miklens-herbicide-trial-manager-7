@@ -34,12 +34,13 @@ export default function BottomNav({ onMoreClick }) {
   ];
 
   return (
-    <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-[0_-4px_16px_rgba(0,0,0,0.05)] pb-safe z-40">
+    <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-[0_-4px_16px_rgba(0,0,0,0.05)] pb-safe z-40" role="navigation" aria-label="Mobile Navigation">
       <div className="flex justify-around items-center h-16 px-2">
         {navItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
+            aria-label={item.label}
             className={({ isActive }) =>
               `flex flex-col items-center justify-center w-16 h-full transition-colors ${
                 isActive ? activeColor : 'text-slate-500 hover:text-slate-800'
@@ -54,6 +55,7 @@ export default function BottomNav({ onMoreClick }) {
         {/* Floating Action-like button for Scanning */}
         <NavLink
           to="/scanner"
+          aria-label="Scan Plot"
           className={({ isActive }) =>
             `flex flex-col items-center justify-center w-16 h-full transition-colors relative ${
               isActive ? activeColor : 'text-slate-500 hover:text-slate-800'
@@ -69,6 +71,8 @@ export default function BottomNav({ onMoreClick }) {
         {/* More Menu Trigger */}
         <button
           onClick={onMoreClick}
+          aria-label="Open Sidebar Menu"
+          aria-haspopup="true"
           className="flex flex-col items-center justify-center w-16 h-full text-slate-500 hover:text-slate-800 transition-colors"
         >
           <MoreHorizontal className="w-6 h-6" />

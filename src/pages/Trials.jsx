@@ -2,8 +2,10 @@ import React, { useState, useMemo, useRef, useEffect, useCallback, useDeferredVa
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppState } from '../hooks/useAppState.jsx';
 import { useAuth } from '../hooks/useAuth.js';
+import { useTrialsFilter } from '../hooks/useTrialsFilter.js';
 import TopBar from '../components/TopBar.jsx';
 import Modal from '../components/Modal.jsx';
+import ErrorBoundary from '../components/ErrorBoundary.jsx';
 import { addTrial, deleteTrial, updateTrial, uploadPhoto, apiCall, validateCategoryDataOperation } from '../services/dataLayer.js';
 import {
   Plus, Trash2, Edit, Copy, ChevronRight, Activity, MapPin, Calendar,
@@ -17,8 +19,8 @@ import {
 } from 'lucide-react';
 import { safeJsonParse } from '../utils/helpers.js';
 import { resolvePhotoSrc, getPhotoThumbnailSrc, isPhotoBroken, getDriveFileId } from '../utils/photoUtils.js';
-import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryValue, calculateEfficacy } from '../utils/categoryConfig.js';
-import { calculateDAA, toDateKey, formatPhotoDate, toDatetimeLocal, formatDate, formatDateTime, parseDateFromFilename } from '../utils/dateUtils.js';
+import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryValue, calculateEfficacy, getRatingFromEfficacy } from '../utils/categoryConfig.js';
+import { calculateDAA, toDateKey, formatPhotoDate, toDatetimeLocal, formatDate, formatDateTime, parseDateFromFilename, parsePhotoInfoFromFilename } from '../utils/dateUtils.js';
 import { normalizeObservation } from '../utils/categoryObservationUtils.js';
 import { validateEfficacyData } from '../utils/analysisUtils.js';
 import { canonicalizeWeedSpecies } from '../utils/weedUtils.js';
@@ -46,6 +48,45 @@ import { fetchWeather, fetchSoilData } from '../services/weather.js';
 import { EPPO_CODES, BBCH_STAGES, lookupEPPO } from '../utils/eppoBBCHData.js';
 import { exportToARM, importARMCSV } from '../services/armExporter.js';
 import { detectOutliers } from '../utils/statsUtils.js';
+
+const getAutomaticPotPrefix = (targetTrial, allTrials) => {
+  if (!targetTrial || !allTrials) return '';
+  const treatmentName = targetTrial.FormulationName || targetTrial.FormulationID;
+  if (!treatmentName) return '';
+  
+  const siblingTrials = allTrials.filter(t => 
+    t.ProjectID === targetTrial.ProjectID && 
+    (t.FormulationName === treatmentName || t.FormulationID === treatmentName)
+  );
+
+  const parseCoords = (label) => {
+    if (!label) return { row: 999, col: 999, seq: 9999 };
+    const rcMatch = label.match(/R(?:ow)?\s*(\d+)\s*C(?:ol)?\s*(\d+)/i);
+    if (rcMatch) {
+      return { row: parseInt(rcMatch[1], 10), col: parseInt(rcMatch[2], 10), seq: 9999 };
+    }
+    const seqMatch = label.match(/(?:P(?:ot)?\s*)?(\d+)/i);
+    if (seqMatch) {
+      return { row: 999, col: 999, seq: parseInt(seqMatch[1], 10) };
+    }
+    return { row: 999, col: 999, seq: 9999 };
+  };
+
+  const sortedSiblings = [...siblingTrials].sort((a, b) => {
+    const aCoords = parseCoords(a.PotLabel);
+    const bCoords = parseCoords(b.PotLabel);
+    if (aCoords.row !== bCoords.row) return aCoords.row - bCoords.row;
+    if (aCoords.col !== bCoords.col) return aCoords.col - bCoords.col;
+    return aCoords.seq - bCoords.seq;
+  });
+
+  const idx = sortedSiblings.findIndex(t => t.ID === targetTrial.ID);
+  if (idx >= 0) {
+    const potLetter = String.fromCharCode(65 + idx);
+    return `Plant ${idx + 1} (Pot ${potLetter})`;
+  }
+  return '';
+};
 import AppSharingModal from '../components/AppSharingModal.jsx';
 import SprayCalculatorModal from '../components/SprayCalculatorModal.jsx';
 import TrialDesignGuideModal from '../components/TrialDesignGuideModal.jsx';
@@ -116,6 +157,14 @@ export default function Trials({ onMenuClick }) {
     const ownUid = user?.uid || user?.ID || user?.id;
     return !record.CreatedBy || record.CreatedBy === ownUid;
   }, [user, isAdmin]);
+
+  const isTrialPendingSync = useCallback((t) => {
+    return (state.syncQueue || []).some(item => 
+      (item.payload && (String(item.payload.ID) === String(t.ID) || String(item.payload.trialId) === String(t.ID))) || 
+      String(item.trialId) === String(t.ID) || 
+      item.id === `sync_${t.ID}`
+    );
+  }, [state.syncQueue]);
   const location = useLocation();
   const navigate = useNavigate();
   const activeCategory = state.activeCategory || 'herbicide';
@@ -145,6 +194,9 @@ export default function Trials({ onMenuClick }) {
   const [showFilters, setShowFilters] = useState(false);
   const [selectedForBulk, setSelectedForBulk] = useState(new Set());
   const [collapsedSections, setCollapsedSections] = useState({});
+  const [projectSearchQuery, setProjectSearchQuery] = useState('');
+  const [projectDesignFilter, setProjectDesignFilter] = useState('');
+  const [projectInvestigatorFilter, setProjectInvestigatorFilter] = useState('');
 
   const toggleSection = useCallback((sectionId) => {
     setCollapsedSections(prev => ({
@@ -235,6 +287,7 @@ export default function Trials({ onMenuClick }) {
   // --- Date range filter ---
   const [filterDateStart, setFilterDateStart] = useState('');
   const [filterDateEnd, setFilterDateEnd] = useState('');
+  const [showRepCompareModal, setShowRepCompareModal] = useState(false);
 
   // --- GPS fetch ---
   const [gpsFetching, setGpsFetching] = useState(false);
@@ -390,7 +443,7 @@ export default function Trials({ onMenuClick }) {
   const [eppoSearchQuery, setEppoSearchQuery] = useState('');
   const [showEppoDropdown, setShowEppoDropdown] = useState(false);
 
-  const renderTargetFieldAutocomplete = (fieldKey, label, ringColor = 'focus:ring-emerald-400', eppoType = 'weed') => {
+  const renderTargetFieldAutocomplete = (fieldKey, label, ringColor = 'focus:ring-[var(--primary-color)]', eppoType = 'weed') => {
     return (
       <div className="relative">
         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">{label} (EPPO)</label>
@@ -553,107 +606,17 @@ export default function Trials({ onMenuClick }) {
 
 
 
-  const filteredTrials = useMemo(() => {
-    let list = [...trials];
-    if (activeTab === 'standard') list = list.filter(t => !t.ProjectID);
-    else if (activeTab === 'rcbd') list = list.filter(t => !!t.ProjectID);
-    else if (activeTab === 'control') list = list.filter(t => (t.IsControl === true || t.IsControl === 'true') && !t.ProjectID);
-    else if (activeTab === 'finalized') list = list.filter(t => t.IsCompleted === true || t.IsCompleted === 'true');
-
-    if (deferredSearch) {
-      list = list.filter(t => {
-        const searchParts = [
-          t.FormulationName,
-          t.FormulationID,
-          t.InvestigatorName,
-          t.Location,
-          t.WeedSpecies,
-          t.ID,
-          t.Notes,
-          t.Conclusion,
-          t.Replication,
-          t.PlotNumber,
-          t.Date
-        ].filter(Boolean).join(' ');
-        return fuzzyMatch(searchParts, deferredSearch);
-      });
-    }
-    if (filterFormulation) list = list.filter(t => t.FormulationID === filterFormulation || t.FormulationName === filterFormulation);
-    if (filterResult) list = list.filter(t => (t.Result || '') === filterResult);
-    if (filterProject) list = list.filter(t => t.ProjectID === filterProject);
-
-    if (filterDateStart) list = list.filter(t => t.Date && t.Date >= filterDateStart);
-    if (filterDateEnd)   list = list.filter(t => t.Date && t.Date <= filterDateEnd);
-    list.sort((a, b) => {
-      if (sortBy === 'date-desc') {
-        const dateDiff = new Date(b.Date || 0) - new Date(a.Date || 0);
-        if (dateDiff !== 0) return dateDiff;
-
-        // For pot trials with same date, sort by replication block, then row, then column/pot number
-        const aIsPot = a.TrialDesign === 'PotTrial' || a.PotLabel;
-        const bIsPot = b.TrialDesign === 'PotTrial' || b.PotLabel;
-        if (aIsPot && bIsPot) {
-          const aRep = parseInt(a.Replication) || 0;
-          const bRep = parseInt(b.Replication) || 0;
-          if (aRep !== bRep) return aRep - bRep;
-
-          const aRow = parseInt(a.PotRow) || 0;
-          const bRow = parseInt(b.PotRow) || 0;
-          if (aRow !== bRow) return aRow - bRow;
-
-          const aCol = parseInt(a.PotCol) || 0;
-          const bCol = parseInt(b.PotCol) || 0;
-          return aCol - bCol;
-        }
-
-        // Secondary sort for same date: newest DateUpdatedAt / CreatedAt on top
-        const aTime = new Date(a.DateUpdatedAt || a.CreatedAt || a._createdAt?.toDate?.() || 0).getTime();
-        const bTime = new Date(b.DateUpdatedAt || b.CreatedAt || b._createdAt?.toDate?.() || 0).getTime();
-        if (bTime !== aTime) return bTime - aTime;
-        return new Date(b.CreatedAt || 0) - new Date(a.CreatedAt || 0);
-      }
-      if (sortBy === 'date-asc') {
-        const dateDiff = new Date(a.Date || 0) - new Date(b.Date || 0);
-        if (dateDiff !== 0) return dateDiff;
-
-        // For pot trials with same date, sort by replication block, then row, then column/pot number
-        const aIsPot = a.TrialDesign === 'PotTrial' || a.PotLabel;
-        const bIsPot = b.TrialDesign === 'PotTrial' || b.PotLabel;
-        if (aIsPot && bIsPot) {
-          const aRep = parseInt(a.Replication) || 0;
-          const bRep = parseInt(b.Replication) || 0;
-          if (aRep !== bRep) return aRep - bRep;
-
-          const aRow = parseInt(a.PotRow) || 0;
-          const bRow = parseInt(b.PotRow) || 0;
-          if (aRow !== bRow) return aRow - bRow;
-
-          const aCol = parseInt(a.PotCol) || 0;
-          const bCol = parseInt(b.PotCol) || 0;
-          return aCol - bCol;
-        }
-
-        // Secondary sort for same date: oldest DateUpdatedAt / CreatedAt on top
-        const aTime = new Date(a.DateUpdatedAt || a.CreatedAt || a._createdAt?.toDate?.() || 0).getTime();
-        const bTime = new Date(b.DateUpdatedAt || b.CreatedAt || b._createdAt?.toDate?.() || 0).getTime();
-        if (aTime !== bTime) return aTime - bTime;
-        return new Date(a.CreatedAt || 0) - new Date(b.CreatedAt || 0);
-      }
-      if (sortBy === 'name') return (a.FormulationName || '').localeCompare(b.FormulationName || '');
-      if (sortBy === 'obs') return (safeJsonParse(b.EfficacyDataJSON, []).length) - (safeJsonParse(a.EfficacyDataJSON, []).length);
-      if (sortBy === 'shared') {
-        const ownUid = user?.uid || user?.ID || user?.id;
-        const aShared = !!((a.CreatedBy && a.CreatedBy !== ownUid) || (Array.isArray(a.SharedWith) && a.SharedWith.length > 0));
-        const bShared = !!((b.CreatedBy && b.CreatedBy !== ownUid) || (Array.isArray(b.SharedWith) && b.SharedWith.length > 0));
-        if (aShared === bShared) {
-          return new Date(b.Date || 0) - new Date(a.Date || 0);
-        }
-        return bShared ? 1 : -1;
-      }
-      return 0;
-    });
-    return list;
-  }, [trials, activeTab, deferredSearch, filterFormulation, filterResult, filterProject, sortBy, filterDateStart, filterDateEnd, user]);
+  const filteredTrials = useTrialsFilter(trials, {
+    activeTab,
+    deferredSearch,
+    filterFormulation,
+    filterResult,
+    filterProject,
+    filterDateStart,
+    filterDateEnd,
+    sortBy,
+    user
+  });
 
   const groupedRcbdTrials = useMemo(() => {
     if (activeTab !== 'rcbd') return { groups: {}, orphaned: [] };
@@ -662,14 +625,46 @@ export default function Trials({ onMenuClick }) {
     filteredTrials.forEach(t => {
       const pid = t.ProjectID;
       if (pid && projectMap[pid]) {
+        const proj = projectMap[pid];
+        
+        // Apply Project Search Query
+        if (projectSearchQuery) {
+          const q = projectSearchQuery.toLowerCase();
+          const nameMatch = (proj.Name || '').toLowerCase().includes(q);
+          const invMatch = (proj.Investigator || '').toLowerCase().includes(q);
+          const locMatch = (proj.Location || '').toLowerCase().includes(q);
+          if (!nameMatch && !invMatch && !locMatch) return;
+        }
+
+        // Apply Project Design Filter
+        if (projectDesignFilter && proj.Design !== projectDesignFilter) return;
+
+        // Apply Project Investigator Filter
+        if (projectInvestigatorFilter && proj.Investigator !== projectInvestigatorFilter) return;
+
         if (!groups[pid]) groups[pid] = [];
         groups[pid].push(t);
       } else {
-        orphaned.push(t);
+        if (!projectSearchQuery && !projectDesignFilter && !projectInvestigatorFilter) {
+          orphaned.push(t);
+        }
       }
     });
     return { groups, orphaned };
-  }, [filteredTrials, activeTab, projectMap]);
+  }, [filteredTrials, activeTab, projectMap, projectSearchQuery, projectDesignFilter, projectInvestigatorFilter]);
+
+  const projectFilterOptions = useMemo(() => {
+    const designs = new Set();
+    const investigators = new Set();
+    Object.values(projectMap).forEach(proj => {
+      if (proj.Design) designs.add(proj.Design);
+      if (proj.Investigator) investigators.add(proj.Investigator);
+    });
+    return {
+      designs: Array.from(designs).sort(),
+      investigators: Array.from(investigators).sort()
+    };
+  }, [projectMap]);
 
   // ── CRUD ───────────────────────────────────────────────────────────
   const handleOpenModal = useCallback((trial = null, isDuplicate = false) => {
@@ -803,7 +798,10 @@ export default function Trials({ onMenuClick }) {
     try {
       await updateTrial({ ID: updated.ID, ProjectID: updated.ProjectID }, getAppState);
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Moved to "${projects[idx].Name}"`, type: 'success' } }));
-    } catch (e) {}
+    } catch (e) {
+      console.error('[Trials] Failed to move trial:', e);
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Failed to update project association.', type: 'error' } }));
+    }
   };
 
   const handleSave = async (e) => {
@@ -1428,6 +1426,117 @@ export default function Trials({ onMenuClick }) {
     }
   }, [activeCategory, activeTrial, trials, updateState, getAppState]);
 
+  const handlePhotoHeightChange = async (photo, heightVal) => {
+    if (!activeTrial) return;
+    
+    // 1. Identify the pot index from photo tag
+    let potIdx = -1;
+    const tag = (photo.tag || '').toUpperCase();
+    const label = (photo.label || '').toUpperCase();
+    
+    if (tag.includes('POT A') || tag.includes('PLANT 1') || label.includes('POT A') || label.includes('PLANT 1')) potIdx = 0;
+    else if (tag.includes('POT B') || tag.includes('PLANT 2') || label.includes('POT B') || label.includes('PLANT 2')) potIdx = 1;
+    else if (tag.includes('POT C') || tag.includes('PLANT 3') || label.includes('POT C') || label.includes('PLANT 3')) potIdx = 2;
+    else if (tag.includes('POT D') || tag.includes('PLANT 4') || label.includes('POT D') || label.includes('PLANT 4')) potIdx = 3;
+    else if (tag.includes('POT E') || tag.includes('PLANT 5') || label.includes('POT E') || label.includes('PLANT 5')) potIdx = 4;
+    else {
+      // Try regex matching
+      const matchPot = (photo.tag || '').match(/Pot\s+([A-Z])/i) || (photo.label || '').match(/Pot\s+([A-Z])/i);
+      if (matchPot) {
+        potIdx = matchPot[1].toUpperCase().charCodeAt(0) - 65;
+      } else {
+        const matchPlant = (photo.tag || '').match(/Plant\s+(\d+)/i) || (photo.label || '').match(/Plant\s+(\d+)/i);
+        if (matchPlant) {
+          potIdx = parseInt(matchPlant[1], 10) - 1;
+        }
+      }
+    }
+
+    if (potIdx < 0) return;
+
+    // 2. Find or parse photo date
+    const photoDateStr = toDateKey(photo.date) || toDateKey(new Date());
+
+    // Load current observations
+    const efficacyData = safeJsonParse(activeTrial.EfficacyDataJSON, []);
+    
+    // Find observation with the exact same date
+    let obs = efficacyData.find(o => o.date && toDateKey(o.date) === photoDateStr);
+    let isNew = false;
+    
+    if (!obs) {
+      // Create new observation
+      isNew = true;
+      const computedDaa = activeTrial.Date ? calculateDAA(photoDateStr, activeTrial.Date) : 0;
+      obs = {
+        daa: Number(computedDaa),
+        date: photo.date ? photo.date : photoDateStr,
+        notes: 'Logged via photo height input',
+        weedDetails: []
+      };
+    }
+
+    // Determine pot count
+    const currentProj = projects.find(p => String(p.ID) === String(activeTrial.ProjectID));
+    const potObsMode = currentProj?.PotObsMode || activeTrial.PotObsMode || 'row-wise';
+    let potCount = null;
+    if (activeTrial.PotLabel) {
+      const m = activeTrial.PotLabel.match(/(\d+)\s*Pots?/i);
+      if (m) potCount = parseInt(m[1], 10);
+    }
+    if (!potCount || isNaN(potCount)) {
+      if (potObsMode === 'column-wise' && currentProj) {
+        const blocksCount = parseInt(currentProj.PotBlocks) || 3;
+        potCount = Math.floor((parseInt(currentProj.PotRows) || 9) / blocksCount);
+      } else if (potObsMode === 'row-wise' && currentProj) {
+        potCount = parseInt(currentProj.PotCols) || 4;
+      }
+    }
+    if (!potCount || isNaN(potCount) || potCount < 1) potCount = 3;
+
+    // 3. Initialize or update potHeights array
+    const heights = obs.potHeights ? [...obs.potHeights] : Array(potCount).fill('');
+    while (heights.length < potCount) heights.push('');
+    
+    heights[potIdx] = heightVal === '' ? '' : Number(heightVal);
+    obs.potHeights = heights;
+
+    // Recalculate average height
+    const filled = heights.filter(h => h !== '' && h !== null && h !== undefined).map(Number).filter(n => !isNaN(n));
+    const newAvg = filled.length > 0 ? parseFloat((filled.reduce((s, v) => s + v, 0) / filled.length).toFixed(1)) : null;
+    
+    // Save average to Plant Height keys
+    obs['Plant Height'] = newAvg;
+    obs['plantHeight'] = newAvg;
+
+    if (isNew) {
+      efficacyData.push(obs);
+    } else {
+      const idx = efficacyData.findIndex(o => o.date && toDateKey(o.date) === photoDateStr);
+      if (idx !== -1) {
+        efficacyData[idx] = obs;
+      }
+    }
+    
+    efficacyData.sort((a, b) => a.daa - b.daa);
+    
+    const newResult = calculateResultRating(efficacyData, activeTrial.IsControl || false, activeCategory, activeTrial);
+    const updated = {
+      ...activeTrial,
+      EfficacyDataJSON: JSON.stringify(efficacyData),
+      Result: newResult
+    };
+    
+    updateState({ trials: getAppState().trials.map(t => t.ID === updated.ID ? updated : t) });
+    setActiveTrial(updated);
+    try {
+      await updateTrial({ ID: updated.ID, EfficacyDataJSON: updated.EfficacyDataJSON, Result: updated.Result }, getAppState);
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Observation saved', type: 'success' } }));
+    } catch (err) {
+      console.error('Failed to update quick height:', err);
+    }
+  };
+
   const openObsModal = (idx = null) => {
     const primaryObsField = getPrimaryObservationField(activeCategory);
     const initialForm = {
@@ -1441,7 +1550,8 @@ export default function Trials({ onMenuClick }) {
       weatherRain: '',
       bbchStage: '',
       phytotoxicityPct: '',
-      phytotoxicityNotes: ''
+      phytotoxicityNotes: '',
+      sampleCount: ''
     };
 
     catConfig.observationFields?.forEach(f => {
@@ -1458,7 +1568,23 @@ export default function Trials({ onMenuClick }) {
       const today = new Date().toISOString().split('T')[0];
       const autoDaa = activeTrial?.Date ? calculateDAA(today, activeTrial.Date) : '';
       const newForm = { ...initialForm, date: today, daa: autoDaa };
-      setObsForm(newForm);
+      
+      const savedDraft = activeTrial ? localStorage.getItem(`obs_draft_${activeTrial.ID}`) : null;
+      if (savedDraft) {
+        try {
+          const parsed = JSON.parse(savedDraft);
+          if (parsed && (window.confirm("An unsaved observation draft was found for this trial. Would you like to restore it?"))) {
+            setObsForm(parsed);
+          } else {
+            localStorage.removeItem(`obs_draft_${activeTrial.ID}`);
+            setObsForm(newForm);
+          }
+        } catch (e) {
+          setObsForm(newForm);
+        }
+      } else {
+        setObsForm(newForm);
+      }
     }
     setCoverDetectResult(null);
     setEditingObsIdx(idx);
@@ -1508,18 +1634,7 @@ export default function Trials({ onMenuClick }) {
     }
 
     const efficacy = calculateEfficacy(categoryId, val, controlVal);
-
-    if (categoryId === 'nutrition' || categoryId === 'biostimulant') {
-      if (efficacy >= 15) return 'Excellent';
-      if (efficacy >= 8) return 'Good';
-      if (efficacy >= 3) return 'Fair';
-      return 'Poor';
-    } else {
-      if (efficacy >= 85) return 'Excellent';
-      if (efficacy >= 70) return 'Good';
-      if (efficacy >= 50) return 'Fair';
-      return 'Poor';
-    }
+    return getRatingFromEfficacy(categoryId, efficacy);
   };
 
   const handleSaveObs = async (e) => {
@@ -1528,6 +1643,31 @@ export default function Trials({ onMenuClick }) {
 
     const efficacyData = validateEfficacyData(safeJsonParse(activeTrial.EfficacyDataJSON, []), activeCategory, true);
     const primaryObsField = getPrimaryObservationField(activeCategory);
+
+    // Biological plausibility and range validators
+    const validationErrors = [];
+    catConfig.observationFields?.forEach(field => {
+      const val = parseFloat(obsForm[field.key]);
+      if (!isNaN(val)) {
+        if (field.label.includes('%') && (val < 0 || val > 100)) {
+          validationErrors.push(`${field.label} must be between 0% and 100%.`);
+        }
+        if (field.key === 'chlorophyllIndex' && val > 80) {
+          validationErrors.push(`Chlorophyll (SPAD) reading of ${val} is unusually high (typically < 80).`);
+        }
+        if (field.key === 'plantHeight' && val > 250) {
+          validationErrors.push(`Plant Height of ${val} cm is extremely tall. Please double check.`);
+        }
+        if ((field.key.includes('Count') || field.key.includes('count') || field.key === 'noduleCount' || field.key === 'leafCount') && val < 0) {
+          validationErrors.push(`${field.label} cannot be negative.`);
+        }
+      }
+    });
+
+    if (validationErrors.length > 0) {
+      const proceed = window.confirm(`Validation Warnings:\n\n${validationErrors.join('\n')}\n\nDo you want to proceed with saving anyway?`);
+      if (!proceed) return;
+    }
 
     // Check if any fields that were previously recorded in this project are missing
     const projId = activeTrial.ProjectID;
@@ -1565,11 +1705,14 @@ export default function Trials({ onMenuClick }) {
       weatherRain: obsForm.weatherRain,
       bbchStage: obsForm.bbchStage || '',
       phytotoxicityPct: obsForm.phytotoxicityPct !== '' && obsForm.phytotoxicityPct != null ? Number(obsForm.phytotoxicityPct) : undefined,
-      phytotoxicityNotes: obsForm.phytotoxicityNotes || undefined
+      phytotoxicityNotes: obsForm.phytotoxicityNotes || undefined,
+      sampleCount: obsForm.sampleCount !== '' && obsForm.sampleCount != null ? Number(obsForm.sampleCount) : null,
+      potHeights: obsForm.potHeights && obsForm.potHeights.some(h => h !== '' && h !== null && h !== undefined) ? obsForm.potHeights : undefined
     };
     // Remove undefined fields to keep records clean
     if (newObs.phytotoxicityPct === undefined) delete newObs.phytotoxicityPct;
     if (!newObs.phytotoxicityNotes) delete newObs.phytotoxicityNotes;
+    if (!newObs.potHeights) delete newObs.potHeights;
 
     catConfig.observationFields?.forEach(f => {
       const val = obsForm[f.key];
@@ -1628,6 +1771,9 @@ export default function Trials({ onMenuClick }) {
     updateState({ trials: getAppState().trials.map(t => t.ID === updated.ID ? updated : t) });
     setActiveTrial(updated);
     setIsObsModalOpen(false);
+    if (activeTrial) {
+      localStorage.removeItem(`obs_draft_${activeTrial.ID}`);
+    }
     try {
       await updateTrial({ ID: updated.ID, EfficacyDataJSON: updated.EfficacyDataJSON, Result: updated.Result }, getAppState);
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Observation saved', type: 'success' } }));
@@ -1701,6 +1847,9 @@ export default function Trials({ onMenuClick }) {
     setBaselineWarningOpen(false);
     setPendingObsSave(null);
     setIsObsModalOpen(false);
+    if (trial) {
+      localStorage.removeItem(`obs_draft_${trial.ID}`);
+    }
     try {
       await updateTrial({ ID: updated.ID, EfficacyDataJSON: updated.EfficacyDataJSON, Result: updated.Result }, getAppState);
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Observation saved', type: 'success' } }));
@@ -1943,7 +2092,7 @@ export default function Trials({ onMenuClick }) {
       return { species: sp, initialCover: baseVal.toFixed(1), finalCover: val.toFixed(1), wce: wce !== null ? parseFloat(wce.toFixed(1)) : null, controlRating: rating, daa: obs.daa };
     });
 
-    // Run RCBD ANOVA
+    // Run ANOVA or appropriate Design calculations
     const trtGroups = {};
     const repGroups = {};
     const values = [];
@@ -1965,10 +2114,26 @@ export default function Trials({ onMenuClick }) {
     const t = Object.keys(trtGroups).length;
     const b = Object.keys(repGroups).length;
 
+    const trialDesign = detailTrial.TrialDesign || 'RCBD';
+    const isSupportedAnova = trialDesign === 'RCBD' || trialDesign === 'CRD';
+
     let anovaResults = null;
     let lsdResults = null;
 
-    if (N >= 4 && t >= 2 && b >= 2) {
+    if (!isSupportedAnova) {
+      // Return informational message/warnings for unsupported design analyses
+      anovaResults = {
+        isDescriptiveOnly: true,
+        designWarning: true,
+        message: `Significance testing (ANOVA/LSD) for design "${trialDesign}" is not supported locally. Statistics are limited to descriptive metrics.`,
+        n: values.length,
+        mean: values.length ? parseFloat((values.reduce((a,b)=>a+b,0)/values.length).toFixed(2)) : 0,
+        stdDev: 0,
+        cv: 0,
+        min: values.length ? Math.min(...values) : 0,
+        max: values.length ? Math.max(...values) : 0
+      };
+    } else if (N >= 4 && t >= 2 && b >= 2) {
       const grandMean = values.reduce((a, b) => a + b, 0) / N;
       let ssTotal = 0;
       values.forEach(y => { ssTotal += Math.pow(y - grandMean, 2); });
@@ -1987,28 +2152,29 @@ export default function Trials({ onMenuClick }) {
         ssBlock += repVals.length * Math.pow(repMean - grandMean, 2);
       });
 
-      const ssError = Math.max(0, ssTotal - ssTreat - ssBlock);
+      // Adjust analysis based on design (CRD has no blocking term)
+      const ssError = trialDesign === 'CRD' ? Math.max(0, ssTotal - ssTreat) : Math.max(0, ssTotal - ssTreat - ssBlock);
       const dfTreat = t - 1;
-      const dfBlock = b - 1;
-      const dfError = dfTreat * dfBlock;
+      const dfBlock = trialDesign === 'CRD' ? 0 : b - 1;
+      const dfError = trialDesign === 'CRD' ? N - t : dfTreat * dfBlock;
       const dfTotal = N - 1;
 
       const msTreat = ssTreat / dfTreat;
-      const msBlock = ssBlock / dfBlock;
-      const msError = ssError / dfError;
+      const msBlock = dfBlock > 0 ? ssBlock / dfBlock : 0;
+      const msError = dfError > 0 ? ssError / dfError : 0;
 
       const fVal = msError > 0 ? msTreat / msError : 0;
-      const fBlock = msError > 0 ? msBlock / msError : 0;
+      const fBlock = (msError > 0 && trialDesign === 'RCBD') ? msBlock / msError : 0;
 
       const pVal = (msError > 0 && typeof jStat !== 'undefined') ? 1 - jStat.centralF.cdf(fVal, dfTreat, dfError) : 1;
-      const pBlock = (msError > 0 && typeof jStat !== 'undefined') ? 1 - jStat.centralF.cdf(fBlock, dfBlock, dfError) : 1;
+      const pBlock = (msError > 0 && trialDesign === 'RCBD' && typeof jStat !== 'undefined') ? 1 - jStat.centralF.cdf(fBlock, dfBlock, dfError) : 1;
 
       const cVals = trtGroups[1] || [];
       const tVals = trtGroups[2] || [];
       const cMean = cVals.length ? cVals.reduce((a, b) => a + b, 0) / cVals.length : 0;
       const tMean = tVals.length ? tVals.reduce((a, b) => a + b, 0) / tVals.length : 0;
 
-      const tValCrit = (typeof jStat !== 'undefined') ? jStat.studentt.inv(1 - (0.05 / 2), dfError) : 2.05;
+      const tValCrit = (dfError > 0 && typeof jStat !== 'undefined') ? jStat.studentt.inv(1 - (0.05 / 2), dfError) : 2.05;
       const lsd = tValCrit * Math.sqrt((2 * msError) / b);
       const sem = Math.sqrt(msError / b);
       const cv = grandMean > 0 ? (Math.sqrt(msError) / grandMean) * 100 : 0;
@@ -2027,9 +2193,12 @@ export default function Trials({ onMenuClick }) {
       }
 
       anovaResults = {
+        trialDesign,
         anovaTable: {
           treatment: { source: 'Treatment', df: dfTreat, ss: parseFloat(ssTreat.toFixed(2)), ms: parseFloat(msTreat.toFixed(2)), f: parseFloat(fVal.toFixed(2)), p: parseFloat(pVal.toFixed(4)), sig: pVal < 0.01 ? '**' : pVal < 0.05 ? '*' : 'ns' },
-          block: { source: 'Replications (Block)', df: dfBlock, ss: parseFloat(ssBlock.toFixed(2)), ms: parseFloat(msBlock.toFixed(2)), f: parseFloat(fBlock.toFixed(2)), p: parseFloat(pBlock.toFixed(4)), sig: pBlock < 0.01 ? '**' : pBlock < 0.05 ? '*' : 'ns' },
+          ...(trialDesign === 'RCBD' ? {
+            block: { source: 'Replications (Block)', df: dfBlock, ss: parseFloat(ssBlock.toFixed(2)), ms: parseFloat(msBlock.toFixed(2)), f: parseFloat(fBlock.toFixed(2)), p: parseFloat(pBlock.toFixed(4)), sig: pBlock < 0.01 ? '**' : pBlock < 0.05 ? '*' : 'ns' }
+          } : {}),
           error: { source: 'Error', df: dfError, ss: parseFloat(ssError.toFixed(2)), ms: parseFloat(msError.toFixed(2)), f: null, p: null, sig: '' },
           total: { source: 'Total', df: dfTotal, ss: parseFloat(ssTotal.toFixed(2)), ms: null, f: null, p: null, sig: '' }
         },
@@ -2117,7 +2286,21 @@ export default function Trials({ onMenuClick }) {
     setAiGenRunning(dataUrl || true);
 
     const photoDate = formatPhotoDate(photoDateStr || new Date().toISOString());
-    const fileName = `photo_${targetTrial.ID}_${Date.now()}.jpg`;
+    const safeTag = String(photoTag || 'Whole Canopy')
+      .replace(/[^a-zA-Z0-9\(\)\s\-_]/g, '')
+      .replace(/\s+/g, '_');
+    let daaVal = 0;
+    if (targetTrial.Date && photoDateStr) {
+      try {
+        const diff = new Date(photoDateStr) - new Date(targetTrial.Date);
+        if (!isNaN(diff)) {
+          daaVal = Math.max(0, Math.round(diff / 86400000));
+        }
+      } catch (e) {
+        console.warn('Failed to calculate DAA for filename:', e);
+      }
+    }
+    const fileName = `photo_${targetTrial.ID}_${safeTag}_DAA-${daaVal}_${Date.now()}.jpg`;
     const tempId = `local_${Date.now()}`;
 
     // Build Drive folder path — same convention as HTML app:
@@ -2867,33 +3050,7 @@ Rules:
     // Calculate Result rating dynamically based on remaining severity/cover
     let resultRating = 'Unrated';
     if (efficacyData.length > 0) {
-      const latestObs = [...efficacyData].sort((a, b) => (parseFloat(b.daa) || 0) - (parseFloat(a.daa) || 0))[0];
-      const val = Number(getObservationPrimaryValue(trialCat, latestObs) ?? 0);
-      
-      if (trialCat === 'nutrition' || trialCat === 'biostimulant') {
-        const firstObs = [...efficacyData].sort((a, b) => (parseFloat(a.daa) || 0) - (parseFloat(b.daa) || 0))[0];
-        const baseVal = getObservationPrimaryValue(trialCat, firstObs) || 1;
-        const pctImprovement = ((val / baseVal) - 1) * 100;
-        if (pctImprovement >= 15) {
-          resultRating = 'Excellent';
-        } else if (pctImprovement >= 8) {
-          resultRating = 'Good';
-        } else if (pctImprovement >= 3) {
-          resultRating = 'Fair';
-        } else {
-          resultRating = 'Poor';
-        }
-      } else {
-        if (val <= 10) {
-          resultRating = 'Excellent';
-        } else if (val <= 25) {
-          resultRating = 'Good';
-        } else if (val <= 50) {
-          resultRating = 'Fair';
-        } else {
-          resultRating = 'Poor';
-        }
-      }
+      resultRating = calculateResultRating(efficacyData, latestTrial.IsControl || false, trialCat, latestTrial);
     }
 
     const targetField = catConfig.targetField || 'WeedSpecies';
@@ -3013,22 +3170,14 @@ Rules:
           getDriveFileId(p.url || p.src) === img.id
         );
 
-        // Smart parsing from filename
-        let photoDate = parseDateFromFilename(img.name, trial.Date) || (img.createdTime ? img.createdTime.split('T')[0] : new Date().toISOString().split('T')[0]);
-        let cleanLabel = img.name.replace(/\.[^/.]+$/, ""); // strip extension
-        
-        // Extract clean pot name/label by stripping date and times
-        let strippedLabel = cleanLabel;
-        strippedLabel = strippedLabel.replace(/\d{2}[-_]\d{2}[-_]\d{4}/g, '');
-        strippedLabel = strippedLabel.replace(/\d{4}[-_]\d{2}[-_]\d{2}/g, '');
-        strippedLabel = strippedLabel.replace(/\d{2}[:_]\d{2}\s*(AM|PM|am|pm)?/g, '');
-        strippedLabel = strippedLabel.replace(/^[\s\-_]+|[\s\-_]+$/g, '');
-        
-        if (strippedLabel) {
-          cleanLabel = strippedLabel;
-        }
+        // Smart parsing from filename using parsePhotoInfoFromFilename
+        const info = parsePhotoInfoFromFilename(img.name, trial.Date);
+        let photoDate = info.date ? info.date.split('T')[0] : (img.createdTime ? img.createdTime.split('T')[0] : new Date().toISOString().split('T')[0]);
+        const parsedTag = info.tag || 'Field Observation';
+        const parsedLabel = info.label || 'Field Observation';
+        const parsedDaa = info.daa;
 
-        const normDriveLabel = normalize(cleanLabel);
+        const normDriveLabel = normalize(parsedTag !== 'Field Observation' ? parsedTag : parsedLabel);
         const webViewUrl = `https://drive.google.com/uc?export=view&id=${img.id}`;
 
         if (existingPhoto) {
@@ -3057,16 +3206,20 @@ Rules:
 
         let healed = false;
 
-        // 1. Attempt to find an unmatched broken/unavailable entry that matches this photo by label
+        // 1. Attempt to find an unmatched broken/unavailable entry that matches this photo by label/tag
         for (let i = 0; i < photoURLs.length; i++) {
           const p = photoURLs[i];
           if (isPhotoBroken(p) && !p.deleted) {
             const normExistingLabel = normalize(p.label);
+            const normExistingTag = normalize(p.tag);
             
-            const isMatch = normExistingLabel && normDriveLabel && (
+            const isMatch = (normExistingLabel && normDriveLabel && (
               normExistingLabel.indexOf(normDriveLabel) !== -1 ||
               normDriveLabel.indexOf(normExistingLabel) !== -1
-            );
+            )) || (normExistingTag && normDriveLabel && (
+              normExistingTag.indexOf(normDriveLabel) !== -1 ||
+              normDriveLabel.indexOf(normExistingTag) !== -1
+            ));
 
             if (isMatch) {
               p.url = webViewUrl;
@@ -3106,10 +3259,11 @@ Rules:
               url: webViewUrl,
               fileName: img.name,
               date: photoDate,
-              label: cleanLabel,
+              label: parsedLabel,
               importedFrom: 'Drive',
               driveId: img.id,
-              tag: 'Field Observation',
+              tag: parsedTag,
+              daa: parsedDaa,
               aiStatus: 'pending'
             });
             addedCount++;
@@ -3225,20 +3379,14 @@ Rules:
                 getDriveFileId(p.url || p.src) === img.id
               );
 
-              let photoDate = parseDateFromFilename(img.name, trial.Date) || (img.createdTime ? img.createdTime.split('T')[0] : new Date().toISOString().split('T')[0]);
-              let cleanLabel = img.name.replace(/\.[^/.]+$/, "");
+              // Smart parsing from filename using parsePhotoInfoFromFilename
+              const info = parsePhotoInfoFromFilename(img.name, trial.Date);
+              let photoDate = info.date ? info.date.split('T')[0] : (img.createdTime ? img.createdTime.split('T')[0] : new Date().toISOString().split('T')[0]);
+              const parsedTag = info.tag || 'Field Observation';
+              const parsedLabel = info.label || 'Field Observation';
+              const parsedDaa = info.daa;
 
-              let strippedLabel = cleanLabel;
-              strippedLabel = strippedLabel.replace(/\d{2}[-_]\d{2}[-_]\d{4}/g, '');
-              strippedLabel = strippedLabel.replace(/\d{4}[-_]\d{2}[-_]\d{2}/g, '');
-              strippedLabel = strippedLabel.replace(/\d{2}[:_]\d{2}\s*(AM|PM|am|pm)?/g, '');
-              strippedLabel = strippedLabel.replace(/^[\s\-_]+|[\s\-_]+$/g, '');
-              
-              if (strippedLabel) {
-                cleanLabel = strippedLabel;
-              }
-
-              const normDriveLabel = cleanLabel.toLowerCase().replace(/[^a-z0-9]/g, '');
+              const normDriveLabel = (parsedTag !== 'Field Observation' ? parsedTag : parsedLabel).toLowerCase().replace(/[^a-z0-9]/g, '');
               const webViewUrl = `https://drive.google.com/uc?export=view&id=${img.id}`;
 
               if (existingPhoto) {
@@ -3272,10 +3420,15 @@ Rules:
                 const p = photoURLs[i];
                 if (isPhotoBroken(p) && !p.deleted) {
                   const normExistingLabel = (p.label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-                  const isMatch = normExistingLabel && normDriveLabel && (
+                  const normExistingTag = (p.tag || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                  
+                  const isMatch = (normExistingLabel && normDriveLabel && (
                     normExistingLabel.indexOf(normDriveLabel) !== -1 ||
                     normDriveLabel.indexOf(normExistingLabel) !== -1
-                  );
+                  )) || (normExistingTag && normDriveLabel && (
+                    normExistingTag.indexOf(normDriveLabel) !== -1 ||
+                    normDriveLabel.indexOf(normExistingTag) !== -1
+                  ));
 
                   if (isMatch) {
                     p.url = webViewUrl;
@@ -3314,10 +3467,11 @@ Rules:
                     url: webViewUrl,
                     fileName: img.name,
                     date: photoDate,
-                    label: cleanLabel,
+                    label: parsedLabel,
                     importedFrom: 'Drive',
                     driveId: img.id,
-                    tag: 'Field Observation',
+                    tag: parsedTag,
+                    daa: parsedDaa,
                     aiStatus: 'pending'
                   });
                   localAdded++;
@@ -4360,16 +4514,29 @@ Rules:
 
   // DAA coverage analysis for photos/observations
   const daaCoverage = useMemo(() => {
-    if (!activeTrial) return { allDAAs: [], obsDAAs: [], photoDAAs: [], hasGaps: false };
+    if (!activeTrial) return { allDAAs: [], obsDAAs: [], photoDAAs: [], hasGaps: false, missingMilestones: [] };
     const obs = validateEfficacyData(safeJsonParse(activeTrial.EfficacyDataJSON, []), activeTrial.Category || activeCategory, true);
     const photoDAAs = activeTrial.Date 
       ? detailPhotos.map(p => p.date ? calculateDAA(p.date, activeTrial.Date) : null).filter(val => val !== null)
       : [];
     const obsDAAs = obs.map(o => o.daa).filter(d => d !== undefined && d !== null);
-    const allDAAs = [...new Set([...obsDAAs, ...photoDAAs])].sort((a, b) => a - b);
-    const maxDAA = allDAAs.length > 0 ? Math.max(...allDAAs) : 0;
-    const hasGaps = maxDAA > 0 && allDAAs.length < maxDAA + 1;
-    return { allDAAs, obsDAAs: [...new Set(obsDAAs)], photoDAAs: [...new Set(photoDAAs)], hasGaps };
+    
+    // Standard recommended observation milestones
+    const milestones = [0, 7, 14, 21, 28];
+    const maxObsDaa = obsDAAs.length > 0 ? Math.max(...obsDAAs) : 0;
+    
+    // Missing milestones that should have been captured based on how far the trial has progressed
+    const missingMilestones = milestones.filter(m => m <= maxObsDaa && !obsDAAs.includes(m));
+    const allDAAs = [...new Set([...obsDAAs, ...photoDAAs, ...milestones])].sort((a, b) => a - b);
+    const hasGaps = missingMilestones.length > 0;
+    
+    return { 
+      allDAAs, 
+      obsDAAs: [...new Set(obsDAAs)], 
+      photoDAAs: [...new Set(photoDAAs)], 
+      hasGaps, 
+      missingMilestones 
+    };
   }, [activeTrial, detailPhotos]);
 
   // Chart data computation
@@ -5336,6 +5503,113 @@ If none are present, write "None".`;
           {filteredTrials.length > 0 ? (
             activeTab === 'rcbd' ? (
               <div className="space-y-6">
+                {/* ── Project Search, Filter & Quick Jump Panel ── */}
+                <div className="bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm space-y-3">
+                  <div className="flex flex-col md:flex-row gap-3">
+                    {/* Search */}
+                    <div className="flex-1 relative">
+                      <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Search projects by name, investigator, location..."
+                        value={projectSearchQuery}
+                        onChange={e => setProjectSearchQuery(e.target.value)}
+                        className="w-full pl-9 pr-4 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white dark:bg-slate-800 dark:border-slate-700 text-slate-700 dark:text-slate-200"
+                      />
+                      {projectSearchQuery && (
+                        <button onClick={() => setProjectSearchQuery('')} className="absolute right-3 top-2.5 text-xs font-semibold text-slate-400 hover:text-slate-600">✕</button>
+                      )}
+                    </div>
+                    {/* Design dropdown */}
+                    <div className="w-full md:w-48">
+                      <select
+                        value={projectDesignFilter}
+                        onChange={e => setProjectDesignFilter(e.target.value)}
+                        className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white dark:bg-slate-800 dark:border-slate-700 text-slate-700 dark:text-slate-200 cursor-pointer"
+                      >
+                        <option value="">All Designs</option>
+                        {projectFilterOptions.designs.map(d => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {/* Investigator dropdown */}
+                    <div className="w-full md:w-48">
+                      <select
+                        value={projectInvestigatorFilter}
+                        onChange={e => setProjectInvestigatorFilter(e.target.value)}
+                        className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white dark:bg-slate-800 dark:border-slate-700 text-slate-700 dark:text-slate-200 cursor-pointer"
+                      >
+                        <option value="">All Investigators</option>
+                        {projectFilterOptions.investigators.map(i => (
+                          <option key={i} value={i}>{i}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {/* Reset button */}
+                    {(projectSearchQuery || projectDesignFilter || projectInvestigatorFilter) && (
+                      <button
+                        onClick={() => {
+                          setProjectSearchQuery('');
+                          setProjectDesignFilter('');
+                          setProjectInvestigatorFilter('');
+                        }}
+                        className="px-4 py-2 text-sm font-semibold text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition"
+                      >
+                        Reset Filters
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Quick Jump List */}
+                  {Object.keys(groupedRcbdTrials.groups).length > 0 && (
+                    <div className="border-t border-slate-200/60 dark:border-slate-700 pt-3">
+                      <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase mb-2 flex items-center gap-1">
+                        ⚡ Quick Jump Navigator ({Object.keys(groupedRcbdTrials.groups).length} matched)
+                      </p>
+                      <div className="flex gap-2 overflow-x-auto pb-1.5 scrollbar-thin">
+                        {Object.entries(groupedRcbdTrials.groups).map(([pid, trialsList]) => {
+                          const proj = projectMap[pid];
+                          if (!proj) return null;
+                          return (
+                            <button
+                              key={pid}
+                              type="button"
+                              onClick={() => {
+                                // Expand target project
+                                setCollapsedSections(prev => {
+                                  const next = { ...prev };
+                                  delete next[pid];
+                                  return next;
+                                });
+                                // Scroll to target element
+                                setTimeout(() => {
+                                  const el = document.getElementById(`proj-card-${pid}`);
+                                  if (el) {
+                                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                    // Highlight effect
+                                    el.classList.add('ring-2', 'ring-emerald-500', 'scale-[1.005]');
+                                    setTimeout(() => {
+                                      el.classList.remove('ring-2', 'ring-emerald-500', 'scale-[1.005]');
+                                    }, 1500);
+                                  }
+                                }, 100);
+                              }}
+                              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-200 transition whitespace-nowrap shadow-sm"
+                            >
+                              <FolderOpen className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              <span>{proj.Name || 'Unnamed'}</span>
+                              <span className="bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-bold px-1.5 py-0.2 rounded-full text-[10px]">
+                                {trialsList.length}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 {/* Global Expand/Collapse controls */}
                 <div className="flex justify-end gap-2 mb-2">
                   <button
@@ -5364,7 +5638,7 @@ If none are present, write "None".`;
                   const proj = projectMap[pid];
                   const isCollapsed = !!collapsedSections[pid];
                   return (
-                    <div key={pid} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm overflow-hidden transition-all duration-200">
+                    <div key={pid} id={`proj-card-${pid}`} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm overflow-hidden transition-all duration-300">
                       <div
                         onClick={() => toggleSection(pid)}
                         className="p-4 bg-slate-50 dark:bg-slate-800/50 flex items-center justify-between cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors select-none"
@@ -5444,6 +5718,7 @@ If none are present, write "None".`;
                                 trial={t}
                                 project={proj}
                                 isSelected={selectedForBulk.has(t.ID)}
+                                isPendingSync={isTrialPendingSync(t)}
                                 isMenuOpen={openCardMenu === t.ID}
                                 onToggleBulk={toggleBulk}
                                 onToggleMenu={handleToggleMenu}
@@ -5518,6 +5793,7 @@ If none are present, write "None".`;
                                 trial={t}
                                 project={null}
                                 isSelected={selectedForBulk.has(t.ID)}
+                                isPendingSync={isTrialPendingSync(t)}
                                 isMenuOpen={openCardMenu === t.ID}
                                 onToggleBulk={toggleBulk}
                                 onToggleMenu={handleToggleMenu}
@@ -5560,6 +5836,7 @@ If none are present, write "None".`;
                     trial={t}
                     project={projectMap[t.ProjectID]}
                     isSelected={selectedForBulk.has(t.ID)}
+                    isPendingSync={isTrialPendingSync(t)}
                     isMenuOpen={openCardMenu === t.ID}
                     onToggleBulk={toggleBulk}
                     onToggleMenu={handleToggleMenu}
@@ -5941,11 +6218,11 @@ If none are present, write "None".`;
                       <Calculator size={10} /> Spray Mix Calc
                     </button>
                   </div>
-                  <input type="text" value={formData.Dosage} onChange={e => setFormData({...formData, Dosage: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="e.g. 1500 ml/ha" />
+                  <input type="text" value={formData.Dosage} onChange={e => setFormData({...formData, Dosage: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]" placeholder="e.g. 1500 ml/ha" />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Result</label>
-                  <select value={formData.Result} onChange={e => setFormData({...formData, Result: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400">
+                  <select value={formData.Result} onChange={e => setFormData({...formData, Result: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]">
                     <option value="">— Select Result —</option>
                     {catConfig.resultRatings.map(r => <option key={r} value={r}>{r}</option>)}
                     <option value="Control">Control</option>
@@ -5953,7 +6230,7 @@ If none are present, write "None".`;
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Application Timing</label>
-                  <select value={formData.ApplicationTiming} onChange={e => setFormData({...formData, ApplicationTiming: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400">
+                  <select value={formData.ApplicationTiming} onChange={e => setFormData({...formData, ApplicationTiming: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]">
                     <option value="">— Select Timing —</option>
                     {catConfig.applicationTimings.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                   </select>
@@ -5963,7 +6240,7 @@ If none are present, write "None".`;
                     const eppoType = field.key === 'WeedSpecies' ? 'weed' : field.key === 'DiseaseTarget' ? 'disease' : 'pest';
                     return (
                       <div key={field.key}>
-                        {renderTargetFieldAutocomplete(field.key, field.label, 'focus:ring-indigo-400', eppoType)}
+                        {renderTargetFieldAutocomplete(field.key, field.label, 'focus:ring-[var(--primary-color)]', eppoType)}
                       </div>
                     );
                   }
@@ -5971,7 +6248,7 @@ If none are present, write "None".`;
                     return (
                       <div key={field.key}>
                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">{field.label} (BBCH)</label>
-                        <select value={formData[field.key] || ''} onChange={e => setFormData({...formData, [field.key]: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400">
+                        <select value={formData[field.key] || ''} onChange={e => setFormData({...formData, [field.key]: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]">
                           <option value="">— Select Growth Stage —</option>
                           {BBCH_STAGES.map(s => <option key={s.value} value={s.label}>{s.label}</option>)}
                         </select>
@@ -5982,12 +6259,12 @@ If none are present, write "None".`;
                     <div key={field.key} className="relative">
                       <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">{field.label}</label>
                       {field.type === 'select' ? (
-                        <select value={formData[field.key] || ''} onChange={e => setFormData({...formData, [field.key]: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400">
+                        <select value={formData[field.key] || ''} onChange={e => setFormData({...formData, [field.key]: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]">
                           <option value="">— Select {field.label} —</option>
                           {field.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
                         </select>
                       ) : (
-                        <input type={field.type} step={field.type === 'number' ? 'any' : undefined} value={formData[field.key] || ''} onChange={e => setFormData({...formData, [field.key]: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder={field.placeholder || ''} />
+                        <input type={field.type} step={field.type === 'number' ? 'any' : undefined} value={formData[field.key] || ''} onChange={e => setFormData({...formData, [field.key]: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]" placeholder={field.placeholder || ''} />
                       )}
                     </div>
                   );
@@ -6430,8 +6707,9 @@ If none are present, write "None".`;
             </div>
 
             <div className="flex-1 overflow-y-auto p-5 pb-24">
-              {/* Applications Log Tab */}
-              {detailTab === 'applications' && (
+              <ErrorBoundary inline={true}>
+                {/* Applications Log Tab */}
+                {detailTab === 'applications' && (
                 <div className="space-y-4">
                   <div className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-100">
                     <div>
@@ -6718,6 +6996,21 @@ If none are present, write "None".`;
                   }
                   return (
                   <div>
+                    {/* Application Weather Quick Card */}
+                    {(detailTrial.Temperature || detailTrial.Humidity || detailTrial.Windspeed || detailTrial.Rain) && (
+                      <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 mb-4 flex items-center justify-between text-xs text-slate-600 gap-2">
+                        <div className="flex items-center gap-1.5 font-semibold text-slate-700">
+                          <CloudRain className="w-4 h-4 text-blue-500 shrink-0" />
+                          <span>App Weather Conditions:</span>
+                        </div>
+                        <div className="flex gap-3 flex-wrap">
+                          {detailTrial.Temperature && <span>🌡 {detailTrial.Temperature}°C</span>}
+                          {detailTrial.Humidity && <span>💧 {detailTrial.Humidity}% RH</span>}
+                          {detailTrial.Windspeed && <span>💨 {detailTrial.Windspeed} km/h</span>}
+                          {detailTrial.Rain && <span>🌧 {detailTrial.Rain} mm</span>}
+                        </div>
+                      </div>
+                    )}
                     <div className="flex justify-between items-center mb-3">
                       <div>
                         <h3 className="font-semibold text-slate-700">Observation Timeline</h3>
@@ -6731,6 +7024,11 @@ If none are present, write "None".`;
                         {sorted.length >= 2 && !isViewer && (
                           <button onClick={() => generateAISummary()} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-gradient-to-r from-violet-500 to-purple-500 text-white rounded-lg hover:from-violet-600 hover:to-purple-600 shadow-sm">
                             <Sparkles className="w-3.5 h-3.5" />Generate AI Summary
+                          </button>
+                        )}
+                        {detailTrial?.ProjectID && (
+                          <button onClick={() => setShowRepCompareModal(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100">
+                            <SlidersHorizontal className="w-3.5 h-3.5" /> Compare Replicates
                           </button>
                         )}
                         {!isViewer && (
@@ -6781,6 +7079,26 @@ If none are present, write "None".`;
                               <div className="flex justify-between items-start mb-3">
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <span className="bg-slate-700 text-white font-bold px-2 py-1 rounded text-xs">DAA {obs.daa ?? 0}</span>
+                                  {(() => {
+                                    const appLog = safeJsonParse(detailTrial.ApplicationLogJSON, []);
+                                    // Match observation date to closest application that occurred before or on the obs date
+                                    const obsTime = obs.date ? new Date(obs.date).getTime() : 0;
+                                    const pastApps = appLog
+                                      .filter(a => a.date && new Date(a.date).getTime() <= obsTime)
+                                      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                                    const activeApp = pastApps[0];
+                                    if (!activeApp) return null;
+                                    return (
+                                      <span className="bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded text-xs" title={`Active Application: ${activeApp.code} on ${formatDate(activeApp.date)}`}>
+                                        App: {activeApp.code}
+                                      </span>
+                                    );
+                                  })()}
+                                  {(obs.sampleCount !== undefined && obs.sampleCount !== null && obs.sampleCount < 3) && (
+                                    <span className="bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-1 cursor-help" title={`Low sample size! Only ${obs.sampleCount} samples recorded. Minimum 3 recommended.`}>
+                                      ⚠️ Low Samples ({obs.sampleCount})
+                                    </span>
+                                  )}
                                   <span className="text-xs text-slate-500">{obs.date ? formatPhotoDate(obs.date) : ''}</span>
                                   {efficacyRating && <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${ratingCls}`}>{efficacyRating}</span>}
                                   {(() => {
@@ -6919,6 +7237,26 @@ If none are present, write "None".`;
                                   </div>
                                 </div>
                               )}
+                              {/* Pot-wise Plant Heights Display */}
+                              {obs.potHeights && obs.potHeights.some(h => h !== '' && h !== null && h !== undefined) && (
+                                <div className="mt-2 border-t pt-2">
+                                  <p className="text-[10px] font-bold text-lime-700 uppercase mb-1.5">🌱 Pot-wise Plant Heights</p>
+                                  <div className="flex flex-wrap gap-2">
+                                    {obs.potHeights.map((h, hIdx) => {
+                                      if (h === '' || h === null || h === undefined) return null;
+                                      const potLetter = String.fromCharCode(65 + hIdx);
+                                      return (
+                                        <span key={hIdx} className="text-xs bg-lime-50 border border-lime-200 rounded-lg px-2 py-1 font-semibold text-lime-800">
+                                          Pot {potLetter}: {h} cm
+                                        </span>
+                                      );
+                                    })}
+                                    <span className="text-xs bg-lime-100 border border-lime-300 rounded-lg px-2 py-1 font-bold text-lime-900">
+                                      Avg: {(obs.potHeights.filter(h => h !== '' && h !== null && h !== undefined).map(Number).filter(n => !isNaN(n)).reduce((s, v) => s + v, 0) / obs.potHeights.filter(h => h !== '' && h !== null && h !== undefined).map(Number).filter(n => !isNaN(n)).length).toFixed(1)} cm
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
                               {/* Observation-level weather strip */}
                               {(obs.weatherTemp || obs.weatherWind || obs.weatherRain) && (
                                 <div className="mt-2 border-t pt-2 flex flex-wrap gap-3 text-[10px] text-slate-500">
@@ -7005,20 +7343,22 @@ If none are present, write "None".`;
                         {daaCoverage.allDAAs.map(daa => {
                           const hasObs = daaCoverage.obsDAAs.includes(daa);
                           const hasPhoto = daaCoverage.photoDAAs.includes(daa);
+                          const isMissingMilestone = daaCoverage.missingMilestones?.includes(daa);
                           return (
                             <div key={daa} className={`px-2 py-1 rounded text-[10px] font-semibold ${
                               hasObs ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' :
+                              isMissingMilestone ? 'bg-red-50 text-red-600 border border-red-200 animate-pulse' :
                               hasPhoto ? 'bg-amber-100 text-amber-700 border border-amber-200' :
                               'bg-slate-100 text-slate-500'
-                            }`} title={hasObs ? 'Has observation' : 'Has photo, needs AI scan'}>
-                              DAA {daa} {hasObs ? '✓' : hasPhoto ? '📷' : ''}
+                            }`} title={hasObs ? 'Has observation' : isMissingMilestone ? 'Missed target milestone!' : 'Has photo, needs AI scan'}>
+                              DAA {daa} {hasObs ? '✓' : isMissingMilestone ? '⚠' : hasPhoto ? '📷' : ''}
                             </div>
                           );
                         })}
                       </div>
                       {daaCoverage.hasGaps && (
-                        <p className="text-[10px] text-amber-600 mt-2">
-                          ⚠️ Missing DAAs. Click "AI Scan All" to fill gaps.
+                        <p className="text-[10px] text-red-600 mt-2 font-semibold">
+                          ⚠️ Missed recommended DAA observation milestones: {daaCoverage.missingMilestones.join(', ')}
                         </p>
                       )}
                     </div>
@@ -7181,6 +7521,60 @@ If none are present, write "None".`;
                               </button>
                               )}
                             </div>
+                            {(() => {
+                              const currentProj = activeTrial ? projects.find(p => String(p.ID) === String(activeTrial.ProjectID)) : null;
+                              const isPotTrial = (activeTrial?.TrialDesign === 'PotTrial' || activeTrial?.TrialDesign === 'rcbd-pot' || !!activeTrial?.PotLabel) || (currentProj?.Design === 'PotTrial' || currentProj?.Design === 'rcbd-pot');
+                              if (!isPotTrial || isViewer) return null;
+
+                              let potIdx = -1;
+                              const tag = (photo.tag || '').toUpperCase();
+                              const label = (photo.label || '').toUpperCase();
+                              
+                              if (tag.includes('POT A') || tag.includes('PLANT 1') || label.includes('POT A') || label.includes('PLANT 1')) potIdx = 0;
+                              else if (tag.includes('POT B') || tag.includes('PLANT 2') || label.includes('POT B') || label.includes('PLANT 2')) potIdx = 1;
+                              else if (tag.includes('POT C') || tag.includes('PLANT 3') || label.includes('POT C') || label.includes('PLANT 3')) potIdx = 2;
+                              else if (tag.includes('POT D') || tag.includes('PLANT 4') || label.includes('POT D') || label.includes('PLANT 4')) potIdx = 3;
+                              else if (tag.includes('POT E') || tag.includes('PLANT 5') || label.includes('POT E') || label.includes('PLANT 5')) potIdx = 4;
+                              else {
+                                const matchPot = (photo.tag || '').match(/Pot\s+([A-Z])/i) || (photo.label || '').match(/Pot\s+([A-Z])/i);
+                                if (matchPot) {
+                                  potIdx = matchPot[1].toUpperCase().charCodeAt(0) - 65;
+                                } else {
+                                  const matchPlant = (photo.tag || '').match(/Plant\s+(\d+)/i) || (photo.label || '').match(/Plant\s+(\d+)/i);
+                                  if (matchPlant) {
+                                    potIdx = parseInt(matchPlant[1], 10) - 1;
+                                  }
+                                }
+                              }
+
+                              if (potIdx < 0) return null;
+                              const potLetter = String.fromCharCode(65 + potIdx);
+                              const photoDateStr = toDateKey(photo.date) || toDateKey(new Date());
+                              const efficacyData = safeJsonParse(activeTrial?.EfficacyDataJSON, []);
+                              const obs = efficacyData.find(o => o.date && toDateKey(o.date) === photoDateStr);
+                              const currentHeight = obs?.potHeights?.[potIdx] ?? '';
+
+                              return (
+                                <div className="px-2 pb-2 pt-1.5 border-t border-slate-100 flex items-center justify-between gap-2 bg-lime-50/60">
+                                  <span className="text-[10px] font-bold text-lime-800 flex items-center gap-1 shrink-0">
+                                    🌱 Pot {potLetter} Height:
+                                  </span>
+                                  <div className="flex items-center gap-1">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      max="500"
+                                      step="0.1"
+                                      placeholder="cm"
+                                      value={currentHeight}
+                                      onChange={e => handlePhotoHeightChange(photo, e.target.value)}
+                                      className="w-16 px-1.5 py-0.5 text-xs border border-lime-300 rounded focus:outline-none focus:ring-1 focus:ring-lime-500 bg-white text-center font-bold text-lime-900"
+                                    />
+                                    <span className="text-[10px] font-semibold text-lime-700">cm</span>
+                                  </div>
+                                </div>
+                              );
+                            })()}
                           </div>
                         );
                       })}
@@ -7342,20 +7736,39 @@ If none are present, write "None".`;
                     <div className="space-y-5">
                       {statsData.stats?.wce && statsData.stats.wce.length > 0 && (
                         <div>
-                          <h4 className="text-sm font-bold text-slate-700 mb-2">Weed Control Efficiency — Per Observation</h4>
+                          <h4 className="text-sm font-bold text-slate-700 mb-2">{catConfig.primaryMetric.label} — Per Observation</h4>
                           <div className="overflow-x-auto rounded-xl border">
                             <table className="min-w-full text-xs divide-y divide-slate-200">
-                              <thead className="bg-slate-50"><tr>{['DAA','Species','Cover %','WCE %','Rating'].map(h => <th key={h} className="px-3 py-2 text-left font-semibold text-slate-500 uppercase text-[10px]">{h}</th>)}</tr></thead>
+                              <thead className="bg-slate-50"><tr>{['DAA', catConfig.targetLabel || 'Target', 'Value', `${catConfig.primaryMetric.key} (${catConfig.primaryMetric.unit || '%'})`, 'Rating'].map(h => <th key={h} className="px-3 py-2 text-left font-semibold text-slate-500 uppercase text-[10px]">{h}</th>)}</tr></thead>
                               <tbody className="divide-y divide-slate-100 bg-white">
-                                {statsData.stats.wce.map((w, i) => (
-                                  <tr key={i} className={w.controlRating === 'Baseline' ? 'bg-slate-50' : ''}>
-                                    <td className="px-3 py-2 font-bold text-slate-600">{w.daa ?? 0}</td>
-                                    <td className="px-3 py-2 font-medium text-slate-700 truncate max-w-[100px]">{w.species}</td>
-                                    <td className="px-3 py-2 text-slate-500">{w.finalCover}%</td>
-                                    <td className={`px-3 py-2 font-bold ${w.wce === null ? 'text-slate-400' : w.wce >= 80 ? 'text-emerald-600' : 'text-amber-600'}`}>{w.wce !== null ? `${w.wce.toFixed(1)}%` : '—'}</td>
-                                    <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${w.controlRating === 'Baseline' ? 'bg-slate-200 text-slate-600' : w.controlRating === 'Excellent' ? 'bg-emerald-100 text-emerald-800' : w.controlRating === 'Good' ? 'bg-blue-100 text-blue-800' : w.controlRating === 'Fair' ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'}`}>{w.controlRating}</span></td>
-                                  </tr>
-                                ))}
+                                {statsData.stats.wce.map((w, i) => {
+                                  const ratingStyle = 
+                                    w.controlRating === 'Baseline' ? 'text-slate-400' :
+                                    w.controlRating === 'Excellent' || w.controlRating === 'Good' ? 'text-emerald-600 font-bold' :
+                                    w.controlRating === 'Fair' ? 'text-amber-600 font-bold' : 'text-rose-600 font-bold';
+                                  
+                                  return (
+                                    <tr key={i} className={w.controlRating === 'Baseline' ? 'bg-slate-50' : ''}>
+                                      <td className="px-3 py-2 font-bold text-slate-600">{w.daa ?? 0}</td>
+                                      <td className="px-3 py-2 font-medium text-slate-700 truncate max-w-[100px]">{w.species}</td>
+                                      <td className="px-3 py-2 text-slate-500">{w.finalCover}%</td>
+                                      <td className={`px-3 py-2 ${ratingStyle}`}>
+                                        {w.wce !== null ? `${w.wce.toFixed(1)}%` : '—'}
+                                      </td>
+                                      <td className="px-3 py-2">
+                                        <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                                          w.controlRating === 'Baseline' ? 'bg-slate-200 text-slate-600' : 
+                                          w.controlRating === 'Excellent' ? 'bg-emerald-100 text-emerald-800' : 
+                                          w.controlRating === 'Good' ? 'bg-blue-100 text-blue-800' : 
+                                          w.controlRating === 'Fair' ? 'bg-amber-100 text-amber-800' : 
+                                          'bg-rose-100 text-rose-800'
+                                        }`}>
+                                          {w.controlRating}
+                                        </span>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
                               </tbody>
                             </table>
                           </div>
@@ -7387,7 +7800,11 @@ If none are present, write "None".`;
                             </div>
                           </div>
                           <div className="mt-3 p-3 bg-blue-50 text-blue-800 rounded-xl text-xs border border-blue-100">
-                            ℹ️ This is a single-replicate trial. Descriptive statistics summarize trends over time (DAA timepoints). Replicated ANOVA/Tukey significance testing is only scientifically valid when grouping multiple trials at the Project level.
+                            {statsData.stats.anovaResults.designWarning ? (
+                              <span>⚠️ {statsData.stats.anovaResults.message}</span>
+                            ) : (
+                              <span>ℹ️ This is a single-replicate trial. Descriptive statistics summarize trends over time (DAA timepoints). Replicated ANOVA/Tukey significance testing is only scientifically valid when grouping multiple trials at the Project level.</span>
+                            )}
                           </div>
                         </div>
                       ) : statsData.stats?.anovaResults?.anovaTable && (
@@ -8148,6 +8565,7 @@ If none are present, write "None".`;
                   </div>
                 );
               })()}
+              </ErrorBoundary>
             </div>
           </div>
         </div>
@@ -8567,6 +8985,83 @@ If none are present, write "None".`;
         )}
       </Modal>
 
+      {/* ── CROSS-REPLICATE COMPARISON MODAL ── */}
+      <Modal isOpen={showRepCompareModal} onClose={() => setShowRepCompareModal(false)} title="Cross-Replicate Observation comparison">
+        {(() => {
+          if (!detailTrial?.ProjectID) return null;
+          
+          // Get all trials in the same project
+          const projectTrials = (getAppState().trials || []).filter(t => 
+            String(t.ProjectID) === String(detailTrial.ProjectID) &&
+            (t.FormulationName === detailTrial.FormulationName || t.FormulationID === detailTrial.FormulationID)
+          ).sort((a, b) => (parseInt(a.Replication) || 0) - (parseInt(b.Replication) || 0));
+
+          // Get unique DAAs across all replicates
+          const repDAAs = new Set();
+          projectTrials.forEach(t => {
+            const eff = validateEfficacyData(safeJsonParse(t.EfficacyDataJSON, []), activeCategory);
+            eff.forEach(obs => {
+              if (obs.daa !== undefined && obs.daa !== null) repDAAs.add(Number(obs.daa));
+            });
+          });
+          const sortedDAAs = Array.from(repDAAs).sort((a, b) => a - b);
+          const primaryObsField = getPrimaryObservationField(activeCategory);
+
+          return (
+            <div className="space-y-4">
+              <div className="bg-slate-50 rounded-xl p-3 border text-xs">
+                <span className="font-bold text-slate-700 block mb-0.5">Treatment comparison</span>
+                <span className="text-slate-500">Treatment: {detailTrial.FormulationName} | Target Metric: {catConfig.primaryMetric.label} ({catConfig.primaryMetric.unit || '%'})</span>
+              </div>
+
+              {sortedDAAs.length === 0 ? (
+                <p className="text-center py-6 text-slate-400 text-xs">No observation points recorded yet.</p>
+              ) : (
+                <div className="overflow-x-auto border rounded-xl">
+                  <table className="min-w-full text-xs divide-y divide-slate-200">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-bold text-slate-500 uppercase text-[9px]">Replication</th>
+                        {sortedDAAs.map(daa => (
+                          <th key={daa} className="px-3 py-2 text-center font-bold text-slate-500 uppercase text-[9px]">DAA {daa}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-slate-100">
+                      {projectTrials.map((t, index) => {
+                        const eff = validateEfficacyData(safeJsonParse(t.EfficacyDataJSON, []), activeCategory);
+                        const isCurrent = t.ID === detailTrial.ID;
+                        return (
+                          <tr key={t.ID} className={isCurrent ? 'bg-indigo-50/40 font-semibold' : ''}>
+                            <td className="px-3 py-2 text-slate-700">
+                              Rep {t.Replication || index + 1} {t.PlotNumber ? `(Plot ${t.PlotNumber})` : ''} {t.IsControl ? '[Control]' : ''} {isCurrent ? '⭐' : ''}
+                            </td>
+                            {sortedDAAs.map(daa => {
+                              const match = eff.find(o => Number(o.daa) === Number(daa));
+                              const val = match ? getObservationPrimaryValue(activeCategory, match) : null;
+                              return (
+                                <td key={daa} className="px-3 py-2 text-center font-medium text-slate-600">
+                                  {val !== null ? `${val}%` : '—'}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <div className="flex justify-end pt-2">
+                <button onClick={() => setShowRepCompareModal(false)} className="px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-900 text-xs font-bold transition">
+                  Close Comparison
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
+
       {/* ── OBSERVATION MODAL ── */}
       <Modal isOpen={isObsModalOpen} onClose={() => setIsObsModalOpen(false)} title={editingObsIdx !== null ? 'Edit Observation' : 'Log Observation'}>
         <form onSubmit={handleSaveObs} className="space-y-4 max-h-[80vh] overflow-y-auto pr-1">
@@ -8594,7 +9089,11 @@ If none are present, write "None".`;
                       newDate = `${ry}-${rm}-${rd}`;
                     }
                   }
-                  setObsForm({ ...obsForm, daa: val, date: newDate });
+                  const updated = { ...obsForm, daa: val, date: newDate };
+                  setObsForm(updated);
+                  if (activeTrial) {
+                    localStorage.setItem(`obs_draft_${activeTrial.ID}`, JSON.stringify(updated));
+                  }
                 }}
                 className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400"
               />
@@ -8608,11 +9107,35 @@ If none are present, write "None".`;
                 onChange={e => {
                   const val = e.target.value;
                   const computedDaa = activeTrial?.Date ? calculateDAA(val, activeTrial.Date) : obsForm.daa;
-                  setObsForm({ ...obsForm, date: val, daa: computedDaa });
+                  const updated = { ...obsForm, date: val, daa: computedDaa };
+                  setObsForm(updated);
+                  if (activeTrial) {
+                    localStorage.setItem(`obs_draft_${activeTrial.ID}`, JSON.stringify(updated));
+                  }
                 }}
                 className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400"
               />
             </div>
+          </div>
+
+          {/* Sample Count Field */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Sample Count (Minimum 3 recommended)</label>
+            <input
+              type="number"
+              min="1"
+              value={obsForm.sampleCount ?? ''}
+              onChange={e => {
+                const val = e.target.value === '' ? '' : parseInt(e.target.value, 10);
+                const updated = { ...obsForm, sampleCount: val };
+                setObsForm(updated);
+                if (activeTrial) {
+                  localStorage.setItem(`obs_draft_${activeTrial.ID}`, JSON.stringify(updated));
+                }
+              }}
+              placeholder="e.g. 5"
+              className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400"
+            />
           </div>
 
           {/* AI Auto-fill from Photo for Non-Herbicide Categories */}
@@ -8777,7 +9300,14 @@ If none are present, write "None".`;
               return (
                 <div key={field.key} className="border-b border-slate-100 pb-3 last:border-0 last:pb-0">
                   <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs font-semibold text-slate-500 uppercase">{field.label}</label>
+                    <label className="text-xs font-semibold text-slate-500 uppercase flex items-center gap-1">
+                      {field.label}
+                      {isPrimary && (
+                        <span className="bg-emerald-100 text-emerald-800 text-[9px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wider">
+                          Primary Metric
+                        </span>
+                      )}
+                    </label>
                     {isPrimary && (
                       <div className="flex items-center gap-2">
                         <input ref={obsPhotoRef} type="file" accept="image/*" className="hidden" onChange={e => {
@@ -8786,7 +9316,13 @@ If none are present, write "None".`;
                           const reader = new FileReader();
                           reader.onload = async ev => {
                             const result = await detectWeedCoverAI(ev.target.result);
-                            if (result?.cover !== undefined) setObsForm(prev => ({ ...prev, [field.key]: result.cover }));
+                            if (result?.cover !== undefined) {
+                              const updated = { ...obsForm, [field.key]: result.cover };
+                              setObsForm(updated);
+                              if (activeTrial) {
+                                localStorage.setItem(`obs_draft_${activeTrial.ID}`, JSON.stringify(updated));
+                              }
+                            }
                           };
                           reader.readAsDataURL(f);
                           e.target.value = '';
@@ -8818,10 +9354,17 @@ If none are present, write "None".`;
                             next.rootToShootRatio = parseFloat((rb / sb).toFixed(3));
                           }
                         }
+                        if (activeTrial) {
+                          localStorage.setItem(`obs_draft_${activeTrial.ID}`, JSON.stringify(next));
+                        }
                         return next;
                       });
                     }}
-                    className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                    className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 ${
+                      isPrimary 
+                        ? 'border-emerald-300 ring-2 ring-emerald-50 focus:ring-emerald-400 font-bold text-slate-800' 
+                        : 'focus:ring-emerald-400'
+                    }`}
                   />
                   {isPrimary && coverDetectResult && (
                     <div className="mt-1.5 flex items-center gap-3 text-xs bg-violet-50 border border-violet-200 rounded-lg px-3 py-1.5">
@@ -8834,6 +9377,83 @@ If none are present, write "None".`;
               );
             })}
           </div>
+
+          {/* ── Pot-wise Plant Heights (for row-wise pot trials) ── */}
+          {(() => {
+            const currentProj = activeTrial ? projects.find(p => String(p.ID) === String(activeTrial.ProjectID)) : null;
+            const isPotTrial = (activeTrial?.TrialDesign === 'PotTrial' || activeTrial?.TrialDesign === 'rcbd-pot' || !!activeTrial?.PotLabel) || (currentProj?.Design === 'PotTrial' || currentProj?.Design === 'rcbd-pot');
+            const potObsMode = currentProj?.PotObsMode || activeTrial?.PotObsMode || 'row-wise';
+            if (!isPotTrial || potObsMode === 'pot-wise') return null;
+
+            let potCount = null;
+            if (activeTrial?.PotLabel) {
+              const m = activeTrial.PotLabel.match(/(\d+)\s*Pots?/i);
+              if (m) potCount = parseInt(m[1], 10);
+            }
+            if (!potCount || isNaN(potCount)) {
+              if (potObsMode === 'column-wise' && currentProj) {
+                const blocksCount = parseInt(currentProj.PotBlocks) || 3;
+                potCount = Math.floor((parseInt(currentProj.PotRows) || 9) / blocksCount);
+              } else if (potObsMode === 'row-wise' && currentProj) {
+                potCount = parseInt(currentProj.PotCols) || 4;
+              }
+            }
+            if (!potCount || isNaN(potCount) || potCount < 1) potCount = 3;
+
+            const currentHeights = obsForm.potHeights || Array(potCount).fill('');
+            // Ensure array length matches pot count
+            const heights = [...currentHeights];
+            while (heights.length < potCount) heights.push('');
+
+            const filledHeights = heights.filter(h => h !== '' && h !== null && h !== undefined).map(Number).filter(n => !isNaN(n));
+            const avgHeight = filledHeights.length > 0 ? (filledHeights.reduce((s, v) => s + v, 0) / filledHeights.length).toFixed(1) : null;
+
+            return (
+              <div className="bg-lime-50/70 border border-lime-200 rounded-xl p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-lime-800 uppercase flex items-center gap-1.5">
+                    🌱 Pot-wise Plant Heights (cm)
+                  </label>
+                  {avgHeight && (
+                    <span className="text-xs font-bold text-lime-700 bg-lime-100 px-2 py-0.5 rounded-full">
+                      Avg: {avgHeight} cm
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {Array.from({ length: potCount }, (_, idx) => {
+                    const potLetter = String.fromCharCode(65 + idx);
+                    return (
+                      <div key={idx}>
+                        <label className="text-[10px] font-semibold text-lime-700 block mb-0.5">Pot {potLetter}</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="500"
+                          step="0.1"
+                          placeholder="cm"
+                          value={heights[idx] || ''}
+                          onChange={e => {
+                            const newHeights = [...heights];
+                            newHeights[idx] = e.target.value;
+                            const filled = newHeights.filter(h => h !== '' && h !== null && h !== undefined).map(Number).filter(n => !isNaN(n));
+                            const newAvg = filled.length > 0 ? parseFloat((filled.reduce((s, v) => s + v, 0) / filled.length).toFixed(1)) : '';
+                            setObsForm(prev => ({
+                              ...prev,
+                              potHeights: newHeights,
+                              plantHeight: newAvg
+                            }));
+                          }}
+                          className="w-full px-2 py-1.5 text-xs border border-lime-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-lime-500 bg-white"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="text-[10px] text-lime-600 italic">Enter height for each pot. The average is auto-calculated and logged to the observation.</p>
+              </div>
+            );
+          })()}
 
           {/* Per-species weed details */}
           <div>
@@ -9080,7 +9700,7 @@ If none are present, write "None".`;
       {pendingPhotoAnalysis && (() => {
         const targetTrialForPhoto = pendingPhotoAnalysis.targetTrial || activeTrial;
         const proj = projects.find(p => String(p.ID) === String(targetTrialForPhoto?.ProjectID));
-        const isPotTrial = (targetTrialForPhoto?.TrialDesign === 'PotTrial') || (proj?.Design === 'PotTrial');
+        const isPotTrial = (targetTrialForPhoto?.TrialDesign === 'PotTrial' || targetTrialForPhoto?.TrialDesign === 'rcbd-pot' || !!targetTrialForPhoto?.PotLabel) || (proj?.Design === 'PotTrial' || proj?.Design === 'rcbd-pot');
         
         const SCIENTIFIC_FOCUS_TAGS = [
           { value: 'Whole Canopy (Standard)', label: 'Whole Canopy (Standard)', hint: 'Hold the camera parallel to the ground to avoid perspective bias for ground cover.' },
@@ -9092,7 +9712,16 @@ If none are present, write "None".`;
           { value: 'Fruit / Produce Close-up', label: 'Fruit / Produce Close-up', hint: 'Ensure fruits/produce are centered and in focus. Avoid extreme glare.' }
         ];
 
-        const defaultTag = isPotTrial ? 'Plant 1 (Pot A) - Whole Canopy (Standard)' : 'Whole Canopy (Standard)';
+        const PREFIX_REGEX = /^(Plant \d+ \(Pot [A-Z]\)|Pot [a-zA-Z0-9_\-\s]+) - /;
+        const potObsMode = proj?.PotObsMode || targetTrialForPhoto?.PotObsMode || 'row-wise';
+        const autoPotPrefix = isPotTrial ? getAutomaticPotPrefix(targetTrialForPhoto, state.trials) : '';
+        const defaultTag = isPotTrial 
+          ? (autoPotPrefix 
+              ? `${autoPotPrefix} - Whole Canopy (Standard)` 
+              : (potObsMode === 'pot-wise' 
+                  ? `Pot ${targetTrialForPhoto?.PotLabel || 'Single Pot'} - Whole Canopy (Standard)`
+                  : 'Plant 1 (Pot A) - Whole Canopy (Standard)'))
+          : 'Whole Canopy (Standard)';
         const currentTag = pendingPhotoAnalysis.tag || defaultTag;
 
         return (
@@ -9114,46 +9743,70 @@ If none are present, write "None".`;
                   className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" />
               </div>
 
+              {isPotTrial && potObsMode !== 'pot-wise' && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Target Pot</label>
+                  <select
+                    value={(() => {
+                      const potMatch = currentTag.match(/Plant \d+ \(Pot [A-Z]\)/);
+                      return potMatch ? potMatch[0] : 'General';
+                    })()}
+                    onChange={e => {
+                      const selectedPot = e.target.value;
+                      const potMatch = currentTag.match(/Plant \d+ \(Pot [A-Z]\)/);
+                      const currentFocus = potMatch ? currentTag.replace(`${potMatch[0]} - `, '') : currentTag;
+                      const newTag = selectedPot === 'General' ? currentFocus : `${selectedPot} - ${currentFocus}`;
+                      setPendingPhotoAnalysis(p => ({ ...p, tag: newTag }));
+                    }}
+                    className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white text-slate-800 font-medium"
+                  >
+                    <option value="General">General / All Pots</option>
+                    {(() => {
+                      let potCount = null;
+                      if (targetTrialForPhoto?.PotLabel) {
+                        const m = targetTrialForPhoto.PotLabel.match(/(\d+)\s*Pots?/i);
+                        if (m) potCount = parseInt(m[1], 10);
+                      }
+                      if (!potCount || isNaN(potCount)) {
+                        if (potObsMode === 'column-wise' && proj) {
+                          const blocksCount = parseInt(proj.PotBlocks) || 3;
+                          potCount = Math.floor((parseInt(proj.PotRows) || 9) / blocksCount);
+                        } else if (potObsMode === 'row-wise' && proj) {
+                          potCount = parseInt(proj.PotCols) || 4;
+                        }
+                      }
+                      if (!potCount || isNaN(potCount) || potCount < 1) {
+                        potCount = 3;
+                      }
+                      const options = [];
+                      for (let idx = 0; idx < potCount; idx++) {
+                        const potLetter = String.fromCharCode(65 + idx);
+                        const val = `Plant ${idx + 1} (Pot ${potLetter})`;
+                        options.push(
+                          <option key={val} value={val}>Plant {idx + 1} (Pot {potLetter})</option>
+                        );
+                      }
+                      return options;
+                    })()}
+                  </select>
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Photo Tag / Focus Type</label>
                 <select
-                  value={currentTag}
-                  onChange={e => setPendingPhotoAnalysis(p => ({ ...p, tag: e.target.value }))}
+                  value={currentTag.replace(PREFIX_REGEX, '')}
+                  onChange={e => {
+                    const selectedFocus = e.target.value;
+                    const prefixMatch = currentTag.match(PREFIX_REGEX);
+                    const prefix = prefixMatch ? prefixMatch[0] : '';
+                    setPendingPhotoAnalysis(p => ({ ...p, tag: `${prefix}${selectedFocus}` }));
+                  }}
                   className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white text-slate-800 font-medium"
                 >
-                  {(() => {
-                    if (!isPotTrial) {
-                      return SCIENTIFIC_FOCUS_TAGS.map(f => (
-                        <option key={f.value} value={f.value}>{f.label}</option>
-                      ));
-                    }
-                    
-                    const potObsMode = proj?.PotObsMode || targetTrialForPhoto?.PotObsMode || 'row-wise';
-                    let potCount = 3;
-                    if (potObsMode === 'column-wise' && proj) {
-                      const blocksCount = parseInt(proj.PotBlocks) || 3;
-                      potCount = Math.floor((parseInt(proj.PotRows) || 9) / blocksCount);
-                    } else if (potObsMode === 'row-wise' && proj) {
-                      potCount = parseInt(proj.PotCols) || 4;
-                    } else if (targetTrialForPhoto?.PotLabel) {
-                      const m = targetTrialForPhoto.PotLabel.match(/(\d+)\s*Pots?/i);
-                      if (m) potCount = parseInt(m[1], 10);
-                    }
-                    
-                    const options = [];
-                    for (let idx = 0; idx < potCount; idx++) {
-                      const potLetter = String.fromCharCode(65 + idx); // A, B, C...
-                      SCIENTIFIC_FOCUS_TAGS.forEach(f => {
-                        const val = `Plant ${idx + 1} (Pot ${potLetter}) - ${f.value}`;
-                        options.push(
-                          <option key={val} value={val}>
-                            Plant {idx + 1} (Pot {potLetter}) - {f.label}
-                          </option>
-                        );
-                      });
-                    }
-                    return options;
-                  })()}
+                  {SCIENTIFIC_FOCUS_TAGS.map(f => (
+                    <option key={f.value} value={f.value}>{f.label}</option>
+                  ))}
                 </select>
               </div>
 

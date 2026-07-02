@@ -353,8 +353,12 @@ export function useAppState() {
     throw new Error('useAppState must be used within an AppStateProvider');
   }
 
+  // Get full state ref to fill in remaining less-frequently changing fields
+  const fullState = core.getAppState ? core.getAppState() : {};
+
   return {
     state: {
+      ...fullState,
       auth,
       trials,
       projects,
@@ -477,29 +481,7 @@ export function AppStateProvider({ children }) {
         const parsedAuth = JSON.parse(savedAuth);
         dispatch({ type: 'SET_STATE', payload: { auth: parsedAuth } });
         
-        // Proactively fetch global/user settings from Firestore if Firebase Auth is active
-        const uid = parsedAuth.uid || parsedAuth.user?.uid || parsedAuth.user?.ID;
-        if (uid && parsedAuth.authProvider === 'firebase') {
-          (async () => {
-            try {
-              const fbSettings = await fbGetUserSettings(uid);
-              if (fbSettings) {
-                // Merge Firestore settings over localStorage settings
-                dispatch({ 
-                  type: 'UPDATE_SETTINGS', 
-                  payload: {
-                    ...fbSettings,
-                    firebaseEnabled: true, // Safeguard config
-                    firebaseConfig: parsedAuth.firebaseConfig || (savedSettings ? JSON.parse(savedSettings).firebaseConfig : null) // Preserve auth config
-                  } 
-                });
-                console.log('[Firestore] User settings synchronized successfully.');
-              }
-            } catch (err) {
-              console.warn('[Firestore] Failed to synchronize settings:', err.message);
-            }
-          })();
-        }
+        // Auth state is hydrated; settings retrieval will be handled by the reactive settings sync effect
       }
 
       const savedCategory = localStorage.getItem('activeCategory');
@@ -608,6 +590,49 @@ export function AppStateProvider({ children }) {
     if (!isHydrated) return;
     saveOfflineData('blocks', state.blocks || []);
   }, [isHydrated, state.blocks]);
+
+  // Persist settings and auth to Dexie settings store for Service Worker background access
+  useEffect(() => {
+    if (!isHydrated) return;
+    import('../services/dexieDB.js').then(({ db }) => {
+      db.settings.put({
+        ID: 'appSettings',
+        settings: state.settings || {},
+        auth: state.auth || {}
+      }).catch(err => console.error('[useAppState] Failed to save settings to Dexie:', err));
+    }).catch(err => console.error('[useAppState] Failed to import Dexie:', err));
+  }, [isHydrated, state.settings, state.auth]);
+
+  // Fetch user settings and API keys from Firebase when authenticated (handles new devices/browsers seamlessly)
+  useEffect(() => {
+    const uid = state.auth?.uid || state.auth?.user?.uid || state.auth?.user?.ID;
+    if (uid && state.auth?.authProvider === 'firebase') {
+      let active = true;
+      (async () => {
+        try {
+          const { fbGetUserSettings } = await import('../services/firebaseDB.js');
+          const fbSettings = await fbGetUserSettings(uid);
+          if (fbSettings && active) {
+            const savedSettingsRaw = localStorage.getItem('appSettings');
+            const savedSettings = savedSettingsRaw ? JSON.parse(savedSettingsRaw) : null;
+            
+            dispatch({ 
+              type: 'UPDATE_SETTINGS', 
+              payload: {
+                ...fbSettings,
+                firebaseEnabled: true,
+                firebaseConfig: state.auth?.firebaseConfig || savedSettings?.firebaseConfig || state.settings?.firebaseConfig
+              } 
+            });
+            console.log('[Firestore] User settings synchronized successfully.');
+          }
+        } catch (err) {
+          console.warn('[Firestore] Failed to synchronize settings:', err.message);
+        }
+      })();
+      return () => { active = false; };
+    }
+  }, [state.auth?.uid, state.auth?.authProvider]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {

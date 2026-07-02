@@ -36,6 +36,45 @@ import { resolvePhotoSrc, getDriveFileId } from "../utils/photoUtils.js";
 import { validateEfficacyData } from "../utils/analysisUtils.js";
 import { analyzePhoto, generateTextWithAI } from "../services/multiProviderAI.js";
 
+const getAutomaticPotPrefix = (targetTrial, allTrials) => {
+  if (!targetTrial || !allTrials) return '';
+  const treatmentName = targetTrial.FormulationName || targetTrial.FormulationID;
+  if (!treatmentName) return '';
+  
+  const siblingTrials = allTrials.filter(t => 
+    t.ProjectID === targetTrial.ProjectID && 
+    (t.FormulationName === treatmentName || t.FormulationID === treatmentName)
+  );
+
+  const parseCoords = (label) => {
+    if (!label) return { row: 999, col: 999, seq: 9999 };
+    const rcMatch = label.match(/R(?:ow)?\s*(\d+)\s*C(?:ol)?\s*(\d+)/i);
+    if (rcMatch) {
+      return { row: parseInt(rcMatch[1], 10), col: parseInt(rcMatch[2], 10), seq: 9999 };
+    }
+    const seqMatch = label.match(/(?:P(?:ot)?\s*)?(\d+)/i);
+    if (seqMatch) {
+      return { row: 999, col: 999, seq: parseInt(seqMatch[1], 10) };
+    }
+    return { row: 999, col: 999, seq: 9999 };
+  };
+
+  const sortedSiblings = [...siblingTrials].sort((a, b) => {
+    const aCoords = parseCoords(a.PotLabel);
+    const bCoords = parseCoords(b.PotLabel);
+    if (aCoords.row !== bCoords.row) return aCoords.row - bCoords.row;
+    if (aCoords.col !== bCoords.col) return aCoords.col - bCoords.col;
+    return aCoords.seq - bCoords.seq;
+  });
+
+  const idx = sortedSiblings.findIndex(t => t.ID === targetTrial.ID);
+  if (idx >= 0) {
+    const potLetter = String.fromCharCode(65 + idx);
+    return `Plant ${idx + 1} (Pot ${potLetter})`;
+  }
+  return '';
+};
+
 function parseQrData(raw) {
   if (!raw) return null;
   const str = raw.trim();
@@ -591,6 +630,7 @@ export default function PlotScanner({ onMenuClick }) {
       source: 'AI',
       photoUrl: photoUrl || '',
       bbchStage: aiData.bbchStage || '',
+      sampleCount: 1,
       ...(weatherData ? {
         weatherTemp: weatherData.temp,
         weatherHumidity: weatherData.hum,
@@ -1318,7 +1358,7 @@ Rules:
       {pendingPhotoSetup && (() => {
         const targetTrial = state.trials?.find(t => t.ID === pendingPhotoSetup.trialId);
         const proj = state.projects?.find(p => String(p.ID) === String(targetTrial?.ProjectID));
-        const isPotTrial = (targetTrial?.TrialDesign === 'PotTrial') || (proj?.Design === 'PotTrial');
+        const isPotTrial = (targetTrial?.TrialDesign === 'PotTrial' || targetTrial?.TrialDesign === 'rcbd-pot' || !!targetTrial?.PotLabel) || (proj?.Design === 'PotTrial' || proj?.Design === 'rcbd-pot');
         
         const SCIENTIFIC_FOCUS_TAGS = [
           { value: 'Whole Canopy (Standard)', label: 'Whole Canopy (Standard)', hint: 'Hold the camera parallel to the ground to avoid perspective bias for ground cover.' },
@@ -1330,7 +1370,16 @@ Rules:
           { value: 'Fruit / Produce Close-up', label: 'Fruit / Produce Close-up', hint: 'Focus closely on fruit/produce.' }
         ];
 
-        const defaultTag = isPotTrial ? 'Plant 1 (Pot A) - Whole Canopy (Standard)' : 'Whole Canopy (Standard)';
+        const PREFIX_REGEX = /^(Plant \d+ \(Pot [A-Z]\)|Pot [a-zA-Z0-9_\-\s]+) - /;
+        const potObsMode = proj?.PotObsMode || targetTrial?.PotObsMode || 'row-wise';
+        const autoPotPrefix = isPotTrial ? getAutomaticPotPrefix(targetTrial, state.trials) : '';
+        const defaultTag = isPotTrial 
+          ? (autoPotPrefix 
+              ? `${autoPotPrefix} - Whole Canopy (Standard)` 
+              : (potObsMode === 'pot-wise' 
+                  ? `Pot ${targetTrial?.PotLabel || 'Single Pot'} - Whole Canopy (Standard)`
+                  : 'Plant 1 (Pot A) - Whole Canopy (Standard)'))
+          : 'Whole Canopy (Standard)';
         const currentTag = pendingPhotoSetup.tag || defaultTag;
 
         return (
@@ -1363,46 +1412,70 @@ Rules:
                 />
               </div>
 
+              {isPotTrial && potObsMode !== 'pot-wise' && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Target Pot</label>
+                  <select
+                    value={(() => {
+                      const potMatch = currentTag.match(/Plant \d+ \(Pot [A-Z]\)/);
+                      return potMatch ? potMatch[0] : 'General';
+                    })()}
+                    onChange={e => {
+                      const selectedPot = e.target.value;
+                      const potMatch = currentTag.match(/Plant \d+ \(Pot [A-Z]\)/);
+                      const currentFocus = potMatch ? currentTag.replace(`${potMatch[0]} - `, '') : currentTag;
+                      const newTag = selectedPot === 'General' ? currentFocus : `${selectedPot} - ${currentFocus}`;
+                      setPendingPhotoSetup(p => ({ ...p, tag: newTag }));
+                    }}
+                    className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white text-slate-800 font-medium"
+                  >
+                    <option value="General">General / All Pots</option>
+                    {(() => {
+                      let potCount = null;
+                      if (targetTrial?.PotLabel) {
+                        const m = targetTrial.PotLabel.match(/(\d+)\s*Pots?/i);
+                        if (m) potCount = parseInt(m[1], 10);
+                      }
+                      if (!potCount || isNaN(potCount)) {
+                        if (potObsMode === 'column-wise' && proj) {
+                          const blocksCount = parseInt(proj.PotBlocks) || 3;
+                          potCount = Math.floor((parseInt(proj.PotRows) || 9) / blocksCount);
+                        } else if (potObsMode === 'row-wise' && proj) {
+                          potCount = parseInt(proj.PotCols) || 4;
+                        }
+                      }
+                      if (!potCount || isNaN(potCount) || potCount < 1) {
+                        potCount = 3;
+                      }
+                      const options = [];
+                      for (let idx = 0; idx < potCount; idx++) {
+                        const potLetter = String.fromCharCode(65 + idx);
+                        const val = `Plant ${idx + 1} (Pot ${potLetter})`;
+                        options.push(
+                          <option key={val} value={val}>Plant {idx + 1} (Pot {potLetter})</option>
+                        );
+                      }
+                      return options;
+                    })()}
+                  </select>
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Photo Tag / Focus Type</label>
                 <select
-                  value={currentTag}
-                  onChange={e => setPendingPhotoSetup(p => ({ ...p, tag: e.target.value }))}
+                  value={currentTag.replace(PREFIX_REGEX, '')}
+                  onChange={e => {
+                    const selectedFocus = e.target.value;
+                    const prefixMatch = currentTag.match(PREFIX_REGEX);
+                    const prefix = prefixMatch ? prefixMatch[0] : '';
+                    setPendingPhotoSetup(p => ({ ...p, tag: `${prefix}${selectedFocus}` }));
+                  }}
                   className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white text-slate-800 font-medium"
                 >
-                  {(() => {
-                    if (!isPotTrial) {
-                      return SCIENTIFIC_FOCUS_TAGS.map(f => (
-                        <option key={f.value} value={f.value}>{f.label}</option>
-                      ));
-                    }
-                    
-                    const potObsMode = proj?.PotObsMode || targetTrial?.PotObsMode || 'row-wise';
-                    let potCount = 3;
-                    if (potObsMode === 'column-wise' && proj) {
-                      const blocksCount = parseInt(proj.PotBlocks) || 3;
-                      potCount = Math.floor((parseInt(proj.PotRows) || 9) / blocksCount);
-                    } else if (potObsMode === 'row-wise' && proj) {
-                      potCount = parseInt(proj.PotCols) || 4;
-                    } else if (targetTrial?.PotLabel) {
-                      const m = targetTrial.PotLabel.match(/(\d+)\s*Pots?/i);
-                      if (m) potCount = parseInt(m[1], 10);
-                    }
-                    
-                    const options = [];
-                    for (let idx = 0; idx < potCount; idx++) {
-                      const potLetter = String.fromCharCode(65 + idx); // A, B, C...
-                      SCIENTIFIC_FOCUS_TAGS.forEach(f => {
-                        const val = `Plant ${idx + 1} (Pot ${potLetter}) - ${f.value}`;
-                        options.push(
-                          <option key={val} value={val}>
-                            Plant {idx + 1} (Pot {potLetter}) - {f.label}
-                          </option>
-                        );
-                      });
-                    }
-                    return options;
-                  })()}
+                  {SCIENTIFIC_FOCUS_TAGS.map(f => (
+                    <option key={f.value} value={f.value}>{f.label}</option>
+                  ))}
                 </select>
               </div>
 

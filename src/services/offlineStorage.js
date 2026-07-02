@@ -1,6 +1,7 @@
 // src/services/offlineStorage.js
-// Native IndexedDB storage wrapper for offline data caching.
+// Dexie IndexedDB storage wrapper for offline data caching.
 
+import { db } from './dexieDB.js';
 import { 
   getIndexedDBUsage, 
   getIndexedDBUsagePercent, 
@@ -10,58 +11,31 @@ import {
   getStorageStats
 } from './storageQuotaManager.js';
 
-const DB_NAME = 'MiklensTrialManagerDB';
-const DB_VERSION = 2;
 const STORES = ['trials', 'projects', 'formulations', 'ingredients', 'blocks', 'syncQueue', 'trialPhotos'];
 
-function getDB() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-    request.onupgradeneeded = (event) => {
-      const db = event.target.result;
-      STORES.forEach(storeName => {
-        if (!db.objectStoreNames.contains(storeName)) {
-          db.createObjectStore(storeName, { keyPath: 'ID' });
-        }
-      });
-    };
-
-    request.onsuccess = (event) => {
-      resolve(event.target.result);
-    };
-
-    request.onerror = (event) => {
-      reject(event.target.error);
-    };
-  });
+async function initOfflineDB() {
+  if (!db.isOpen()) {
+    await db.open();
+  }
+  return db;
 }
 
 export async function saveOfflinePhoto(id, base64Data) {
   try {
-    const db = await getDB();
-    const transaction = db.transaction('trialPhotos', 'readwrite');
-    const store = transaction.objectStore('trialPhotos');
-    store.put({ ID: String(id), dataUrl: base64Data });
-    return new Promise((resolve, reject) => {
-      transaction.oncomplete = () => resolve(true);
-      transaction.onerror = () => reject(transaction.error);
-    });
+    await initOfflineDB();
+    await db.trialPhotos.put({ ID: String(id), dataUrl: base64Data });
+    return true;
   } catch (err) {
     console.error(`Failed to save offline photo ${id}:`, err);
+    return false;
   }
 }
 
 export async function loadOfflinePhoto(id) {
   try {
-    const db = await getDB();
-    const transaction = db.transaction('trialPhotos', 'readonly');
-    const store = transaction.objectStore('trialPhotos');
-    const request = store.get(String(id));
-    return new Promise((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result?.dataUrl || null);
-      request.onerror = () => reject(request.error);
-    });
+    await initOfflineDB();
+    const result = await db.trialPhotos.get(String(id));
+    return result?.dataUrl || null;
   } catch (err) {
     console.error(`Failed to load offline photo ${id}:`, err);
     return null;
@@ -71,44 +45,50 @@ export async function loadOfflinePhoto(id) {
 export async function saveOfflineData(storeName, data) {
   if (!STORES.includes(storeName)) return;
   try {
-    const db = await getDB();
-    const transaction = db.transaction(storeName, 'readwrite');
-    const store = transaction.objectStore(storeName);
+    await initOfflineDB();
+    const table = db[storeName];
+    if (!table) return;
 
     // Clear existing data in the store
-    store.clear();
+    await table.clear();
 
     // Add new data
     const items = Array.isArray(data) ? data : [data];
+    const normalizedItems = [];
     items.forEach(item => {
       if (item && (item.ID !== undefined || item.id !== undefined)) {
         // Enforce ID as keyPath
         const key = item.ID !== undefined ? item.ID : item.id;
-        store.put({ ...item, ID: String(key) });
+        normalizedItems.push({ ...item, ID: String(key) });
       }
     });
 
-    return new Promise((resolve, reject) => {
-      transaction.oncomplete = () => resolve(true);
-      transaction.onerror = () => reject(transaction.error);
-    });
+    if (normalizedItems.length > 0) {
+      await table.bulkPut(normalizedItems);
+    }
+    return true;
   } catch (err) {
     console.error(`Failed to save offline data for store ${storeName}:`, err);
+    return false;
   }
 }
 
 export async function loadOfflineData(storeName) {
   if (!STORES.includes(storeName)) return [];
   try {
-    const db = await getDB();
-    const transaction = db.transaction(storeName, 'readonly');
-    const store = transaction.objectStore(storeName);
-    const request = store.getAll();
-
-    return new Promise((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result || []);
-      request.onerror = () => reject(request.error);
-    });
+    await initOfflineDB();
+    const table = db[storeName];
+    if (!table) return [];
+    
+    const results = await table.toArray();
+    
+    // Fix #20: Filter trials by activeCategory to prevent cross-contamination
+    if (storeName === 'trials' && typeof window !== 'undefined') {
+      const activeCategory = localStorage.getItem('activeCategory') || 'herbicide';
+      return results.filter(t => (t.Category || 'herbicide') === activeCategory);
+    }
+    
+    return results;
   } catch (err) {
     console.error(`Failed to load offline data for store ${storeName}:`, err);
     return [];
@@ -117,16 +97,13 @@ export async function loadOfflineData(storeName) {
 
 export async function clearOfflineCache() {
   try {
-    const db = await getDB();
-    const transaction = db.transaction(STORES, 'readwrite');
-    STORES.forEach(storeName => {
-      transaction.objectStore(storeName).clear();
-    });
-    return new Promise((resolve) => {
-      transaction.oncomplete = () => resolve(true);
-    });
+    await initOfflineDB();
+    const tables = [db.trials, db.projects, db.formulations, db.ingredients, db.blocks, db.syncQueue, db.trialPhotos];
+    await Promise.all(tables.map(table => table.clear()));
+    return true;
   } catch (err) {
     console.error('Failed to clear offline cache:', err);
+    return false;
   }
 }
 
@@ -144,57 +121,50 @@ function dataURLtoBlob(dataurl) {
 
 export async function saveSyncQueueOffline(queue) {
   try {
-    const db = await getDB();
-    const transaction = db.transaction('syncQueue', 'readwrite');
-    const store = transaction.objectStore('syncQueue');
-    store.clear();
-    queue.forEach(item => {
+    await initOfflineDB();
+    await db.syncQueue.clear();
+    const normalizedQueue = queue.map(item => {
       const id = String(item.id || item.ID);
       const itemCopy = { ...item, ID: id };
       if (itemCopy.photo && typeof itemCopy.photo.fileData === 'string' && itemCopy.photo.fileData.startsWith('data:')) {
         itemCopy.photo.fileData = dataURLtoBlob(itemCopy.photo.fileData);
       }
-      store.put(itemCopy);
+      return itemCopy;
     });
-    return new Promise((resolve, reject) => {
-      transaction.oncomplete = () => resolve(true);
-      transaction.onerror = () => reject(transaction.error);
-    });
+
+    if (normalizedQueue.length > 0) {
+      await db.syncQueue.bulkPut(normalizedQueue);
+    }
+    return true;
   } catch (err) {
     console.error('Failed to save sync queue offline:', err);
+    return false;
   }
 }
 
 export async function loadSyncQueueOffline() {
   try {
-    const db = await getDB();
-    const transaction = db.transaction('syncQueue', 'readonly');
-    const store = transaction.objectStore('syncQueue');
-    const request = store.getAll();
-    return new Promise((resolve, reject) => {
-      request.onsuccess = async () => {
-        const results = request.result || [];
-        const queue = await Promise.all(results.map(async item => {
-          if (item.photo && item.photo.fileData instanceof Blob) {
-            const base64 = await new Promise((res, rej) => {
-              const reader = new FileReader();
-              reader.onloadend = () => res(reader.result);
-              reader.onerror = rej;
-              reader.readAsDataURL(item.photo.fileData);
-            });
-            item.photo.fileData = base64;
-          }
-          return item;
-        }));
-        resolve(queue);
-      };
-      request.onerror = () => reject(request.error);
-    });
+    await initOfflineDB();
+    const results = await db.syncQueue.toArray();
+    const queue = await Promise.all(results.map(async item => {
+      if (item.photo && item.photo.fileData instanceof Blob) {
+        const base64 = await new Promise((res, rej) => {
+          const reader = new FileReader();
+          reader.onloadend = () => res(reader.result);
+          reader.onerror = rej;
+          reader.readAsDataURL(item.photo.fileData);
+        });
+        item.photo.fileData = base64;
+      }
+      return item;
+    }));
+    return queue;
   } catch (err) {
     console.error('Failed to load sync queue offline:', err);
     return [];
   }
 }
+
 /**
  * Cleanup old photos from IndexedDB
  * @param {number} olderThanDays - Remove photos older than N days (default 90)

@@ -21,7 +21,13 @@ import { DEFAULT_CATEGORY_ACCESS } from '../utils/categoryConfig.js';
 async function getUserProfile(uid) {
   const db = getFirebaseDB();
   const snap = await getDoc(doc(db, COLLECTIONS.users, uid));
-  return snap.exists() ? { uid, ...snap.data() } : null;
+  if (snap.exists()) {
+    const data = { ...snap.data() };
+    delete data.Password;
+    delete data.password;
+    return { uid, ...data };
+  }
+  return null;
 }
 
 async function createUserProfile(uid, profileData) {
@@ -36,13 +42,11 @@ async function createUserProfile(uid, profileData) {
     // If rules block listing users, we assume not first
   }
 
-  const emailLower = (profileData.email || '').toLowerCase();
-  const autoAdmin = isFirstUser || emailLower.includes('admin');
+  const autoAdmin = isFirstUser;
 
   const record = {
     ID: uid,
     Username: profileData.email,
-    Password: profileData.password || '',
     Name: profileData.name || profileData.displayName || profileData.email,
     Role: profileData.role || (autoAdmin ? 'Admin' : 'User'),
     IsActive: true,
@@ -72,17 +76,10 @@ export async function fbLogin(email, password) {
     let profile = await getUserProfile(cred.user.uid);
     if (!profile) {
       try {
-        profile = await createUserProfile(cred.user.uid, { email, password });
+        profile = await createUserProfile(cred.user.uid, { email });
       } catch (profileErr) {
         console.error('[Firebase] Failed to create user profile in Firestore:', profileErr);
         profile = { uid: cred.user.uid, Username: email, Role: 'User', IsActive: true };
-      }
-    } else if (profile.Password !== password) {
-      try {
-        await fbUpdateUserProfile(cred.user.uid, { Password: password });
-        profile.Password = password;
-      } catch (updateErr) {
-        console.warn('[Firebase] Failed to sync password to Firestore:', updateErr);
       }
     }
     if (profile.IsActive === false) {
@@ -114,7 +111,7 @@ export async function fbRegisterUser(email, password, profileData = {}) {
     const tempAuth = getFirebaseAuthInstance(tempApp);
 
     const cred = await createUserWithEmailAndPassword(tempAuth, email, password);
-    const profile = await createUserProfile(cred.user.uid, { email, password, ...profileData });
+    const profile = await createUserProfile(cred.user.uid, { email, ...profileData });
     
     try {
       await tempApp.delete();

@@ -738,7 +738,6 @@ function pdfAddFooter(doc, label) {
   for (let i = 1; i <= n; i++) {
     doc.setPage(i); doc.setFontSize(8); doc.setTextColor(150, 150, 150);
     doc.text(`${label} | Page ${i} of ${n}`, pw / 2, ph - 6, { align: 'center' });
-    doc.text(`Generated ${formatDateTime(new Date())}`, pw - 14, ph - 6, { align: 'right' });
   }
   doc.setTextColor(0, 0, 0);
 }
@@ -1193,67 +1192,8 @@ function conclusionNotes(doc, trial, y, ph) {
 }
 
 function addScientificInterpretation(doc, trial, efficacy, categoryId, y, ph) {
-  if (categoryId !== 'herbicide' || efficacy.length < 2) return y;
-  
-  const pw = doc.internal.pageSize.getWidth();
-  const sorted = [...efficacy].sort((a, b) => {
-    const getDaa = (o) => {
-      if (o.daa !== undefined && o.daa !== null && o.daa !== '' && o.daa !== '—') return Number(o.daa);
-      return calculateDAA(o.date, trial.Date || '');
-    };
-    return getDaa(a) - getDaa(b);
-  });
-  const getDaa = (o) => {
-    if (o.daa !== undefined && o.daa !== null && o.daa !== '' && o.daa !== '—') return Number(o.daa);
-    return calculateDAA(o.date, trial.Date || '');
-  };
-  
-  const first = sorted[0];
-  const last = sorted[sorted.length - 1];
-  const firstDaa = getDaa(first);
-  const lastDaa = getDaa(last);
-  const firstVal = getObservationPrimaryValue(categoryId, first) ?? 0;
-  const lastVal = getObservationPrimaryValue(categoryId, last) ?? 0;
-  
-  const isStandardTrial = !trial?.Replication || trial.Replication === 'N/A' || trial.Replication === '';
-  const isOngoing = !(trial.IsCompleted === true || trial.IsCompleted === 'true');
-  
-  let text = `The treatment produced rapid suppression between DAA ${firstDaa} and DAA ${lastDaa}, reducing weed canopy cover from ${firstVal.toFixed(1)}% to ${lastVal.toFixed(1)}%. No increase in greenness or weed density was detected through DAA ${lastDaa}, suggesting sustained suppression during the current observation period.`;
-  
-  if (isStandardTrial && isOngoing) {
-    text += ` As the trial remains ongoing and lacks untreated controls, these observations should be interpreted as observational field data rather than statistically validated efficacy.`;
-  } else if (isStandardTrial) {
-    text += ` As the trial has been finalized and lacks untreated controls, these observations represent a standard observational performance profile under the evaluated conditions.`;
-  } else if (isOngoing) {
-    text += ` As the trial remains ongoing, additional replicate observations are required to determine statistical significance.`;
-  } else {
-    text += ` Replicated design data suggests this response profile represents a statistically consistent treatment effect.`;
-  }
-  
-  if (y + 35 > ph - 20) { doc.addPage(); y = 20; }
-  
-  doc.setFillColor(248, 250, 252);
-  doc.setDrawColor(203, 213, 225);
-  doc.setFont(undefined, 'bold');
-  doc.setFontSize(9.5);
-  
-  const headerText = "AI Scientific Interpretation";
-  const wrappedText = doc.splitTextToSize(text, pw - 36);
-  const boxHeight = wrappedText.length * 5 + 14;
-  
-  doc.rect(14, y, pw - 28, boxHeight, 'FD');
-  
-  doc.setTextColor(15, 118, 110);
-  doc.text(headerText, 18, y + 6);
-  
-  doc.setTextColor(51, 65, 85);
-  doc.setFont(undefined, 'normal');
-  doc.setFontSize(9);
-  doc.text(wrappedText, 18, y + 12);
-  
-  doc.setTextColor(0, 0, 0);
-  
-  return y + boxHeight + 10;
+  // AI Scientific Interpretation removed by request
+  return y;
 }
 
 // Local helper: Root-to-Shoot Ratio
@@ -1550,6 +1490,7 @@ export async function generateComprehensivePdf(trial, options = {}) {
           showPhotoDates = true, formulations = [] } = options;
   const repConfig = getReportConfig(trial);
   const categoryId = repConfig.cat;
+  const primaryColor = repConfig.primaryColor;
   
   toast(`Generating Comprehensive ${repConfig.config.name} PDF…`, 'info');
   const doc      = createDoc();
@@ -1573,18 +1514,45 @@ export async function generateComprehensivePdf(trial, options = {}) {
   // 2-column metadata
   doc.setFontSize(10);
   const lx = 14, rx = pw / 2 + 10;
-  const meta2 = [];
-  meta2.push([`Investigator: ${trial.InvestigatorName || 'N/A'}`, `Date: ${trialDate}`]);
-  meta2.push([`Location: ${trial.Location || 'N/A'}`,              `Dosage: ${trial.Dosage || 'N/A'}`]);
-  meta2.push([`${dataFields.cropLabel}: ${dataFields.crop}`,                           categoryId === 'herbicide' ? `Weed Growth Stage: ${trial.WeedGrowthStage || '—'}` : `Growth Stage: ${dataFields.cropStage}`]);
+  
+  const rawMeta = [];
+  const addMeta = (label, val, force = false) => {
+    const isEmpty = !val || String(val).trim() === '' || String(val).trim() === '—' || String(val).trim() === 'N/A';
+    if (!isEmpty || force) {
+      rawMeta.push({ label, val: val || 'N/A' });
+    }
+  };
+
+  addMeta('Investigator', trial.InvestigatorName, true);
+  addMeta('Date', trialDate, true);
+  addMeta('Location', trial.Location, true);
+  addMeta('Dosage', trial.Dosage, true);
+  addMeta(cropLabel, cropValue, true);
+  addMeta(categoryId === 'herbicide' ? 'Weed Growth Stage' : 'Growth Stage', categoryId === 'herbicide' ? trial.WeedGrowthStage : dataFields.cropStage);
   if (categoryId !== 'herbicide') {
-    meta2.push([`Yield: ${dataFields.yieldValue}`,                  `BBCH Code: ${dataFields.bbchCode}`]);
+    addMeta('Yield', dataFields.yieldValue);
+    addMeta('BBCH Code', dataFields.bbchCode);
   }
-  meta2.push([`Application Timing: ${dataFields.applicationTiming}`, `Application Method: ${dataFields.applicationMethod}`]);
-  meta2.push([`Spray Volume: ${dataFields.sprayVolume}`,            `Nozzle: ${dataFields.nozzle}`]);
-  meta2.push([`Result: ${trial.Result || 'Pending'}`,               `Replication: ${trial.Replication || 'N/A'}`]);
-  meta2.push([`Status: ${(trial.IsCompleted === true || trial.IsCompleted === 'true') ? 'Finalized' : 'Ongoing'}`,
-              trial.PlotNumber ? `Plot #: ${trial.PlotNumber}` : '']);
+  addMeta('Application Timing', dataFields.applicationTiming);
+  addMeta('Application Method', dataFields.applicationMethod);
+  addMeta('Spray Volume', dataFields.sprayVolume);
+  addMeta('Nozzle', dataFields.nozzle);
+  addMeta('Result', trial.Result || 'Pending', true);
+  addMeta('Replication', trial.Replication);
+  addMeta('Status', (trial.IsCompleted === true || trial.IsCompleted === 'true') ? 'Finalized' : 'Ongoing', true);
+  if (trial.PlotNumber) {
+    addMeta('Plot #', trial.PlotNumber);
+  }
+
+  const meta2 = [];
+  for (let i = 0; i < rawMeta.length; i += 2) {
+    const left = rawMeta[i];
+    const right = rawMeta[i + 1];
+    const leftStr = `${left.label}: ${left.val}`;
+    const rightStr = right ? `${right.label}: ${right.val}` : '';
+    meta2.push([leftStr, rightStr]);
+  }
+
   meta2.forEach(([l, r]) => { doc.text(l, lx, y); if (r) doc.text(r, rx, y); y += 6; });
   y += 2;
 
@@ -1904,7 +1872,7 @@ function drawTextWithItalics(doc, text, x, y, maxWidth, lineHeight = 5) {
       continue;
     }
     
-    const isHeader = /^(Methodology|Results|Conclusions?)\s*:?\s*$/i.test(line);
+    const isHeader = /^(Methodology|Results|Conclusions?)\s*:?\s*$/i.test(line) || /^\d+\.\s+[A-Za-z]/.test(line);
     if (isHeader) {
       if (currentY + 12 > ph - 20) { doc.addPage(); currentY = 20; }
       doc.setFont(undefined, 'bold');
@@ -2020,17 +1988,47 @@ export async function generateScientificReport(trial, options = {}) {
   const cropValue = isNonCrop ? (trial.SiteType || proj?.SiteType || trial.Site || 'Open field') : dataFields.crop;
 
   // Metadata table (4-column)
-  const metaRows = [];
-  metaRows.push(['Investigator', trial.InvestigatorName || 'N/A', 'Date', trialDate]);
-  metaRows.push(['Location', trial.Location || 'N/A', 'Dosage', trial.Dosage || 'N/A']);
-  metaRows.push([cropLabel, cropValue, categoryId === 'herbicide' ? 'Weed Growth Stage' : 'Growth Stage', categoryId === 'herbicide' ? (trial.WeedGrowthStage || '—') : dataFields.cropStage]);
+  const rawMeta = [];
+  const addMeta = (label, val, force = false) => {
+    const isEmpty = !val || String(val).trim() === '' || String(val).trim() === '—' || String(val).trim() === 'N/A';
+    if (!isEmpty || force) {
+      rawMeta.push({ label, val: val || '—' });
+    }
+  };
+
+  addMeta('Investigator', trial.InvestigatorName, true);
+  addMeta('Date', trialDate, true);
+  addMeta('Location', trial.Location, true);
+  addMeta('Dosage', trial.Dosage, true);
+  addMeta(cropLabel, cropValue, true);
+  addMeta(categoryId === 'herbicide' ? 'Weed Growth Stage' : 'Growth Stage', categoryId === 'herbicide' ? trial.WeedGrowthStage : dataFields.cropStage);
   if (categoryId !== 'herbicide') {
-    metaRows.push(['Yield', dataFields.yieldValue, 'BBCH Code', dataFields.bbchCode]);
+    addMeta('Yield', dataFields.yieldValue);
+    addMeta('BBCH Code', dataFields.bbchCode);
   }
-  metaRows.push(['App Timing', dataFields.applicationTiming, 'App Method', dataFields.applicationMethod]);
-  metaRows.push(['Spray Volume', dataFields.sprayVolume, 'Nozzle', dataFields.nozzle]);
-  metaRows.push(['Status', (trial.IsCompleted === true || trial.IsCompleted === 'true') ? 'Finalized' : 'Ongoing', 'Result', trial.Result || 'Pending']);
-  metaRows.push([repConfig.targetLabel, repConfig.targetValue, 'Replication', trial.Replication || 'N/A']);
+  addMeta('App Timing', dataFields.applicationTiming);
+  addMeta('App Method', dataFields.applicationMethod);
+  addMeta('Spray Volume', dataFields.sprayVolume);
+  addMeta('Nozzle', dataFields.nozzle);
+  addMeta('Status', (trial.IsCompleted === true || trial.IsCompleted === 'true') ? 'Finalized' : 'Ongoing', true);
+  addMeta('Result', trial.Result || 'Pending', true);
+  addMeta(repConfig.targetLabel, repConfig.targetValue);
+  addMeta('Replication', trial.Replication);
+  if (trial.PlotNumber) {
+    addMeta('Plot #', trial.PlotNumber);
+  }
+
+  const metaRows = [];
+  for (let i = 0; i < rawMeta.length; i += 2) {
+    const left = rawMeta[i];
+    const right = rawMeta[i + 1];
+    if (right) {
+      metaRows.push([left.label, left.val, right.label, right.val]);
+    } else {
+      metaRows.push([left.label, left.val, '', '']);
+    }
+  }
+
   autoTable(doc, {
     startY: y, body: metaRows, theme: 'plain',
     styles: { fontSize: 10, cellPadding: 2 },

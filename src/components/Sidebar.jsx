@@ -124,9 +124,6 @@ export default function Sidebar({ isOpen, onClose }) {
       // 2. Update Auth password
       await updatePassword(cred.user, newPassword);
 
-      // 3. Update Firestore profile
-      await fbUpdateUserProfile(cred.user.uid, { Password: newPassword });
-
       setChangeSuccess('Password successfully updated!');
       setCurrentPassword('');
       setNewPassword('');
@@ -184,7 +181,7 @@ export default function Sidebar({ isOpen, onClose }) {
 
   const filteredBottomItems = bottomItems;
 
-  const sidebarClass = `sidebar bg-white/70 backdrop-blur-md w-64 flex-shrink-0 border-r border-white/40 shadow-[4px_0_24px_rgba(0,0,0,0.02)] flex flex-col fixed inset-y-0 left-0 z-30 md:relative md:translate-x-0 transition-transform duration-300 ${isOpen ? 'translate-x-0' : '-translate-x-full'}`;
+  const sidebarClass = `sidebar bg-white/70 backdrop-blur-md w-64 flex-shrink-0 border-r border-white/40 shadow-[4px_0_24px_rgba(0,0,0,0.02)] flex flex-col fixed inset-y-0 left-0 z-30 md:relative md:translate-x-0 transition-transform duration-300 pt-[env(safe-area-inset-top)] ${isOpen ? 'translate-x-0' : '-translate-x-full'}`;
 
   return (
     <>

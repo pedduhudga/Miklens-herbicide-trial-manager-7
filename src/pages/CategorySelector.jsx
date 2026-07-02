@@ -90,7 +90,7 @@ export default function CategorySelector() {
   const categories = Object.values(CATEGORIES);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 flex flex-col">
+    <div className="h-full overflow-y-auto bg-gradient-to-br from-slate-50 via-white to-slate-100 flex flex-col">
       {/* Header */}
       <header className="flex items-center justify-between px-6 py-5 border-b border-slate-200/60 bg-white/70 backdrop-blur-md">
         <div className="flex items-center gap-3">

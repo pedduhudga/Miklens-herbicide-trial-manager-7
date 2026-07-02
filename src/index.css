@@ -18,27 +18,69 @@
     --primary-color: #059669;
     --primary-hover-color: #047857;
     --primary-light: #d1fae5;
+    --bg-color: #f8fafc;
+    --text-color: #334155;
     --bg-gradient-1: hsla(160, 100%, 96%, 1);
     --bg-gradient-2: hsla(190, 100%, 96%, 1);
     --bg-gradient-3: hsla(160, 100%, 96%, 1);
     --bg-gradient-4: hsla(210, 100%, 96%, 1);
     --surface-glass: rgba(255, 255, 255, 0.85);
+    --surface-border: rgba(226, 232, 240, 0.8);
     --surface-blur: 16px;
+    --card-bg: #ffffff;
+    --card-text-muted: #64748b;
+}
+
+body.dark {
+    --bg-color: #0f172a;
+    --text-color: #f1f5f9;
+    --bg-gradient-1: hsla(220, 40%, 12%, 1);
+    --bg-gradient-2: hsla(225, 45%, 10%, 1);
+    --bg-gradient-3: hsla(230, 40%, 12%, 1);
+    --bg-gradient-4: hsla(225, 45%, 10%, 1);
+    --surface-glass: rgba(30, 41, 59, 0.85);
+    --surface-border: rgba(51, 65, 85, 0.8);
+    --card-bg: #1e293b;
+    --card-text-muted: #94a3b8;
+}
+
+body.high-contrast {
+    --bg-color: #ffffff;
+    --text-color: #000000;
+    --bg-gradient-1: #ffffff;
+    --bg-gradient-2: #ffffff;
+    --bg-gradient-3: #ffffff;
+    --bg-gradient-4: #ffffff;
+    --surface-glass: #ffffff;
+    --surface-border: #000000;
+    --card-bg: #ffffff;
+    --card-text-muted: #000000;
+    --primary-color: #008000;
+    --primary-hover-color: #006400;
 }
 
 body {
     font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    background-color: #f8fafc;
+    background-color: var(--bg-color);
     background-image:
         radial-gradient(at 0% 0%, var(--bg-gradient-1) 0px, transparent 50%),
         radial-gradient(at 100% 0%, var(--bg-gradient-2) 0px, transparent 50%),
         radial-gradient(at 100% 100%, var(--bg-gradient-3) 0px, transparent 50%),
         radial-gradient(at 0% 100%, var(--bg-gradient-4) 0px, transparent 50%);
     background-attachment: fixed;
-    color: #334155;
+    color: var(--text-color);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     letter-spacing: -0.01em;
+
+    /* PWA Mobile Optimizations */
+    overscroll-behavior-y: contain;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+}
+
+button, a, select, input {
+    -webkit-tap-highlight-color: transparent;
 }
 
 /* Base styles imported from legacy */
@@ -157,4 +199,20 @@ body {
     border: 1px solid rgba(255, 255, 255, 0.12);
     box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
     flex-shrink: 0;
+}
+
+/* Smooth touch scroll on mobile devices */
+.overflow-y-auto {
+    -webkit-overflow-scrolling: touch;
+}
+
+.pb-safe {
+    padding-bottom: env(safe-area-inset-bottom) !important;
+}
+
+@media (max-width: 767px) {
+    /* Ensure the scrollable contents clear the floating BottomNav completely */
+    .overflow-y-auto {
+        padding-bottom: calc(5.5rem + env(safe-area-inset-bottom)) !important;
+    }
 }

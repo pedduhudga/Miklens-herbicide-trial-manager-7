@@ -1,6 +1,5 @@
-/**
- * @jest-environment jsdom
- */
+import { vi } from 'vitest';
+const jest = vi;
 
 import { 
   validateAIAnalysisCategory, 

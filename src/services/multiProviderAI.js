@@ -130,6 +130,12 @@ function getAPIKeys(providerId) {
   if (isGroq) {
     const raw = extractKeyStr(settings?.groqApiKey);
     if (raw) keys.push(raw);
+    if (Array.isArray(settings?.groqApiKeys)) {
+      settings.groqApiKeys.forEach(k => {
+        const rawKey = extractKeyStr(k);
+        if (rawKey) keys.push(rawKey);
+      });
+    }
   }
   if (baseId === 'pixtral') {
     const raw = extractKeyStr(settings?.mistralApiKey);

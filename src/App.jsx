@@ -16,34 +16,61 @@ import { getAllData } from './services/dataLayer.js';
 import { initAI } from './services/ai.js';
 import { getCategoryConfig } from './utils/categoryConfig.js';
 
+// A safe wrapper around React.lazy that catches chunk load errors (e.g. from app updates)
+// and triggers a full page reload to fetch the latest assets from the server.
+function safeLazy(importFn) {
+  return lazy(() => {
+    return importFn().catch(error => {
+      console.error('[safeLazy] Failed to load chunk:', error);
+      const errorMsg = error?.message || '';
+      const isChunkError = 
+        error.name === 'ChunkLoadError' || 
+        /failed to fetch dynamically imported module/i.test(errorMsg) ||
+        /loading chunk/i.test(errorMsg);
+        
+      if (isChunkError) {
+        const reloadKey = 'chunk_reload_attempts';
+        const attempts = parseInt(sessionStorage.getItem(reloadKey) || '0', 10);
+        if (attempts < 2) {
+          sessionStorage.setItem(reloadKey, String(attempts + 1));
+          window.location.reload();
+          // Return a pending promise so the UI stays in loading state while reloading
+          return new Promise(() => {});
+        }
+      }
+      throw error;
+    });
+  });
+}
+
 // Lazy-loaded page components for code splitting - enables route-based code splitting
 // Each page is loaded on-demand when the user navigates to that route
-const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
-const PlotScanner = lazy(() => import('./pages/PlotScanner.jsx'));
-const DataManagement = lazy(() => import('./pages/DataManagement.jsx'));
-const Settings = lazy(() => import('./pages/Settings.jsx'));
-const UserManagement = lazy(() => import('./pages/UserManagement.jsx'));
-const AIAssistant = lazy(() => import('./pages/AIAssistant.jsx'));
-const SmartSearch = lazy(() => import('./pages/SmartSearch.jsx'));
-const Analytics = lazy(() => import('./pages/Analytics.jsx'));
-const Reports = lazy(() => import('./pages/Reports.jsx'));
-const Statistics = lazy(() => import('./pages/Statistics.jsx'));
-const Alerts = lazy(() => import('./pages/Alerts.jsx'));
-const DoseResponse = lazy(() => import('./pages/DoseResponse.jsx'));
-const ResistanceTracker = lazy(() => import('./pages/ResistanceTracker.jsx'));
-const FieldMap = lazy(() => import('./pages/FieldMap.jsx'));
-const Trials = lazy(() => import('./pages/Trials.jsx'));
-const Projects = lazy(() => import('./pages/Projects.jsx'));
-const LargeScaleTrials = lazy(() => import('./pages/LargeScaleTrials.jsx'));
-const Ingredients = lazy(() => import('./pages/Ingredients.jsx'));
-const Organisations = lazy(() => import('./pages/Organisations.jsx'));
-const Formulations = lazy(() => import('./pages/Formulations.jsx'));
-const CompareTrials = lazy(() => import('./pages/CompareTrials.jsx'));
-const CategorySelector = lazy(() => import('./pages/CategorySelector.jsx'));
-const Setup = lazy(() => import('./pages/Setup.jsx'));
-const Login = lazy(() => import('./pages/Login.jsx'));
-const MigrationTool = lazy(() => import('./pages/MigrationTool.jsx'));
-const LiveTrialPage = lazy(() => import('./pages/LiveTrialPage.jsx'));
+const Dashboard = safeLazy(() => import('./pages/Dashboard.jsx'));
+const PlotScanner = safeLazy(() => import('./pages/PlotScanner.jsx'));
+const DataManagement = safeLazy(() => import('./pages/DataManagement.jsx'));
+const Settings = safeLazy(() => import('./pages/Settings.jsx'));
+const UserManagement = safeLazy(() => import('./pages/UserManagement.jsx'));
+const AIAssistant = safeLazy(() => import('./pages/AIAssistant.jsx'));
+const SmartSearch = safeLazy(() => import('./pages/SmartSearch.jsx'));
+const Analytics = safeLazy(() => import('./pages/Analytics.jsx'));
+const Reports = safeLazy(() => import('./pages/Reports.jsx'));
+const Statistics = safeLazy(() => import('./pages/Statistics.jsx'));
+const Alerts = safeLazy(() => import('./pages/Alerts.jsx'));
+const DoseResponse = safeLazy(() => import('./pages/DoseResponse.jsx'));
+const ResistanceTracker = safeLazy(() => import('./pages/ResistanceTracker.jsx'));
+const FieldMap = safeLazy(() => import('./pages/FieldMap.jsx'));
+const Trials = safeLazy(() => import('./pages/Trials.jsx'));
+const Projects = safeLazy(() => import('./pages/Projects.jsx'));
+const LargeScaleTrials = safeLazy(() => import('./pages/LargeScaleTrials.jsx'));
+const Ingredients = safeLazy(() => import('./pages/Ingredients.jsx'));
+const Organisations = safeLazy(() => import('./pages/Organisations.jsx'));
+const Formulations = safeLazy(() => import('./pages/Formulations.jsx'));
+const CompareTrials = safeLazy(() => import('./pages/CompareTrials.jsx'));
+const CategorySelector = safeLazy(() => import('./pages/CategorySelector.jsx'));
+const Setup = safeLazy(() => import('./pages/Setup.jsx'));
+const Login = safeLazy(() => import('./pages/Login.jsx'));
+const MigrationTool = safeLazy(() => import('./pages/MigrationTool.jsx'));
+const LiveTrialPage = safeLazy(() => import('./pages/LiveTrialPage.jsx'));
 
 // Import skeleton loaders for better UX
 import { 
@@ -305,123 +332,155 @@ function AppLayout() {
   }
 
   return (
-    <div className="flex h-screen bg-slate-100 font-sans">
+    <div className="flex h-screen h-[100dvh] bg-slate-100 font-sans pt-[env(safe-area-inset-top)]">
 
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
-      <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-transparent">
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-transparent md:pb-0">
         <Routes>
           <Route path="/categories" element={
-            <PermissionGuard tabName="All Categories" onMenuClick={toggleSidebar}>
-              <Suspense fallback={<PageLoader />}>
-                <CategorySelector />
-              </Suspense>
-            </PermissionGuard>
+            <ErrorBoundary inline>
+              <PermissionGuard tabName="All Categories" onMenuClick={toggleSidebar}>
+                <Suspense fallback={<PageLoader />}>
+                  <CategorySelector />
+                </Suspense>
+              </PermissionGuard>
+            </ErrorBoundary>
           } />
           <Route path="/" element={
-            <PermissionGuard tabName="Dashboard" onMenuClick={toggleSidebar}>
-              <Suspense fallback={<DashboardLoader />}>
-                <Dashboard onMenuClick={toggleSidebar} />
-              </Suspense>
-            </PermissionGuard>
+            <ErrorBoundary inline>
+              <PermissionGuard tabName="Dashboard" onMenuClick={toggleSidebar}>
+                <Suspense fallback={<DashboardLoader />}>
+                  <Dashboard onMenuClick={toggleSidebar} />
+                </Suspense>
+              </PermissionGuard>
+            </ErrorBoundary>
           } />
           <Route path="/large-scale-trials" element={
-            <PermissionGuard tabName="Large Field Trials" onMenuClick={toggleSidebar}>
-              <Suspense fallback={<PageLoader />}>
-                <LargeScaleTrials onMenuClick={toggleSidebar} />
-              </Suspense>
-            </PermissionGuard>
+            <ErrorBoundary inline>
+              <PermissionGuard tabName="Large Field Trials" onMenuClick={toggleSidebar}>
+                <Suspense fallback={<PageLoader />}>
+                  <LargeScaleTrials onMenuClick={toggleSidebar} />
+                </Suspense>
+              </PermissionGuard>
+            </ErrorBoundary>
           } />
           <Route path="/projects" element={
-            <PermissionGuard tabName="Projects (Grouped)" onMenuClick={toggleSidebar}>
-              <Suspense fallback={<PageLoader />}>
-                <Projects onMenuClick={toggleSidebar} />
-              </Suspense>
-            </PermissionGuard>
+            <ErrorBoundary inline>
+              <PermissionGuard tabName="Projects (Grouped)" onMenuClick={toggleSidebar}>
+                <Suspense fallback={<PageLoader />}>
+                  <Projects onMenuClick={toggleSidebar} />
+                </Suspense>
+              </PermissionGuard>
+            </ErrorBoundary>
           } />
           <Route path="/scanner" element={
-            <PermissionGuard tabName="Plot Scanner" onMenuClick={toggleSidebar}>
-              <Suspense fallback={<PageLoader />}>
-                <PlotScanner onMenuClick={toggleSidebar} />
-              </Suspense>
-            </PermissionGuard>
+            <ErrorBoundary inline>
+              <PermissionGuard tabName="Plot Scanner" onMenuClick={toggleSidebar}>
+                <Suspense fallback={<PageLoader />}>
+                  <PlotScanner onMenuClick={toggleSidebar} />
+                </Suspense>
+              </PermissionGuard>
+            </ErrorBoundary>
           } />
           <Route path="/formulations" element={
-            <PermissionGuard tabName="Formulations" onMenuClick={toggleSidebar}>
-              <Suspense fallback={<PageLoader />}>
-                <Formulations onMenuClick={toggleSidebar} />
-              </Suspense>
-            </PermissionGuard>
+            <ErrorBoundary inline>
+              <PermissionGuard tabName="Formulations" onMenuClick={toggleSidebar}>
+                <Suspense fallback={<PageLoader />}>
+                  <Formulations onMenuClick={toggleSidebar} />
+                </Suspense>
+              </PermissionGuard>
+            </ErrorBoundary>
           } />
           <Route path="/trials" element={
-            <PermissionGuard tabName="Trials" onMenuClick={toggleSidebar}>
-              <Suspense fallback={<TrialsLoader />}>
-                <Trials onMenuClick={toggleSidebar} />
-              </Suspense>
-            </PermissionGuard>
+            <ErrorBoundary inline>
+              <PermissionGuard tabName="Trials" onMenuClick={toggleSidebar}>
+                <Suspense fallback={<TrialsLoader />}>
+                  <Trials onMenuClick={toggleSidebar} />
+                </Suspense>
+              </PermissionGuard>
+            </ErrorBoundary>
           } />
           <Route path="/reports" element={
-            <PermissionGuard tabName="Reports & Cards" onMenuClick={toggleSidebar}>
-              <Suspense fallback={<ReportsLoader />}>
-                <Reports onMenuClick={toggleSidebar} />
-              </Suspense>
-            </PermissionGuard>
+            <ErrorBoundary inline>
+              <PermissionGuard tabName="Reports & Cards" onMenuClick={toggleSidebar}>
+                <Suspense fallback={<ReportsLoader />}>
+                  <Reports onMenuClick={toggleSidebar} />
+                </Suspense>
+              </PermissionGuard>
+            </ErrorBoundary>
           } />
           <Route path="/organisations" element={
-            <PermissionGuard tabName="Organisations" onMenuClick={toggleSidebar}>
-              <Suspense fallback={<PageLoader />}>
-                <Organisations onMenuClick={toggleSidebar} />
-              </Suspense>
-            </PermissionGuard>
+            <ErrorBoundary inline>
+              <PermissionGuard tabName="Organisations" onMenuClick={toggleSidebar}>
+                <Suspense fallback={<PageLoader />}>
+                  <Organisations onMenuClick={toggleSidebar} />
+                </Suspense>
+              </PermissionGuard>
+            </ErrorBoundary>
           } />
           <Route path="/ingredients" element={
-            <PermissionGuard tabName="Ingredient Costs" onMenuClick={toggleSidebar}>
-              <Suspense fallback={<PageLoader />}>
-                <Ingredients onMenuClick={toggleSidebar} />
-              </Suspense>
-            </PermissionGuard>
+            <ErrorBoundary inline>
+              <PermissionGuard tabName="Ingredient Costs" onMenuClick={toggleSidebar}>
+                <Suspense fallback={<PageLoader />}>
+                  <Ingredients onMenuClick={toggleSidebar} />
+                </Suspense>
+              </PermissionGuard>
+            </ErrorBoundary>
           } />
           <Route path="/ai-assistant" element={
-            <PermissionGuard tabName="AI Assistant" onMenuClick={toggleSidebar}>
-              <Suspense fallback={<AILoader />}>
-                <AIAssistant onMenuClick={toggleSidebar} />
-              </Suspense>
-            </PermissionGuard>
+            <ErrorBoundary inline>
+              <PermissionGuard tabName="AI Assistant" onMenuClick={toggleSidebar}>
+                <Suspense fallback={<AILoader />}>
+                  <AIAssistant onMenuClick={toggleSidebar} />
+                </Suspense>
+              </PermissionGuard>
+            </ErrorBoundary>
           } />
           <Route path="/analytics" element={
-            <PermissionGuard tabName="Analytics" onMenuClick={toggleSidebar}>
-              <Suspense fallback={<AnalyticsLoader />}>
-                <Analytics onMenuClick={toggleSidebar} />
-              </Suspense>
-            </PermissionGuard>
+            <ErrorBoundary inline>
+              <PermissionGuard tabName="Analytics" onMenuClick={toggleSidebar}>
+                <Suspense fallback={<AnalyticsLoader />}>
+                  <Analytics onMenuClick={toggleSidebar} />
+                </Suspense>
+              </PermissionGuard>
+            </ErrorBoundary>
           } />
           <Route path="/statistics" element={
-            <PermissionGuard tabName="Statistics" onMenuClick={toggleSidebar}>
-              <Suspense fallback={<PageLoader />}>
-                <Statistics onMenuClick={toggleSidebar} />
-              </Suspense>
-            </PermissionGuard>
+            <ErrorBoundary inline>
+              <PermissionGuard tabName="Statistics" onMenuClick={toggleSidebar}>
+                <Suspense fallback={<PageLoader />}>
+                  <Statistics onMenuClick={toggleSidebar} />
+                </Suspense>
+              </PermissionGuard>
+            </ErrorBoundary>
           } />
           <Route path="/alerts" element={
-            <PermissionGuard tabName="Smart Alerts" onMenuClick={toggleSidebar}>
-              <Suspense fallback={<PageLoader />}>
-                <Alerts onMenuClick={toggleSidebar} />
-              </Suspense>
-            </PermissionGuard>
+            <ErrorBoundary inline>
+              <PermissionGuard tabName="Smart Alerts" onMenuClick={toggleSidebar}>
+                <Suspense fallback={<PageLoader />}>
+                  <Alerts onMenuClick={toggleSidebar} />
+                </Suspense>
+              </PermissionGuard>
+            </ErrorBoundary>
           } />
           <Route path="/dose-response" element={
-            <PermissionGuard tabName="Dose-Response (ED50)" onMenuClick={toggleSidebar}>
-              <Suspense fallback={<PageLoader />}>
-                <DoseResponse onMenuClick={toggleSidebar} />
-              </Suspense>
-            </PermissionGuard>
+            <ErrorBoundary inline>
+              <PermissionGuard tabName="Dose-Response (ED50)" onMenuClick={toggleSidebar}>
+                <Suspense fallback={<PageLoader />}>
+                  <DoseResponse onMenuClick={toggleSidebar} />
+                </Suspense>
+              </PermissionGuard>
+            </ErrorBoundary>
           } />
           <Route path="/resistance" element={
-            <PermissionGuard tabName="Resistance Tracker" onMenuClick={toggleSidebar}>
-              <Suspense fallback={<PageLoader />}>
-                <ResistanceTracker onMenuClick={toggleSidebar} />
-              </Suspense>
-            </PermissionGuard>
+            <ErrorBoundary inline>
+              <PermissionGuard tabName="Resistance Tracker" onMenuClick={toggleSidebar}>
+                <Suspense fallback={<PageLoader />}>
+                  <ResistanceTracker onMenuClick={toggleSidebar} />
+                </Suspense>
+              </PermissionGuard>
+            </ErrorBoundary>
           } />
           <Route path="/map" element={
             <PermissionGuard tabName="Field Map" onMenuClick={toggleSidebar}>
@@ -500,7 +559,13 @@ function WebPlatformAdapter({ children }) {
   const { updateState } = useAppState();
 
   React.useEffect(() => {
+    // Clear chunk reload attempts counter upon successful load of the main wrapper
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem('chunk_reload_attempts');
+    }
+
     // Setup the platform adapter methods in global state for hooks/services to use
+    // NOTE: online/offline listeners are handled exclusively by useSync to avoid duplicate toasts
     updateState({
       isOnline: navigator.onLine,
       platformAdapter: {
@@ -509,24 +574,6 @@ function WebPlatformAdapter({ children }) {
         renderSyncStatus: () => window.dispatchEvent(new CustomEvent('app:sync-status-update'))
       }
     });
-
-    const handleOnline = () => {
-      updateState({ isOnline: true });
-      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Back online! Syncing data...', type: 'info' } }));
-    };
-
-    const handleOffline = () => {
-      updateState({ isOnline: false });
-      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Offline Mode Active', type: 'info' } }));
-    };
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
   }, [updateState]);
 
   return children;

@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useAppState } from '../hooks/useAppState.jsx';
 import TopBar from '../components/TopBar.jsx';
 import { safeJsonParse } from '../utils/helpers.js';
+import { sanitizeHtml } from '../utils/sanitize.js';
 import { useNavigate } from 'react-router-dom';
 import { Sparkles, Loader2, Activity, ArrowLeft, CheckCircle, X, Download, FileText, Table, LineChart, Cpu, DollarSign, Cloud, Compass, AlertTriangle } from 'lucide-react';
 import { exportComparisonCsv, exportComparisonHtml, exportComparisonPdf } from '../services/compareReports.js';
@@ -641,13 +642,7 @@ ${contextData}`;
           </div>
           {aiSummary ? (
             <div className="bg-indigo-50 rounded-xl p-4 text-sm text-indigo-900 whitespace-pre-wrap leading-relaxed"
-              dangerouslySetInnerHTML={{ __html: String(aiSummary)
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                .replace(/\n/g, '<br/>')
-              }} />
+              dangerouslySetInnerHTML={{ __html: sanitizeHtml(aiSummary) }} />
           ) : (
             <p className="text-sm text-slate-400">Click "Generate AI Report" to perform an end-to-end scientific comparison analysis across the selected trials.</p>
           )}

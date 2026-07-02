@@ -13,6 +13,25 @@ export default class ErrorBoundary extends React.Component {
 
   componentDidCatch(error, errorInfo) {
     console.error('[ErrorBoundary] Caught error:', error, errorInfo);
+    
+    const errorMsg = error?.message || '';
+    const isChunkError = error && (
+      error.name === 'ChunkLoadError' || 
+      /failed to fetch dynamically imported module/i.test(errorMsg) ||
+      /loading chunk/i.test(errorMsg)
+    );
+
+    if (isChunkError) {
+      console.warn('[ErrorBoundary] Detected chunk load error, attempting automatic reload...');
+      const reloadKey = 'chunk_reload_attempts';
+      const attempts = parseInt(sessionStorage.getItem(reloadKey) || '0', 10);
+      if (attempts < 2) {
+        sessionStorage.setItem(reloadKey, String(attempts + 1));
+        window.location.reload();
+        return;
+      }
+    }
+
     try {
       if (typeof window !== 'undefined' && window.currentTrialDraft) {
         localStorage.setItem('trial_draft_recovery', JSON.stringify(window.currentTrialDraft));
@@ -34,6 +53,21 @@ export default class ErrorBoundary extends React.Component {
 
   render() {
     if (this.state.hasError) {
+      if (this.props.inline) {
+        return (
+          <div className="p-4 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 rounded-xl text-center space-y-2">
+            <AlertTriangle className="w-6 h-6 text-red-500 mx-auto" />
+            <h4 className="text-xs font-bold text-red-800 dark:text-red-300">Tab Error</h4>
+            <p className="text-[10px] text-red-600 dark:text-red-400 font-mono break-all">{this.state.error?.message || 'Failed to render section'}</p>
+            <button
+              onClick={() => this.setState({ hasError: false, error: null })}
+              className="px-3 py-1 bg-red-100 dark:bg-red-900/50 text-red-800 dark:text-red-200 text-[10px] font-bold rounded hover:bg-red-200 transition"
+            >
+              Reset view
+            </button>
+          </div>
+        );
+      }
       return (
         <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
           <div className="max-w-md w-full bg-slate-800 border border-red-500/30 rounded-2xl p-8 text-center">

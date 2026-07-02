@@ -276,11 +276,40 @@ export async function fbDeleteOrganisation(id) {
 export async function fbGetUserSettings(userId) {
   if (!userId) return null;
   const db = getFirebaseDB();
-  const snap = await getDoc(doc(db, COLLECTIONS.settings, userId));
-  return snap.exists() ? snap.data() : null;
+  const userSnap = await getDoc(doc(db, COLLECTIONS.settings, userId));
+  const userData = userSnap.exists() ? userSnap.data() : {};
+
+  // Fetch admin keys configuration if available
+  try {
+    const adminSnap = await getDoc(doc(db, COLLECTIONS.settings, "adminKeys"));
+    if (adminSnap.exists()) {
+      const adminData = adminSnap.data();
+      // If user doesn't have custom keys set, fall back to admin keys
+      const mergedKeys = (userData.apiKeys && userData.apiKeys.length > 0) ? userData.apiKeys : (adminData.apiKeys || []);
+      const mergedGroqKeys = (userData.groqApiKeys && userData.groqApiKeys.length > 0) ? userData.groqApiKeys : (adminData.groqApiKeys || []);
+      return {
+        ...adminData,
+        ...userData,
+        apiKeys: mergedKeys,
+        groqApiKeys: mergedGroqKeys,
+        geminiApiKey: userData.geminiApiKey || adminData.geminiApiKey || '',
+        groqApiKey: userData.groqApiKey || adminData.groqApiKey || '',
+        mistralApiKey: userData.mistralApiKey || adminData.mistralApiKey || '',
+        openWeatherApiKey: userData.openWeatherApiKey || adminData.openWeatherApiKey || '',
+        folderId: userData.folderId || adminData.folderId || '',
+        sheetId: userData.sheetId || adminData.sheetId || '',
+        scriptUrl: userData.scriptUrl || adminData.scriptUrl || '',
+        appSecretToken: userData.appSecretToken || adminData.appSecretToken || ''
+      };
+    }
+  } catch (err) {
+    console.warn("Failed to retrieve admin keys fallback settings:", err);
+  }
+
+  return userSnap.exists() ? userData : null;
 }
 
-export async function fbSaveUserSettings(userId, settings) {
+export async function fbSaveUserSettings(userId, settings, isAdmin = false) {
   const db = getFirebaseDB();
   await setDoc(
     doc(db, COLLECTIONS.settings, userId),
@@ -290,6 +319,30 @@ export async function fbSaveUserSettings(userId, settings) {
     },
     { merge: true },
   );
+
+  // If saved by an admin, mirror the admin's API keys to a global 'adminKeys' document
+  if (isAdmin) {
+    const apiKeys = Array.isArray(settings.apiKeys) ? settings.apiKeys : [];
+    const groqApiKeys = Array.isArray(settings.groqApiKeys) ? settings.groqApiKeys : [];
+    await setDoc(
+      doc(db, COLLECTIONS.settings, "adminKeys"),
+      {
+        apiKeys,
+        groqApiKeys,
+        geminiApiKey: settings.geminiApiKey || '',
+        groqApiKey: settings.groqApiKey || '',
+        mistralApiKey: settings.mistralApiKey || '',
+        openWeatherApiKey: settings.openWeatherApiKey || '',
+        folderId: settings.folderId || '',
+        sheetId: settings.sheetId || '',
+        scriptUrl: settings.scriptUrl || '',
+        appSecretToken: settings.appSecretToken || '',
+        _updatedAt: serverTimestamp()
+      },
+      { merge: true }
+    );
+  }
+
   return { success: true };
 }
 

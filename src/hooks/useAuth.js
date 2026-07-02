@@ -44,7 +44,12 @@ export function useAuth() {
     // ── Legacy Google Sheet auth ──────────────────────────────────────────────
     try {
       const response = await loginUser({ username, password }, getAppState);
-      const userData = response?.user || response;
+      const userDataRaw = response?.user || response;
+      const userData = userDataRaw ? { ...userDataRaw } : null;
+      if (userData) {
+        delete userData.Password;
+        delete userData.password;
+      }
       const tokenValue = response?.token || response?.Token || response?.user?.token || response?.user?.Token || username;
 
       if (userData && (userData.ID || userData.Username || userData.username)) {

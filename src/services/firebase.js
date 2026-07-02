@@ -2,7 +2,7 @@
 // Firebase initialization — config is loaded from app settings at runtime.
 
 import { initializeApp, getApps } from 'firebase/app';
-import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
+import { initializeFirestore, getFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 
 let _app = null;
@@ -32,28 +32,30 @@ export function initFirebase(config) {
     }
   }
 
-  _db = getFirestore(_app);
-  _auth = getAuth(_app);
-
-  if (typeof window !== 'undefined') {
-    enableIndexedDbPersistence(_db).catch((err) => {
-      let message = '';
-      if (err.code === 'failed-precondition') {
-        message = 'Offline persistence unavailable: Multiple tabs open. Close other tabs to enable offline data caching.';
-        console.warn('[Firebase] Persistence failed-precondition: Multiple tabs open.');
-      } else if (err.code === 'unimplemented') {
-        message = 'Offline persistence not supported by this browser.';
-        console.warn('[Firebase] Persistence unimplemented by browser.');
-      } else {
-        message = 'Failed to enable offline data caching.';
-        console.warn('[Firebase] Persistence error:', err.code, err.message);
-      }
+  // Use modern persistence API (replaces deprecated enableIndexedDbPersistence)
+  try {
+    _db = initializeFirestore(_app, {
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+    });
+  } catch (err) {
+    // If Firestore is already initialized (e.g. re-init), fall back to getFirestore
+    if (err.code === 'failed-precondition' || err.message?.includes('already been called')) {
+      _db = getFirestore(_app);
+      console.warn('[Firebase] Firestore already initialized, reusing existing instance.');
+    } else {
+      console.warn('[Firebase] Persistence initialization failed:', err.message);
       // Dispatch toast event to notify the user
-      if (message && typeof window !== 'undefined') {
+      if (typeof window !== 'undefined') {
+        const message = err.code === 'unimplemented'
+          ? 'Offline persistence not supported by this browser.'
+          : 'Failed to enable offline data caching.';
         window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: message, type: 'warn' } }));
       }
-    });
+      _db = getFirestore(_app);
+    }
   }
+
+  _auth = getAuth(_app);
 
   return { app: _app, db: _db, auth: _auth };
 }

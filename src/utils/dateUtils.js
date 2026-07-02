@@ -251,3 +251,53 @@ export function parseDateFromFilename(filename, trialDateStr) {
 
   return null;
 }
+
+export function parsePhotoInfoFromFilename(filename, trialDateStr) {
+  if (!filename) return null;
+  const cleanName = filename.replace(/\.[^/.]+$/, "").trim();
+
+  // Try to match the descriptive format: photo_[TrialID]_[SafeTag]_DAA-[Daa]_[Timestamp]
+  // e.g. photo_022f35af-3761-4995-ad3b-178297619223_Plant_1_(Pot_A)_-_Whole_Canopy_(Standard)_DAA-7_1719914400000
+  const descriptiveMatch = cleanName.match(/^photo_([a-f0-9\-]+)_(.+)_DAA-(\d+)_(\d+)$/i);
+  if (descriptiveMatch) {
+    const rawTag = descriptiveMatch[2];
+    const tag = rawTag.replace(/_/g, ' ');
+    const daa = parseInt(descriptiveMatch[3], 10);
+    const ts = parseInt(descriptiveMatch[4], 10);
+    let date = null;
+    if (!isNaN(ts)) {
+      try {
+        const dObj = new Date(ts);
+        if (!isNaN(dObj.getTime())) {
+          date = dObj.toISOString();
+        }
+      } catch (e) {}
+    }
+    return {
+      tag,
+      label: 'Field Observation',
+      daa,
+      date
+    };
+  }
+
+  // Parse using existing logic if not descriptive
+  let photoDate = parseDateFromFilename(filename, trialDateStr);
+  let label = cleanName;
+  let strippedLabel = label;
+  strippedLabel = strippedLabel.replace(/\d{2}[-_]\d{2}[-_]\d{4}/g, '');
+  strippedLabel = strippedLabel.replace(/\d{4}[-_]\d{2}[-_]\d{2}/g, '');
+  strippedLabel = strippedLabel.replace(/\d{2}[:_]\d{2}\s*(AM|PM|am|pm)?/g, '');
+  strippedLabel = strippedLabel.replace(/^[\s\-_]+|[\s\-_]+$/g, '');
+  
+  if (strippedLabel) {
+    label = strippedLabel;
+  }
+
+  return {
+    tag: 'Field Observation',
+    label,
+    daa: null,
+    date: photoDate
+  };
+}

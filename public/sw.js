@@ -1,4 +1,21 @@
 // Service Worker for Miklens Trial Manager PWA
+importScripts('https://unpkg.com/dexie@latest/dist/dexie.js');
+
+// Define Dexie DB inside Service Worker matching the app definition
+const db = new self.Dexie('MiklensTrialManagerDexieDB');
+db.version(1).stores({
+  trials: 'ID, ProjectID, Date, LastModified',
+  projects: 'ID',
+  formulations: 'ID',
+  ingredients: 'ID',
+  organisations: 'ID',
+  blocks: 'ID',
+  syncQueue: 'id, entityType, entityId, timestamp, status',
+  trialPhotos: 'ID',
+  conflicts: 'id, entityType, entityId, resolved',
+  settings: 'ID'
+});
+
 const CACHE_NAME = 'trial-manager-v1.0.0';
 const STATIC_CACHE = 'static-v1.0.0';
 const DYNAMIC_CACHE = 'dynamic-v1.0.0';
@@ -109,9 +126,96 @@ self.addEventListener('sync', (event) => {
 
 async function syncTrialData() {
   try {
-    // Get offline data from IndexedDB and sync when online
-    console.log('[SW] Syncing trial data...');
-    // Implementation would depend on your offline storage strategy
+    console.log('[SW] Syncing trial data via Background Sync API...');
+    const clientsList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    
+    // Notify foreground client to trigger its sync logic if open
+    let notifiedClient = false;
+    for (const client of clientsList) {
+      client.postMessage({ type: 'TRIGGER_SYNC' });
+      notifiedClient = true;
+    }
+    
+    // Open the local Dexie DB to process background sync directly if no foreground client handles it
+    await db.open();
+    const appSettingsRecord = await db.settings.get('appSettings');
+    if (!appSettingsRecord || !appSettingsRecord.settings?.scriptUrl) {
+      console.log('[SW] No settings found. Postponing background sync.');
+      return;
+    }
+
+    const { settings, auth } = appSettingsRecord;
+    const pendingItems = await db.syncQueue.toArray();
+    const filterPending = pendingItems.filter(item => item.status === 'pending' || item.status === 'failed');
+
+    if (filterPending.length === 0) {
+      console.log('[SW] No pending items in syncQueue.');
+      return;
+    }
+
+    console.log(`[SW] Found ${filterPending.length} pending items to sync directly.`);
+
+    for (const item of filterPending) {
+      // Mark as uploading in Dexie so active app state updates reflect this
+      await db.syncQueue.update(item.id, { status: 'uploading', lastAttempt: new Date().toISOString() });
+      clientsList.forEach(c => c.postMessage({ type: 'SYNC_PROGRESS', id: item.id, status: 'uploading' }));
+
+      const effectiveFolderId = (auth && (auth.user?.personalDriveFolderId || auth.personalDriveFolderId)) || settings.folderId;
+      let authObject = undefined;
+      if (auth) {
+        authObject = auth.user ? { ...auth.user, token: auth.token } : { ...auth };
+        if (authObject.token && authObject.Token === undefined) authObject.Token = authObject.token;
+        if (authObject.Token && authObject.token === undefined) authObject.token = authObject.Token;
+      }
+
+      const fullPayload = {
+        ...item.payload,
+        spreadsheetId: settings.sheetId,
+        folderId: effectiveFolderId,
+        auth: authObject
+      };
+
+      const body = JSON.stringify({
+        action: item.action,
+        payload: fullPayload,
+        appSecretToken: settings.appSecretToken
+      });
+
+      try {
+        const response = await fetch(settings.scriptUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP error ${response.status}`);
+        }
+
+        const resJson = await response.json();
+        const isError = resJson?.status === 'error' || resJson?.success === false || resJson?.data?.status === 'error';
+
+        if (isError) {
+          const errorMsg = resJson?.message || 'Server error';
+          throw new Error(errorMsg);
+        }
+
+        // Successfully synced, remove from queue
+        await db.syncQueue.delete(item.id);
+        clientsList.forEach(c => c.postMessage({ type: 'SYNC_SUCCESS', id: item.id }));
+        console.log(`[SW] Successfully synced item: ${item.action}`);
+      } catch (err) {
+        console.error('[SW] Sync item failed:', item.id, err);
+        const nextAttempts = (item.attempts || 0) + 1;
+        const status = nextAttempts >= 5 ? 'failed' : 'pending';
+        await db.syncQueue.update(item.id, {
+          status,
+          attempts: nextAttempts,
+          lastError: err.message || String(err)
+        });
+        clientsList.forEach(c => c.postMessage({ type: 'SYNC_FAILED', id: item.id, error: err.message }));
+      }
+    }
   } catch (error) {
     console.error('[SW] Sync failed:', error);
   }
@@ -157,5 +261,12 @@ self.addEventListener('notificationclick', (event) => {
     event.waitUntil(
       clients.openWindow('/')
     );
+  }
+});
+
+// Message handling - skip waiting when requested
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
   }
 });

@@ -69,6 +69,7 @@ const TrialCard = memo(function TrialCard({
   onMarkComplete,
   onEditControlDays,
   onRecordWeather,
+  isPendingSync,
 }) {
   const handleRecordWeather = useCallback((e) => {
     e.stopPropagation();
@@ -393,6 +394,11 @@ const TrialCard = memo(function TrialCard({
               <span className="align-middle">{trial.FormulationName || 'Untitled'}</span>
             </h3>
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+              {isPendingSync && (
+                <span className="text-[10px] bg-amber-50 text-amber-600 border border-amber-200 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5 animate-pulse" title="Offline changes queued, pending sync">
+                  <Clock className="w-2.5 h-2.5 text-amber-500" /> Pending Sync
+                </span>
+              )}
               {trial.IsControl && <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">Control</span>}
               {trial.IsStandardCheck && <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">Standard</span>}
               {trial.IsCompleted && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded">Finalized</span>}

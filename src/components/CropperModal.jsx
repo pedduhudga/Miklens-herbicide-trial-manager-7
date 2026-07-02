@@ -17,10 +17,21 @@ export default function CropperModal({ isOpen, onClose, imageSrc, onCropComplete
     const img = imgRef.current;
     if (!canvas || !img || !img.complete) return;
     const ctx = canvas.getContext('2d');
+    
+    const dpr = window.devicePixelRatio || 1;
     const { w: cw, h: ch } = canvasSize;
-    ctx.clearRect(0, 0, cw, ch);
+    
+    // Scale internal canvas drawing buffer for high-DPI screen sharpness
+    canvas.width = cw * dpr;
+    canvas.height = ch * dpr;
+    canvas.style.width = `${cw}px`;
+    canvas.style.height = `${ch}px`;
+    
+    ctx.clearRect(0, 0, cw * dpr, ch * dpr);
 
     ctx.save();
+    ctx.scale(dpr, dpr); // Scale operations to match high-DPI backing store
+
     ctx.translate(cw / 2, ch / 2);
     ctx.rotate((rotation * Math.PI) / 180);
 
@@ -32,6 +43,8 @@ export default function CropperModal({ isOpen, onClose, imageSrc, onCropComplete
     ctx.drawImage(img, -img.naturalWidth * scale / 2, -img.naturalHeight * scale / 2, img.naturalWidth * scale, img.naturalHeight * scale);
     ctx.restore();
 
+    ctx.save();
+    ctx.scale(dpr, dpr); // Scale crop box overlay details
     const { x, y, w, h } = crop;
     if (w > 0 && h > 0) {
       ctx.fillStyle = 'rgba(0,0,0,0.45)';
@@ -54,6 +67,7 @@ export default function CropperModal({ isOpen, onClose, imageSrc, onCropComplete
         ctx.fillRect(hx - HANDLE/2, hy - HANDLE/2, HANDLE, HANDLE);
       });
     }
+    ctx.restore();
   }, [crop, rotation, canvasSize]);
 
   useEffect(() => { drawCanvas(); }, [drawCanvas]);

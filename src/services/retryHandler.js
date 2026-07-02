@@ -18,12 +18,14 @@ export async function retryWithBackoff(fn, options = {}) {
     maxAttempts = DEFAULT_MAX_ATTEMPTS,
     baseDelay = DEFAULT_BASE_DELAY,
     onRetry = null,
-    shouldRetry = null
+    shouldRetry = null,
+    onAttempt = null
   } = options;
 
   let lastError;
   
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (onAttempt) onAttempt(attempt);
     try {
       return await fn(attempt);
     } catch (error) {
@@ -196,24 +198,26 @@ export const defaultShouldRetry = (error, attempt) => {
  */
 export async function executeWithRetry(fn, options = {}) {
   const startTime = Date.now();
+  let currentAttempt = 1;
   
   try {
     const result = await retryWithBackoff(fn, {
       ...options,
+      onAttempt: (attempt) => { currentAttempt = attempt; },
       shouldRetry: options.shouldRetry || defaultShouldRetry
     });
     
     return {
       success: true,
       result,
-      attempts: 1,
+      attempts: currentAttempt,
       duration: Date.now() - startTime
     };
   } catch (error) {
     return {
       success: false,
       error,
-      attempts: options.maxAttempts || DEFAULT_MAX_ATTEMPTS,
+      attempts: currentAttempt,
       duration: Date.now() - startTime
     };
   }

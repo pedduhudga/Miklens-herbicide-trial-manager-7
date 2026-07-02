@@ -15,9 +15,9 @@ export default function CameraCapture({ isOpen = true, onClose, onCapture, initi
   useEffect(() => {
     let activeStream = null;
 
-    const startCamera = async (constraints) => {
+    const startCamera = async (c) => {
       try {
-        const s = await navigator.mediaDevices.getUserMedia(constraints);
+        const s = await navigator.mediaDevices.getUserMedia(c);
         activeStream = s;
         setStream(s);
 
@@ -27,33 +27,86 @@ export default function CameraCapture({ isOpen = true, onClose, onCapture, initi
           await videoRef.current.play();
         }
 
-        // Check for flash support
+        // Apply advanced hardware constraints on the active video track (autofocus, raw frame resolution)
         const track = s.getVideoTracks()[0];
-        const capabilities = track.getCapabilities ? track.getCapabilities() : {};
-        if (capabilities.torch) {
-          setFlashSupported(true);
+        if (track && track.applyConstraints) {
+          const capabilities = track.getCapabilities ? track.getCapabilities() : {};
+          const constraintsToApply = {};
+
+          if (capabilities.focusMode && capabilities.focusMode.includes('continuous')) {
+            constraintsToApply.focusMode = 'continuous';
+          }
+          if (capabilities.resizeMode && capabilities.resizeMode.includes('none')) {
+            constraintsToApply.resizeMode = 'none';
+          }
+
+          if (Object.keys(constraintsToApply).length > 0) {
+            try {
+              await track.applyConstraints(constraintsToApply);
+              console.log("[CameraCapture] Track hardware constraints applied successfully:", constraintsToApply);
+            } catch (trackErr) {
+              console.warn("[CameraCapture] Non-critical track constraints application failed:", trackErr);
+            }
+          }
+          
+          if (capabilities.torch) {
+            setFlashSupported(true);
+          }
         }
       } catch (err) {
-        console.warn("Camera attempt failed:", constraints, err);
-        if (constraints && constraints.video && typeof constraints.video === 'object' && constraints.video.width) {
-            await startCamera({ video: { facingMode: { ideal: 'environment' } } });
-        } else if (constraints && constraints.video && typeof constraints.video === 'object' && constraints.video.facingMode) {
+        console.warn("Camera attempt failed:", c, err);
+        // Step-down constraints fallback to preserve highest possible resolution
+        if (c && c.video && typeof c.video === 'object') {
+          if (c.video.width && c.video.width.ideal === 3840) {
+            // Fall back to 1080p with focus constraints
+            await startCamera({
+              video: {
+                facingMode: { ideal: 'environment' },
+                width: { ideal: 1920 },
+                height: { ideal: 1080 },
+                focusMode: { ideal: 'continuous' },
+                resizeMode: { ideal: 'none' }
+              }
+            });
+          } else if (c.video.width && c.video.width.ideal === 1920) {
+            // Fall back to 720p with focus constraints
+            await startCamera({
+              video: {
+                facingMode: { ideal: 'environment' },
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+                focusMode: { ideal: 'continuous' }
+              }
+            });
+          } else if (c.video.width && c.video.width.ideal === 1280) {
+            // Fall back to generic environment
+            await startCamera({
+              video: { 
+                facingMode: { ideal: 'environment' },
+                focusMode: { ideal: 'continuous' }
+              }
+            });
+          } else {
+            // Fall back to default video: true
             await startCamera({ video: true });
+          }
         } else {
-            window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Camera access denied or unavailable.', type: 'error' } }));
-            onClose();
+          window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Camera access denied or unavailable.', type: 'error' } }));
+          onClose();
         }
       }
     };
 
-    const constraints = {
+    const initialConstraints = {
       video: {
           facingMode: { ideal: 'environment' },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 }
+          width: { ideal: 3840 },
+          height: { ideal: 2160 },
+          focusMode: { ideal: 'continuous' },
+          resizeMode: { ideal: 'none' }
       }
     };
-    startCamera(constraints);
+    startCamera(initialConstraints);
 
     return () => {
       if (activeStream) {
@@ -106,11 +159,12 @@ export default function CameraCapture({ isOpen = true, onClose, onCapture, initi
     }
   };
 
-  const handleCapture = () => {
+  const handleCapture = async () => {
     if (!videoRef.current || !canvasRef.current) return;
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
 
     const displayWidth = video.clientWidth;
     const displayHeight = video.clientHeight;
@@ -122,7 +176,6 @@ export default function CameraCapture({ isOpen = true, onClose, onCapture, initi
       // Fallback if dimensions are not resolved
       canvas.width = videoWidth || 1920;
       canvas.height = videoHeight || 1080;
-      const ctx = canvas.getContext('2d');
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
       onCapture(dataUrl);
@@ -130,23 +183,85 @@ export default function CameraCapture({ isOpen = true, onClose, onCapture, initi
       return;
     }
 
-    // Calculate scaling factor of the object-cover drawing
-    const scale = Math.max(displayWidth / videoWidth, displayHeight / videoHeight);
+    const targetRatio = displayWidth / displayHeight;
 
-    const drawWidth = videoWidth * scale;
-    const drawHeight = videoHeight * scale;
+    // Try using ImageCapture API for native Still Photo quality (full sensor resolution)
+    if (stream) {
+      const track = stream.getVideoTracks()[0];
+      if (track && typeof window.ImageCapture === 'function') {
+        try {
+          const imageCapture = new window.ImageCapture(track);
+          // Request still image capture
+          const blob = await imageCapture.takePhoto();
+          const img = new Image();
+          
+          await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = reject;
+            img.src = URL.createObjectURL(blob);
+          });
 
-    const xOffset = (drawWidth - displayWidth) / 2;
-    const yOffset = (drawHeight - displayHeight) / 2;
+          // Crop high-resolution image to match viewfinder aspect ratio
+          const imgRatio = img.naturalWidth / img.naturalHeight;
+          let srcX, srcY, srcW, srcH;
 
-    // Translate the visible viewport to natural video coordinates
-    const srcX = xOffset / scale;
-    const srcY = yOffset / scale;
-    const srcW = displayWidth / scale;
-    const srcH = displayHeight / scale;
+          if (imgRatio > targetRatio) {
+            srcH = img.naturalHeight;
+            srcW = img.naturalHeight * targetRatio;
+            srcX = (img.naturalWidth - srcW) / 2;
+            srcY = 0;
+          } else {
+            srcW = img.naturalWidth;
+            srcH = img.naturalWidth / targetRatio;
+            srcX = 0;
+            srcY = (img.naturalHeight - srcH) / 2;
+          }
 
-    // Set canvas size matching the viewport aspect ratio (capped for performance)
-    const maxDimension = 1920;
+          let destW = Math.round(srcW);
+          let destH = Math.round(srcH);
+          
+          // Cap at 3840px (Ultra HD 4K still image size) for browser canvas stability
+          const capDimension = 3840;
+          if (destW > capDimension || destH > capDimension) {
+            const scale = capDimension / Math.max(destW, destH);
+            destW = Math.round(destW * scale);
+            destH = Math.round(destH * scale);
+          }
+
+          canvas.width = destW;
+          canvas.height = destH;
+          ctx.drawImage(img, srcX, srcY, srcW, srcH, 0, 0, destW, destH);
+
+          URL.revokeObjectURL(img.src);
+          onCapture(canvas.toDataURL('image/jpeg', 0.96));
+          onClose();
+          return;
+        } catch (captureErr) {
+          console.warn("[CameraCapture] Native Still ImageCapture failed, falling back to stream capture:", captureErr);
+        }
+      }
+    }
+
+    // Direct high-resolution crop based on viewport aspect ratio
+    const videoRatio = videoWidth / videoHeight;
+    let srcX, srcY, srcW, srcH;
+
+    if (videoRatio > targetRatio) {
+      // Video is wider than the target aspect ratio -> crop width
+      srcH = videoHeight;
+      srcW = videoHeight * targetRatio;
+      srcX = (videoWidth - srcW) / 2;
+      srcY = 0;
+    } else {
+      // Video is taller than the target aspect ratio -> crop height
+      srcW = videoWidth;
+      srcH = videoWidth / targetRatio;
+      srcX = 0;
+      srcY = (videoHeight - srcH) / 2;
+    }
+
+    // Set destination canvas size matching full crop resolution (capped for safety/memory)
+    const maxDimension = 2560;
     let destW = Math.round(srcW);
     let destH = Math.round(srcH);
     if (destW > maxDimension || destH > maxDimension) {
@@ -158,7 +273,6 @@ export default function CameraCapture({ isOpen = true, onClose, onCapture, initi
     canvas.width = destW;
     canvas.height = destH;
 
-    const ctx = canvas.getContext('2d');
     ctx.drawImage(video, srcX, srcY, srcW, srcH, 0, 0, destW, destH);
 
     // High quality JPEG

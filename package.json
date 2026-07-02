@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && node inject-assets-sw.cjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
@@ -22,6 +22,7 @@
     "@google/genai": "^2.6.0",
     "chart.js": "^4.5.1",
     "cropperjs": "^2.1.1",
+    "dexie": "^4.4.4",
     "docx": "^9.7.1",
     "exceljs": "^4.4.0",
     "file-saver": "^2.0.5",

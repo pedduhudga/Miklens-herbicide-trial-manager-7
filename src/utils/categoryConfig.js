@@ -431,6 +431,22 @@ export function calculateEfficacy(categoryId, treatedValue, controlValue) {
   }
 }
 
+// Helper: determine descriptive rating based on calculated efficacy percentage
+export function getRatingFromEfficacy(categoryId, efficacyVal) {
+  if (efficacyVal === null || efficacyVal === undefined) return 'Unrated';
+  if (categoryId === 'nutrition' || categoryId === 'biostimulant') {
+    if (efficacyVal >= 15) return 'Excellent';
+    if (efficacyVal >= 8) return 'Good';
+    if (efficacyVal >= 3) return 'Fair';
+    return 'Poor';
+  } else {
+    if (efficacyVal >= 85) return 'Excellent';
+    if (efficacyVal >= 70) return 'Good';
+    if (efficacyVal >= 50) return 'Fair';
+    return 'Poor';
+  }
+}
+
 // Helper: get the primary observation field key for a category
 export function getPrimaryObservationField(categoryId) {
   const fieldMap = {

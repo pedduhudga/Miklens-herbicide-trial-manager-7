@@ -3,6 +3,7 @@ import { useAppState } from '../hooks/useAppState.jsx';
 import TopBar from '../components/TopBar.jsx';
 import { Sparkles, SendHorizontal, Trash2, Copy, Check, Paperclip, X, Mic, MicOff, Image as ImageIcon, Search, PlusCircle, MessageSquare } from 'lucide-react';
 import { safeJsonParse } from '../utils/helpers.js';
+import { sanitizeAiContent } from '../utils/sanitize.js';
 import { _callGeminiApiWithRetries, resetGeminiState } from '../services/ai.js';
 import { getAiChatSessions, saveAiChatSession, deleteAiChatSession } from '../services/dataLayer.js';
 import { getCategoryConfig, getPrimaryObservationField } from '../utils/categoryConfig.js';
@@ -664,16 +665,10 @@ RIGOROUS SCIENTIFIC ANSWERING PROTOCOL:
                     )}
                     <div className={`relative max-w-[80%] rounded-2xl px-4 py-3 ${msg.role === 'user' ? 'text-white rounded-br-sm' : 'bg-slate-100 text-slate-800 rounded-bl-sm'}`} style={msg.role === 'user' ? { backgroundColor: config.color.hex } : undefined}>
                       <div className="text-sm whitespace-pre-wrap leading-relaxed"
-                        dangerouslySetInnerHTML={{ __html: msg.content
-                          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-                          .replace(/\[(.*?)\]\((.*?)\)/g, (match, text, url) => {
-                            const isSafe = /^https?:\/\//i.test(url) || url.startsWith('#') || url.startsWith('/');
-                            const safeUrl = isSafe ? url : '#';
-                            return `<a href="${safeUrl}" class="${msg.role === 'user' ? 'text-white/80 hover:text-white' : 'font-semibold underline'}" style="${msg.role === 'assistant' ? `color: ${config.color.hex}` : ''}">${text}</a>`;
-                          })
-                          .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                          .replace(/\*(.*?)\*/g, '<em>$1</em>')
-                          .replace(/\n/g, '<br/>') }} />
+                        dangerouslySetInnerHTML={{ __html: sanitizeAiContent(msg.content, {
+                          linkClass: msg.role === 'user' ? 'text-white/80 hover:text-white' : 'font-semibold underline',
+                          linkStyle: msg.role === 'assistant' ? `color: ${config.color.hex}` : ''
+                        }) }} />
                     </div>
 
                     {/* Actions Menu */}

@@ -190,7 +190,15 @@ export async function flushMirrorQueue(getAppState) {
 
       try {
         const result = await apiCall(item.action, payload, false, getAppState);
-        if (result?._errType) throw new Error(result.message);
+        if (result?._errType) {
+          const isNotFoundError = String(result.message || '').toLowerCase().includes('not found');
+          const isDeleteAction = String(item.action).toLowerCase().includes('delete');
+          if (isDeleteAction && isNotFoundError) {
+            console.log('[SheetMirror] Delete target not found in Sheet, dequeuing as already deleted.');
+          } else {
+            throw new Error(result.message);
+          }
+        }
         dequeue(item.id);
         console.log('[SheetMirror] Mirrored:', item.action);
       } catch (err) {

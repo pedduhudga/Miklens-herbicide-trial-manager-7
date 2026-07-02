@@ -32,8 +32,10 @@ import {
   AlertTriangle,
   FileSearch,
   Zap,
+  FolderSync,
 } from "lucide-react";
 const LegacyDataMigrationModal = React.lazy(() => import("../components/LegacyDataMigrationModal.jsx"));
+const DriveMigrationModal = React.lazy(() => import("../components/DriveMigrationModal.jsx"));
 import { quickMigrationAnalysis } from "../utils/legacyDataMigration.js";
 
 const QR_FIELDS = [
@@ -108,6 +110,7 @@ export default function Settings({ onMenuClick }) {
   const [migrationModalOpen, setMigrationModalOpen] = useState(false);
   const [migrationAnalysis, setMigrationAnalysis] = useState(null);
   const [loadingMigrationAnalysis, setLoadingMigrationAnalysis] = useState(false);
+  const [driveMigrationOpen, setDriveMigrationOpen] = useState(false);
 
   const s = state.settings || {};
   const isAdminUser =
@@ -152,27 +155,31 @@ export default function Settings({ onMenuClick }) {
     };
   }, [isAdminUser, getAppState]);
 
-  // Multi-provider AI keys from localStorage
-  const [aiKeys, setAiKeys] = useState({
-    gemini: localStorage.getItem("AI_KEY_GEMINI") || "",
-    groq: localStorage.getItem("AI_KEY_GROQ") || "",
-    pixtral: localStorage.getItem("AI_KEY_PIXTRAL") || "",
-  });
+  // Derived state for aiKeys from settings with localStorage fallbacks
+  const aiKeys = {
+    gemini: s.geminiApiKey || localStorage.getItem("AI_KEY_GEMINI") || "",
+    pixtral: s.mistralApiKey || localStorage.getItem("AI_KEY_PIXTRAL") || "",
+  };
 
   const saveAiKey = (provider, key) => {
     if (isViewer) {
       toast("Viewer role cannot modify API settings", "error");
       return;
     }
-    const newKeys = { ...aiKeys, [provider]: key };
-    setAiKeys(newKeys);
-    localStorage.setItem(`AI_KEY_${provider.toUpperCase()}`, key);
+    if (provider === "gemini") {
+      updateSettings({ geminiApiKey: key });
+    } else if (provider === "pixtral") {
+      updateSettings({ mistralApiKey: key });
+    }
     toast(
       `${provider.charAt(0).toUpperCase() + provider.slice(1)} API key saved`,
     );
   };
 
-  const loadGroqKeys = () => {
+  const groqKeysList = (() => {
+    if (s.groqApiKeys && Array.isArray(s.groqApiKeys)) {
+      return s.groqApiKeys.map((k, idx) => ({ id: `slot_${idx}`, key: k }));
+    }
     const keys = [];
     const mainKey = localStorage.getItem("AI_KEY_GROQ");
     if (mainKey) keys.push({ id: "main", key: mainKey });
@@ -181,8 +188,8 @@ export default function Settings({ onMenuClick }) {
       if (val) keys.push({ id: `slot_${i}`, key: val });
     }
     return keys;
-  };
-  const [groqKeysList, setGroqKeysList] = useState(loadGroqKeys());
+  })();
+
   const [newGroqKey, setNewGroqKey] = useState("");
 
   const handleAddGroqKey = () => {
@@ -190,40 +197,37 @@ export default function Settings({ onMenuClick }) {
     const cleanKey = newGroqKey.trim();
     if (!cleanKey) return;
 
-    let targetSlot = "";
-    if (!localStorage.getItem("AI_KEY_GROQ")) {
-      targetSlot = "AI_KEY_GROQ";
-    } else {
-      for (let i = 1; i <= 5; i++) {
-        if (!localStorage.getItem(`AI_KEY_GROQ_${i}`)) {
-          targetSlot = `AI_KEY_GROQ_${i}`;
-          break;
-        }
-      }
-    }
+    const currentKeys = s.groqApiKeys && Array.isArray(s.groqApiKeys)
+      ? s.groqApiKeys
+      : groqKeysList.map(item => item.key);
 
-    if (!targetSlot) {
+    if (currentKeys.length >= 6) {
       toast("Maximum of 6 Groq API keys reached.", "error");
       return;
     }
 
-    localStorage.setItem(targetSlot, cleanKey);
+    updateSettings({ groqApiKeys: [...currentKeys, cleanKey] });
     setNewGroqKey("");
-    setGroqKeysList(loadGroqKeys());
     toast("Groq API Key added");
   };
 
   const handleRemoveGroqKey = (id, keyVal) => {
     if (isViewer) return;
     if (!window.confirm("Remove this Groq API key?")) return;
-    
-    if (id === "main") {
-      localStorage.removeItem("AI_KEY_GROQ");
-    } else {
-      const slotNum = id.split("_")[1];
-      localStorage.removeItem(`AI_KEY_GROQ_${slotNum}`);
+
+    const currentKeys = s.groqApiKeys && Array.isArray(s.groqApiKeys)
+      ? s.groqApiKeys
+      : groqKeysList.map(item => item.key);
+
+    const updatedKeys = currentKeys.filter(k => k !== keyVal);
+    updateSettings({ groqApiKeys: updatedKeys });
+
+    // Clean legacy local storage
+    localStorage.removeItem("AI_KEY_GROQ");
+    for (let i = 1; i <= 5; i++) {
+      localStorage.removeItem(`AI_KEY_GROQ_${i}`);
     }
-    setGroqKeysList(loadGroqKeys());
+
     toast("Groq API Key removed");
   };
 
@@ -413,7 +417,7 @@ export default function Settings({ onMenuClick }) {
 
           const uid = state.auth?.uid || user?.uid;
           if (uid && isFirebaseReady()) {
-            await fbSaveUserSettings(uid, settingsToPersist);
+            await fbSaveUserSettings(uid, settingsToPersist, isAdminUser);
           }
           // Save global QR settings to Firestore so that LiveTrialPage
           // can read them on any device without localStorage access.
@@ -730,13 +734,14 @@ export default function Settings({ onMenuClick }) {
               )}
               {(s.apiKeys || []).map((key, index) => {
                 const rawKey = typeof key === "object" ? key.key : key;
+                const displayKey = isAdminUser ? rawKey : "••••••••••••••••••••";
                 const result = keyTestResult[index];
                 return (
                   <div key={index} className="flex gap-2 items-center">
                     <div className="flex-1 relative">
                       <input
                         type="password"
-                        value={rawKey}
+                        value={displayKey}
                         readOnly
                         className="w-full px-3 py-2 text-sm border bg-slate-50 text-slate-500 rounded-lg outline-none pr-8"
                       />
@@ -749,47 +754,55 @@ export default function Settings({ onMenuClick }) {
                         </span>
                       )}
                     </div>
-                    <button
-                      onClick={() => handleTestKey(key, index)}
-                      disabled={testingKey === index}
-                      className="px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-bold transition disabled:opacity-50 whitespace-nowrap"
-                    >
-                      {testingKey === index ? "…" : "Test"}
-                    </button>
-                    <button
-                      onClick={() => handleRemoveKey(index)}
-                      className="p-2 bg-red-50 hover:bg-red-100 text-red-500 rounded-lg transition"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    {isAdminUser && (
+                      <>
+                        <button
+                          onClick={() => handleTestKey(key, index)}
+                          disabled={testingKey === index}
+                          className="px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-bold transition disabled:opacity-50 whitespace-nowrap"
+                        >
+                          {testingKey === index ? "…" : "Test"}
+                        </button>
+                        <button
+                          onClick={() => handleRemoveKey(index)}
+                          className="p-2 bg-red-50 hover:bg-red-100 text-red-500 rounded-lg transition"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </>
+                    )}
                   </div>
                 );
               })}
             </div>
-            <div className="flex gap-2 mb-3">
-              <input
-                type="text"
-                value={newKey}
-                onChange={(e) => setNewKey(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleAddKey()}
-                placeholder="Paste new Gemini API key…"
-                className="flex-1 px-3 py-2 text-sm border rounded-lg outline-none focus:ring-2 focus:ring-purple-400"
-              />
-              <button
-                onClick={handleAddKey}
-                className="px-4 py-2 bg-purple-600 text-white text-sm font-bold rounded-lg hover:bg-purple-700 transition flex items-center gap-1.5"
-              >
-                <Plus className="w-4 h-4" /> Add
-              </button>
-            </div>
-            <div className="flex items-center gap-3 flex-wrap">
-              <button
-                onClick={handleTestAllKeys}
-                className="text-sm bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-1 rounded-md hover:bg-indigo-200 font-semibold"
-              >
-                Test All Keys
-              </button>
-            </div>
+            {isAdminUser && (
+              <div className="flex gap-2 mb-3">
+                <input
+                  type="text"
+                  value={newKey}
+                  onChange={(e) => setNewKey(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleAddKey()}
+                  placeholder="Paste new Gemini API key…"
+                  className="flex-1 px-3 py-2 text-sm border rounded-lg outline-none focus:ring-2 focus:ring-purple-400"
+                />
+                <button
+                  onClick={handleAddKey}
+                  className="px-4 py-2 bg-purple-600 text-white text-sm font-bold rounded-lg hover:bg-purple-700 transition flex items-center gap-1.5"
+                >
+                  <Plus className="w-4 h-4" /> Add
+                </button>
+              </div>
+            )}
+            {isAdminUser && (
+              <div className="flex items-center gap-3 flex-wrap">
+                <button
+                  onClick={handleTestAllKeys}
+                  className="text-sm bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-1 rounded-md hover:bg-indigo-200 font-semibold"
+                >
+                  Test All Keys
+                </button>
+              </div>
+            )}
           </div>
 
           {/* API Quota Saver */}
@@ -821,6 +834,10 @@ export default function Settings({ onMenuClick }) {
 
         {/* ── Multi-Provider AI Keys ── */}
         <div className="bg-white p-6 rounded-lg shadow space-y-4">
+          {/* Hidden inputs to capture browser autofill and prevent overriding API key fields */}
+          <input type="text" name="prevent_autofill_username" style={{ display: "none" }} autoComplete="username" />
+          <input type="password" name="prevent_autofill_password" style={{ display: "none" }} autoComplete="current-password" />
+          
           <div>
             <h2 className="text-xl font-semibold text-gray-700 mb-1">
               AI Photo Analysis Keys
@@ -854,25 +871,29 @@ export default function Settings({ onMenuClick }) {
                 <div key={item.id} className="flex gap-2 items-center">
                   <input
                     type="password"
-                    value={item.key}
+                    value={isAdminUser ? item.key : "••••••••••••••••••••"}
                     readOnly
                     className="flex-1 px-3 py-1.5 text-sm border bg-slate-100 text-slate-500 rounded-lg outline-none pr-8"
                   />
-                  <button
-                    onClick={() => handleRemoveGroqKey(item.id, item.key)}
-                    className="p-1.5 bg-red-50 hover:bg-red-100 text-red-500 rounded-lg transition"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  {isAdminUser && (
+                    <button
+                      onClick={() => handleRemoveGroqKey(item.id, item.key)}
+                      className="p-1.5 bg-red-50 hover:bg-red-100 text-red-500 rounded-lg transition"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
 
             {/* Add New Key */}
-            {groqKeysList.length < 6 && (
+            {isAdminUser && groqKeysList.length < 6 && (
               <div className="flex gap-2">
                 <input
                   type="text"
+                  name="groq_new_api_key_field"
+                  autoComplete="new-password"
                   value={newGroqKey}
                   onChange={(e) => setNewGroqKey(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleAddGroqKey()}
@@ -912,10 +933,13 @@ export default function Settings({ onMenuClick }) {
             <div className="flex gap-2">
               <input
                 type="password"
-                value={aiKeys.gemini}
-                onChange={(e) => saveAiKey("gemini", e.target.value)}
-                placeholder="AIza..."
-                className="flex-1 px-3 py-2 text-sm border rounded-lg outline-none focus:ring-2 focus:ring-blue-400"
+                name="gemini_photo_api_key_field"
+                autoComplete="new-password"
+                value={isAdminUser ? aiKeys.gemini : (aiKeys.gemini ? "••••••••••••••••••••" : "")}
+                onChange={(e) => isAdminUser && saveAiKey("gemini", e.target.value)}
+                disabled={!isAdminUser}
+                placeholder={aiKeys.gemini ? "••••••••••••" : "Not Configured"}
+                className="flex-1 px-3 py-2 text-sm border rounded-lg outline-none focus:ring-2 focus:ring-blue-400 disabled:bg-slate-100 disabled:text-slate-400"
               />
             </div>
             <p className="text-xs text-gray-500 mt-1">
@@ -943,10 +967,13 @@ export default function Settings({ onMenuClick }) {
             <div className="flex gap-2">
               <input
                 type="password"
-                value={aiKeys.pixtral}
-                onChange={(e) => saveAiKey("pixtral", e.target.value)}
-                placeholder="..."
-                className="flex-1 px-3 py-2 text-sm border rounded-lg outline-none focus:ring-2 focus:ring-purple-400"
+                name="mistral_photo_api_key_field"
+                autoComplete="new-password"
+                value={isAdminUser ? aiKeys.pixtral : (aiKeys.pixtral ? "••••••••••••••••••••" : "")}
+                onChange={(e) => isAdminUser && saveAiKey("pixtral", e.target.value)}
+                disabled={!isAdminUser}
+                placeholder={aiKeys.pixtral ? "••••••••••••" : "Not Configured"}
+                className="flex-1 px-3 py-2 text-sm border rounded-lg outline-none focus:ring-2 focus:ring-purple-400 disabled:bg-slate-100 disabled:text-slate-400"
               />
             </div>
             <p className="text-xs text-gray-500 mt-1">
@@ -1248,28 +1275,27 @@ export default function Settings({ onMenuClick }) {
         </div>
 
         {/* ── Data Source Settings ── */}
-        {isAdminUser && (
-          <div className="bg-white p-6 rounded-lg shadow">
-            <h2 className="text-xl font-semibold text-gray-700 mb-1 flex items-center gap-2">
-              <Link className="w-5 h-5 text-gray-500" /> Data Source Settings
-              (Google Sheets)
-            </h2>
-            <p className="text-sm text-gray-600 mb-2">
-              The Apps Script URL is{" "}
-              <strong>required for photo uploads to Google Drive</strong> — this
-              applies in both Firebase and Sheet modes. The Sheet ID is only
-              needed when using Sheet mirror/backup.
-            </p>
-            {!s.scriptUrl && (
-              <div className="flex items-start gap-2 p-3 mb-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
-                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                <span>
-                  <strong>Script URL missing</strong> — photos cannot be uploaded
-                  to Google Drive until this is set.
-                </span>
-              </div>
-            )}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h2 className="text-xl font-semibold text-gray-700 mb-1 flex items-center gap-2">
+            <Link className="w-5 h-5 text-gray-500" /> Data Source Settings
+            (Google Sheets)
+          </h2>
+          <p className="text-sm text-gray-600 mb-2">
+            The Apps Script URL is{" "}
+            <strong>required for photo uploads to Google Drive</strong> — this
+            applies in both Firebase and Sheet modes. The Sheet ID is only
+            needed when using Sheet mirror/backup.
+          </p>
+          {!s.scriptUrl && (
+            <div className="flex items-start gap-2 p-3 mb-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <span>
+                <strong>Script URL missing</strong> — photos cannot be uploaded
+                to Google Drive until this is set.
+              </span>
+            </div>
+          )}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {[
               {
                 label: "Script URL",
@@ -1287,75 +1313,99 @@ export default function Settings({ onMenuClick }) {
                 placeholder: "Enter custom secret token (do not use default)...",
                 type: "password",
               },
-            ].map(({ label, key, placeholder, type }) => (
-              <div key={key}>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  {label}
-                </label>
-                <input
-                  type={type || "text"}
-                  value={s[key] || ""}
-                  onChange={(e) => updateSettings({ [key]: e.target.value })}
-                  placeholder={placeholder}
-                  className="w-full border rounded-md shadow-sm p-2 text-sm"
-                />
-              </div>
-            ))}
+            ].map(({ label, key, placeholder, type }) => {
+              const displayVal = isAdminUser ? (s[key] || "") : (s[key] ? "••••••••••••••••••••" : "");
+              return (
+                <div key={key}>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    {label}
+                  </label>
+                  <input
+                    type={type || "text"}
+                    value={displayVal}
+                    onChange={(e) => isAdminUser && updateSettings({ [key]: e.target.value })}
+                    disabled={!isAdminUser}
+                    placeholder={displayVal ? "••••••••••••" : placeholder}
+                    className="w-full border rounded-md shadow-sm p-2 text-sm disabled:bg-slate-100 disabled:text-slate-400"
+                  />
+                </div>
+              );
+            })}
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Drive Photo Folder URL
               </label>
               <input
                 type="text"
-                value={s.folderId || ""}
-                onChange={(e) => updateSettings({ folderId: e.target.value })}
-                placeholder="https://drive.google.com/drive/folders/..."
-                className="w-full border rounded-md shadow-sm p-2 text-sm"
+                value={isAdminUser ? (s.folderId || "") : (s.folderId ? "••••••••••••••••••••" : "")}
+                onChange={(e) => isAdminUser && updateSettings({ folderId: e.target.value })}
+                disabled={!isAdminUser}
+                placeholder={s.folderId ? "••••••••••••" : "https://drive.google.com/drive/folders/..."}
+                className="w-full border rounded-md shadow-sm p-2 text-sm disabled:bg-slate-100 disabled:text-slate-400"
               />
             </div>
           </div>
-          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center justify-between gap-4">
-              <div>
-                <h4 className="text-sm font-semibold text-emerald-800">
-                  Drive Cleanup Utility
-                </h4>
-                <p className="text-xs text-emerald-700 mt-1">
-                  Automatically organize all existing trial photos into "Project
-                  &gt; Trial" subfolders.
-                </p>
+
+          {isAdminUser && (
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center justify-between gap-4">
+                <div>
+                  <h4 className="text-sm font-semibold text-emerald-800">
+                    Drive Cleanup Utility
+                  </h4>
+                  <p className="text-xs text-emerald-700 mt-1">
+                    Automatically organize all existing trial photos into "Project
+                    &gt; Trial" subfolders.
+                  </p>
+                </div>
+                <button
+                  onClick={() =>
+                    toast("Requires Google Apps Script environment", "info")
+                  }
+                  className="whitespace-nowrap bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 font-medium text-sm flex items-center gap-2"
+                >
+                  <LayoutGrid className="w-4 h-4" /> Organize Drive Photos
+                </button>
               </div>
-              <button
-                onClick={() =>
-                  toast("Requires Google Apps Script environment", "info")
-                }
-                className="whitespace-nowrap bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 font-medium text-sm flex items-center gap-2"
-              >
-                <LayoutGrid className="w-4 h-4" /> Organize Drive Photos
-              </button>
-            </div>
-            <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between gap-4">
-              <div>
-                <h4 className="text-sm font-semibold text-slate-800">
-                  Photo Consistency Check
-                </h4>
-                <p className="text-xs text-slate-700 mt-1">
-                  Scan Drive and trials to find photos not linked to any Trial
-                  record.
-                </p>
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between gap-4">
+                <div>
+                  <h4 className="text-sm font-semibold text-slate-800">
+                    Photo Consistency Check
+                  </h4>
+                  <p className="text-xs text-slate-700 mt-1">
+                    Scan Drive and trials to find photos not linked to any Trial
+                    record.
+                  </p>
+                </div>
+                <button
+                  onClick={() =>
+                    toast("Requires Google Apps Script environment", "info")
+                  }
+                  className="whitespace-nowrap bg-slate-700 text-white px-4 py-2 rounded-lg hover:bg-slate-800 font-medium text-sm flex items-center gap-2"
+                >
+                  <Search className="w-4 h-4" /> Scan Photos
+                </button>
               </div>
-              <button
-                onClick={() =>
-                  toast("Requires Google Apps Script environment", "info")
-                }
-                className="whitespace-nowrap bg-slate-700 text-white px-4 py-2 rounded-lg hover:bg-slate-800 font-medium text-sm flex items-center gap-2"
-              >
-                <Search className="w-4 h-4" /> Scan Photos
-              </button>
+              <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-lg flex items-center justify-between gap-4">
+                <div>
+                  <h4 className="text-sm font-semibold text-indigo-800">
+                    Migrate Google Drive
+                  </h4>
+                  <p className="text-xs text-indigo-700 mt-1">
+                    Move all photos to a new Drive folder/account without losing any data.
+                    Rewrites all photo links automatically.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setDriveMigrationOpen(true)}
+                  className="whitespace-nowrap bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 font-medium text-sm flex items-center gap-2"
+                >
+                  <FolderSync className="w-4 h-4" /> Migrate Drive
+                </button>
+              </div>
             </div>
-          </div>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* ── QR Code Content — Offline ── */}
         <div className="bg-white p-6 rounded-lg shadow">
@@ -1676,6 +1726,20 @@ export default function Settings({ onMenuClick }) {
             onApplyMigration={handleMigrationApplied}
             state={state}
             updateState={updateState}
+          />
+        </React.Suspense>
+      )}
+
+      {/* Drive Migration Modal */}
+      {driveMigrationOpen && (
+        <React.Suspense fallback={null}>
+          <DriveMigrationModal
+            isOpen={driveMigrationOpen}
+            onClose={() => setDriveMigrationOpen(false)}
+            state={state}
+            updateSettings={updateSettings}
+            getAppState={getAppState}
+            toast={toast}
           />
         </React.Suspense>
       )}

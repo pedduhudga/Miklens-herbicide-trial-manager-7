@@ -178,8 +178,7 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                     if (item.cancelRequested || item.status === 'cancelled') {
                         console.log(`[HighTechSync] ? Skipping cancelled item: ${getSyncItemLabel(item)}`);
                         removeSyncPlaceholderFromTrial(item);
-                        getAppState().syncQueue = getAppState().syncQueue.filter(i => i.id !== item.id);
-                        updateAppState({ syncQueue: getAppState().syncQueue });
+                        updateAppState({ syncQueue: getAppState().syncQueue.filter(i => i.id !== item.id) });
                         renderSyncStatus();
                         continue;
                     }
@@ -243,8 +242,7 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
 
                             if (item.cancelRequested) {
                                 console.log(`[HighTechSync] ? Cancelled after request: ${item.action}`);
-                                getAppState().syncQueue = getAppState().syncQueue.filter(i => i.id !== item.id);
-                                updateAppState({ syncQueue: getAppState().syncQueue });
+                                updateAppState({ syncQueue: getAppState().syncQueue.filter(i => i.id !== item.id) });
                                 continue;
                             }
 
@@ -252,8 +250,7 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
 
                             console.log(`%c? Action Synced: ${item.action}`, "color: #16a34a;");
                             item.status = 'completed';
-                            getAppState().syncQueue = getAppState().syncQueue.filter(i => i.id !== item.id);
-                            updateAppState({ syncQueue: getAppState().syncQueue });
+                            updateAppState({ syncQueue: getAppState().syncQueue.filter(i => i.id !== item.id) });
                             continue;
                         } catch (e) {
                             console.error(`[HighTechSync] ? Action Fail: ${item.action}`, e);
@@ -266,9 +263,9 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                             
                             if (isNonRetryable) {
                                 console.warn(`[HighTechSync] Non-retryable error for ${item.action}. Removing from queue. Error: ${errMsg}`);
-                                getAppState().syncQueue = getAppState().syncQueue.filter(i => i.id !== item.id);
-                                updateAppState({ syncQueue: getAppState().syncQueue });
-                                saveSyncQueueOffline(getAppState().syncQueue).catch(err => console.error('Failed to save sync queue offline:', err));
+                                const nextQueue = getAppState().syncQueue.filter(i => i.id !== item.id);
+                                updateAppState({ syncQueue: nextQueue });
+                                saveSyncQueueOffline(nextQueue).catch(err => console.error('Failed to save sync queue offline:', err));
                                 continue;
                             }
 
@@ -294,8 +291,7 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                         if (existingPhoto && existingPhoto.url) {
                             console.log(`[HighTechSync] ? DUPLICATE BLOCKED: Photo already uploaded: ${item.photo.tempId}`);
                             item.status = 'completed';
-                            getAppState().syncQueue = getAppState().syncQueue.filter(i => i.id !== item.id);
-                            updateAppState({ syncQueue: getAppState().syncQueue });
+                            updateAppState({ syncQueue: getAppState().syncQueue.filter(i => i.id !== item.id) });
                             continue;
                         }
 
@@ -618,7 +614,7 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                         }
 
                         item.status = 'completed';
-                        getAppState().syncQueue = getAppState().syncQueue.filter(i => i.id !== item.id);
+                        updateAppState({ syncQueue: getAppState().syncQueue.filter(i => i.id !== item.id) });
 
                         const totalItemTime = ((Date.now() - itemStartTime) / 1000).toFixed(2);
                         console.log(`%cTotal Item Process Time: ${totalItemTime}s`, "font-weight: bold; color: #0d9488;");

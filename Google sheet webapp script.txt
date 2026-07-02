@@ -51,7 +51,10 @@ function isWriteAction(action) {
         getSyncConflicts: true,
         getDoseResponseData: true,
         getResistanceData: true,
-        getSprayLogs: true
+        getSprayLogs: true,
+        migrateDrivePhotos: true,
+        listAllFilesRecursive: true,
+        copySingleFile: true
     };
 
     return !readOnlyActions[String(action || '').trim()];
@@ -326,6 +329,10 @@ function executeAction(action, payload, auth) {
         'saveDoseResponseResult': (p) => saveDoseResponseResult(ss, p, auth),
         // ---- Resistance Tracker (read computed profiles from trials) ----
         'getResistanceData': (p) => getResistanceData(ss, p, auth),
+        // ---- Drive Migration (Admin Only) ----
+        'migrateDrivePhotos': (p) => { if (auth.Role !== 'Admin') throw new Error('Admin only.'); return migrateDrivePhotos(p); },
+        'listAllFilesRecursive': (p) => { if (auth.Role !== 'Admin') throw new Error('Admin only.'); return listAllFilesRecursive(p); },
+        'copySingleFile': (p) => { if (auth.Role !== 'Admin') throw new Error('Admin only.'); return copySingleFile(p); },
     };
     if (actions[action]) {
         return actions[action](payload);
@@ -2516,3 +2523,257 @@ function uploadPhotoChunk(parentFolderId, payload) {
         chunkIndex: chunkIndex
     };
 }
+
+/* --- DRIVE MIGRATION: Copy all photos from one folder to another --- */
+function migrateDrivePhotos(payload) {
+    var sourceFolderId = payload.sourceFolderId;
+    var targetFolderId = payload.targetFolderId;
+    var startTime = new Date().getTime();
+    var timeLimit = 220000; // 3.6 minutes limit to safely return before browser/Apps Script timeouts (6 mins limit)
+    
+    if (!sourceFolderId || !targetFolderId) {
+        return { status: 'error', message: 'Source and target folder IDs are required.' };
+    }
+    
+    var sourceFolder, targetFolder;
+    try {
+        sourceFolder = DriveApp.getFolderById(sourceFolderId);
+        targetFolder = DriveApp.getFolderById(targetFolderId);
+    } catch (e) {
+        return { status: 'error', message: 'Cannot access folders: ' + e.message + '. Make sure both folder IDs are correct and accessible.' };
+    }
+    
+    var mapping = {};
+    var fileCount = 0;
+    var skipCount = 0;
+    var errorCount = 0;
+    var errors = [];
+    var isPartial = false;
+
+    // Build an in-memory index of the target folder structure and files to prevent slow APIs
+    var targetFolderIndex = {}; // maps folder path key (e.g. "root/Fungicide") -> folder object
+    var targetFileIndex = {};   // maps "folderId_filename" -> fileId
+    
+    function indexTargetFolders(folder, currentPath) {
+        targetFolderIndex[currentPath] = folder;
+        
+        // Index all files in this target folder
+        var files = folder.getFiles();
+        while (files.hasNext()) {
+            var f = files.next();
+            targetFileIndex[folder.getId() + "_" + f.getName()] = f.getId();
+        }
+        
+        // Recurse subfolders
+        var subfolders = folder.getFolders();
+        while (subfolders.hasNext()) {
+            var sub = subfolders.next();
+            indexTargetFolders(sub, currentPath + "/" + sub.getName());
+        }
+    }
+    
+    try {
+        Logger.log('Indexing target folder structures...');
+        indexTargetFolders(targetFolder, "root");
+        Logger.log('Target indexing complete.');
+    } catch(e) {
+        return { status: 'error', message: 'Failed indexing target folder: ' + e.message };
+    }
+    
+    function copyFolderRecursive(source, currentPath, targetDir) {
+        if (isPartial) return;
+        
+        // Copy all files in this folder
+        var files = source.getFiles();
+        while (files.hasNext()) {
+            // Check time elapsed to prevent hard execution timeouts
+            if (new Date().getTime() - startTime > timeLimit) {
+                isPartial = true;
+                return;
+            }
+            
+            var file = files.next();
+            try {
+                // Check if target folder already contains this file name in-memory (very fast)
+                var existingId = targetFileIndex[targetDir.getId() + "_" + file.getName()];
+                if (existingId) {
+                    mapping[file.getId()] = existingId;
+                    skipCount++;
+                } else {
+                    var newFile = file.makeCopy(file.getName(), targetDir);
+                    try {
+                        newFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+                    } catch (shareErr) {
+                        Logger.log('Could not set sharing on ' + file.getName() + ': ' + shareErr.message);
+                    }
+                    mapping[file.getId()] = newFile.getId();
+                    fileCount++;
+                }
+            } catch (e) {
+                errorCount++;
+                errors.push({ file: file.getName(), error: e.message });
+                Logger.log('Failed to copy/check file ' + file.getName() + ': ' + e.message);
+            }
+        }
+        
+        // Recurse into subfolders
+        var subfolders = source.getFolders();
+        while (subfolders.hasNext()) {
+            if (isPartial) return;
+            var subfolder = subfolders.next();
+            var subPath = currentPath + "/" + subfolder.getName();
+            var newSubfolder = targetFolderIndex[subPath];
+            
+            if (!newSubfolder) {
+                // Create target subfolder and index it
+                newSubfolder = targetDir.createFolder(subfolder.getName());
+                targetFolderIndex[subPath] = newSubfolder;
+            }
+            
+            copyFolderRecursive(subfolder, subPath, newSubfolder);
+        }
+    }
+    
+    Logger.log('Starting/Resuming Drive migration from ' + sourceFolderId + ' to ' + targetFolderId);
+    copyFolderRecursive(sourceFolder, "root", targetFolder);
+    Logger.log('Migration batch complete. Copied: ' + fileCount + ', Skipped (already exists): ' + skipCount + ', Errors: ' + errorCount);
+    
+    return {
+        status: isPartial ? 'partial' : 'success',
+        mapping: mapping,
+        fileCount: fileCount,
+        skipCount: skipCount,
+        errorCount: errorCount,
+        errors: errors.slice(0, 20)
+    };
+}
+
+/* --- DRIVE MIGRATION: List all files recursively with their parent folder names --- */
+function listAllFilesRecursive(payload) {
+    var sourceFolderId = payload.sourceFolderId;
+    if (!sourceFolderId) {
+        return { status: 'error', message: 'Source folder ID is required.' };
+    }
+    
+    var sourceFolder;
+    try {
+        sourceFolder = DriveApp.getFolderById(sourceFolderId);
+    } catch(e) {
+        return { status: 'error', message: 'Source folder inaccessible: ' + e.message };
+    }
+    
+    var fileList = [];
+    
+    // Fast flat queue-based traversal to prevent deep stack exhaustion and timeouts
+    var folderQueue = [{ folder: sourceFolder, path: "root" }];
+    
+    while (folderQueue.length > 0) {
+        var current = folderQueue.shift();
+        var folder = current.folder;
+        var currentPath = current.path;
+        
+        // Grab files
+        var files = folder.getFiles();
+        while (files.hasNext()) {
+            var f = files.next();
+            fileList.push({
+                id: f.getId(),
+                name: f.getName(),
+                path: currentPath
+            });
+        }
+        
+        // Queue subfolders
+        var subfolders = folder.getFolders();
+        while (subfolders.hasNext()) {
+            var sub = subfolders.next();
+            folderQueue.push({
+                folder: sub,
+                path: currentPath + "/" + sub.getName()
+            });
+        }
+    }
+    
+    return { status: 'success', files: fileList };
+}
+
+/* --- DRIVE MIGRATION: Copy a single file to a target subfolder path --- */
+function copySingleFile(payload) {
+    var fileId = payload.fileId;
+    var targetFolderId = payload.targetFolderId;
+    var path = payload.path || "root"; // e.g. "root/Fungicide/Trial A"
+    var name = payload.name;
+    
+    if (!fileId || !targetFolderId) {
+        return { status: 'error', message: 'fileId and targetFolderId are required.' };
+    }
+    
+    // Acquire a short lock to prevent parallel browser threads from creating duplicate folders at the same time
+    var folderLock = LockService.getUserLock();
+    try {
+        folderLock.waitLock(15000);
+    } catch (lockErr) {
+        // Fall back to general script lock if user lock isn't available
+        try {
+            folderLock = LockService.getScriptLock();
+            folderLock.waitLock(15000);
+        } catch(e) {}
+    }
+    
+    try {
+        var file = DriveApp.getFileById(fileId);
+        var targetRoot = DriveApp.getFolderById(targetFolderId);
+        
+        // Find or create subfolders matching the path
+        var currentDir = targetRoot;
+        var parts = path.split("/");
+        
+        // parts[0] is "root", skip it, traverse the rest
+        for (var i = 1; i < parts.length; i++) {
+            var partName = parts[i].trim();
+            if (!partName) continue;
+            
+            var existing = currentDir.getFoldersByName(partName);
+            var found = false;
+            while (existing.hasNext()) {
+                currentDir = existing.next();
+                found = true;
+                break; // Use the first match
+            }
+            
+            if (!found) {
+                currentDir = currentDir.createFolder(partName);
+            }
+        }
+        
+        // Release folder creation lock before performing the file copy
+        try { folderLock.releaseLock(); } catch(e) {}
+        
+        // Check if file already exists in target folder to avoid duplicate files
+        var existingFiles = currentDir.getFilesByName(name || file.getName());
+        if (existingFiles.hasNext()) {
+            var existingFile = existingFiles.next();
+            return {
+                status: 'skipped',
+                newId: existingFile.getId(),
+                message: 'File already exists in target folder.'
+            };
+        }
+        
+        // Copy the file
+        var copiedFile = file.makeCopy(name || file.getName(), currentDir);
+        try {
+            copiedFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+        } catch(e) {}
+        
+        return {
+            status: 'success',
+            newId: copiedFile.getId(),
+            message: 'File copied successfully.'
+        };
+    } catch(e) {
+        try { folderLock.releaseLock(); } catch(lockErr) {}
+        return { status: 'error', message: e.message };
+    }
+}
+
