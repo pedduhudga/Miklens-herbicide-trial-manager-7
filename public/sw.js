@@ -1,5 +1,5 @@
 // Service Worker for Miklens Trial Manager PWA
-importScripts('https://unpkg.com/dexie@latest/dist/dexie.js');
+importScripts('https://unpkg.com/dexie@4.4.4/dist/dexie.js');
 
 // Define Dexie DB inside Service Worker matching the app definition
 const db = new self.Dexie('MiklensTrialManagerDexieDB');
