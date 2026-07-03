@@ -692,6 +692,17 @@ function toBase64(src, maxPx = 400) {
   });
 }
 
+// Local helper to convert human-readable label to camelCase key
+function labelToKey(label) {
+  if (!label) return '';
+  const clean = label.replace(/[^a-zA-Z0-9\s]/g, '').trim();
+  const parts = clean.split(/\s+/);
+  return parts.map((p, idx) => {
+    if (idx === 0) return p.toLowerCase();
+    return p.charAt(0).toUpperCase() + p.slice(1).toLowerCase();
+  }).join('');
+}
+
 export class AdvancedReportGenerator {
   constructor(trialOrTrials, category = 'nutrition', project = null) {
     this.category = category;
@@ -707,12 +718,20 @@ export class AdvancedReportGenerator {
     const proj = project || projects.find(p => String(p.ID) === String(representative.ProjectID));
     this.project = proj || null;
     
+    // Start with category default observation fields
+    const combinedFields = [...(this.config.observationFields || [])];
+
+    // If it's a Pot Trial, also merge the custom pot fields mapped to their camelCase keys
     if (proj?.Design === 'PotTrial' || representative?.Design === 'PotTrial') {
       const potFields = proj?.PotFields || representative?.PotFields || ['Plant Height', 'Branches', 'Flowers', 'Fruit Count', 'Yield'];
-      this.activeFields = potFields.map(f => ({ key: f, label: f }));
-    } else {
-      this.activeFields = [...(this.config.observationFields || [])];
+      potFields.forEach(f => {
+        const key = labelToKey(f);
+        if (key && !combinedFields.some(existing => existing.key === key)) {
+          combinedFields.push({ key, label: f });
+        }
+      });
     }
+    this.activeFields = combinedFields;
 
     // Append category-specific advanced agronomic metrics
     // NOTE: These derived metrics are only included if actual data exists for them.
