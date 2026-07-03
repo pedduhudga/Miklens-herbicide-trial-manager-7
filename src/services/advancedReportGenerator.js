@@ -1239,13 +1239,16 @@ export class AdvancedReportGenerator {
       methodParts.push(`Investigator: ${this.trial.InvestigatorName}`);
     }
     
+    const repsList = [...new Set(this.observations.map(o => o.replication || o.rep).filter(Boolean))];
+    const computedReplications = repsList.length > 0 ? repsList.length : (this.trial.Replication && !isNaN(this.trial.Replication) ? parseInt(this.trial.Replication) : 3);
+
     const designLabel = this.design === 'CRD' 
       ? 'Completely Randomized Design (CRD)' 
       : this.design === 'PotTrial' 
         ? 'Pot Trial Design' 
         : 'Randomized Complete Block Design (RCBD)';
 
-    methodParts.push(`Design: ${designLabel} with ${this.trial.Replication || 6} replicates`);
+    methodParts.push(`Design: ${designLabel} with ${computedReplications} replicates`);
     if (this.trial.Dosage && this.trial.Dosage !== 'N/A') {
       methodParts.push(`Dosage applied: ${this.trial.Dosage}`);
     }
@@ -1291,16 +1294,27 @@ export class AdvancedReportGenerator {
     });
     const sigParamsList = sigParams.length ? sigParams.join(', ') : 'None';
 
-    const primaryMetricKey = this.config.primaryMetric?.key || 'plantHeight';
-    const primaryAnova = calculateAnovaRCB(this.observations, primaryMetricKey, this.category, this.design);
+    const primaryMetricKey = this.config.primaryMetric?.key || (this.activeFields[0]?.key) || 'plantHeight';
+    let primaryAnova = calculateAnovaRCB(this.observations, primaryMetricKey, this.category, this.design);
+    if (!primaryAnova || primaryAnova.error) {
+      for (let i = 0; i < this.activeFields.length; i++) {
+        const testAnova = calculateAnovaRCB(this.observations, this.activeFields[i].key, this.category, this.design);
+        if (testAnova && !testAnova.error) {
+          primaryAnova = testAnova;
+          break;
+        }
+      }
+    }
+
     let bestTrtName = 'N/A';
     if (primaryAnova && !primaryAnova.error) {
+      const isRed = isReductionMetric(primaryMetricKey, this.category);
       const sortedTrts = Object.entries(primaryAnova.treatmentMeans)
         .map(([trtNum, stats]) => ({
           name: this.treatmentNames[parseInt(trtNum) - 1] || `Treatment ${trtNum}`,
           mean: stats.mean
         }))
-        .sort((a, b) => b.mean - a.mean);
+        .sort((a, b) => isRed ? a.mean - b.mean : b.mean - a.mean);
       if (sortedTrts.length > 0) {
         bestTrtName = sortedTrts[0].name;
       }
@@ -1309,7 +1323,7 @@ export class AdvancedReportGenerator {
     const execSummaryRows = [
       ['Trial Design', this.design === 'CRD' ? 'Completely Randomized Design (CRD)' : this.design === 'PotTrial' ? 'Pot Trial Design' : 'Randomized Complete Block Design (RCBD)'],
       ['Treatments Evaluated', this.treatmentNames.length],
-      ['Replications / Blocks', this.trial.Replication || 6],
+      ['Replications / Blocks', computedReplications],
       ['Observation Period', `${maxDaa} DAA`],
       ['Statistically Significant Parameters', sigParamsList],
       ['Numerically Superior Treatment', bestTrtName],
@@ -1344,6 +1358,22 @@ export class AdvancedReportGenerator {
         ? 'Pot Trial Design' 
         : 'RCB (Randomized Complete Block)';
 
+    const repsList = [...new Set(this.observations.map(o => o.replication || o.rep).filter(Boolean))];
+    const computedReplications = repsList.length > 0 ? repsList.length : (this.trial.Replication && !isNaN(this.trial.Replication) ? parseInt(this.trial.Replication) : 3);
+
+    const totalObs = this.observations.length;
+    const trtCount = this.treatmentNames.length;
+    const independentUnits = trtCount * computedReplications;
+    
+    let obsMode = 'Treatment Column-wise';
+    let totalPots = totalObs;
+    let unitText = `Statistical analysis was performed using ${independentUnits} independent experimental units.`;
+
+    if (totalObs > independentUnits) {
+      obsMode = 'Plant-wise';
+      unitText = `Statistical analysis was performed using ${independentUnits} experimental units (Treatment × Replication means), while observations were collected from ${totalObs} pots (${(totalObs / independentUnits).toFixed(0)} pots per experimental unit).`;
+    }
+
     const rawMetadata = [
       ['Trial ID', this.trial.ID],
       ['Investigator', this.trial.InvestigatorName],
@@ -1355,7 +1385,12 @@ export class AdvancedReportGenerator {
       ['Irrigation Method', this.trial.IrrigationMethod],
       ['Plant Population (plants/ha)', this.trial.PlantPopulation],
       ['Design Type', designLabel],
-      ['Replications', this.trial.Replication || 6],
+      ['Replications', computedReplications],
+      ['Experimental Unit', 'Treatment × Block'],
+      ['Independent Units Used', independentUnits],
+      ['Total Pots Observed', totalPots],
+      ['Observation Mode', obsMode],
+      ['Methodology Note', unitText],
       ['Trial Start Date', this.trial.Date],
       ['Soil pH', this.soil?.ph],
       ['Soil Texture', this.soil?.texture],
@@ -1437,7 +1472,10 @@ export class AdvancedReportGenerator {
     ws.getCell(`A${mapStartRow}`).value = 'Field Trial Layout Map (RCB Grid)';
     ws.getCell(`A${mapStartRow}`).font = { bold: true, size: 12 };
 
-    let layoutText = `Replications: ${this.trial.Replication || 'Multiple'}\nPlots layout:\n`;
+    const repsList = [...new Set(this.observations.map(o => o.replication || o.rep).filter(Boolean))];
+    const computedReplications = repsList.length > 0 ? repsList.length : (this.trial.Replication && !isNaN(this.trial.Replication) ? parseInt(this.trial.Replication) : 3);
+
+    let layoutText = `Replications: ${computedReplications}\nPlots layout:\n`;
     if (this.isProjectWide && this.trials) {
       const repGroups = {};
       this.trials.forEach(t => {
