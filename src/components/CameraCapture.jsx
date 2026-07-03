@@ -165,19 +165,24 @@ export default function CameraCapture({ isOpen = true, onClose, onCapture, initi
     const track = stream.getVideoTracks()[0];
     if (track && track.applyConstraints) {
       try {
-        const nextMode = focusMode === 'continuous' ? 'manual' : 'continuous';
-        const constraintsToApply = { focusMode: nextMode };
-        
+        const nextMode = focusMode === 'continuous' ? 'locked' : 'continuous';
         const capabilities = track.getCapabilities ? track.getCapabilities() : {};
-        if (nextMode === 'manual' && capabilities.focusDistance) {
-          const min = capabilities.focusDistance.min || 0;
-          const max = capabilities.focusDistance.max || 1;
-          constraintsToApply.focusDistance = (min + max) / 2;
+        
+        let focusConstraint = 'continuous';
+        if (nextMode === 'locked') {
+          if (capabilities.focusMode && capabilities.focusMode.includes('single-shot')) {
+            focusConstraint = 'single-shot';
+          } else if (capabilities.focusMode && capabilities.focusMode.includes('manual')) {
+            focusConstraint = 'manual';
+          } else {
+            focusConstraint = 'continuous';
+          }
         }
 
+        const constraintsToApply = { focusMode: focusConstraint };
         await track.applyConstraints(constraintsToApply);
         setFocusMode(nextMode);
-        console.log(`[CameraCapture] Focus mode set to ${nextMode}`);
+        console.log(`[CameraCapture] Focus mode applied constraint: ${focusConstraint}`);
       } catch (err) {
         console.warn('Focus mode toggle failed', err);
         window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Focus mode override not supported on this device.', type: 'warning' } }));
@@ -399,7 +404,7 @@ export default function CameraCapture({ isOpen = true, onClose, onCapture, initi
           <div className="mt-4 text-[10px] tracking-widest font-bold bg-[#0f172a]/95 border border-white/10 px-3 py-1.5 rounded-full backdrop-blur-md shadow-lg flex items-center gap-2 select-none">
             <span className={`w-2 h-2 rounded-full ${focusMode === 'continuous' ? 'bg-emerald-500 animate-pulse' : 'bg-sky-400'}`}></span>
             <span className="text-slate-300">
-              {focusMode === 'continuous' ? 'AUTO FOCUS' : 'NORMAL / FIXED FOCUS'}
+              {focusMode === 'continuous' ? 'AUTO FOCUS' : 'LOCKED FOCUS'}
             </span>
           </div>
         )}
@@ -412,7 +417,7 @@ export default function CameraCapture({ isOpen = true, onClose, onCapture, initi
                   onClick={toggleFlash}
                   className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${flashOn ? 'bg-yellow-400 text-yellow-900' : 'bg-black/40 text-white backdrop-blur-md'}`}
                >
-                 <Zap className="w-6 h-6" />
+                  <Zap className="w-6 h-6" />
                </button>
              )}
           </div>
@@ -433,7 +438,7 @@ export default function CameraCapture({ isOpen = true, onClose, onCapture, initi
                       ? 'bg-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] border border-emerald-400/20'
                       : 'bg-black/40 text-slate-300 border border-white/10 hover:text-white'
                   }`}
-                  title={focusMode === 'continuous' ? 'Auto Focus (Continuous)' : 'Normal Photo (Fixed Focus)'}
+                  title={focusMode === 'continuous' ? 'Auto Focus (Continuous)' : 'Lock Focus'}
                >
                   <Focus className="w-6 h-6 animate-pulse" style={{ animationDuration: focusMode === 'continuous' ? '3s' : '0s' }} />
                </button>
