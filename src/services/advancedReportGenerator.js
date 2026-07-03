@@ -728,6 +728,7 @@ export class AdvancedReportGenerator {
     this.category = category;
     this.config = getCategoryConfig(category);
     this.workbook = new ExcelJS.Workbook();
+    this.workbook.calcProperties.fullCalcOnLoad = true;
     
     // Find representative trial to determine if it is a PotTrial
     const isArr = Array.isArray(trialOrTrials);
@@ -1533,6 +1534,10 @@ export class AdvancedReportGenerator {
     else if (rawLayout === 'randomized-row') layoutLabel = 'Randomized Row';
     else if (rawLayout) layoutLabel = rawLayout;
 
+    const datesList = [...new Set(this.observations.map(o => o.date || 'N/A'))];
+    const independentStatsObsCount = datesList.length * independentUnits;
+    const exportTime = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+
     const rawMetadata = [
       ['Trial ID', this.trial.ID],
       ['Investigator', this.trial.InvestigatorName],
@@ -1553,12 +1558,17 @@ export class AdvancedReportGenerator {
       ['Pots per Experimental Unit', potsPerUnit > 1 ? potsPerUnit : ''],
       ['Observation Mode', obsMode !== 'N/A' ? obsMode : ''],
       ['Methodology Note', unitText],
+      ['Independent Statistical Observations', independentStatsObsCount],
       ['Trial Start Date', this.trial.Date],
       ['Soil pH', this.soil?.ph],
       ['Soil Texture', this.soil?.texture],
       ['Soil Clay %', this.soil?.clay],
       ['Soil Sand %', this.soil?.sand],
-      ['Soil Organic Carbon', this.soil?.organicCarbon]
+      ['Soil Organic Carbon', this.soil?.organicCarbon],
+      ['Report Version', 'v1.2'],
+      ['Export Timestamp', exportTime],
+      ['Software Version', 'v7.5.0'],
+      ['Statistical Engine', 'v2.1.2']
     ];
 
     // Filter out rows that have empty/N/A values
@@ -1616,7 +1626,7 @@ export class AdvancedReportGenerator {
     this.treatmentNames.forEach((trtName, index) => {
       const trtNum = index + 1;
       const trialObj = (this.trials || []).find(t => (t.FormulationName || 'Untreated Control') === trtName) || this.trial;
-      const rate = trialObj.Dosage || 'N/A';
+      const rate = trialObj.Dosage && String(trialObj.Dosage).toUpperCase() !== 'NA' ? trialObj.Dosage : 'Not Applicable';
       const notes = trtName.toLowerCase().includes('control') || trtName.toLowerCase().includes('check') || trtName.toLowerCase().includes('utc') 
         ? 'Negative control' 
         : 'Efficacy evaluation';
@@ -1685,7 +1695,9 @@ export class AdvancedReportGenerator {
   // 4. Assessment Data Summary Sheet
   async createAssessmentDataSheet() {
     const ws = this.workbook.addWorksheet('Assessment Data Summary');
-    ws.views = [{ showGridLines: true }];
+    ws.views = [
+      { state: 'frozen', ySplit: 1, xSplit: 7, activeCell: 'H2', showGridLines: true }
+    ];
 
     // Columns: Date, Days After App, Harvest, Plot, Rep, Treatment, Pot ID, and the category observation fields
     const headerRow = ['Date', 'Days After App', 'Harvest', 'Plot', 'Rep', 'Treatment', 'Pot ID'];
@@ -1964,10 +1976,10 @@ export class AdvancedReportGenerator {
       curRow++;
     });
 
-    // 3. Treatment Rankings & Improvement over Control
+    // 3a. Beneficial Parameters (Higher is Better)
     curRow += 2;
     ws.mergeCells(`A${curRow}:J${curRow}`);
-    ws.getCell(`A${curRow}`).value = '3. TREATMENT PERFORMANCE RANKINGS & COMPARATIVE ANALYSIS';
+    ws.getCell(`A${curRow}`).value = '3a. BENEFICIAL PARAMETERS (HIGHER IS BETTER)';
     ws.getCell(`A${curRow}`).font = { name: 'Calibri', bold: true, size: 11, color: { rgb: '2980B9' } };
     curRow++;
 
@@ -1977,7 +1989,8 @@ export class AdvancedReportGenerator {
     ws.getRow(curRow).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: '34495E' } };
     curRow++;
 
-    this.activeFields.forEach(f => {
+    const beneficialFields = this.activeFields.filter(f => !isReductionMetric(f.key, this.category));
+    beneficialFields.forEach(f => {
       const trtMeans = this.treatmentNames.map((name, idx) => {
         const trtNum = idx + 1;
         const trtVals = this.observations.filter(o => (o.treatmentNumber || o.treatment || 1) === trtNum)
@@ -1993,13 +2006,73 @@ export class AdvancedReportGenerator {
         return { name, trtNum, mean: avg };
       });
 
-      const isRed = isReductionMetric(f.key, this.category);
-      const sortedTrts = [...trtMeans].sort((a, b) => isRed ? a.mean - b.mean : b.mean - a.mean);
+      const sortedTrts = [...trtMeans].sort((a, b) => b.mean - a.mean);
       const controlMean = trtMeans[0]?.mean || 1;
 
       sortedTrts.forEach((trt, sortIdx) => {
         const rank = sortIdx + 1;
         const pctDiff = controlMean > 0 ? ((trt.mean - controlMean) / controlMean) * 100 : 0;
+        const diffStr = trt.trtNum === 1 ? 'Control (Ref)' : `${pctDiff > 0 ? '+' : ''}${pctDiff.toFixed(2)}%`;
+
+        let classification = 'Intermediate';
+        if (sortIdx === 0) classification = 'Best Performer';
+        else if (sortIdx === sortedTrts.length - 1) classification = 'Lowest Performer';
+
+        ws.getRow(curRow).values = [
+          f.label,
+          trt.name,
+          parseFloat(trt.mean.toFixed(2)),
+          rank,
+          diffStr,
+          classification
+        ];
+
+        if (classification === 'Best Performer') {
+          ws.getCell(curRow, 6).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'E2EFDA' } };
+          ws.getCell(curRow, 6).font = { name: 'Calibri', color: { rgb: '375623' }, bold: true };
+        } else if (classification === 'Lowest Performer') {
+          ws.getCell(curRow, 6).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'FFF2CC' } };
+        }
+
+        curRow++;
+      });
+    });
+
+    // 3b. Stress / Adverse Parameters (Lower is Better)
+    curRow += 2;
+    ws.mergeCells(`A${curRow}:J${curRow}`);
+    ws.getCell(`A${curRow}`).value = '3b. STRESS / ADVERSE PARAMETERS (LOWER IS BETTER)';
+    ws.getCell(`A${curRow}`).font = { name: 'Calibri', bold: true, size: 11, color: { rgb: '2980B9' } };
+    curRow++;
+
+    ws.getRow(curRow).values = rankHeaders;
+    ws.getRow(curRow).font = { name: 'Calibri', bold: true, color: { rgb: 'FFFFFF' } };
+    ws.getRow(curRow).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: '34495E' } };
+    curRow++;
+
+    const stressFields = this.activeFields.filter(f => isReductionMetric(f.key, this.category));
+    stressFields.forEach(f => {
+      const trtMeans = this.treatmentNames.map((name, idx) => {
+        const trtNum = idx + 1;
+        const trtVals = this.observations.filter(o => (o.treatmentNumber || o.treatment || 1) === trtNum)
+                                         .map(o => {
+                                           if (f.key.toLowerCase().replace(/\s/g, '') === 'plantheight' && o.potHeights) {
+                                             return o.potHeights.map(h => parseFloat(h)).filter(v => !isNaN(v));
+                                           }
+                                           return parseFloat(o[f.key]);
+                                         })
+                                         .flat()
+                                         .filter(v => !isNaN(v));
+        const avg = trtVals.length ? trtVals.reduce((sum, v) => sum + v, 0) / trtVals.length : 0;
+        return { name, trtNum, mean: avg };
+      });
+
+      const sortedTrts = [...trtMeans].sort((a, b) => a.mean - b.mean);
+      const controlMean = trtMeans[0]?.mean || 1;
+
+      sortedTrts.forEach((trt, sortIdx) => {
+        const rank = sortIdx + 1;
+        const pctDiff = controlMean > 0 ? ((controlMean - trt.mean) / controlMean) * 100 : 0;
         const diffStr = trt.trtNum === 1 ? 'Control (Ref)' : `${pctDiff > 0 ? '+' : ''}${pctDiff.toFixed(2)}%`;
 
         let classification = 'Intermediate';
@@ -2342,8 +2415,8 @@ export class AdvancedReportGenerator {
       const getCvRating = (c) => {
         if (c < 10) return 'Excellent';
         if (c <= 20) return 'Good';
-        if (c <= 30) return 'Acceptable';
-        return 'Poor';
+        if (c <= 30) return 'Moderate';
+        return 'High';
       };
 
       const isSymptom = /deficiency|severity|chlorosis|necrosis|pest|disease|injury|mortality/i.test(f.key) || 
@@ -2462,6 +2535,9 @@ export class AdvancedReportGenerator {
           console.error('Failed to render chart image:', e);
         }
       }
+    }
+    if (chartIndex === 0) {
+      this.workbook.removeWorksheet(ws.id);
     }
   }
 
@@ -2670,8 +2746,14 @@ export class AdvancedReportGenerator {
           if (p.plot || p.plotNumber || this.trial.PlotNumber) {
             infoParts.push(`Plot: ${p.plot || p.plotNumber || this.trial.PlotNumber}`);
           }
-          if (p.block || p.rep || p.replication || this.trial.Replication) {
-            infoParts.push(`Rep: ${p.block || p.rep || p.replication || this.trial.Replication}`);
+          const repVal = p.rep || p.replication || p.block;
+          if (repVal) {
+            infoParts.push(`Rep: ${repVal}`);
+          } else if (this.trial.Replication && !isNaN(this.trial.Replication)) {
+            const totalReps = parseInt(this.trial.Replication);
+            if (totalReps === 1) {
+              infoParts.push(`Rep: 1`);
+            }
           }
           if (p.tag) {
             infoParts.push(`Tag: ${p.tag}`);
@@ -2760,8 +2842,8 @@ export class AdvancedReportGenerator {
       };
 
       const interpretationText = anova.p_value < 0.05
-        ? 'Statistically significant treatment effect (p < 0.05)'
-        : 'No statistically significant treatment effect (p >= 0.05)';
+        ? 'Reject H₀: Statistically significant treatment effect detected (p < 0.05)'
+        : 'Fail to reject H₀: No statistically significant treatment effect detected (p >= 0.05)';
 
       ws.getRow(r).values = [
         f.label,
