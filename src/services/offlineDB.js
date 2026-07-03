@@ -109,6 +109,13 @@ export async function queueForSync(entityType, entityId, operation, data = null)
   return id;
 }
 
+// Helper to parse key to a safe type for Dexie (prevents NaN from throwing DataError)
+function parseKey(val) {
+  if (val === undefined || val === null) return '';
+  const num = Number(val);
+  return isNaN(num) ? String(val) : num;
+}
+
 /**
  * Get pending sync items
  */
@@ -124,7 +131,7 @@ export async function updateSyncStatus(id, status, error = null) {
   await initOfflineDB();
   
   await db.transaction('readwrite', db.syncQueue, async () => {
-    const item = await db.syncQueue.get(Number(id));
+    const item = await db.syncQueue.get(parseKey(id));
     if (item) {
       item.status = status;
       item.lastAttempt = new Date().toISOString();
@@ -141,7 +148,7 @@ export async function updateSyncStatus(id, status, error = null) {
  */
 export async function removeFromSyncQueue(id) {
   await initOfflineDB();
-  await db.syncQueue.delete(Number(id));
+  await db.syncQueue.delete(parseKey(id));
 }
 
 /**
@@ -178,7 +185,7 @@ export async function resolveConflict(id, resolution, mergedData = null) {
   await initOfflineDB();
   
   await db.transaction('readwrite', db.conflicts, async () => {
-    const conflict = await db.conflicts.get(Number(id));
+    const conflict = await db.conflicts.get(parseKey(id));
     if (conflict) {
       conflict.resolved = 1;
       conflict.resolution = resolution; // 'local', 'server', 'merge'
