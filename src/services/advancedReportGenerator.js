@@ -579,6 +579,11 @@ function compileAgronomicInterpretation(observations, activeFields, treatmentNam
     const cvRating = anova.cv < 10 ? 'Excellent' : anova.cv <= 20 ? 'Good' : anova.cv <= 30 ? 'Acceptable' : 'Poor';
     const cvInfo = !isMeanNearZero ? ` (CV: ${anova.cv.toFixed(1)}% - ${cvRating} precision)` : '';
 
+    if (anova.f_value === 0 && anova.p_value === 1) {
+      summaries.push(`For ${f.label}: Measurements were identical across all treatments and replicates, resulting in an F-value of 0.00 and P-value of 1.00.`);
+      return;
+    }
+
     summaries.push(`For ${f.label}: The trial showed ${isSig ? 'statistically significant' : 'no statistically significant'} differences between treatments (p = ${anova.p_value.toFixed(4)})${cvInfo}. The highest mean was observed under ${best.name} (${best.mean.toFixed(2)}, Group '${best.group}'), and the lowest under ${worst.name} (${worst.mean.toFixed(2)}, Group '${worst.group}') ${impStr}`);
   });
 
@@ -2181,5 +2186,15 @@ export class AdvancedReportGenerator {
       ws.getRow(r).values = rowVals;
       r++;
     });
+
+    r += 2;
+    ws.mergeCells(`A${r}:L${r}`);
+    ws.getCell(`A${r}`).value = '* Note: Percentage efficacy values are descriptive only and should not be interpreted as statistically significant unless supported by the ANOVA results.';
+    ws.getCell(`A${r}`).font = { italic: true, size: 9, color: { rgb: '7F8C8D' } };
+    r++;
+
+    ws.mergeCells(`A${r}:L${r}`);
+    ws.getCell(`A${r}`).value = '* Note: F-value of 0.00 and P-value of 1.00 indicate identical measurements across all treatments and replicates (zero variance within and between groups).';
+    ws.getCell(`A${r}`).font = { italic: true, size: 9, color: { rgb: '7F8C8D' } };
   }
 }
