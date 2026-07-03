@@ -1,3 +1,359 @@
+/* ============================================
+   MIKLENS TRIAL MANAGER - MOBILE FIRST STYLES
+   ============================================ */
+
+:root {
+  /* Safe area variables for notched devices */
+  --sat: env(safe-area-inset-top);
+  --sab: env(safe-area-inset-bottom);
+  --sal: env(safe-area-inset-left);
+  --sar: env(safe-area-inset-right);
+  
+  /* Category colors */
+  --primary-color: #059669;
+  --primary-light: #d1fae5;
+  --primary-hover-color: #047857;
+  
+  /* Brand colors */
+  --accent: #059669;
+  --accent-bg: #ecfdf5;
+  --accent-border: #6ee7b7;
+  --text-h: #0f172a;
+  --text-m: #475569;
+  --text-l: #94a3b8;
+  --border: #e2e8f0;
+  --social-bg: #f1f5f9;
+  --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+}
+
+/* Reset and base */
+*, *::before, *::after {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: linear-gradient(135deg, var(--bg-gradient-1, #ecfdf5) 0%, var(--bg-gradient-2, #d1fae5) 50%, var(--bg-gradient-3, #ecfdf5) 100%);
+  background-attachment: fixed;
+  color: var(--text-h);
+  min-height: 100vh;
+  overflow-x: hidden;
+  overscroll-behavior: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* PWA standalone mode */
+@media (display-mode: standalone) {
+  body {
+    overscroll-behavior: none;
+  }
+  
+  /* Hide browser UI elements */
+  :root {
+    --desktop-sidebar-width: 0px;
+  }
+}
+
+/* ============================================
+   MOBILE OPTIMIZATIONS
+   ============================================ */
+
+/* Touch-friendly tap targets */
+@media (max-width: 768px) {
+  button, 
+  [role="button"],
+  .tap-target {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 12px 16px;
+  }
+  
+  /* Larger touch targets for primary actions */
+  .btn-primary,
+  .btn-emerald,
+  [class*="bg-emerald"] button {
+    min-height: 48px;
+  }
+  
+  /* Input fields - larger on mobile */
+  input, 
+  select, 
+  textarea {
+    min-height: 48px;
+    font-size: 16px !important; /* Prevents iOS zoom */
+  }
+  
+  /* Cards - full width on mobile */
+  .card {
+    margin-left: -8px;
+    margin-right: -8px;
+    border-radius: 0;
+    box-shadow: none;
+    border-left: none;
+    border-right: none;
+  }
+  
+  /* Page padding */
+  .page-content {
+    padding: 16px;
+    padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+  }
+  
+  /* Bottom navigation safe area */
+  .bottom-nav {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+
+/* ============================================
+   BOTTOM NAVIGATION ENHANCEMENTS
+   ============================================ */
+.mobile-bottom-nav {
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-top: 1px solid rgba(0, 0, 0, 0.05);
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.08);
+}
+
+/* Floating action button */
+.fab-button {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  box-shadow: 0 4px 12px rgba(5, 150, 105, 0.4);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.fab-button:active {
+  transform: scale(0.95);
+  box-shadow: 0 2px 8px rgba(5, 150, 105, 0.3);
+}
+
+/* ============================================
+   NOTCH / DYNAMIC ISLAND HANDLING
+   ============================================ */
+.has-notch {
+  padding-top: env(safe-area-inset-top);
+}
+
+.has-notch-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Safe area for top header */
+.app-header {
+  padding-top: max(12px, env(safe-area-inset-top, 0px));
+}
+
+/* Safe area for bottom elements */
+.app-footer,
+.bottom-nav,
+.floating-pwa-status {
+  padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
+}
+
+/* ============================================
+   PWA STATUS COMPONENT POSITIONS
+   ============================================ */
+.floating-pwa-status {
+  bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+}
+
+@media (min-width: 768px) {
+  .floating-pwa-status {
+    bottom: 24px;
+  }
+}
+
+/* ============================================
+   ANIMATIONS
+   ============================================ */
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.animate-slide-up {
+  animation: slideUp 0.3s ease-out;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out;
+}
+
+/* ============================================
+   GLOBAL MOBILE LAYOUT FIXES
+   ============================================ */
+
+/* Prevent horizontal scroll */
+body {
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+/* Ensure proper height on mobile */
+#root {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Mobile-friendly scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* ============================================
+   BUTTON & INPUT OPTIMIZATIONS
+   ============================================ */
+
+/* Touch-friendly buttons */
+button, 
+[role="button"],
+.btn,
+[class*="bg-"] button {
+  min-height: 44px;
+  min-width: 44px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Prevent zoom on input focus (iOS) */
+input, 
+select, 
+textarea,
+[type="text"],
+[type="email"],
+[type="password"],
+[type="number"],
+[type="search"],
+[type="tel"],
+[type="url"] {
+  font-size: 16px !important;
+  touch-action: manipulation;
+}
+
+/* Remove default iOS input styles */
+input, select, textarea {
+  -webkit-appearance: none;
+  appearance: none;
+  border-radius: 12px;
+}
+
+/* ============================================
+   CARD LAYOUT FIXES
+   ============================================ */
+
+@media (max-width: 640px) {
+  .card,
+  [class*="rounded-"][class*="bg-"][class*="p-"] {
+    margin-left: -8px;
+    margin-right: -8px;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+  }
+}
+
+/* ============================================
+   TABLE RESPONSIVE FIXES
+   ============================================ */
+
+@media (max-width: 768px) {
+  table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  /* Force cards layout on mobile */
+  .grid {
+    display: flex;
+    flex-direction: column;
+  }
+  
+  /* Fix flex containers */
+  .flex {
+    flex-wrap: wrap;
+  }
+  
+  .flex > * {
+    flex: 1 1 100%;
+    max-width: 100%;
+  }
+}
+
+/* ============================================
+   MODAL FIXES
+   ============================================ */
+
+@media (max-width: 640px) {
+  [class*="fixed"][class*="inset-0"][class*="z-"] > div,
+  .modal,
+  [role="dialog"] {
+    margin: 8px !important;
+    max-width: calc(100vw - 16px) !important;
+    max-height: calc(100vh - 32px) !important;
+  }
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ============================================
+   COUNTER (Legacy)
+   ============================================ */
 .counter {
   font-size: 16px;
   padding: 5px 10px;
@@ -7,14 +363,15 @@
   border: 2px solid transparent;
   transition: border-color 0.3s;
   margin-bottom: 24px;
+}
 
-  &:hover {
-    border-color: var(--accent-border);
-  }
-  &:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
+.counter:hover {
+  border-color: var(--accent-border);
+}
+
+.counter:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .hero {

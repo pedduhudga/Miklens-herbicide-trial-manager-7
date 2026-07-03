@@ -1,64 +1,189 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Icon Generator</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PWA Icon Generator</title>
+  <style>
+    body { font-family: system-ui; max-width: 800px; margin: 40px auto; padding: 20px; }
+    h1 { color: #059669; }
+    .icon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 16px; margin: 20px 0; }
+    .icon-item { text-align: center; padding: 16px; background: #f8fafc; border-radius: 12px; }
+    .icon-item img, .icon-item canvas { width: 64px; height: 64px; margin-bottom: 8px; }
+    button { background: #059669; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 16px; margin: 10px 5px 10px 0; }
+    button:hover { background: #047857; }
+    button:disabled { background: #94a3b8; cursor: not-allowed; }
+    .status { padding: 12px; border-radius: 8px; margin: 10px 0; }
+    .status.success { background: #d1fae5; color: #065f46; }
+    .status.error { background: #fee2e2; color: #991b1b; }
+    .info { background: #e0f2fe; color: #075985; padding: 12px; border-radius: 8px; margin: 10px 0; }
+  </style>
 </head>
 <body>
-    <h3>PWA Icon Generator</h3>
-    <p>This will generate PNG icons from SVG. Open browser dev tools and run the script below:</p>
-    
-    <script>
-    // Icon generator for PWA
-    const sizes = [72, 96, 128, 144, 152, 192, 384, 512];
-    
-    function generateIcon(size) {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        canvas.width = size;
-        canvas.height = size;
-        
-        // Create SVG icon
-        const svg = `
-        <svg width="${size}" height="${size}" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <rect width="32" height="32" rx="6" fill="#059669"/>
-            <path d="M8 12C8 10.8954 8.89543 10 10 10H22C23.1046 10 24 10.8954 24 12V20C24 21.1046 23.1046 22 22 22H10C8.89543 22 8 21.1046 8 20V12Z" fill="white"/>
-            <path d="M10 14H14V18H10V14Z" fill="#059669"/>
-            <path d="M16 14H20V16H16V14Z" fill="#059669"/>
-            <path d="M16 18H22V20H16V18Z" fill="#059669"/>
-        </svg>`;
-        
+  <h1>🔬 PWA Icon Generator</h1>
+  <p>Click the button below to generate all required PWA icons. Icons will be downloaded as a ZIP file.</p>
+  
+  <div class="info">
+    <strong>Instructions:</strong><br>
+    1. Click "Generate Icons" below<br>
+    2. A ZIP file will download automatically<br>
+    3. Extract the contents to <code>public/icons/</code> folder<br>
+    4. Also create a <code>public/screenshots/</code> folder for app screenshots
+  </div>
+  
+  <button id="generateBtn" onclick="generateAndDownload()">Generate & Download Icons</button>
+  <button onclick="generateAllIcons()">Generate to Console (Devs)</button>
+  
+  <div id="status"></div>
+  
+  <div class="icon-grid" id="preview"></div>
+
+  <script>
+    // SVG template for the icon
+    const iconSvg = `<svg width="{SIZE}" height="{SIZE}" viewBox="0 0 {SIZE} {SIZE}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#059669"/>
+      <stop offset="100%" style="stop-color:#047857"/>
+    </linearGradient>
+  </defs>
+  <rect width="{SIZE}" height="{SIZE}" rx="{RADIUS}" fill="url(#bg)"/>
+  <g fill="none" stroke="white" stroke-width="{STROKE}" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M{S_MUL*176} {S_MUL*160} L{S_MUL*256} {S_MUL*96} L{S_MUL*336} {S_MUL*160} L{S_MUL*336} {S_MUL*400} C{S_MUL*336} {S_MUL*424} {S_MUL*288} {S_MUL*448} {S_MUL*256} {S_MUL*448} C{S_MUL*224} {S_MUL*448} {S_MUL*176} {S_MUL*424} {S_MUL*176} {S_MUL*400} Z"/>
+    <path d="M{S_MUL*220} {S_MUL*160} L{S_MUL*220} {S_MUL*112} L{S_MUL*292} {S_MUL*112} L{S_MUL*292} {S_MUL*160}"/>
+    <path d="M{S_MUL*196} {S_MUL*320} C{S_MUL*196} {S_MUL*350} {S_MUL*220} {S_MUL*380} {S_MUL*256} {S_MUL*380} C{S_MUL*292} {S_MUL*380} {S_MUL*316} {S_MUL*350} {S_MUL*316} {S_MUL*320}" stroke="#34d399"/>
+    <circle cx="{S_MUL*236}" cy="{S_MUL*280}" r="{S_MUL*12}" fill="#34d399" stroke="none"/>
+    <circle cx="{S_MUL*276}" cy="{S_MUL*300}" r="{S_MUL*8}" fill="#34d399" stroke="none"/>
+    <circle cx="{S_MUL*256}" cy="{S_MUL*250}" r="{S_MUL*10}" fill="#34d399" stroke="none"/>
+  </g>
+</svg>`;
+
+    const sizes = [
+      { name: 'icon-16x16.png', size: 16 },
+      { name: 'icon-32x32.png', size: 32 },
+      { name: 'icon-72x72.png', size: 72 },
+      { name: 'icon-96x96.png', size: 96 },
+      { name: 'icon-128x128.png', size: 128 },
+      { name: 'icon-144x144.png', size: 144 },
+      { name: 'icon-150x150.png', size: 150 },
+      { name: 'icon-152x152.png', size: 152 },
+      { name: 'icon-167x167.png', size: 167 },
+      { name: 'icon-180x180.png', size: 180 },
+      { name: 'icon-192x192.png', size: 192 },
+      { name: 'icon-310x310.png', size: 310 },
+      { name: 'icon-310x150.png', size: 310, height: 150 },
+      { name: 'icon-384x384.png', size: 384 },
+      { name: 'icon-512x512.png', size: 512 },
+    ];
+
+    async function svgToPng(svgString, width, height) {
+      return new Promise((resolve) => {
         const img = new Image();
-        const svgBlob = new Blob([svg], { type: 'image/svg+xml' });
-        const url = URL.createObjectURL(svgBlob);
+        const blob = new Blob([svgString], { type: 'image/svg+xml' });
+        const url = URL.createObjectURL(blob);
         
-        img.onload = function() {
-            ctx.drawImage(img, 0, 0, size, size);
-            
-            canvas.toBlob(function(blob) {
-                const link = document.createElement('a');
-                link.download = `icon-${size}x${size}.png`;
-                link.href = URL.createObjectURL(blob);
-                link.click();
-                URL.revokeObjectURL(link.href);
-            }, 'image/png');
-            
-            URL.revokeObjectURL(url);
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          URL.revokeObjectURL(url);
+          
+          canvas.toBlob((blob) => resolve(blob), 'image/png');
         };
         
         img.src = url;
+      });
     }
-    
-    // Generate all icon sizes
+
+    function generateSvg(size, height) {
+      const s = size / 512;
+      const h = height || size;
+      const hRatio = h / size;
+      const radius = size * 0.1875; // 96/512 for rounded corners
+      const stroke = Math.max(2, size * 0.047); // 24/512
+      return iconSvg
+        .replace(/{SIZE}/g, size)
+        .replace(/{RADIUS}/g, radius)
+        .replace(/{STROKE}/g, stroke)
+        .replace(/{S_MUL}/g, s);
+    }
+
+    async function generateAndDownload() {
+      const btn = document.getElementById('generateBtn');
+      btn.disabled = true;
+      btn.textContent = 'Generating...';
+      
+      const status = document.getElementById('status');
+      status.innerHTML = '<div class="status">Generating icons... please wait.</div>';
+      
+      try {
+        // Use JSZip if available, otherwise download individually
+        let zip;
+        try {
+          // Check if JSZip is loaded
+          if (typeof JSZip === 'undefined') {
+            // Load JSZip dynamically
+            await new Promise((resolve, reject) => {
+              const script = document.createElement('script');
+              script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+              script.onload = resolve;
+              script.onerror = reject;
+              document.head.appendChild(script);
+            });
+          }
+          zip = new JSZip();
+        } catch (e) {
+          console.warn('JSZip not available, will download individually');
+        }
+
+        for (const { name, size, height } of sizes) {
+          const svg = generateSvg(size, height);
+          const pngBlob = await svgToPng(svg, size, height || size);
+          
+          if (zip) {
+            zip.file(name, pngBlob);
+          }
+          
+          // Show preview
+          const preview = document.getElementById('preview');
+          const div = document.createElement('div');
+          div.className = 'icon-item';
+          const img = document.createElement('img');
+          img.src = URL.createObjectURL(pngBlob);
+          div.appendChild(img);
+          const label = document.createElement('div');
+          label.textContent = name;
+          label.style.fontSize = '12px';
+          div.appendChild(label);
+          preview.appendChild(div);
+        }
+
+        if (zip) {
+          const content = await zip.generateAsync({ type: 'blob' });
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(content);
+          link.download = 'pwa-icons.zip';
+          link.click();
+          status.innerHTML = '<div class="status success">✅ Icons generated! Downloaded pwa-icons.zip</div>';
+        } else {
+          status.innerHTML = '<div class="status">Generated previews above. For download, open this page in a Node.js environment.</div>';
+        }
+      } catch (err) {
+        status.innerHTML = `<div class="status error">❌ Error: ${err.message}</div>`;
+        console.error(err);
+      }
+      
+      btn.disabled = false;
+      btn.textContent = 'Generate & Download Icons';
+    }
+
     function generateAllIcons() {
-        sizes.forEach((size, index) => {
-            setTimeout(() => generateIcon(size), index * 200);
-        });
+      console.log('Icon generation function - use this in Node.js with sharp:');
+      console.log('Run: node generate-pwa-icons.cjs');
+      alert('For Node.js icon generation, run: node generate-pwa-icons.cjs\n\nThis browser version is for preview only.');
     }
-    
-    console.log('Run generateAllIcons() to create all PWA icons');
-    </script>
-    
-    <button onclick="generateAllIcons()">Generate All Icons</button>
-    <p><em>Note: Icons will be downloaded to your Downloads folder. Move them to public/icons/ directory.</em></p>
+  </script>
 </body>
 </html>

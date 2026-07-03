@@ -1,7 +1,14 @@
 // Service Worker for Miklens Trial Manager PWA
+// Version: 2.0.0 - Enhanced caching strategies
+
+const CACHE_NAME = 'trial-manager-v2.0.0';
+const STATIC_CACHE = 'static-v2.0.0';
+const DYNAMIC_CACHE = 'dynamic-v2.0.0';
+const IMAGE_CACHE = 'images-v2.0.0';
+
+// IndexedDB setup via Dexie for offline data
 importScripts('https://unpkg.com/dexie@4.4.4/dist/dexie.js');
 
-// Define Dexie DB inside Service Worker matching the app definition
 const db = new self.Dexie('MiklensTrialManagerDexieDB');
 db.version(1).stores({
   trials: 'ID, ProjectID, Date, LastModified',
@@ -16,110 +23,253 @@ db.version(1).stores({
   settings: 'ID'
 });
 
-const CACHE_NAME = 'trial-manager-v1.0.0';
-const STATIC_CACHE = 'static-v1.0.0';
-const DYNAMIC_CACHE = 'dynamic-v1.0.0';
-
-// Assets to cache on install
-const STATIC_ASSETS = [
+// Core assets to cache immediately on install
+const PRECACHE_URLS = [
   '/',
   '/index.html',
-  '/manifest.json',
-  // Add critical CSS and JS files that will be generated during build
+  './manifest.json',
+  './favicon.svg',
 ];
 
-// Install event - cache static assets
+// Install event - cache core assets
 self.addEventListener('install', (event) => {
-  console.log('[SW] Installing service worker');
+  console.log('[SW] Installing service worker v2.0.0');
   event.waitUntil(
     caches.open(STATIC_CACHE).then((cache) => {
-      console.log('[SW] Caching static assets');
-      return cache.addAll(STATIC_ASSETS.map(url => new Request(url, { cache: 'reload' })));
+      console.log('[SW] Precaching core assets');
+      return cache.addAll(PRECACHE_URLS.map(url => new Request(url, { cache: 'reload' })));
     }).catch(error => {
       console.warn('[SW] Failed to cache some static assets:', error);
     })
   );
-  // Force activation immediately
+  // Activate immediately
   self.skipWaiting();
+  console.log('[SW] Service worker installed and ready');
 });
 
-// Activate event - clean old caches
+// Activate event - cleanup old caches
 self.addEventListener('activate', (event) => {
   console.log('[SW] Activating service worker');
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((cacheName) => {
-          if (cacheName !== STATIC_CACHE && cacheName !== DYNAMIC_CACHE) {
+          // Clean up old version caches
+          if (cacheName !== STATIC_CACHE && 
+              cacheName !== DYNAMIC_CACHE && 
+              cacheName !== IMAGE_CACHE) {
             console.log('[SW] Deleting old cache:', cacheName);
             return caches.delete(cacheName);
           }
         })
       );
     }).then(() => {
-      // Take control of all clients immediately
+      console.log('[SW] Claiming all clients');
       return self.clients.claim();
     })
   );
 });
 
-// Fetch event - serve from cache with network fallback
+// Fetch event - intelligent caching strategies
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
-
-  // Skip cross-origin requests and chrome-extension requests
-  if (url.origin !== location.origin || request.url.startsWith('chrome-extension://')) {
-    return;
-  }
 
   // Skip non-GET requests
   if (request.method !== 'GET') {
     return;
   }
 
-  event.respondWith(
-    caches.match(request).then((cachedResponse) => {
-      if (cachedResponse) {
-        // Return cached version and update cache in background
-        fetchAndCache(request);
-        return cachedResponse;
-      }
+  // Skip chrome-extension and other non-http(s) requests
+  if (!url.protocol.startsWith('http')) {
+    return;
+  }
 
-      // Not in cache, fetch from network
-      return fetchAndCache(request);
-    }).catch(() => {
-      // Network failed, return offline fallback for navigation requests
-      if (request.mode === 'navigate') {
-        return caches.match('/index.html');
-      }
-    })
-  );
+  // Handle different resource types with different strategies
+  if (isStaticAsset(url)) {
+    // Static assets (JS, CSS, fonts) - Cache First
+    event.respondWith(cacheFirst(request));
+  } else if (isImage(url)) {
+    // Images - Cache First with network fallback
+    event.respondWith(cacheFirst(request, IMAGE_CACHE));
+  } else if (isApiRequest(url)) {
+    // API requests - Network First (always try fresh)
+    event.respondWith(networkFirst(request, DYNAMIC_CACHE));
+  } else {
+    // Navigation and other requests - Stale While Revalidate
+    event.respondWith(staleWhileRevalidate(request, DYNAMIC_CACHE));
+  }
 });
 
-// Helper function to fetch and cache responses
-async function fetchAndCache(request) {
+// Helper: Check if request is for static asset
+function isStaticAsset(url) {
+  const staticExtensions = ['.js', '.css', '.woff', '.woff2', '.ttf', '.eot', '.svg'];
+  return staticExtensions.some(ext => url.pathname.endsWith(ext)) ||
+         url.pathname.includes('/static/') ||
+         url.pathname.includes('/icons/');
+}
+
+// Helper: Check if request is for image
+function isImage(url) {
+  const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico'];
+  return imageExtensions.some(ext => url.pathname.toLowerCase().endsWith(ext)) ||
+         url.href.includes('data:image') ||
+         url.href.includes('blob:');
+}
+
+// Helper: Check if request is API call
+function isApiRequest(url) {
+  return url.href.includes('googleapis.com') ||
+         url.href.includes('firebaseio.com') ||
+         url.href.includes('script.google.com') ||
+         url.href.includes('/api/');
+}
+
+// Strategy: Cache First - Check cache, fallback to network
+async function cacheFirst(request, cacheName = STATIC_CACHE) {
+  const cachedResponse = await caches.match(request);
+  if (cachedResponse) {
+    // Update cache in background
+    fetchAndCache(request, cacheName);
+    return cachedResponse;
+  }
+  
   try {
-    const response = await fetch(request);
-    
-    // Only cache successful responses
-    if (response.status === 200) {
-      const cache = await caches.open(DYNAMIC_CACHE);
-      // Clone the response because it can only be consumed once
-      cache.put(request, response.clone());
+    const networkResponse = await fetch(request);
+    if (networkResponse.ok) {
+      const cache = await caches.open(cacheName);
+      cache.put(request, networkResponse.clone());
     }
-    
-    return response;
+    return networkResponse;
   } catch (error) {
-    console.warn('[SW] Fetch failed:', error);
+    console.warn('[SW] Cache First failed for:', request.url);
+    // Return offline fallback for images
+    if (isImage(new URL(request.url))) {
+      return caches.match('/icons/icon-192x192.png');
+    }
     throw error;
   }
 }
 
-// Background sync for offline data
+// Strategy: Network First - Try network, fallback to cache
+async function networkFirst(request, cacheName = DYNAMIC_CACHE) {
+  try {
+    const networkResponse = await fetch(request);
+    if (networkResponse.ok) {
+      const cache = await caches.open(cacheName);
+      cache.put(request, networkResponse.clone());
+    }
+    return networkResponse;
+  } catch (error) {
+    console.log('[SW] Network failed, trying cache for:', request.url);
+    const cachedResponse = await caches.match(request);
+    if (cachedResponse) {
+      return cachedResponse;
+    }
+    throw error;
+  }
+}
+
+// Strategy: Stale While Revalidate - Return cached, update in background
+async function staleWhileRevalidate(request, cacheName = DYNAMIC_CACHE) {
+  const cachedResponse = await caches.match(request);
+  
+  const fetchPromise = fetch(request).then((networkResponse) => {
+    if (networkResponse.ok) {
+      caches.open(cacheName).then(cache => {
+        cache.put(request, networkResponse.clone());
+      });
+    }
+    return networkResponse;
+  }).catch(() => null);
+  
+  // Return cached immediately, update if network succeeds
+  return cachedResponse || fetchPromise;
+}
+
+// Helper: Fetch and cache a request
+async function fetchAndCache(request, cacheName) {
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      const cache = await caches.open(cacheName);
+      cache.put(request, response.clone());
+    }
+    return response;
+  } catch (error) {
+    console.warn('[SW] Fetch failed:', error);
+  }
+}
+
+// Background Sync for offline data
 self.addEventListener('sync', (event) => {
   console.log('[SW] Background sync:', event.tag);
-  if (event.tag === 'background-sync-trials') {
+  if (event.tag.startsWith('background-sync')) {
+    event.waitUntil(syncTrialData());
+  }
+});
+
+// Push notifications
+self.addEventListener('push', (event) => {
+  if (!event.data) return;
+  
+  const data = event.data.json();
+  const options = {
+    body: data.body || 'New update available',
+    icon: './icons/icon-192x192.png',
+    badge: './icons/icon-72x72.png',
+    vibrate: [100, 50, 100],
+    data: {
+      url: data.url || '/',
+      dateOfArrival: Date.now(),
+    },
+    actions: [
+      { action: 'open', title: 'Open App' },
+      { action: 'dismiss', title: 'Dismiss' }
+    ],
+    tag: data.tag || 'default',
+    renotify: true,
+  };
+  
+  event.waitUntil(
+    self.registration.showNotification(data.title || 'Trial Manager', options)
+  );
+});
+
+// Notification click handling
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  
+  if (event.action === 'open' || !event.action) {
+    event.waitUntil(
+      clients.openWindow(event.notification.data?.url || '/')
+    );
+  }
+});
+
+// Message handling from main app
+self.addEventListener('message', (event) => {
+  const { type, data } = event.data || {};
+  
+  if (type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  } else if (type === 'CACHE_URL') {
+    // Allow app to request caching of specific URLs
+    caches.open(DYNAMIC_CACHE).then(cache => {
+      cache.add(data.url);
+    });
+  } else if (type === 'CLEAR_CACHE') {
+    // Clear all caches (e.g., on logout or data reset)
+    caches.keys().then(names => Promise.all(names.map(c => caches.delete(c))));
+  } else if (type === 'GET_VERSION') {
+    // Return current SW version
+    event.ports[0]?.postMessage({ version: CACHE_NAME });
+  }
+});
+
+// Periodic background sync (if supported)
+self.addEventListener('periodicsync', (event) => {
+  if (event.tag === 'sync-data') {
     event.waitUntil(syncTrialData());
   }
 });
@@ -129,14 +279,12 @@ async function syncTrialData() {
     console.log('[SW] Syncing trial data via Background Sync API...');
     const clientsList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     
-    // Notify foreground client to trigger its sync logic if open
-    let notifiedClient = false;
+    // Notify foreground client to trigger its sync logic
     for (const client of clientsList) {
       client.postMessage({ type: 'TRIGGER_SYNC' });
-      notifiedClient = true;
     }
     
-    // Open the local Dexie DB to process background sync directly if no foreground client handles it
+    // Process background sync directly if needed
     await db.open();
     const appSettingsRecord = await db.settings.get('appSettings');
     if (!appSettingsRecord || !appSettingsRecord.settings?.scriptUrl) {
@@ -156,7 +304,6 @@ async function syncTrialData() {
     console.log(`[SW] Found ${filterPending.length} pending items to sync directly.`);
 
     for (const item of filterPending) {
-      // Mark as uploading in Dexie so active app state updates reflect this
       await db.syncQueue.update(item.id, { status: 'uploading', lastAttempt: new Date().toISOString() });
       clientsList.forEach(c => c.postMessage({ type: 'SYNC_PROGRESS', id: item.id, status: 'uploading' }));
 
@@ -200,7 +347,6 @@ async function syncTrialData() {
           throw new Error(errorMsg);
         }
 
-        // Successfully synced, remove from queue
         await db.syncQueue.delete(item.id);
         clientsList.forEach(c => c.postMessage({ type: 'SYNC_SUCCESS', id: item.id }));
         console.log(`[SW] Successfully synced item: ${item.action}`);
@@ -221,52 +367,4 @@ async function syncTrialData() {
   }
 }
 
-// Push notifications (if needed in future)
-self.addEventListener('push', (event) => {
-  if (!event.data) return;
-  
-  const options = {
-    body: event.data.text(),
-    icon: './icons/icon-192x192.png',
-    badge: './icons/icon-72x72.png',
-    vibrate: [100, 50, 100],
-    data: {
-      dateOfArrival: Date.now(),
-      primaryKey: '1'
-    },
-    actions: [
-      {
-        action: 'explore',
-        title: 'Open App',
-        icon: './icons/icon-192x192.png'
-      },
-      {
-        action: 'close',
-        title: 'Close',
-        icon: './icons/icon-192x192.png'
-      }
-    ]
-  };
-  
-  event.waitUntil(
-    self.registration.showNotification('Trial Manager', options)
-  );
-});
-
-// Notification click handling
-self.addEventListener('notificationclick', (event) => {
-  event.notification.close();
-  
-  if (event.action === 'explore') {
-    event.waitUntil(
-      clients.openWindow('/')
-    );
-  }
-});
-
-// Message handling - skip waiting when requested
-self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SKIP_WAITING') {
-    self.skipWaiting();
-  }
-});
+console.log('[SW] Service Worker loaded');

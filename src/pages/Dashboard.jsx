@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { safeJsonParse } from '../utils/helpers.js';
 import SprayAdvisor from '../components/SprayAdvisor.jsx';
 import SmartAlerts from '../components/SmartAlerts.jsx';
+import WeatherDashboard from '../components/WeatherDashboard.jsx';
 import {
   Activity, FolderOpen, FlaskConical, CheckCircle, Plus,
   TrendingUp, AlertCircle, Leaf, BarChart3, Search, ChevronRight,
@@ -410,6 +411,15 @@ export default function Dashboard({ onMenuClick }) {
               )}
           </div>
           )}
+
+          {/* ── Weather Dashboard ──────────────────────────────────────── */}
+          <div className="mb-6">
+            <WeatherDashboard 
+              trials={trials} 
+              activeCategory={activeCategory}
+              getAppState={getAppState}
+            />
+          </div>
 
           {/* ── Top Performing Formulations by Weed ───────────────── */}
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">

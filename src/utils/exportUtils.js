@@ -743,6 +743,231 @@ export function exportCSV(data, filename, category = null) {
     saveAs(blob, filename + '.csv');
 }
 
+// ── Excel Export with Multiple Sheets ────────────────────────────────────────
+export function exportToExcel(dataByEntity, filename = 'Miklens_Export') {
+    // dataByEntity: { trials: [...], projects: [...], formulations: [...], ingredients: [...] }
+    if (!dataByEntity || typeof dataByEntity !== 'object') {
+        console.error('exportToExcel: Invalid data object');
+        return;
+    }
+    
+    // Use SheetJS (xlsx) if available globally
+    if (typeof XLSX === 'undefined') {
+        console.error('SheetJS (XLSX) not loaded. Load it from CDN first.');
+        // Fallback to CSV export
+        const entries = Object.entries(dataByEntity).filter(([_, arr]) => Array.isArray(arr) && arr.length);
+        if (entries.length > 0) {
+            const [key, data] = entries[0];
+            exportCSV(data, `${filename}_${key}`);
+        }
+        return;
+    }
+    
+    const workbook = XLSX.utils.book_new();
+    
+    // Define column widths for each entity type
+    const colWidths = {
+        trials: [
+            { wch: 8 },  // ID
+            { wch: 30 }, // FormulationName
+            { wch: 15 }, // Date
+            { wch: 20 }, // Location
+            { wch: 15 }, // ProjectID
+            { wch: 15 }, // Dosage
+            { wch: 15 }, // Result
+            { wch: 12 }, // Category
+            { wch: 25 }, // InvestigatorName
+            { wch: 15 }, // Temperature
+            { wch: 15 }, // Humidity
+            { wch: 15 }, // Windspeed
+            { wch: 30 }, // Notes
+        ],
+        projects: [
+            { wch: 8 },  // ID
+            { wch: 30 }, // Name
+            { wch: 15 }, // Date
+            { wch: 20 }, // Location
+            { wch: 12 }, // Category
+            { wch: 25 }, // Description
+        ],
+        formulations: [
+            { wch: 8 },  // ID
+            { wch: 30 }, // FormulationName
+            { wch: 20 }, // ActiveIngredient
+            { wch: 15 }, // Dosage
+            { wch: 20 }, // Manufacturer
+            { wch: 12 }, // Category
+            { wch: 15 }, // Cost
+        ],
+        ingredients: [
+            { wch: 8 },  // ID
+            { wch: 25 }, // Name
+            { wch: 15 }, // Category
+            { wch: 15 }, // Cost
+            { wch: 20 }, // Supplier
+        ],
+        organisations: [
+            { wch: 8 },  // ID
+            { wch: 30 }, // Name
+            { wch: 25 }, // Address
+            { wch: 20 }, // Contact
+        ],
+    };
+    
+    // Process each entity type
+    Object.entries(dataByEntity).forEach(([entityKey, data]) => {
+        if (!Array.isArray(data) || data.length === 0) return;
+        
+        // Transform data to handle nested objects and JSON strings
+        const transformedData = data.map(item => {
+            const row = { ...item };
+            
+            // Handle EfficacyDataJSON - convert to readable format
+            if (row.EfficacyDataJSON) {
+                try {
+                    const parsed = typeof row.EfficacyDataJSON === 'string' 
+                        ? JSON.parse(row.EfficacyDataJSON) 
+                        : row.EfficacyDataJSON;
+                    if (Array.isArray(parsed)) {
+                        // Extract key metrics
+                        const firstObs = parsed[0] || {};
+                        row['Efficacy_Obs_Count'] = parsed.length;
+                        row['Efficacy_First_DAA'] = firstObs.daa ?? firstObs.day ?? '';
+                        row['Efficacy_First_Value'] = firstObs.weedCover ?? firstObs.diseaseSeverity ?? firstObs.pestCount ?? firstObs.visualVigor ?? '';
+                        row['Efficacy_Data'] = JSON.stringify(parsed).substring(0, 500); // Truncate for Excel
+                    }
+                } catch (e) {
+                    row['Efficacy_Data'] = row.EfficacyDataJSON;
+                }
+                delete row.EfficacyDataJSON;
+            }
+            
+            // Handle PhotoURLs
+            if (row.PhotoURLs) {
+                try {
+                    const parsed = typeof row.PhotoURLs === 'string' 
+                        ? JSON.parse(row.PhotoURLs) 
+                        : row.PhotoURLs;
+                    row['Photo_Count'] = Array.isArray(parsed) ? parsed.length : 0;
+                } catch (e) {}
+            }
+            
+            // Handle Blocks
+            if (row.Blocks) {
+                try {
+                    const parsed = typeof row.Blocks === 'string' 
+                        ? JSON.parse(row.Blocks) 
+                        : row.Blocks;
+                    row['Block_Count'] = Array.isArray(parsed) ? parsed.length : 0;
+                } catch (e) {}
+            }
+            
+            // Clean up other large JSON fields
+            ['EfficacyDataJSON', 'Blocks', 'PhotoURLs', 'Auth', 'syncItem'].forEach(key => {
+                if (row[key] && typeof row[key] === 'string' && row[key].length > 200) {
+                    row[key] = row[key].substring(0, 200) + '...';
+                }
+            });
+            
+            return row;
+        });
+        
+        // Create worksheet
+        const worksheet = XLSX.utils.json_to_sheet(transformedData);
+        
+        // Set column widths if available
+        if (colWidths[entityKey]) {
+            worksheet['!cols'] = colWidths[entityKey];
+        }
+        
+        // Add sheet to workbook
+        const sheetName = entityKey.charAt(0).toUpperCase() + entityKey.slice(1);
+        XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+    });
+    
+    // Generate and download
+    const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    saveAs(blob, `${filename}_${new Date().toISOString().split('T')[0]}.xlsx`);
+}
+
+// ── Export Trial Data with Observations ─────────────────────────────────────
+export function exportTrialObservations(trials, category, filename = 'TrialObservations') {
+    if (!trials || !trials.length) return;
+    
+    if (typeof XLSX === 'undefined') {
+        console.error('SheetJS (XLSX) not loaded');
+        return;
+    }
+    
+    const workbook = XLSX.utils.book_new();
+    
+    // Prepare observation data - one row per observation
+    const observations = [];
+    
+    trials.forEach(trial => {
+        const effData = trial.EfficacyDataJSON 
+            ? (typeof trial.EfficacyDataJSON === 'string' ? JSON.parse(trial.EfficacyDataJSON) : trial.EfficacyDataJSON)
+            : [];
+        
+        if (!Array.isArray(effData) || effData.length === 0) {
+            // Still add trial row even with no observations
+            observations.push({
+                Trial_ID: trial.ID,
+                FormulationName: trial.FormulationName,
+                Date: trial.Date,
+                Location: trial.Location,
+                Category: trial.Category || category,
+                DAA: '',
+                Observation_Index: 0,
+                Primary_Value: '',
+            });
+        } else {
+            effData.forEach((obs, idx) => {
+                observations.push({
+                    Trial_ID: trial.ID,
+                    FormulationName: trial.FormulationName,
+                    Date: trial.Date,
+                    Location: trial.Location,
+                    Category: trial.Category || category,
+                    DAA: obs.daa ?? obs.day ?? obs.DAA ?? '',
+                    Observation_Index: idx + 1,
+                    // Primary observation value based on category
+                    Primary_Value: obs.weedCover ?? obs.diseaseSeverity ?? obs.pestCount ?? obs.visualVigor ?? obs.overallVigor ?? '',
+                    // Include all observation fields
+                    WCE: obs.wce ?? obs.WCE ?? '',
+                    Control_Pct: obs.controlPct ?? obs.control ?? '',
+                    Weed_Cover: obs.weedCover ?? '',
+                    Disease_Severity: obs.diseaseSeverity ?? '',
+                    Disease_Incidence: obs.diseaseIncidence ?? '',
+                    Pest_Count: obs.pestCount ?? '',
+                    Visual_Vigor: obs.visualVigor ?? '',
+                    Overall_Vigor: obs.overallVigor ?? '',
+                    Phytotoxicity: obs.phytotoxicity ?? obs.phytotoxicityPct ?? '',
+                    Temperature: obs.weatherTempAtObs ?? '',
+                    Humidity: obs.weatherHumidityAtObs ?? '',
+                    Wind_Speed: obs.weatherWindAtObs ?? '',
+                    Notes: obs.notes ?? obs.ObsNotes ?? '',
+                });
+            });
+        }
+    });
+    
+    const worksheet = XLSX.utils.json_to_sheet(observations);
+    worksheet['!cols'] = [
+        { wch: 12 }, { wch: 30 }, { wch: 12 }, { wch: 20 }, { wch: 12 },
+        { wch: 8 }, { wch: 8 }, { wch: 15 }, { wch: 10 }, { wch: 10 },
+        { wch: 10 }, { wch: 15 }, { wch: 15 }, { wch: 10 }, { wch: 10 },
+        { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 30 }
+    ];
+    
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Observations');
+    
+    const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    saveAs(blob, `${filename}_${new Date().toISOString().split('T')[0]}.xlsx`);
+}
+
 export function importCSV(file, callback) {
     if (!file) return;
     const reader = new FileReader();

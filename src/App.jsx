@@ -332,11 +332,11 @@ function AppLayout() {
   }
 
   return (
-    <div className="flex h-screen h-[100dvh] bg-slate-100 font-sans pt-[env(safe-area-inset-top)]">
-
+    <div className="flex h-[100dvh] h-screen overflow-hidden bg-slate-100 font-sans">
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
-      <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-transparent md:pb-0">
+      {/* Main content area - mobile optimized */}
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-transparent">
         <Routes>
           <Route path="/categories" element={
             <ErrorBoundary inline>

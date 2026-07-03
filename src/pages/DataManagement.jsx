@@ -1,9 +1,9 @@
 import React, { useRef, useState, useEffect } from 'react';
 import TopBar from '../components/TopBar.jsx';
 import { useAppState } from '../hooks/useAppState.jsx';
-import { Database, Download, Upload, Archive, Activity, FileSpreadsheet, CheckCircle, AlertCircle, Wrench, Bot, Trash2, FileCode, Cloud, Import, RefreshCw } from 'lucide-react';
+import { Database, Download, Upload, Archive, Activity, FileSpreadsheet, CheckCircle, AlertCircle, Wrench, Bot, Trash2, FileCode, Cloud, Import, RefreshCw, FileSpreadsheet as ExcelIcon, Table } from 'lucide-react';
 import CloudBackup from '../components/CloudBackup.jsx';
-import { exportCSV, exportZIP, importCSV } from '../utils/exportUtils.js';
+import { exportCSV, exportZIP, importCSV, exportToExcel, exportTrialObservations } from '../utils/exportUtils.js';
 import { updateTrial, updateProject, updateFormulation } from '../services/dataLayer.js'; // Adjust as needed
 import { calculateDAA } from '../utils/dateUtils.js';
 import { analyzePhoto, generateTextWithAI, getAPIKeys } from '../services/multiProviderAI.js';
@@ -153,6 +153,125 @@ export default function DataManagement({ onMenuClick }) {
     
     exportCSV(data, `${label}_${activeCategory}_${new Date().toISOString().split('T')[0]}`, activeCategory);
     toast(`${label} CSV exported for category "${activeCategory}"`);
+  };
+
+  // ── Excel Export (All Categories) ─────────────────────────────────────────
+  const handleExportExcelAll = () => {
+    if (!canDownload) {
+      toast("Download permission is disabled for your account", "error");
+      return;
+    }
+    
+    // Check if SheetJS is available
+    if (typeof XLSX === 'undefined') {
+      toast('Excel export loading...', 'info');
+      // Load SheetJS dynamically
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+      script.onload = () => {
+        const dataByEntity = {
+          trials: state.trials || [],
+          projects: state.projects || [],
+          formulations: state.formulations || [],
+          ingredients: state.ingredients || [],
+          organisations: state.organisations || [],
+        };
+        exportToExcel(dataByEntity, 'Miklens_AllData');
+        toast('Excel export complete');
+      };
+      script.onerror = () => toast('Failed to load Excel library', 'error');
+      document.head.appendChild(script);
+      return;
+    }
+    
+    const dataByEntity = {
+      trials: state.trials || [],
+      projects: state.projects || [],
+      formulations: state.formulations || [],
+      ingredients: state.ingredients || [],
+      organisations: state.organisations || [],
+    };
+    exportToExcel(dataByEntity, 'Miklens_AllData');
+    toast('Excel export complete');
+  };
+
+  // ── Excel Export (Current Category) ────────────────────────────────────────
+  const handleExportExcelCategory = () => {
+    if (!canDownload) {
+      toast("Download permission is disabled for your account", "error");
+      return;
+    }
+    
+    if (typeof XLSX === 'undefined') {
+      toast('Excel export loading...', 'info');
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+      script.onload = () => {
+        const filteredTrials = (state.trials || []).filter(t => 
+          (t.Category === activeCategory) || (!t.Category && activeCategory === 'herbicide')
+        );
+        const dataByEntity = {
+          trials: filteredTrials,
+          projects: (state.projects || []).filter(p => 
+            (p.Category === activeCategory) || (!p.Category && activeCategory === 'herbicide')
+          ),
+          formulations: state.formulations || [],
+          ingredients: state.ingredients || [],
+        };
+        exportToExcel(dataByEntity, `Miklens_${activeCategory}`);
+        toast(`Excel export for ${catConfig.name} complete`);
+      };
+      script.onerror = () => toast('Failed to load Excel library', 'error');
+      document.head.appendChild(script);
+      return;
+    }
+    
+    const filteredTrials = (state.trials || []).filter(t => 
+      (t.Category === activeCategory) || (!t.Category && activeCategory === 'herbicide')
+    );
+    const dataByEntity = {
+      trials: filteredTrials,
+      projects: (state.projects || []).filter(p => 
+        (p.Category === activeCategory) || (!p.Category && activeCategory === 'herbicide')
+      ),
+      formulations: state.formulations || [],
+      ingredients: state.ingredients || [],
+    };
+    exportToExcel(dataByEntity, `Miklens_${activeCategory}`);
+    toast(`Excel export for ${catConfig.name} complete`);
+  };
+
+  // ── Export Trial Observations ──────────────────────────────────────────────
+  const handleExportObservations = () => {
+    if (!canDownload) {
+      toast("Download permission is disabled for your account", "error");
+      return;
+    }
+    
+    const filteredTrials = (state.trials || []).filter(t => 
+      (t.Category === activeCategory) || (!t.Category && activeCategory === 'herbicide')
+    );
+    
+    if (!filteredTrials.length) {
+      toast(`No trials for category "${activeCategory}" to export`, 'info');
+      return;
+    }
+    
+    if (typeof XLSX === 'undefined') {
+      toast('Excel export loading...', 'info');
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+      script.onload = () => {
+        exportTrialObservations(filteredTrials, activeCategory, `Observations_${activeCategory}`);
+        toast('Observations exported to Excel');
+      };
+      script.onerror = () => toast('Failed to load Excel library', 'error');
+      document.head.appendChild(script);
+      return;
+    }
+    
+    exportTrialObservations(filteredTrials, activeCategory, `Observations_${activeCategory}`);
+    toast('Observations exported to Excel');
   };
 
   // ── Import ────────────────────────────────────────────────────────────────
@@ -1455,6 +1574,39 @@ Provide a 2-sentence summary of expected efficacy based on typical performance p
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* ── Excel Export Section ── */}
+          <div className="mt-5 border-t pt-4">
+            <p className="text-sm font-semibold text-slate-600 mb-2 flex items-center gap-2">
+              <Table className="w-4 h-4" /> Export to Excel (XLSX)
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={handleExportExcelAll}
+                disabled={!canDownload}
+                className={`text-xs font-semibold px-3 py-2 rounded-lg border transition flex items-center gap-1.5 ${
+                  !canDownload ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60" : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-emerald-200"
+                }`}>
+                <ExcelIcon className="w-4 h-4" /> All Categories
+              </button>
+              <button onClick={handleExportExcelCategory}
+                disabled={!canDownload}
+                className={`text-xs font-semibold px-3 py-2 rounded-lg border transition flex items-center gap-1.5 ${
+                  !canDownload ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60" : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-emerald-200"
+                }`}>
+                <ExcelIcon className="w-4 h-4" /> Current Category ({catConfig.name})
+              </button>
+              <button onClick={handleExportObservations}
+                disabled={!canDownload}
+                className={`text-xs font-semibold px-3 py-2 rounded-lg border transition flex items-center gap-1.5 ${
+                  !canDownload ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60" : "bg-cyan-50 text-cyan-700 hover:bg-cyan-100 border-cyan-200"
+                }`}>
+                <Table className="w-4 h-4" /> Trial Observations
+              </button>
+            </div>
+            <p className="text-xs text-slate-400 mt-2">
+              Exports all data with multiple sheets. Trial observations exports each observation as a separate row.
+            </p>
           </div>
         </div>
         {/* ── Efficacy Repair & Target Linking ── */}

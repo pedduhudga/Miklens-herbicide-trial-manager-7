@@ -136,18 +136,23 @@ export default function SyncStatus() {
       {/* Compact Status Badge */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition ${config.color} ${config.pulse ? 'animate-pulse' : ''}`}
+        className={`flex items-center gap-1.5 px-2.5 py-1.5 md:px-3 md:py-2 rounded-lg text-xs font-medium border transition touch-manipulation ${
+          // On mobile, use icon only to save space
+          'md:gap-2 ' + config.color + (config.pulse ? ' animate-pulse' : '')
+        }`}
       >
         {config.icon}
-        <span>{config.label}</span>
+        <span className="hidden md:inline">{config.label}</span>
+        {/* Mobile: show dot indicator instead of label */}
+        <span className="md:hidden w-1.5 h-1.5 rounded-full bg-current" />
         {(status === SYNC_STATUS.CONFLICTS || (details?.pendingCount > 0)) && (
           <ChevronRight className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
         )}
       </button>
 
-      {/* Expanded Panel */}
+      {/* Expanded Panel - responsive width */}
       {isExpanded && (
-        <div className="absolute right-0 top-full mt-2 w-72 bg-white rounded-xl shadow-lg border border-slate-200 z-50 overflow-hidden">
+        <div className="absolute right-0 top-full mt-2 w-[calc(100vw-32px)] md:w-72 bg-white rounded-xl shadow-lg border border-slate-200 z-50 overflow-hidden max-w-sm">
           <div className="p-4 border-b border-slate-100">
             <div className="flex items-center justify-between">
               <h4 className="font-bold text-slate-800">Sync Status</h4>
