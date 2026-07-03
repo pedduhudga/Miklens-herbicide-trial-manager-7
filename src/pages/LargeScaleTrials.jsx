@@ -916,8 +916,6 @@ export default function LargeScaleTrials({ onMenuClick }) {
     updateState({ trials: state.trials.map(t => t.ID === optimisticTrial.ID ? optimisticTrial : t) });
     if (selectedSubTrialId === targetTrial.ID) setSelectedSubTrialId(optimisticTrial.ID);
 
-    window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Uploading field photo...', type: 'info' } }));
-
     try {
       const uploadResult = await uploadPhoto({
         trialId: targetTrial.ID,
@@ -948,13 +946,12 @@ export default function LargeScaleTrials({ onMenuClick }) {
       // AI Analysis
       const keys = getAPIKeys('gemini-3-flash');
       if (keys.length) {
-        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Analyzing photo with AI...', type: 'info' } }));
         const result = await analyzePhoto(dataUrl, {
           treatment: targetTrial.FormulationName,
           daa,
           rep: targetTrial.Replication || 'R1'
         }, (msg) => {
-          window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg, type: 'info' } }));
+          console.log(`[AI Status] ${msg}`);
         });
 
         if (result.success) {
@@ -1666,13 +1663,12 @@ Rules:
     setAiGenRunning(true);
     const daa = calculateDAA(photoDate, activeSubTrial.Date);
 
-    window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Analyzing photo with AI (DAA ${daa})...`, type: 'info' } }));
     try {
       const result = await analyzePhoto(photoSrc, {
         treatment: activeSubTrial.FormulationName,
         daa,
         rep: activeSubTrial.Replication || 1
-      }, (msg) => window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg, type: 'info' } })));
+      }, (msg) => console.log(`[AI Status] ${msg}`));
 
       if (result.success) {
         await createObservationFromAI(activeSubTrial, daa, result.data, photoDate, photoSrc);

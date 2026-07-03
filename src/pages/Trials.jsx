@@ -2415,8 +2415,6 @@ export default function Trials({ onMenuClick }) {
     };
     updateState({ syncQueue: [...getAppState().syncQueue, onlineSyncItem] });
 
-    window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Uploading to Drive (${projectName} / ${trialNameWithDate})...`, type: 'info' } }));
-
     try {
       // 1. Upload photo to Google Drive via dataLayer (works in Firebase + Sheet modes)
       const uploadResult = await uploadPhoto({
@@ -2461,8 +2459,6 @@ export default function Trials({ onMenuClick }) {
 
       await updateTrial({ ID: updatedTrial.ID, PhotoURLs: updatedTrial.PhotoURLs }, getAppState);
 
-      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: driveUrl ? 'Photo saved to Drive! Starting AI analysis...' : 'Photo saved locally. Starting AI analysis...', type: 'info' } }));
-
       const daa = calculateDAA(photoDate, targetTrial.Date);
 
       // Auto-fetch weather — always attempt, using stored GPS or browser location
@@ -2499,7 +2495,6 @@ export default function Trials({ onMenuClick }) {
               weatherWind: wind ?? prev.weatherWind,
               weatherRain: rain ?? prev.weatherRain,
             }));
-            window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Weather (${photoDate}): ${temp}°C, wind ${wind} km/h`, type: 'info' } }));
           }
         } catch(we) { console.warn('Weather fetch failed:', we.message); }
       };
@@ -2527,7 +2522,7 @@ export default function Trials({ onMenuClick }) {
         category: targetTrial.Category || activeCategory,
         photoTag: photoTag
       }, (msg) => {
-        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg, type: 'info' } }));
+        console.log(`[AI Status] ${msg}`);
       });
 
       if (result.success) {
@@ -2537,7 +2532,7 @@ export default function Trials({ onMenuClick }) {
         // Auto-run cover detection in background
         detectWeedCoverAI(dataUrl).then(coverResult => {
           if (coverResult?.cover != null) {
-            window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Cover detected: ${coverResult.cover}% (${coverResult.source})`, type: 'info' } }));
+            console.log(`[Cover Detection] Detected: ${coverResult.cover}% (${coverResult.source})`);
           }
         }).catch(() => {});
       } else {
