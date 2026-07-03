@@ -2078,12 +2078,26 @@ export class AdvancedReportGenerator {
           ws.getCell(`${colStart}${startRow + 8}`).value = `Caption: ${p.label || 'Image'}`;
           ws.getCell(`${colStart}${startRow + 8}`).font = { italic: true, size: 9 };
           
-          const photoTrtName = p.treatment || (p.treatmentNumber ? this.treatmentNames[p.treatmentNumber - 1] : '');
+          let photoTrtName = '';
+          if (this.isProjectWide) {
+            photoTrtName = p.treatment || (p.treatmentNumber ? this.treatmentNames[p.treatmentNumber - 1] : '');
+          } else {
+            photoTrtName = this.trial.FormulationName || '';
+          }
+
           const infoParts = [];
-          if (p.block || p.rep || p.replication) infoParts.push(`Block/Rep: ${p.block || p.rep || p.replication}`);
-          if (p.plot || p.plotNumber) infoParts.push(`Plot: ${p.plot || p.plotNumber}`);
-          if (p.pot || p.potNumber) infoParts.push(`Pot: ${p.pot || p.potNumber}`);
           if (photoTrtName) infoParts.push(`Trt: ${photoTrtName}`);
+          if (p.plot || p.plotNumber || this.trial.PlotNumber) {
+            infoParts.push(`Plot: ${p.plot || p.plotNumber || this.trial.PlotNumber}`);
+          }
+          if (p.block || p.rep || p.replication || this.trial.Replication) {
+            infoParts.push(`Rep: ${p.block || p.rep || p.replication || this.trial.Replication}`);
+          }
+          if (p.tag) {
+            infoParts.push(`Tag: ${p.tag}`);
+          } else if (p.pot || p.potNumber) {
+            infoParts.push(`Pot: ${p.pot || p.potNumber}`);
+          }
           
           const metaInfo = infoParts.length > 0 ? infoParts.join(' | ') : 'Unspecified';
           ws.getCell(`${colStart}${startRow + 9}`).value = `Info: ${metaInfo}`;
