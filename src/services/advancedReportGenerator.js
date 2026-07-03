@@ -81,9 +81,12 @@ ANOVA Results / Efficacy: ${JSON.stringify(anovaResults || {})}
 Detailed Agronomic Interpretation:
 ${interpretation}
 Observations summary: ${obsSummary}
-CRITICAL INSTRUCTION: Avoid all causal physiological, biological or metabolic claims (such as "nutrient uptake", "assimilation", "photosynthetic rate", "metabolic demand") unless those biological parameters were directly measured. Focus strictly on physical, visual, and statistical observations (e.g. height, vigor, leaf color, SPAD, yield). Use objective scientific phrasing like "The observed improvements are consistent with crop response to treatment."
-If stating performance conclusions, use publication-friendly, neutral statements like: "No statistically significant differences among treatments were detected under the conditions of this study."
-If identical values are observed (e.g., F = 0, P = 1), do NOT state that ANOVA could not be applied. Instead, state: "Plant height exhibited identical treatment means (F = 0.00, P = 1.000), indicating no detectable treatment effect under the conditions of this study."
+CRITICAL INSTRUCTION: 
+1. Avoid all causal physiological, biological or metabolic claims (such as "nutrient uptake", "assimilation", "photosynthetic rate", "metabolic demand") unless those biological parameters were directly measured. Focus strictly on physical, visual, and statistical observations (e.g. height, vigor, leaf color, SPAD, yield). Use objective scientific phrasing like "The observed improvements are consistent with crop response to treatment."
+2. Analyze and interpret every single measured parameter listed in the Detailed Agronomic Interpretation (including plant height, fruit counts, yield, vigor, deficiencies, etc.) that is present. Do not skip any parameter. 
+3. Compare all treatment groups collectively (e.g. Untreated Control, NPK formulation treatments, synthetic references) instead of focusing on just one treatment. Clearly indicate which treatment performed best in which parameters, and overall which is the best performer across all combined metrics.
+4. If stating performance conclusions, use publication-friendly, neutral statements like: "No statistically significant differences among treatments were detected under the conditions of this study."
+5. If identical values are observed (e.g., F = 0, P = 1), do NOT state that ANOVA could not be applied. Instead, state: "Plant height exhibited identical treatment means (F = 0.00, P = 1.000), indicating no detectable treatment effect under the conditions of this study."
 Do NOT use markdown headers or lists. Keep it strictly scientific, professional, and factual.`;
 
     const text = await generateTextWithAI(prompt, 'You are a professional agronomist.');
@@ -135,7 +138,7 @@ ${interpretation}
 ANOVA Results: ${JSON.stringify(anovaResults || {})}
 CRITICAL INSTRUCTION: 
 1. Avoid all causal physiological, biological or metabolic claims (such as "nutrient uptake", "assimilation", "photosynthetic rate", "metabolic demand") unless those biological parameters were directly measured. Focus strictly on physical, visual, and statistical observations (e.g. height, vigor, leaf color, SPAD, yield).
-2. Write generalized scientific conclusions comparing all treatments together. Avoid referencing only one specific test product unless it performed significantly differently from all others (e.g. instead of focusing only on one product, use phrases like: "No statistically significant differences among treatments were detected under the conditions of this study.").
+2. Analyze and interpret every single measured parameter listed in the Detailed Agronomic Interpretation (including plant height, fruit counts, yield, vigor, deficiencies, etc.) that is present. Clearly indicate which treatment performed best in which parameters, and overall which is the best performer across all combined metrics. Compare all treatment groups collectively (e.g. Untreated Control, formulation treatments, synthetic references) instead of focusing on just one treatment.
 3. Provide research-oriented recommendations, such as: repeating the trial under additional agro-climatic conditions, increasing replication to improve statistical precision, extending the observation period, evaluating across multiple seasons, or validating under commercial farming conditions. Do NOT recommend business-oriented actions (like cost-benefit analyses).
 4. If high coefficients of variation (CV%) are observed for a measured parameter, use statistically precise and cautious wording such as: "The relatively high variability in [Parameter Name] measurements (CV = [Value]%) may have reduced the ability to detect small treatment effects." Avoid claiming that high CV "likely contributed to the absence of statistical power", and NEVER reference "SPAD" or "chlorophyll" unless that metric is actually present in the dataset.
 5. If low coefficients of variation (CV%) are observed, use phrasing like: "Low coefficients of variation for [Parameter Name] ([Value]%) indicate good experimental consistency." Avoid implying precision solely from CV values, and only reference parameters present in the dataset.
@@ -2020,16 +2023,35 @@ export class AdvancedReportGenerator {
     const ws = this.workbook.addWorksheet('Photos');
     ws.views = [{ showGridLines: true }];
 
-    ws.getCell('A1').value = 'TRIAL PHOTO DOCUMENTATION GALLERY';
-    ws.getCell('A1').font = { bold: true, size: 12 };
+    ws.mergeCells('A1:K1');
+    const titleCell = ws.getCell('A1');
+    titleCell.value = 'TRIAL PHOTO DOCUMENTATION GALLERY';
+    titleCell.font = { name: 'Calibri', size: 14, bold: true, color: { rgb: 'FFFFFF' } };
+    titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: this.config.color.hex.replace('#', '') } };
+    titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    ws.getRow(1).height = 30;
 
     if (!this.photos.length) {
       ws.getCell('A3').value = 'No photo records attached to this trial.';
       return;
     }
 
-    // Embed photos as image files if available as local fileData or remote URLs
-    let row = 3;
+    // Assign uniform column widths
+    ws.getColumn(1).width = 13;
+    ws.getColumn(2).width = 13;
+    ws.getColumn(3).width = 13;
+    ws.getColumn(4).width = 3; // Gutter
+    ws.getColumn(5).width = 13;
+    ws.getColumn(6).width = 13;
+    ws.getColumn(7).width = 13;
+    ws.getColumn(8).width = 3; // Gutter
+    ws.getColumn(9).width = 13;
+    ws.getColumn(10).width = 13;
+    ws.getColumn(11).width = 13;
+
+    let colOffset = 0; // 0 = A-C, 1 = E-G, 2 = I-K
+    let startRow = 3;
+
     for (let i = 0; i < this.photos.length; i++) {
       const p = this.photos[i];
       const src = p.fileData || p.url || p.src;
@@ -2047,11 +2069,23 @@ export class AdvancedReportGenerator {
             extension: data.includes('png') ? 'png' : 'jpeg'
           });
           
-          ws.addImage(imageId, `A${row}:C${row + 8}`);
-          ws.getCell(`D${row}`).value = `Caption: ${p.label || 'Observation image'}`;
-          ws.getCell(`D${row + 1}`).value = `Date: ${p.date || 'N/A'}`;
+          const colStartIdx = 1 + colOffset * 4; // Columns A(1), E(5), I(9)
+          const colStart = getColumnLetter(colStartIdx);
+          const colEnd = getColumnLetter(colStartIdx + 2);
           
-          row += 10;
+          ws.addImage(imageId, `${colStart}${startRow}:${colEnd}${startRow + 7}`);
+          
+          ws.getCell(`${colStart}${startRow + 8}`).value = `Caption: ${p.label || 'Image'}`;
+          ws.getCell(`${colStart}${startRow + 8}`).font = { italic: true, size: 9 };
+          
+          ws.getCell(`${colStart}${startRow + 9}`).value = `Date: ${p.date || 'N/A'}`;
+          ws.getCell(`${colStart}${startRow + 9}`).font = { size: 9, color: { rgb: '7F8C8D' } };
+          
+          colOffset++;
+          if (colOffset >= 3) {
+            colOffset = 0;
+            startRow += 11;
+          }
         } catch (e) {
           console.warn('Failed to embed photo in excel:', e);
         }
