@@ -563,7 +563,6 @@ export async function deleteFormulation(payload, getAppState) {
 
 export async function getIngredients(payload, getAppState) {
   const category = enforceActiveCategory(payload, getAppState, 'getIngredients');
-  validateCategory(category);
   const { useFirebase } = getConfig(getAppState);
   if (useFirebase) {
     const allowedUids = getAllowedUids(getAppState);
