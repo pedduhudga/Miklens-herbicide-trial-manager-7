@@ -568,8 +568,10 @@ function compileAgronomicInterpretation(observations, activeFields, treatmentNam
       impStr = `with the highest performing treatment (${best.name}) showing a ${bestImp.toFixed(1)}% difference compared to control.`;
     }
 
+    const isMeanNearZero = anova.grandMean < 2.0 || 
+      ((/deficiency|severity|chlorosis|necrosis|pest|disease|injury|mortality/i.test(f.key)) && anova.grandMean < 5.0);
     const cvRating = anova.cv < 10 ? 'Excellent' : anova.cv <= 20 ? 'Good' : anova.cv <= 30 ? 'Acceptable' : 'Poor';
-    const cvInfo = anova.grandMean >= 1.0 ? ` (CV: ${anova.cv.toFixed(1)}% - ${cvRating} precision)` : '';
+    const cvInfo = !isMeanNearZero ? ` (CV: ${anova.cv.toFixed(1)}% - ${cvRating} precision)` : '';
 
     summaries.push(`For ${f.label}: The trial showed ${isSig ? 'statistically significant' : 'no statistically significant'} differences between treatments (p = ${anova.p_value.toFixed(4)})${cvInfo}. The highest mean was observed under ${best.name} (${best.mean.toFixed(2)}, Group '${best.group}'), and the lowest under ${worst.name} (${worst.mean.toFixed(2)}, Group '${worst.group}') ${impStr}`);
   });
@@ -913,6 +915,14 @@ export class AdvancedReportGenerator {
   validateData() {
     const warnings = [];
     
+    // Helper to zero-out time portion of Date objects
+    const getZeroedDate = (d) => {
+      if (!d || isNaN(d.getTime())) return null;
+      const zeroed = new Date(d);
+      zeroed.setHours(0, 0, 0, 0);
+      return zeroed;
+    };
+
     // 1. Check trial start date
     let startDate = null;
     if (this.trial.Date) {
@@ -923,11 +933,12 @@ export class AdvancedReportGenerator {
         startDate = new Date(this.trial.Date);
       }
     }
+    const sDateZero = getZeroedDate(startDate);
+
+    // Group unique DAA by date
+    const daaByDate = {};
 
     // 2. Check observations
-    let lastDaa = -1;
-    let sequenceError = false;
-
     this.observations.forEach((obs, idx) => {
       if (!obs.treatment) {
         warnings.push(`Observation #${idx + 1}: Missing treatment name.`);
@@ -942,7 +953,8 @@ export class AdvancedReportGenerator {
           obsDate = new Date(obs.date);
         }
         
-        if (obsDate && !isNaN(obsDate.getTime()) && obsDate < startDate) {
+        const oDateZero = getZeroedDate(obsDate);
+        if (oDateZero && sDateZero && oDateZero < sDateZero) {
           warnings.push(`Observation #${idx + 1} (${obs.date}): Assessment date is earlier than Trial Start Date (${this.trial.Date || 'N/A'}).`);
         }
       }
@@ -952,16 +964,38 @@ export class AdvancedReportGenerator {
         if (daaNum < 0) {
           warnings.push(`Observation #${idx + 1}: Negative DAA (${obs.daa}) detected.`);
         }
-        if (daaNum < lastDaa) {
-          sequenceError = true;
+        
+        if (obs.date) {
+          const dStr = obs.date;
+          if (!daaByDate[dStr]) daaByDate[dStr] = [];
+          daaByDate[dStr].push(daaNum);
         }
-        lastDaa = daaNum;
       }
 
       const rep = obs.rep || obs.replication;
       if (rep === undefined || rep === null || rep === '') {
         warnings.push(`Observation #${idx + 1}: Missing replication number.`);
       }
+    });
+
+    // Verify DAA chronological progression across unique dates
+    const sortedDates = Object.keys(daaByDate).sort((a,b) => {
+      const aParts = a.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+      const bParts = b.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+      const aD = aParts ? new Date(parseInt(aParts[3],10), parseInt(aParts[2],10)-1, parseInt(aParts[1],10)) : new Date(a);
+      const bD = bParts ? new Date(parseInt(bParts[3],10), parseInt(bParts[2],10)-1, parseInt(bParts[1],10)) : new Date(b);
+      return aD - bD;
+    });
+
+    let sequenceError = false;
+    let lastDaaVal = -1;
+    sortedDates.forEach(dStr => {
+      const daas = daaByDate[dStr];
+      const avgDaa = daas.reduce((sum,v) => sum+v, 0) / daas.length;
+      if (avgDaa < lastDaaVal) {
+        sequenceError = true;
+      }
+      lastDaaVal = avgDaa;
     });
 
     if (sequenceError) {
@@ -1117,7 +1151,30 @@ export class AdvancedReportGenerator {
     ws.getCell('A11').font = { bold: true, size: 12 };
     ws.getCell('A11').fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'F3F4F6' } };
 
-    const methodologyText = `Location: ${this.trial.Location || 'N/A'}\nCrop Variety: ${this.trial.CropVariety || 'N/A'}\nInvestigator: ${this.trial.InvestigatorName || 'N/A'}\nDesign: ${this.trial.TrialDesign || this.trial.Design || this.design} with ${this.trial.Replication || 6} replicates. Dosage applied: ${this.trial.Dosage || 'N/A'}. All observations recorded dynamically.`;
+    const methodParts = [];
+    if (this.trial.Location && this.trial.Location !== 'N/A' && this.trial.Location !== 'Various') {
+      methodParts.push(`Location: ${this.trial.Location}`);
+    }
+    if (this.trial.CropVariety && this.trial.CropVariety !== 'N/A') {
+      methodParts.push(`Crop Variety: ${this.trial.CropVariety}`);
+    }
+    if (this.trial.InvestigatorName && this.trial.InvestigatorName !== 'N/A') {
+      methodParts.push(`Investigator: ${this.trial.InvestigatorName}`);
+    }
+    
+    const designLabel = this.design === 'CRD' 
+      ? 'Completely Randomized Design (CRD)' 
+      : this.design === 'PotTrial' 
+        ? 'Pot Trial Design' 
+        : 'Randomized Complete Block Design (RCBD)';
+
+    methodParts.push(`Design: ${designLabel} with ${this.trial.Replication || 6} replicates`);
+    if (this.trial.Dosage && this.trial.Dosage !== 'N/A') {
+      methodParts.push(`Dosage applied: ${this.trial.Dosage}`);
+    }
+    methodParts.push("All observations recorded dynamically");
+    
+    const methodologyText = methodParts.join('. ') + '.';
     ws.mergeCells('A12:F14');
     ws.getCell('A12').value = methodologyText;
     ws.getCell('A12').alignment = { wrapText: true, vertical: 'top' };
@@ -1582,9 +1639,10 @@ export class AdvancedReportGenerator {
         return 'Poor';
       };
 
-      const isMeanNearZero = anova.grandMean < 1.0;
+      const isMeanNearZero = anova.grandMean < 2.0 || 
+        ((/deficiency|severity|chlorosis|necrosis|pest|disease|injury|mortality/i.test(f.key)) && anova.grandMean < 5.0);
       const cvDisplay = isMeanNearZero 
-        ? 'N/A (Mean near zero)'
+        ? 'N/A (Mean near zero / low incidence)'
         : (anova.cv ? `${anova.cv.toFixed(2)}% (${getCvRating(anova.cv)})` : 'N/A');
 
       ws.getRow(r).values = [
@@ -1918,9 +1976,10 @@ export class AdvancedReportGenerator {
         })
         .join(', ');
 
-      const isMeanNearZero = anova.grandMean < 1.0;
+      const isMeanNearZero = anova.grandMean < 2.0 || 
+        ((/deficiency|severity|chlorosis|necrosis|pest|disease|injury|mortality/i.test(f.key)) && anova.grandMean < 5.0);
       const cvDisplay = isMeanNearZero 
-        ? 'N/A (Mean near zero)'
+        ? 'N/A (Mean near zero / low incidence)'
         : (anova.cv ? `${anova.cv.toFixed(2)}%` : 'N/A');
 
       ws.getRow(r).values = [
