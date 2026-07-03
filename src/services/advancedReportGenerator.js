@@ -1427,6 +1427,7 @@ export class AdvancedReportGenerator {
     const potCols = proj?.PotCols ? parseInt(proj.PotCols) : null;
     const trtCount = this.treatmentNames.length;
     const independentUnits = trtCount * computedReplications;
+    const totalPots = (potRows && potCols) ? potRows * potCols : (this.isProjectWide ? (this.trials || []).length : this.observations.length);
     const potsPerUnit = independentUnits > 0 ? Math.round(totalPots / independentUnits) : 1;
 
     let methodologyText;
