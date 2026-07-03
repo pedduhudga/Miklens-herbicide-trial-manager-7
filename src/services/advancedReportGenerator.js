@@ -83,6 +83,7 @@ ${interpretation}
 Observations summary: ${obsSummary}
 CRITICAL INSTRUCTION: Avoid all causal physiological, biological or metabolic claims (such as "nutrient uptake", "assimilation", "photosynthetic rate", "metabolic demand") unless those biological parameters were directly measured. Focus strictly on physical, visual, and statistical observations (e.g. height, vigor, leaf color, SPAD, yield). Use objective scientific phrasing like "The observed improvements are consistent with crop response to treatment."
 If stating performance conclusions, use publication-friendly statements like: "Under the conditions of this study, no statistically significant performance advantage of the test treatment over the comparative treatments was demonstrated."
+If identical values are observed (e.g., F = 0, P = 1), do NOT state that ANOVA could not be applied. Instead, state: "Plant height exhibited identical treatment means (F = 0.00, P = 1.000), indicating no detectable treatment effect under the conditions of this study."
 Do NOT use markdown headers or lists. Keep it strictly scientific, professional, and factual.`;
 
     const text = await generateTextWithAI(prompt, 'You are a professional agronomist.');
@@ -138,6 +139,7 @@ CRITICAL INSTRUCTION:
 3. Provide research-oriented recommendations, such as: repeating the trial under additional agro-climatic conditions, increasing replication to improve statistical precision, extending the observation period, evaluating across multiple seasons, or validating under commercial farming conditions. Do NOT recommend business-oriented actions (like cost-benefit analyses).
 4. If high coefficients of variation (CV%) are observed (especially for SPAD/chlorophyll measurements), use statistically precise and cautious wording such as: "The relatively high variability in SPAD measurements (CV = 35.6%) may have reduced the ability to detect small treatment effects." Avoid claiming that high CV "likely contributed to the absence of statistical power".
 5. For visual vigor or leaf color CV, use phrasing like: "Low coefficients of variation for visual vigor (7.0%) and leaf color (4.2%) indicate good experimental consistency." Avoid implying precision solely from CV values.
+6. If identical values are observed for a parameter (resulting in F = 0.00 and P = 1.000), do NOT state that ANOVA could not be applied due to lack of variance. Instead, state: "Plant height exhibited identical treatment means (F = 0.00, P = 1.000), indicating no detectable treatment effect under the conditions of this study."
 Keep it precise and factual. Do NOT include markdown styling or headers, just plain text with bullets.`;
 
     const text = await generateTextWithAI(prompt, 'You are a senior agricultural scientist.');
