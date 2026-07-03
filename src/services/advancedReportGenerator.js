@@ -43,7 +43,7 @@ function getColumnLetter(col) {
 }
 
 // Helper to generate dynamic scientific narrative using Gemini AI
-async function generateNarrativeWithAI(trial, category, observations, activeFields, anovaResults) {
+async function generateNarrativeWithAI(trial, category, observations, activeFields, treatmentNames, design, anovaResults) {
   try {
     const daaMap = {};
     (observations || []).forEach(o => {
@@ -71,12 +71,17 @@ async function generateNarrativeWithAI(trial, category, observations, activeFiel
     });
 
     const obsSummary = summaryParts.slice(0, 20).join('; ');
+    const interpretation = compileAgronomicInterpretation(observations, activeFields, treatmentNames, category, design);
 
     const prompt = `You are a professional agronomist. Write a concise, executive-level scientific narrative (2 paragraphs) summarizing the results of this trial.
 Trial: ${trial.FormulationName || 'Test formulation'} on crop ${trial.CropCrop || trial.Crop || 'Tomato'}.
 Category: ${category}
+Design: ${design}
 ANOVA Results / Efficacy: ${JSON.stringify(anovaResults || {})}
+Detailed Agronomic Interpretation:
+${interpretation}
 Observations summary: ${obsSummary}
+CRITICAL INSTRUCTION: Avoid all causal physiological, biological or metabolic claims (such as "nutrient uptake", "assimilation", "photosynthetic rate", "metabolic demand") unless those biological parameters were directly measured. Focus strictly on physical, visual, and statistical observations (e.g. height, vigor, leaf color, SPAD, yield). Use objective scientific phrasing like "The observed improvements are consistent with crop response to treatment."
 Do NOT use markdown headers or lists. Keep it strictly scientific, professional, and factual.`;
 
     const text = await generateTextWithAI(prompt, 'You are a professional agronomist.');
@@ -88,7 +93,7 @@ Do NOT use markdown headers or lists. Keep it strictly scientific, professional,
 }
 
 // Helper to generate dynamic conclusions using Gemini AI
-async function generateConclusionsWithAI(trial, category, activeFields, observations, anovaResults) {
+async function generateConclusionsWithAI(trial, category, activeFields, observations, treatmentNames, design, anovaResults) {
   try {
     const daaMap = {};
     (observations || []).forEach(o => {
@@ -116,12 +121,17 @@ async function generateConclusionsWithAI(trial, category, activeFields, observat
     });
 
     const obsSummary = summaryParts.slice(0, 20).join('; ');
+    const interpretation = compileAgronomicInterpretation(observations, activeFields, treatmentNames, category, design);
 
     const prompt = `You are a senior agricultural scientist. Write a bulleted list of 3 scientific conclusions and practical grower recommendations based on this trial's statistical results.
 Trial: ${trial.FormulationName || 'Test treatment'}
 Category: ${category}
+Design: ${design}
 Observations summary: ${obsSummary}
+Detailed Agronomic Interpretation:
+${interpretation}
 ANOVA Results: ${JSON.stringify(anovaResults || {})}
+CRITICAL INSTRUCTION: Avoid all causal physiological, biological or metabolic claims (such as "nutrient uptake", "assimilation", "photosynthetic rate", "metabolic demand") unless those biological parameters were directly measured. Focus strictly on physical, visual, and statistical observations (e.g. height, vigor, leaf color, SPAD, yield).
 Keep it precise and factual. Do NOT include markdown styling or headers, just plain text with bullets.`;
 
     const text = await generateTextWithAI(prompt, 'You are a senior agricultural scientist.');
@@ -129,6 +139,7 @@ Keep it precise and factual. Do NOT include markdown styling or headers, just pl
   } catch (e) {
     console.warn('Failed to generate AI conclusions during export:', e);
     return null;
+  }
   }
 }
 
@@ -237,16 +248,17 @@ function normalizeDateString(dateStr, fallbackDate = null) {
     return 'N/A';
   }
   try {
-    let parsedDate = new Date(dateStr);
-    if (isNaN(parsedDate.getTime())) {
-      const parts = dateStr.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
-      if (parts) {
-        const day = parseInt(parts[1], 10);
-        const month = parseInt(parts[2], 10) - 1;
-        const year = parseInt(parts[3], 10);
-        parsedDate = new Date(year, month, day);
-      }
+    let parsedDate = null;
+    const parts = dateStr.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+    if (parts) {
+      const day = parseInt(parts[1], 10);
+      const month = parseInt(parts[2], 10) - 1;
+      const year = parseInt(parts[3], 10);
+      parsedDate = new Date(year, month, day);
+    } else {
+      parsedDate = new Date(dateStr);
     }
+    
     if (isNaN(parsedDate.getTime())) {
       if (fallbackDate && fallbackDate !== dateStr) return normalizeDateString(fallbackDate);
       return 'N/A';
@@ -527,6 +539,45 @@ function calculateAnovaRCB(data, metricKey, category = 'nutrition', design = 'RC
   };
 }
 
+// Compile structured statistical interpretations to feed the AI prompt
+function compileAgronomicInterpretation(observations, activeFields, treatmentNames, category, design) {
+  const summaries = [];
+  
+  activeFields.forEach(f => {
+    const anova = calculateAnovaRCB(observations, f.key, category, design);
+    if (anova.error) return;
+
+    const isSig = anova.p_value < 0.05;
+    const sortedTrts = Object.entries(anova.treatmentMeans)
+      .map(([trtNum, stats]) => ({
+        trtNum: parseInt(trtNum),
+        name: treatmentNames[parseInt(trtNum) - 1] || `Treatment ${trtNum}`,
+        mean: stats.mean,
+        group: stats.group
+      }))
+      .sort((a, b) => b.mean - a.mean);
+
+    if (sortedTrts.length === 0) return;
+
+    const best = sortedTrts[0];
+    const worst = sortedTrts[sortedTrts.length - 1];
+    
+    const controlStats = anova.treatmentMeans[1];
+    let impStr = '';
+    if (controlStats && controlStats.mean > 0) {
+      const bestImp = ((best.mean - controlStats.mean) / controlStats.mean) * 100;
+      impStr = `with the highest performing treatment (${best.name}) showing a ${bestImp.toFixed(1)}% difference compared to control.`;
+    }
+
+    const cvRating = anova.cv < 10 ? 'Excellent' : anova.cv <= 20 ? 'Good' : anova.cv <= 30 ? 'Acceptable' : 'Poor';
+    const cvInfo = anova.grandMean >= 1.0 ? ` (CV: ${anova.cv.toFixed(1)}% - ${cvRating} precision)` : '';
+
+    summaries.push(`For ${f.label}: The trial showed ${isSig ? 'statistically significant' : 'no statistically significant'} differences between treatments (p = ${anova.p_value.toFixed(4)})${cvInfo}. The highest mean was observed under ${best.name} (${best.mean.toFixed(2)}, Group '${best.group}'), and the lowest under ${worst.name} (${worst.mean.toFixed(2)}, Group '${worst.group}') ${impStr}`);
+  });
+
+  return summaries.join('\n');
+}
+
 // Local helper to calculate Excess Green (ExG) index from a base64 image (NDVI surrogate)
 function calculateExGFromBase64(base64Str) {
   return new Promise((resolve) => {
@@ -716,13 +767,38 @@ export class AdvancedReportGenerator {
       this.isProjectWide = false;
       this.trial = trialOrTrials;
       this.design = proj?.Design || representative?.Design || 'RCBD';
-      this.observations = safeJsonParse(trialOrTrials.EfficacyDataJSON, []).map(obs => {
+      
+      const rawObs = safeJsonParse(trialOrTrials.EfficacyDataJSON, []);
+      const obsTrts = [...new Set(rawObs.map(o => o.treatment).filter(Boolean))];
+      const controlIdx = obsTrts.findIndex(n => /control|untreated|check|utc/i.test(n));
+      if (controlIdx > -1) {
+        const [ctl] = obsTrts.splice(controlIdx, 1);
+        obsTrts.unshift(ctl);
+      }
+      if (obsTrts.length === 0) {
+        obsTrts.push('Untreated Check (Control)');
+        if (trialOrTrials.FormulationName) obsTrts.push(trialOrTrials.FormulationName);
+      } else if (obsTrts.length === 1) {
+        if (/control|untreated|check|utc/i.test(obsTrts[0])) {
+          obsTrts.push(trialOrTrials.FormulationName || 'Test Treatment');
+        } else {
+          obsTrts.unshift('Untreated Check (Control)');
+        }
+      }
+      this.treatmentNames = obsTrts;
+
+      this.observations = rawObs.map(obs => {
+        const trtName = obs.treatment || 'Untreated Check (Control)';
+        let trtNum = obsTrts.indexOf(trtName) + 1;
+        if (trtNum === 0) trtNum = 1;
         return {
           ...obs,
           date: normalizeDateString(obs.date, trialOrTrials.Date),
-          treatmentNumber: parseInt(obs.treatmentNumber || obs.treatment || 1)
+          treatmentNumber: trtNum,
+          treatment: trtName
         };
       });
+
       this.photos = safeJsonParse(trialOrTrials.PhotoURLs, []).map(photo => {
         return {
           ...photo,
@@ -730,15 +806,6 @@ export class AdvancedReportGenerator {
         };
       });
       this.soil = safeJsonParse(trialOrTrials.SoilDataJSON, null);
-
-      const trtNums = [...new Set(this.observations.map(o => o.treatmentNumber))].sort((a,b) => a-b);
-      this.treatmentNames = trtNums.map(num => {
-        if (num === 1) return 'Untreated Check (Control)';
-        return this.trial.FormulationName || `Treatment ${num}`;
-      });
-      if (this.treatmentNames.length < 2) {
-        this.treatmentNames = ['Untreated Check (Control)', this.trial.FormulationName || 'Test Treatment'];
-      }
     }
   }
 
@@ -844,10 +911,86 @@ export class AdvancedReportGenerator {
     }
   }
 
+  validateData() {
+    const warnings = [];
+    
+    // 1. Check trial start date
+    let startDate = null;
+    if (this.trial.Date) {
+      const parts = this.trial.Date.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+      if (parts) {
+        startDate = new Date(parseInt(parts[3], 10), parseInt(parts[2], 10) - 1, parseInt(parts[1], 10));
+      } else {
+        startDate = new Date(this.trial.Date);
+      }
+    }
+
+    // 2. Check observations
+    let lastDaa = -1;
+    let sequenceError = false;
+
+    this.observations.forEach((obs, idx) => {
+      if (!obs.treatment) {
+        warnings.push(`Observation #${idx + 1}: Missing treatment name.`);
+      }
+
+      if (obs.date && startDate && !isNaN(startDate.getTime())) {
+        let obsDate = null;
+        const oParts = obs.date.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+        if (oParts) {
+          obsDate = new Date(parseInt(oParts[3], 10), parseInt(oParts[2], 10) - 1, parseInt(oParts[1], 10));
+        } else {
+          obsDate = new Date(obs.date);
+        }
+        
+        if (obsDate && !isNaN(obsDate.getTime()) && obsDate < startDate) {
+          warnings.push(`Observation #${idx + 1} (${obs.date}): Assessment date is earlier than Trial Start Date (${this.trial.Date || 'N/A'}).`);
+        }
+      }
+
+      if (obs.daa !== undefined && obs.daa !== null) {
+        const daaNum = Number(obs.daa);
+        if (daaNum < 0) {
+          warnings.push(`Observation #${idx + 1}: Negative DAA (${obs.daa}) detected.`);
+        }
+        if (daaNum < lastDaa) {
+          sequenceError = true;
+        }
+        lastDaa = daaNum;
+      }
+
+      const rep = obs.rep || obs.replication;
+      if (rep === undefined || rep === null || rep === '') {
+        warnings.push(`Observation #${idx + 1}: Missing replication number.`);
+      }
+    });
+
+    if (sequenceError) {
+      warnings.push("Chronological Warning: DAA values do not follow a strictly sequential progression over time.");
+    }
+
+    if (this.treatmentNames.length < 2) {
+      warnings.push("Experimental Design Warning: Less than 2 distinct treatments found. Efficacy comparison is limited.");
+    }
+
+    const seenTrts = new Set();
+    this.treatmentNames.forEach(tName => {
+      if (seenTrts.has(tName)) {
+        warnings.push(`Duplicate Treatment detected: ${tName}`);
+      }
+      seenTrts.add(tName);
+    });
+
+    return warnings;
+  }
+
   async generateCompleteReport() {
     try {
       // 0. Auto-process observations with Spectral ExG index AI and growth fallbacks
       await this.processObservationsWithAI();
+      
+      // Run Data Validation
+      this.validationWarnings = this.validateData();
 
       // Compute ANOVA on primary metric to supply to AI narrative writer
       const primaryMetricKey = this.config.primaryMetric?.key || 'plantHeight';
@@ -952,7 +1095,7 @@ export class AdvancedReportGenerator {
     let findingsText = aiSaved.narrative || aiSaved.cover || null;
     
     if (!findingsText) {
-      findingsText = await generateNarrativeWithAI(this.trial, this.category, this.observations, this.activeFields, anovaResults);
+      findingsText = await generateNarrativeWithAI(this.trial, this.category, this.observations, this.activeFields, this.treatmentNames, this.design, anovaResults);
     }
     if (!findingsText) {
       const isSig = anovaResults && !anovaResults.error && anovaResults.p_value < 0.05;
@@ -988,7 +1131,7 @@ export class AdvancedReportGenerator {
 
     let conclusionText = this.trial.Conclusion || null;
     if (!conclusionText) {
-      conclusionText = await generateConclusionsWithAI(this.trial, this.category, this.activeFields, this.observations, anovaResults);
+      conclusionText = await generateConclusionsWithAI(this.trial, this.category, this.activeFields, this.observations, this.treatmentNames, this.design, anovaResults);
     }
     if (!conclusionText) {
       const isSig = anovaResults && !anovaResults.error && anovaResults.p_value < 0.05;
@@ -1051,9 +1194,31 @@ export class AdvancedReportGenerator {
       ws.getCell(`B${r}`).value = row[1];
     });
 
+    let vRow = metadata.length + 5;
+    ws.mergeCells(`A${vRow}:B${vRow}`);
+    ws.getCell(`A${vRow}`).value = 'DATA QUALITY & VALIDATION REPORT';
+    ws.getCell(`A${vRow}`).font = { bold: true, size: 11, color: { rgb: 'FFFFFF' } };
+    ws.getCell(`A${vRow}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'C0392B' } }; // Deep red header
+    vRow++;
+
+    const warnings = this.validationWarnings || [];
+    if (warnings.length === 0) {
+      ws.mergeCells(`A${vRow}:B${vRow}`);
+      ws.getCell(`A${vRow}`).value = '✓ All automated data quality checks passed successfully (100% integrity).';
+      ws.getCell(`A${vRow}`).font = { bold: true, color: { rgb: '27AE60' } };
+      vRow++;
+    } else {
+      warnings.forEach(warning => {
+        ws.mergeCells(`A${vRow}:B${vRow}`);
+        ws.getCell(`A${vRow}`).value = `⚠ ${warning}`;
+        ws.getCell(`A${vRow}`).font = { color: { rgb: 'D35400' }, bold: true };
+        vRow++;
+      });
+    }
+
     ws.column_dimensions = {
-      'A': { width: 25 },
-      'B': { width: 45 }
+      'A': { width: 35 },
+      'B': { width: 55 }
     };
   }
 
