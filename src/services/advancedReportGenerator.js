@@ -294,10 +294,30 @@ function normalizeDateString(dateStr, fallbackDate = null) {
 }
 
 function isReductionMetric(key, category) {
-  if (['herbicide', 'fungicide', 'pesticide'].includes(category)) {
-    const growthKeys = ['yieldKgPlot', 'greenLeafArea', 'plantHealthScore', 'beneficialCount', 'marketableYieldPct', 'qualityRating', 'senescenceDays'];
-    return !growthKeys.includes(key);
+  if (!key) return false;
+  
+  // Convert key/label to lowercase to check content
+  const cleanKey = String(key).toLowerCase();
+  
+  // List of standard adverse keywords (where lower is better)
+  const adverseKeywords = [
+    'deficiency', 'severity', 'chlorosis', 'necrosis', 'pest', 'disease', 
+    'injury', 'mortality', 'weed', 'damage', 'incidence', 'phytotoxicity', 
+    'infestation', 'score_deficiency', 'score_injury', 'control_fail'
+  ];
+  
+  if (adverseKeywords.some(keyword => cleanKey.includes(keyword))) {
+    return true;
   }
+  
+  // Fallback for pesticide/herbicide/fungicide categories:
+  // If the category is crop protection and it is NOT one of the beneficial growth keys, treat it as an adverse trait (lower is better)
+  if (['herbicide', 'fungicide', 'pesticide'].includes(category)) {
+    const growthKeys = ['yield', 'height', 'area', 'health', 'vigor', 'color', 'beneficial', 'quality', 'mass', 'length', 'nue', 'spad', 'biomass'];
+    const isGrowth = growthKeys.some(gk => cleanKey.includes(gk));
+    return !isGrowth;
+  }
+  
   return false;
 }
 
