@@ -528,8 +528,8 @@ export async function fbCatDeleteFormulation(category, id) {
   return fbDelete(getCategoryCollection(category, 'formulations'), id);
 }
 
-export async function fbCatGetIngredients(category, userId) {
-  return fbGetAll(getCategoryCollection(category, 'ingredients'), userId);
+export async function fbCatGetIngredients(category, userId, sharedWithUid = null) {
+  return fbGetAll(getCategoryCollection(category, 'ingredients'), userId, sharedWithUid);
 }
 export async function fbCatAddIngredient(category, data, userId) {
   return fbAdd(getCategoryCollection(category, 'ingredients'), data, userId);

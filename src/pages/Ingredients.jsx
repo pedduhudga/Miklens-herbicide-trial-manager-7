@@ -30,6 +30,96 @@ export default function Ingredients({ onMenuClick }) {
     SMILES: ''
   });
 
+  const handleShareLibrary = async () => {
+    if (isViewer) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Viewer role cannot share ingredients.', type: 'error' } }));
+      return;
+    }
+
+    const ownUid = user?.uid || user?.ID || user?.id;
+    const activeCategory = state.activeCategory || 'herbicide';
+
+    if (!window.confirm(`Share all your ${activeCategory} ingredients with other scientists who have access to the ${activeCategory} tab?`)) {
+      return;
+    }
+
+    const toast = (msg, type = 'success') =>
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg, type } }));
+
+    // Show loading overlay
+    window.dispatchEvent(new CustomEvent('app:loading', { detail: { show: true } }));
+
+    try {
+      // 1. Fetch all users
+      const { getUsers } = await import('../services/dataLayer.js');
+      const { hasAccess } = await import('../utils/categoryConfig.js');
+      
+      const allUsers = await getUsers({}, getAppState);
+      
+      // 2. Filter users who have access to the active category and are not the current user / admins
+      const targetUsers = (allUsers || []).filter(u => {
+        const uid = u.id || u.ID || u.uid;
+        if (uid === ownUid) return false;
+        
+        const role = String(u.role || u.Role || '').toLowerCase();
+        if (role === 'admin') return false; // Admins already see everything
+        
+        return hasAccess(u, activeCategory, 'read');
+      });
+
+      if (targetUsers.length === 0) {
+        toast(`No other scientists found with access to the ${activeCategory} tab.`, 'info');
+        return;
+      }
+
+      const targetUids = targetUsers.map(u => u.id || u.ID || u.uid);
+
+      // 3. Filter ingredients owned by the current user in the active category
+      const ownIngredients = (state.ingredients || []).filter(ing => {
+        const createdBy = ing.CreatedBy || ing.createdBy;
+        const isOwn = !createdBy || createdBy === ownUid || isAdmin;
+        const matchesCategory = ing.Category === activeCategory || (!ing.Category && activeCategory === 'herbicide');
+        return isOwn && matchesCategory;
+      });
+
+      if (ownIngredients.length === 0) {
+        toast(`You don't have any ${activeCategory} ingredients to share.`, 'info');
+        return;
+      }
+
+      // 4. Update each ingredient's SharedWith array to include these scientist UIDs
+      const updatedIngredients = [...state.ingredients];
+      
+      const promises = ownIngredients.map(async (ing) => {
+        const currentShared = Array.isArray(ing.SharedWith) ? ing.SharedWith : [];
+        const newShared = Array.from(new Set([...currentShared, ...targetUids]));
+        
+        const updatedIng = {
+          ...ing,
+          SharedWith: newShared
+        };
+
+        const idx = updatedIngredients.findIndex(i => i.ID === ing.ID);
+        if (idx !== -1) {
+          updatedIngredients[idx] = updatedIng;
+        }
+
+        return addIngredient(updatedIng, getAppState);
+      });
+
+      await Promise.all(promises);
+
+      // 5. Update state
+      updateState({ ingredients: updatedIngredients });
+      toast(`Successfully shared ${ownIngredients.length} ingredients with ${targetUsers.length} scientists!`, 'success');
+    } catch (err) {
+      console.error('Error sharing library:', err);
+      toast('Failed to share ingredients library.', 'error');
+    } finally {
+      window.dispatchEvent(new CustomEvent('app:loading', { detail: { show: false } }));
+    }
+  };
+
   const CURRENCY_SYMBOL = '₹'; // Could be dynamic from settings
 
   const handleOpenModal = (ingredient = null) => {
@@ -158,15 +248,24 @@ export default function Ingredients({ onMenuClick }) {
       <TopBar title="Ingredient Costs" onMenuClick={onMenuClick} />
 
       <div className="flex-1 overflow-y-auto p-6 max-w-4xl mx-auto w-full">
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6">
           <h2 className="text-xl font-bold text-slate-800">Ingredients Library</h2>
           {!isViewer && (
-            <button
-              onClick={() => handleOpenModal()}
-              className="btn-primary px-4 py-2 rounded-xl shadow-md flex items-center gap-2"
-            >
-              <Plus className="w-5 h-5" /> Add Ingredient
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleShareLibrary}
+                className="px-4 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-xl font-semibold border border-indigo-200/60 flex items-center gap-2 transition"
+                title={`Share all ingredients in the active category with other scientists`}
+              >
+                <Share2 className="w-4 h-4" /> Share Library
+              </button>
+              <button
+                onClick={() => handleOpenModal()}
+                className="btn-primary px-4 py-2 rounded-xl shadow-md flex items-center gap-2 transition"
+              >
+                <Plus className="w-5 h-5" /> Add Ingredient
+              </button>
+            </div>
           )}
         </div>
 

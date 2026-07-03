@@ -567,9 +567,8 @@ export async function getIngredients(payload, getAppState) {
   const { useFirebase } = getConfig(getAppState);
   if (useFirebase) {
     const allowedUids = getAllowedUids(getAppState);
-    // Note: Ingredients may be shared across categories in some implementations
-    // but we enforce category boundaries for consistency
-    return fbDB.fbCatGetIngredients(category, allowedUids);
+    const sharedWithUid = getSharedWithUid(getAppState);
+    return fbDB.fbCatGetIngredients(category, allowedUids, sharedWithUid);
   }
   // For Google Sheets, apply category filtering
   const data = await sheetDB.getIngredients(payload, getAppState);
