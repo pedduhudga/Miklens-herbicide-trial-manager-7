@@ -136,7 +136,8 @@ CRITICAL INSTRUCTION:
 1. Avoid all causal physiological, biological or metabolic claims (such as "nutrient uptake", "assimilation", "photosynthetic rate", "metabolic demand") unless those biological parameters were directly measured. Focus strictly on physical, visual, and statistical observations (e.g. height, vigor, leaf color, SPAD, yield).
 2. Write generalized scientific conclusions comparing all treatments together. Avoid referencing only one specific test product unless it performed significantly differently from all others (e.g. instead of focusing only on one product, use phrases like: "Under the conditions of this study, no statistically significant performance advantage of the test treatment over the comparative treatments was demonstrated.").
 3. Provide research-oriented recommendations, such as: repeating the trial under additional agro-climatic conditions, increasing replication to improve statistical precision, extending the observation period, evaluating across multiple seasons, or validating under commercial farming conditions. Do NOT recommend business-oriented actions (like cost-benefit analyses).
-4. If high coefficients of variation (CV%) are observed (especially for SPAD/chlorophyll measurements), use statistically precise and cautious wording such as: "The SPAD measurements exhibited relatively high variability (CV = 35.6%), which may have reduced the sensitivity of the statistical analysis." Avoid claiming that high CV "likely contributed to the absence of statistical power".
+4. If high coefficients of variation (CV%) are observed (especially for SPAD/chlorophyll measurements), use statistically precise and cautious wording such as: "The relatively high variability in SPAD measurements (CV = 35.6%) may have reduced the ability to detect small treatment effects." Avoid claiming that high CV "likely contributed to the absence of statistical power".
+5. For visual vigor or leaf color CV, use phrasing like: "Low coefficients of variation for visual vigor (7.0%) and leaf color (4.2%) indicate good experimental consistency." Avoid implying precision solely from CV values.
 Keep it precise and factual. Do NOT include markdown styling or headers, just plain text with bullets.`;
 
     const text = await generateTextWithAI(prompt, 'You are a senior agricultural scientist.');
@@ -2091,6 +2092,7 @@ export class AdvancedReportGenerator {
 
     let r = 6;
     this.activeFields.forEach(f => {
+      if (f.key === 'nue') return;
       const anova = calculateAnovaRCB(this.observations, f.key, this.category, this.design);
       if (anova.error) return;
 
@@ -2163,6 +2165,7 @@ export class AdvancedReportGenerator {
     r++;
 
     this.activeFields.forEach(f => {
+      if (f.key === 'nue') return;
       const anova = calculateAnovaRCB(this.observations, f.key, this.category, this.design);
       if (anova.error) return;
 
