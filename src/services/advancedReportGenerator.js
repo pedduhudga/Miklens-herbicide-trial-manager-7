@@ -2078,13 +2078,24 @@ export class AdvancedReportGenerator {
           ws.getCell(`${colStart}${startRow + 8}`).value = `Caption: ${p.label || 'Image'}`;
           ws.getCell(`${colStart}${startRow + 8}`).font = { italic: true, size: 9 };
           
-          ws.getCell(`${colStart}${startRow + 9}`).value = `Date: ${p.date || 'N/A'}`;
-          ws.getCell(`${colStart}${startRow + 9}`).font = { size: 9, color: { rgb: '7F8C8D' } };
+          const photoTrtName = p.treatment || (p.treatmentNumber ? this.treatmentNames[p.treatmentNumber - 1] : '');
+          const infoParts = [];
+          if (p.block || p.rep || p.replication) infoParts.push(`Block/Rep: ${p.block || p.rep || p.replication}`);
+          if (p.plot || p.plotNumber) infoParts.push(`Plot: ${p.plot || p.plotNumber}`);
+          if (p.pot || p.potNumber) infoParts.push(`Pot: ${p.pot || p.potNumber}`);
+          if (photoTrtName) infoParts.push(`Trt: ${photoTrtName}`);
+          
+          const metaInfo = infoParts.length > 0 ? infoParts.join(' | ') : 'Unspecified';
+          ws.getCell(`${colStart}${startRow + 9}`).value = `Info: ${metaInfo}`;
+          ws.getCell(`${colStart}${startRow + 9}`).font = { size: 9, bold: true, color: { rgb: '2980B9' } };
+          
+          ws.getCell(`${colStart}${startRow + 10}`).value = `Date: ${p.date || 'N/A'}`;
+          ws.getCell(`${colStart}${startRow + 10}`).font = { size: 9, color: { rgb: '7F8C8D' } };
           
           colOffset++;
           if (colOffset >= 3) {
             colOffset = 0;
-            startRow += 11;
+            startRow += 12;
           }
         } catch (e) {
           console.warn('Failed to embed photo in excel:', e);
