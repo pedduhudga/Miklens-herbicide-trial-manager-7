@@ -20,6 +20,7 @@ import {
   formatValidationErrorForUI,
   VALID_CATEGORIES
 } from '../utils/categoryValidation.js';
+import { compressImage } from '../utils/photoUtils.js';
 
 // ─── helper ──────────────────────────────────────────────────────────────────
 
@@ -896,6 +897,15 @@ export async function uploadPhoto(payload, getAppState) {
 
   // Ensure photo metadata includes category information for proper trial association
   const photoData = { ...payload, Category: category };
+  
+  if (photoData.fileData) {
+    try {
+      photoData.fileData = await compressImage(photoData.fileData);
+    } catch (compressErr) {
+      console.warn('[DataLayer] Non-critical image compression failed:', compressErr);
+    }
+  }
+
   console.log(`[DataLayer] Uploading photo for category: ${category} (category-aware trial association)`);
 
   return sheetDB.apiCall('uploadPhoto', photoData, false, getAppState);

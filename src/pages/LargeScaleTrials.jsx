@@ -849,11 +849,17 @@ export default function LargeScaleTrials({ onMenuClick }) {
     setCropperOpen(true);
   };
 
-  const handleCropComplete = (croppedUrl) => {
+  const handleCropComplete = async (croppedUrl) => {
     setCropperOpen(false);
     setCropSource(null);
     if (cropCallbackRef.current) {
-      cropCallbackRef.current(croppedUrl);
+      let finalUrl = croppedUrl;
+      try {
+        finalUrl = await compressImage(croppedUrl, 3072, 0.95);
+      } catch (err) {
+        console.warn('[LargeScaleTrials] Crop compression failed:', err);
+      }
+      cropCallbackRef.current(finalUrl);
       cropCallbackRef.current = null;
     }
   };
@@ -869,7 +875,7 @@ export default function LargeScaleTrials({ onMenuClick }) {
 
     // Compress image before saving/uploading to prevent quota errors
     try {
-      dataUrl = await compressImage(dataUrl, 1920, 0.95);
+      dataUrl = await compressImage(dataUrl, 3072, 0.95);
     } catch (compressErr) {
       console.warn('Photo compression failed, using original:', compressErr);
     }

@@ -18,7 +18,7 @@ import {
   FileCode, MonitorPlay, Archive, Pencil, ScanLine, Crop, Clock, Calculator, Loader2
 } from 'lucide-react';
 import { safeJsonParse } from '../utils/helpers.js';
-import { resolvePhotoSrc, getPhotoThumbnailSrc, isPhotoBroken, getDriveFileId } from '../utils/photoUtils.js';
+import { resolvePhotoSrc, getPhotoThumbnailSrc, isPhotoBroken, getDriveFileId, compressImage } from '../utils/photoUtils.js';
 import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryValue, calculateEfficacy, getRatingFromEfficacy } from '../utils/categoryConfig.js';
 import { calculateDAA, toDateKey, formatPhotoDate, toDatetimeLocal, formatDate, formatDateTime, parseDateFromFilename, parsePhotoInfoFromFilename } from '../utils/dateUtils.js';
 import { normalizeObservation } from '../utils/categoryObservationUtils.js';
@@ -2271,11 +2271,17 @@ export default function Trials({ onMenuClick }) {
     setCropperOpen(true);
   };
 
-  const handleCropComplete = (croppedUrl) => {
+  const handleCropComplete = async (croppedUrl) => {
     setCropperOpen(false);
     setCropSource(null);
     if (cropCallbackRef.current) {
-      cropCallbackRef.current(croppedUrl);
+      let finalUrl = croppedUrl;
+      try {
+        finalUrl = await compressImage(croppedUrl);
+      } catch (err) {
+        console.warn('[Trials] Crop compression failed:', err);
+      }
+      cropCallbackRef.current(finalUrl);
       cropCallbackRef.current = null;
     }
   };
@@ -2283,6 +2289,13 @@ export default function Trials({ onMenuClick }) {
   const saveAndAnalyzePhoto = async (dataUrl, photoDateStr, targetTrialOverride = null, photoTag = 'Whole Canopy') => {
     const targetTrial = targetTrialOverride || activeTrial;
     if (!targetTrial) return;
+    
+    try {
+      dataUrl = await compressImage(dataUrl);
+    } catch (compressErr) {
+      console.warn('[Trials] Non-critical image compression failed:', compressErr);
+    }
+
     setAiGenRunning(dataUrl || true);
 
     const photoDate = formatPhotoDate(photoDateStr || new Date().toISOString());

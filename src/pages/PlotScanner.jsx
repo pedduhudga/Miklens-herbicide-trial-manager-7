@@ -365,11 +365,17 @@ export default function PlotScanner({ onMenuClick }) {
     setCropperOpen(true);
   };
 
-  const handleCropComplete = (croppedUrl) => {
+  const handleCropComplete = async (croppedUrl) => {
     setCropperOpen(false);
     setCropSource(null);
     if (cropCallbackRef.current) {
-      cropCallbackRef.current(croppedUrl);
+      let finalUrl = croppedUrl;
+      try {
+        finalUrl = await compressImage(croppedUrl, 3072, 0.95);
+      } catch (err) {
+        console.warn('[PlotScanner] Crop compression failed:', err);
+      }
+      cropCallbackRef.current(finalUrl);
       cropCallbackRef.current = null;
     }
   };

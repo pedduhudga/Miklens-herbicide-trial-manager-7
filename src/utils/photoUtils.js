@@ -76,3 +76,41 @@ export function stripPhotoArrayForMirror(jsonStr) {
     return jsonStr;
   }
 }
+
+/**
+ * Compress base64/dataURL image to a manageable size (max dimension and quality)
+ * Optimized specifically for AI analysis (Bug, Disease, Weed, and Pest detection).
+ */
+export async function compressImage(dataUrl, maxDimension = 3072, quality = 0.95) {
+  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) {
+    return dataUrl;
+  }
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let { width, height } = img;
+
+      // Scale down if too large
+      if (width > maxDimension || height > maxDimension) {
+        const scale = maxDimension / Math.max(width, height);
+        width = Math.floor(width * scale);
+        height = Math.floor(height * scale);
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+
+      const compressed = canvas.toDataURL('image/jpeg', quality);
+      resolve(compressed);
+    };
+    img.onerror = () => {
+      resolve(dataUrl);
+    };
+    img.src = dataUrl;
+  });
+}
+
