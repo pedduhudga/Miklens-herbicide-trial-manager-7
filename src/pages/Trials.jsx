@@ -5104,7 +5104,8 @@ If none are present, write "None".`;
   const handleExportAdvancedExcel = useCallback(async (trial) => {
     window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Generating Advanced Excel Report...', type: 'info' } }));
     try {
-      const generator = new AdvancedReportGenerator(trial, activeCategory);
+      const trialProj = (state.projects || []).find(p => String(p.ID) === String(trial.ProjectID));
+      const generator = new AdvancedReportGenerator(trial, activeCategory, trialProj);
       await generator.generateCompleteReport();
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Report generated successfully!', type: 'success' } }));
     } catch (error) {
@@ -5693,7 +5694,9 @@ If none are present, write "None".`;
                             onClick={() => triggerExportWithCustomisation(async () => {
                               window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Generating Project-wide Advanced Excel Report...', type: 'info' } }));
                               try {
-                                const generator = new AdvancedReportGenerator(trialsList, activeCategory);
+                                const representative = trialsList[0] || {};
+                                const trialProj = (state.projects || []).find(p => String(p.ID) === String(representative.ProjectID));
+                                const generator = new AdvancedReportGenerator(trialsList, activeCategory, trialProj);
                                 await generator.generateCompleteReport();
                                 window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Project report generated successfully!', type: 'success' } }));
                               } catch (err) {

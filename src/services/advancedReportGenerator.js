@@ -684,7 +684,7 @@ function toBase64(src, maxPx = 400) {
 }
 
 export class AdvancedReportGenerator {
-  constructor(trialOrTrials, category = 'nutrition') {
+  constructor(trialOrTrials, category = 'nutrition', project = null) {
     this.category = category;
     this.config = getCategoryConfig(category);
     this.workbook = new ExcelJS.Workbook();
@@ -695,7 +695,7 @@ export class AdvancedReportGenerator {
     
     // Attempt to lookup backup project if design or custom pot fields are needed
     const projects = getBackupProjects();
-    const proj = projects.find(p => String(p.ID) === String(representative.ProjectID));
+    const proj = project || projects.find(p => String(p.ID) === String(representative.ProjectID));
     this.project = proj || null;
     
     if (proj?.Design === 'PotTrial' || representative?.Design === 'PotTrial') {
@@ -1109,6 +1109,35 @@ export class AdvancedReportGenerator {
 
   async generateCompleteReport() {
     try {
+      // Asynchronously fetch project from Dexie DB if not passed synchronously
+      if (!this.project) {
+        try {
+          const { db } = await import('./dexieDB.js');
+          const projId = this.trial.ProjectID || (this.trials && this.trials[0] ? this.trials[0].ProjectID : null);
+          if (projId) {
+            const offlineProj = await db.projects.get(String(projId));
+            if (offlineProj) {
+              this.project = offlineProj;
+              if (offlineProj.Design === 'PotTrial') {
+                this.design = 'PotTrial';
+                const potFields = offlineProj.PotFields || ['Plant Height', 'Branches', 'Flowers', 'Fruit Count', 'Yield'];
+                this.activeFields = potFields.map(f => ({ key: f, label: f }));
+                this.activeFields = this.activeFields.filter(f => {
+                  const isDerived = ['nue', 'audpc', 'rootToShootRatio'].includes(f.key);
+                  if (!isDerived) return true;
+                  return this.observations.some(obs => {
+                    const val = parseFloat(obs[f.key]);
+                    return !isNaN(val) && val !== 0;
+                  });
+                });
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('Failed to load project from Dexie asynchronously in generateCompleteReport:', err);
+        }
+      }
+
       // 0. Auto-process observations with Spectral ExG index AI and growth fallbacks
       await this.processObservationsWithAI();
       
@@ -1607,8 +1636,8 @@ export class AdvancedReportGenerator {
     const ws = this.workbook.addWorksheet('Assessment Data Summary');
     ws.views = [{ showGridLines: true }];
 
-    // Columns: Date, DAA, Harvest, Plot, Rep, Treatment, and the category observation fields
-    const headerRow = ['Date', 'Days After App', 'Harvest', 'Plot', 'Rep', 'Treatment'];
+    // Columns: Date, Days After App, Harvest, Plot, Rep, Treatment, Pot ID, and the category observation fields
+    const headerRow = ['Date', 'Days After App', 'Harvest', 'Plot', 'Rep', 'Treatment', 'Pot ID'];
     const fieldsToUse = this.activeFields;
 
     fieldsToUse.forEach(f => {
@@ -1619,47 +1648,82 @@ export class AdvancedReportGenerator {
     ws.getRow(1).font = { bold: true, color: { rgb: 'FFFFFF' } };
     ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: '2980B9' } };
 
+    // Determine if it is a PotTrial and calculate pots per unit
+    const proj = this.project;
+    const isPotTrial = this.design === 'PotTrial' || proj?.Design === 'PotTrial';
+    const repsList = [...new Set(this.observations.map(o => o.replication || o.rep).filter(Boolean))];
+    const computedReplications = repsList.length > 0
+      ? repsList.length
+      : (proj?.PotBlocks && !isNaN(proj.PotBlocks))
+        ? parseInt(proj.PotBlocks)
+        : (this.trial.Replication && !isNaN(this.trial.Replication))
+          ? parseInt(this.trial.Replication)
+          : 3;
+    const trtCount = this.treatmentNames.length;
+    const independentUnits = trtCount * computedReplications;
+    const potRows = proj?.PotRows ? parseInt(proj.PotRows) : null;
+    const potCols = proj?.PotCols ? parseInt(proj.PotCols) : null;
+    const totalPots = (potRows && potCols) ? potRows * potCols : (this.isProjectWide ? (this.trials || []).length : this.observations.length);
+    const potsPerUnit = isPotTrial && independentUnits > 0 ? Math.round(totalPots / independentUnits) : 1;
+
+    let currentRow = 2;
+
     // Fill observations
     this.observations.forEach((obs, idx) => {
-      const r = idx + 2;
-      
-      // Write metadata
-      ws.getCell(r, 1).value = obs.date || this.trial.Date || 'N/A';
-      ws.getCell(r, 2).value = obs.daa ?? 0;
-      ws.getCell(r, 3).value = obs.harvestNumber || obs.harvest || 1;
-      ws.getCell(r, 4).value = obs.plotNumber || obs.plot || (idx + 1);
-      ws.getCell(r, 5).value = obs.replication || obs.rep || 1;
-      ws.getCell(r, 6).value = obs.treatmentNumber || obs.treatment || 1;
+      const potsCountToWrite = isPotTrial && potsPerUnit > 1 ? potsPerUnit : 1;
 
-      // Write category-specific variables & apply critical deficiency formats
-      fieldsToUse.forEach((f, fIdx) => {
-        const val = obs[f.key];
-        const cell = ws.getCell(r, 7 + fIdx);
-        cell.value = val !== undefined && val !== null ? val : '';
+      for (let potIdx = 0; potIdx < potsCountToWrite; potIdx++) {
+        const potLetter = String.fromCharCode(65 + potIdx);
+        const potIdValue = isPotTrial && potsPerUnit > 1 ? `Pot ${potLetter}` : '—';
 
-        // Add scientific critical deficiency highlights for tissue concentrations
-        if (val !== undefined && val !== null && val !== '') {
-          const numVal = parseFloat(val);
-          if (!isNaN(numVal)) {
-            let deficient = false;
-            if (f.key === 'tissueN' && numVal < 3.5) deficient = true;
-            else if (f.key === 'tissueP' && numVal < 0.3) deficient = true;
-            else if (f.key === 'tissueK' && numVal < 3.0) deficient = true;
+        // Write metadata
+        ws.getCell(currentRow, 1).value = obs.date || this.trial.Date || 'N/A';
+        ws.getCell(currentRow, 2).value = obs.daa ?? 0;
+        ws.getCell(currentRow, 3).value = obs.harvestNumber || obs.harvest || 1;
+        ws.getCell(currentRow, 4).value = obs.plotNumber || obs.plot || (idx + 1);
+        ws.getCell(currentRow, 5).value = obs.replication || obs.rep || 1;
+        ws.getCell(currentRow, 6).value = obs.treatmentNumber || obs.treatment || 1;
+        ws.getCell(currentRow, 7).value = potIdValue;
 
-            if (deficient) {
-              cell.fill = {
-                type: 'pattern',
-                pattern: 'solid',
-                fgColor: { rgb: 'FCE4D6' } // Light light orange/red alert
-              };
-              cell.font = {
-                color: { rgb: 'C00000' }, // Dark red text
-                bold: true
-              };
+        // Write category-specific variables & apply critical deficiency formats
+        fieldsToUse.forEach((f, fIdx) => {
+          let val = obs[f.key];
+          
+          // If this is the plant height column and we have pot-wise data, use the specific pot value
+          const cleanKey = f.key.toLowerCase().replace(/\s/g, '');
+          if (cleanKey === 'plantheight' && obs.potHeights && obs.potHeights[potIdx] !== undefined && obs.potHeights[potIdx] !== '') {
+            val = obs.potHeights[potIdx];
+          }
+
+          const cell = ws.getCell(currentRow, 8 + fIdx);
+          cell.value = val !== undefined && val !== null ? val : '';
+
+          // Add scientific critical deficiency highlights for tissue concentrations
+          if (val !== undefined && val !== null && val !== '') {
+            const numVal = parseFloat(val);
+            if (!isNaN(numVal)) {
+              let deficient = false;
+              if (f.key === 'tissueN' && numVal < 3.5) deficient = true;
+              else if (f.key === 'tissueP' && numVal < 0.3) deficient = true;
+              else if (f.key === 'tissueK' && numVal < 3.0) deficient = true;
+
+              if (deficient) {
+                cell.fill = {
+                  type: 'pattern',
+                  pattern: 'solid',
+                  fgColor: { rgb: 'FCE4D6' } // Light light orange/red alert
+                };
+                cell.font = {
+                  color: { rgb: 'C00000' }, // Dark red text
+                  bold: true
+                };
+              }
             }
           }
-        }
-      });
+        });
+
+        currentRow++;
+      }
     });
 
     // Formatting column widths
@@ -1682,7 +1746,7 @@ export class AdvancedReportGenerator {
 
     let r = 4;
     this.activeFields.forEach((f, fIdx) => {
-      const fieldCol = getColumnLetter(7 + fIdx);
+      const fieldCol = getColumnLetter(8 + fIdx);
       ws.getCell(`A${r}`).value = f.label;
       ws.getCell(`A${r}`).font = { bold: true };
       

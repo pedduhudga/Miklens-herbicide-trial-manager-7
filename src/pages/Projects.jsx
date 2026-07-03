@@ -4281,7 +4281,7 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
     const projectCategory = activeProject?.Category || activeCategory;
     toast('Generating Project-wide Advanced Excel Report...', 'info');
     try {
-      const generator = new AdvancedReportGenerator(pTrials, projectCategory);
+      const generator = new AdvancedReportGenerator(pTrials, projectCategory, activeProject);
       await generator.generateCompleteReport();
       toast('Project report generated successfully!', 'success');
     } catch (err) {
