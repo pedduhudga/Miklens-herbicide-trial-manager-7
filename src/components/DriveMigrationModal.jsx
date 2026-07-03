@@ -11,9 +11,38 @@ import { getDriveFileId, resolvePhotoSrc } from '../utils/photoUtils.js';
 // ─── Apps Script code that admin must add to their Code.gs ─────────────────
 const APPS_SCRIPT_CODE = `
 /**
+ * getBaseFolderName — Removes trial ID suffixes for fuzzy matching.
+ */
+function getBaseFolderName(name) {
+  if (!name) return "";
+  return name.replace(/\\s+-\\s+[a-zA-Z0-9]{5}$/, '').replace(/\\s+-\\s+local_[a-zA-Z0-9]+$/, '').trim();
+}
+
+/**
+ * findTrialFolderFuzzy — Search for a subfolder by base name and rename if matched.
+ */
+function findTrialFolderFuzzy(parentFolder, targetFolderName) {
+  var subfolders = parentFolder.getFoldersByName(targetFolderName);
+  if (subfolders.hasNext()) return subfolders.next();
+  
+  var targetBase = getBaseFolderName(targetFolderName);
+  var allSubs = parentFolder.getFolders();
+  while (allSubs.hasNext()) {
+    var sub = allSubs.next();
+    var subBase = getBaseFolderName(sub.getName());
+    if (subBase === targetBase) {
+      try {
+        sub.setName(targetFolderName);
+      } catch (e) {}
+      return sub;
+    }
+  }
+  return null;
+}
+
+/**
  * migrateDrivePhotos — Copy all files from one Drive folder to another.
- * Preserves subfolder structure. Returns { oldId → newId } mapping.
- * Add this function to your Code.gs file.
+ * Preserves subfolder structure, merges duplicate trials into single folders.
  */
 function migrateDrivePhotos(payload) {
   var sourceFolderId = payload.sourceFolderId;
@@ -42,7 +71,6 @@ function migrateDrivePhotos(payload) {
       var file = files.next();
       try {
         var newFile = file.makeCopy(file.getName(), target);
-        // Make new file publicly viewable (same as original photo sharing)
         try { newFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch(e2) {}
         mapping[file.getId()] = newFile.getId();
         fileCount++;
@@ -56,16 +84,10 @@ function migrateDrivePhotos(payload) {
     var subfolders = source.getFolders();
     while (subfolders.hasNext()) {
       var subfolder = subfolders.next();
-      var newSubfolder;
-      
-      // Check if subfolder already exists in target
-      var existingFolders = target.getFoldersByName(subfolder.getName());
-      if (existingFolders.hasNext()) {
-        newSubfolder = existingFolders.next();
-      } else {
+      var newSubfolder = findTrialFolderFuzzy(target, subfolder.getName());
+      if (!newSubfolder) {
         newSubfolder = target.createFolder(subfolder.getName());
       }
-      
       copyFolder(subfolder, newSubfolder);
     }
   }
@@ -77,7 +99,7 @@ function migrateDrivePhotos(payload) {
     mapping: mapping,
     fileCount: fileCount,
     errorCount: errorCount,
-    errors: errors.slice(0, 20) // Limit error details
+    errors: errors.slice(0, 20)
   };
 }
 

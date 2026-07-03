@@ -617,6 +617,37 @@ function addBatchRecords(ss, sheetName, items, auth) {
  * Ensure that a hierarchical Drive folder exists for a trial.
  * Structure: Root (folderId) / ProjectName / "FormulationName (YYYY-MM-DD)"
  */
+function getBaseFolderName(name) {
+    if (!name) return "";
+    // Removes the 5-character suffix like " - b615f" or local suffix like " - local_12345"
+    return name.replace(/\s+-\s+[a-zA-Z0-9]{5}$/, '').replace(/\s+-\s+local_[a-zA-Z0-9]+$/, '').trim();
+}
+
+function findTrialFolderFuzzy(parentFolder, targetFolderName) {
+    var subfolders = parentFolder.getFoldersByName(targetFolderName);
+    if (subfolders.hasNext()) {
+        return subfolders.next();
+    }
+    
+    var targetBase = getBaseFolderName(targetFolderName);
+    var allSubs = parentFolder.getFolders();
+    while (allSubs.hasNext()) {
+        var sub = allSubs.next();
+        var subBase = getBaseFolderName(sub.getName());
+        if (subBase === targetBase) {
+            // Rename the folder to the final name with the suffix (e.g. from no-suffix/temp-suffix to real ID suffix)
+            try {
+                sub.setName(targetFolderName);
+                Logger.log("Renamed fuzzy matched folder to target name: " + targetFolderName);
+            } catch (e) {
+                Logger.log("Fuzzy rename error: " + e.message);
+            }
+            return sub;
+        }
+    }
+    return null;
+}
+
 function ensureTrialFolder(ss, parentFolderId, trialPayload, auth) {
     try {
         if (!parentFolderId || !trialPayload) return null;
@@ -625,13 +656,24 @@ function ensureTrialFolder(ss, parentFolderId, trialPayload, auth) {
         const folderPath = getTrialFolderPath(ss, trialPayload, auth);
 
         let targetFolder = rootFolder;
-        folderPath.forEach(name => {
+        folderPath.forEach((name, idx) => {
             if (!name) return;
-            const subfolders = targetFolder.getFoldersByName(name);
-            if (subfolders.hasNext()) {
-                targetFolder = subfolders.next();
+            
+            // For the last folder (trialFolderName), use fuzzy matching to prevent duplicates
+            if (idx === folderPath.length - 1) {
+                var found = findTrialFolderFuzzy(targetFolder, name);
+                if (found) {
+                    targetFolder = found;
+                } else {
+                    targetFolder = targetFolder.createFolder(name);
+                }
             } else {
-                targetFolder = targetFolder.createFolder(name);
+                const subfolders = targetFolder.getFoldersByName(name);
+                if (subfolders.hasNext()) {
+                    targetFolder = subfolders.next();
+                } else {
+                    targetFolder = targetFolder.createFolder(name);
+                }
             }
         });
 
@@ -673,15 +715,28 @@ function uploadPhotoToDrive(parentFolderId, payload) {
     
     // Create/retrieve nested subfolders if requested
     if (folderPath && Array.isArray(folderPath)) {
-        folderPath.forEach(name => {
+        folderPath.forEach((name, idx) => {
             if (!name) return;
-            const subfolders = targetFolder.getFoldersByName(name);
-            if (subfolders.hasNext()) {
-                targetFolder = subfolders.next();
-                Logger.log(`Existing folder found: ${name}`);
+            
+            // For the last folder (trialFolderName), use fuzzy matching to prevent duplicates
+            if (idx === folderPath.length - 1) {
+                var found = findTrialFolderFuzzy(targetFolder, name);
+                if (found) {
+                    targetFolder = found;
+                    Logger.log(`Fuzzy matched folder found/renamed: ${name}`);
+                } else {
+                    targetFolder = targetFolder.createFolder(name);
+                    Logger.log(`New folder created: ${name}`);
+                }
             } else {
-                targetFolder = targetFolder.createFolder(name);
-                Logger.log(`New folder created: ${name}`);
+                const subfolders = targetFolder.getFoldersByName(name);
+                if (subfolders.hasNext()) {
+                    targetFolder = subfolders.next();
+                    Logger.log(`Existing folder found: ${name}`);
+                } else {
+                    targetFolder = targetFolder.createFolder(name);
+                    Logger.log(`New folder created: ${name}`);
+                }
             }
         });
     }
@@ -2625,8 +2680,11 @@ function migrateDrivePhotos(payload) {
             var newSubfolder = targetFolderIndex[subPath];
             
             if (!newSubfolder) {
-                // Create target subfolder and index it
-                newSubfolder = targetDir.createFolder(subfolder.getName());
+                // Try fuzzy match to prevent duplicating trial folders (e.g. merging Bion3-Pot2 and Bion3-Pot2-b615f)
+                newSubfolder = findTrialFolderFuzzy(targetDir, subfolder.getName());
+                if (!newSubfolder) {
+                    newSubfolder = targetDir.createFolder(subfolder.getName());
+                }
                 targetFolderIndex[subPath] = newSubfolder;
             }
             
