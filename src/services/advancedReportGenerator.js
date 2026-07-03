@@ -1328,7 +1328,7 @@ export class AdvancedReportGenerator {
       ['Statistically Significant Parameters', sigParamsList],
       ['Numerically Superior Treatment', bestTrtName],
       ['Statistical Significance Detected', sigParams.length > 0 ? 'Yes (p < 0.05)' : 'No (p >= 0.05)'],
-      ['Key Recommendation', 'Additional multi-location validation & trial replication']
+      ['Key Recommendation', sigParams.length > 0 ? 'Proceed with commercial validation & scaling' : 'Additional replication and multi-site validation recommended']
     ];
 
     execSummaryRows.forEach((rowVals, idx) => {
@@ -1377,7 +1377,7 @@ export class AdvancedReportGenerator {
     const rawMetadata = [
       ['Trial ID', this.trial.ID],
       ['Investigator', this.trial.InvestigatorName],
-      ['Sponsor', this.trial.Sponsor || 'Miklens Agriculture'],
+      ['Sponsor', this.trial.Sponsor || 'N/A'],
       ['Location', this.trial.Location],
       ['Crop', this.trial.CropCrop || this.trial.Crop || 'Tomato'],
       ['Variety', this.trial.CropVariety || this.trial.Variety],
