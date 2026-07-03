@@ -88,9 +88,8 @@ CRITICAL INSTRUCTION:
 3. Only state that deficiency symptoms were not noted if the actual deficiency or chlorosis values in the data are zero or absent.
 4. Never infer that the experiment lacked sufficient data, inadequate replication, or inadequate statistical power unless those conditions are explicitly supported by the statistical output. Do NOT claim the trial has "insufficient data" (it has multiple replication blocks and pots).
 5. Do NOT mention "Completely Randomized Design" or "CRD" unless the selected design is explicitly CRD.
-6. Compare all treatment groups collectively: ${treatmentNames.join(', ')}. Indicate which treatment achieved the numerically highest and lowest means, and state whether those differences were statistically distinguishable at the 5% significance level.
-7. Use neutral phrasing like: "no statistically significant treatment effects were detected under the conditions of this study" or "Given the absence of statistically significant treatment differences..." instead of "lack of variance".
-8. If identical values are observed (e.g., F = 0, P = 1), state: "Plant height exhibited identical treatment means across all experimental units (F = 0.00, P = 1.000)."
+9. Avoid informal phrases like: "performed comparably", "showed comparable vigor", or "uniform". Instead, write: "no statistically significant treatment differences were detected under the conditions of this study."
+10. If the design is PotTrial, refer to it consistently as "Randomized Complete Block Pot Trial (RCBD Pot Trial)".
 Do NOT use markdown headers or lists. Keep it strictly scientific, professional, and factual.`;
 
     const text = await generateTextWithAI(prompt, 'You are a professional agronomist.');
@@ -150,9 +149,9 @@ CRITICAL INSTRUCTION:
 6. Provide research-oriented recommendations, such as: repeating the trial under additional agro-climatic conditions, evaluating across multiple seasons, or validating under commercial farming conditions. Do NOT recommend business-oriented actions.
 7. Use neutral phrasing like: "Given the absence of statistically significant treatment differences..." instead of "lack of variance".
 8. If high coefficients of variation (CV%) are observed for a measured parameter, write: "The relatively high variability in [Parameter Name] measurements (CV = [Value]%) may have reduced the ability to detect small treatment effects." Do not reference "SPAD" or "chlorophyll" unless that metric is actually present in the dataset.
-9. If low coefficients of variation (CV%) are observed, write: "Low coefficients of variation for [Parameter Name] ([Value]%) indicate good experimental consistency."
-10. If identical values are observed (resulting in F = 0.00 and P = 1.000), state: "Plant height exhibited identical treatment means across all experimental units (F = 0.00, P = 1.000)."
-Keep it precise and factual. Do NOT include markdown styling or headers, just plain text with bullets.`;
+9. Avoid informal phrases like: "performed comparably", "showed comparable vigor", or "uniform". Instead, write: "no statistically significant treatment differences were detected under the conditions of this study."
+10. If the design is PotTrial, refer to it consistently as "Randomized Complete Block Pot Trial (RCBD Pot Trial)".
+Do NOT use markdown headers or lists. Keep it strictly scientific, professional, and factual.`;
 
     const text = await generateTextWithAI(prompt, 'You are a senior agricultural scientist.');
     return text || null;
@@ -920,7 +919,7 @@ export class AdvancedReportGenerator {
     const trtRepGroups = {};
 
     this.observations.forEach(obs => {
-      const key = `${obs.treatmentNumber}_${obs.replication}`;
+      const key = `${obs.treatmentNumber}_${obs.replication}_${obs.date || obs.daa || ''}`;
       if (!trtRepGroups[key]) trtRepGroups[key] = [];
       trtRepGroups[key].push(obs);
     });
@@ -1492,7 +1491,14 @@ export class AdvancedReportGenerator {
         }))
         .sort((a, b) => isRed ? a.mean - b.mean : b.mean - a.mean);
       if (sortedTrts.length > 0) {
-        bestTrtName = sortedTrts[0].name;
+        const bestMeanVal = sortedTrts[0].mean;
+        const bestTrts = sortedTrts.filter(t => Math.abs(t.mean - bestMeanVal) < 0.0001);
+        const trtNamesStr = bestTrts.map(t => t.name).join(', ');
+        
+        const isPrimarySig = primaryAnova.p_value < 0.05;
+        bestTrtName = isPrimarySig
+          ? `${trtNamesStr} (Statistically superior at α = 0.05)`
+          : `${trtNamesStr} (Not statistically different from other treatments)`;
       }
     }
 
@@ -1505,7 +1511,7 @@ export class AdvancedReportGenerator {
       ['Total Pots', totalPots],
       ['Observation Period', `${maxDaa} DAA`],
       ['Statistically Significant Parameters', sigParamsList],
-      ['Numerically Superior Treatment', bestTrtName],
+      ['Numerically Best Treatment(s) (Primary Parameter)', bestTrtName],
       ['Statistical Significance Detected', sigParams.length > 0 ? 'Yes (p < 0.05)' : 'No (p >= 0.05)'],
       ['Key Recommendation', sigParams.length > 0 ? 'Proceed with commercial validation & scaling' : 'Additional replication and multi-site validation recommended']
     ];
@@ -1950,8 +1956,30 @@ export class AdvancedReportGenerator {
       ws.getCell(`B${r}`).value = row[1];
     });
 
+    // 1.5. Variability Rating Legend Section (moved above statistics)
+    let legendRow = 16;
+    ws.mergeCells(`A${legendRow}:D${legendRow}`);
+    ws.getCell(`A${legendRow}`).value = 'VARIABILITY RATING LEGEND';
+    ws.getCell(`A${legendRow}`).font = { name: 'Calibri', bold: true, size: 10, color: { rgb: '2980B9' } };
+    legendRow++;
+
+    ws.getRow(legendRow).values = ['CV Range', 'Variability Rating', 'Scientific Quality Definition'];
+    ws.getRow(legendRow).font = { name: 'Calibri', bold: true };
+    legendRow++;
+
+    const legendItems = [
+      ['< 10%', 'Excellent', 'Highly consistent crop response, low experimental error'],
+      ['10% - 20%', 'Good', 'Expected agricultural/greenhouse variation'],
+      ['20% - 30%', 'Moderate', 'Moderate spatial/micro-climatic block variation'],
+      ['> 30%', 'High', 'Relatively high variability; interpret differences with caution']
+    ];
+    legendItems.forEach(item => {
+      ws.getRow(legendRow).values = item;
+      legendRow++;
+    });
+
     // 2. Observation Summary Section (Overall Parameter Metrics)
-    let curRow = 16;
+    let curRow = legendRow + 2;
     ws.mergeCells(`A${curRow}:N${curRow}`);
     ws.getCell(`A${curRow}`).value = '2. OVERALL OBSERVATION STATISTICS BY PARAMETER';
     ws.getCell(`A${curRow}`).font = { name: 'Calibri', bold: true, size: 11, color: { rgb: '2980B9' } };
@@ -1959,7 +1987,9 @@ export class AdvancedReportGenerator {
 
     const descHeaders = [
       'Parameter', 'Min', 'Max', 'Mean', 'Median', 'Std Dev', 'CV %', 'Range', 
-      'Assessment Records Used', 'Variability Class', 'Best Treatment', 'Best Mean', 'Worst Treatment', 'Worst Mean'
+      'Assessment Records Used', 'Variability Class', 
+      'Numerically Best Treatment(s)', 'Best Mean Value', 
+      'Numerically Worst Treatment(s)', 'Worst Mean Value'
     ];
     ws.getRow(curRow).values = descHeaders;
     ws.getRow(curRow).font = { name: 'Calibri', bold: true, color: { rgb: 'FFFFFF' } };
@@ -2023,8 +2053,17 @@ export class AdvancedReportGenerator {
       const isRed = isReductionMetric(f.key, this.category);
       const sortedTrts = [...trtMeans].sort((a, b) => isRed ? a.mean - b.mean : b.mean - a.mean);
       
-      const bestTrt = sortedTrts[0] || { name: 'N/A', mean: 0 };
-      const worstTrt = sortedTrts[sortedTrts.length - 1] || { name: 'N/A', mean: 0 };
+      const bestMeanVal = sortedTrts[0]?.mean;
+      const worstMeanVal = sortedTrts[sortedTrts.length - 1]?.mean;
+
+      const bestTrts = sortedTrts.filter(t => Math.abs(t.mean - bestMeanVal) < 0.0001);
+      const worstTrts = sortedTrts.filter(t => Math.abs(t.mean - worstMeanVal) < 0.0001);
+
+      const bestTrtsName = bestTrts.length > 1 ? `Tie (${bestTrts.map(t => t.name).join(', ')})` : (bestTrts[0]?.name || 'N/A');
+      const worstTrtsName = worstTrts.length > 1 ? `Tie (${worstTrts.map(t => t.name).join(', ')})` : (worstTrts[0]?.name || 'N/A');
+
+      const bestMean = bestTrts[0]?.mean ?? 0;
+      const worstMean = worstTrts[0]?.mean ?? 0;
 
       ws.getRow(curRow).values = [
         f.label,
@@ -2037,10 +2076,10 @@ export class AdvancedReportGenerator {
         parseFloat(range.toFixed(2)),
         sampleSize,
         variabilityClass,
-        bestTrt.name,
-        parseFloat(bestTrt.mean.toFixed(2)),
-        worstTrt.name,
-        parseFloat(worstTrt.mean.toFixed(2))
+        bestTrtsName,
+        parseFloat(bestMean.toFixed(2)),
+        worstTrtsName,
+        parseFloat(worstMean.toFixed(2))
       ];
       
       // Styling the Variability Class
@@ -2234,32 +2273,12 @@ export class AdvancedReportGenerator {
       curRow++;
     });
 
-    // 5. Variability Rating Legend Section
-    curRow += 2;
-    ws.mergeCells(`A${curRow}:D${curRow}`);
-    ws.getCell(`A${curRow}`).value = 'VARIABILITY RATING LEGEND';
-    ws.getCell(`A${curRow}`).font = { name: 'Calibri', bold: true, size: 10, color: { rgb: '2980B9' } };
-    curRow++;
-
-    ws.getRow(curRow).values = ['CV Range', 'Variability Rating', 'Scientific Quality Definition'];
-    ws.getRow(curRow).font = { name: 'Calibri', bold: true };
-    curRow++;
-
-    const legendItems = [
-      ['< 10%', 'Excellent', 'Highly consistent crop response, low experimental error'],
-      ['10% - 20%', 'Good', 'Expected agricultural/greenhouse variation'],
-      ['20% - 30%', 'Moderate', 'Moderate spatial/micro-climatic block variation'],
-      ['> 30%', 'High', 'Relatively high variability; interpret differences with caution']
-    ];
-    legendItems.forEach(item => {
-      ws.getRow(curRow).values = item;
-      curRow++;
-    });
-
     // Formatting column widths
     const columnWidthHeaders = [
       'Parameter', 'Min', 'Max', 'Mean', 'Median', 'Std Dev', 'CV %', 'Range', 
-      'Assessment Records Used', 'Variability Class', 'Best Treatment', 'Best Mean', 'Worst Treatment', 'Worst Mean'
+      'Assessment Records Used', 'Variability Class', 
+      'Numerically Best Treatment(s)', 'Best Mean Value', 
+      'Numerically Worst Treatment(s)', 'Worst Mean Value'
     ];
     columnWidthHeaders.forEach((_, colIndex) => {
       ws.getColumn(colIndex + 1).width = 18;
@@ -2463,14 +2482,19 @@ export class AdvancedReportGenerator {
       Object.keys(anova.treatmentMeans).forEach(trtNum => {
         const trtStats = anova.treatmentMeans[trtNum];
         const trtName = this.treatmentNames[trtNum - 1] || `Treatment ${trtNum}`;
+        const sdVal = trtStats.sd === 0 ? '0.00 (Constant observations)' : parseFloat(trtStats.sd.toFixed(2));
+        const seVal = trtStats.sd === 0 ? '0.00 (Constant observations)' : parseFloat(trtStats.se.toFixed(2));
+        const ciLowerVal = trtStats.sd === 0 ? parseFloat(trtStats.mean.toFixed(2)) : parseFloat(trtStats.ci_lower.toFixed(2));
+        const ciUpperVal = trtStats.sd === 0 ? parseFloat(trtStats.mean.toFixed(2)) : parseFloat(trtStats.ci_upper.toFixed(2));
+
         ws.getRow(r).values = [
           trtName,
           parseFloat(trtStats.mean.toFixed(2)),
           trtStats.group || 'a',
-          parseFloat(trtStats.sd.toFixed(2)),
-          parseFloat(trtStats.se.toFixed(2)),
-          parseFloat(trtStats.ci_lower.toFixed(2)),
-          parseFloat(trtStats.ci_upper.toFixed(2))
+          sdVal,
+          seVal,
+          ciLowerVal,
+          ciUpperVal
         ];
         r++;
       });
@@ -2940,7 +2964,7 @@ export class AdvancedReportGenerator {
 
       const interpretationText = anova.p_value < 0.05
         ? 'Reject H₀: Statistically significant treatment effect detected (p < 0.05)'
-        : 'Fail to reject H₀: No statistically significant treatment effect detected (p >= 0.05)';
+        : 'Fail to reject H₀. Treatments belong to the same statistical grouping.';
 
       ws.getRow(r).values = [
         f.label,
