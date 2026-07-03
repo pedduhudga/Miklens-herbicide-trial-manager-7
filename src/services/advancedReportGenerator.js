@@ -350,6 +350,11 @@ function calculateAnovaRCB(data, metricKey, category = 'nutrition', design = 'RC
     return { error: `Insufficient data for ${isCrd ? 'CRD' : 'RCB'} ANOVA.` };
   }
 
+  const allIdentical = values.every(v => v === values[0]);
+  if (allIdentical) {
+    return { error: 'No variability detected; ANOVA cannot identify treatment differences because all treatment means are identical.' };
+  }
+
   const grandMean = values.reduce((a, b) => a + b, 0) / N;
   
   // Check if design is balanced
@@ -887,6 +892,61 @@ export class AdvancedReportGenerator {
         return !isNaN(val) && val !== 0;
       });
     });
+
+    // Filter out any active fields that have absolutely NO observations recorded
+    this.skippedFields = [];
+    const fieldsToKeep = [];
+
+    this.activeFields.forEach(f => {
+      const hasAnyData = this.observations.some(obs => {
+        const val = obs[f.key];
+        if (val === undefined || val === null || val === '') return false;
+        const num = parseFloat(val);
+        return !isNaN(num);
+      });
+
+      if (hasAnyData) {
+        fieldsToKeep.push(f);
+      } else {
+        this.skippedFields.push({ ...f, reason: 'No observations recorded' });
+      }
+    });
+
+    this.activeFields = fieldsToKeep;
+
+    // Analyze for duplicate values within subsamples (subsample/pot copy warning)
+    let potReplicatesCount = 0;
+    let identicalPotReplicatesCount = 0;
+    const trtRepGroups = {};
+
+    this.observations.forEach(obs => {
+      const key = `${obs.treatmentNumber}_${obs.replication}`;
+      if (!trtRepGroups[key]) trtRepGroups[key] = [];
+      trtRepGroups[key].push(obs);
+    });
+
+    Object.values(trtRepGroups).forEach(group => {
+      if (group.length > 1) {
+        potReplicatesCount++;
+        // Check if all active fields have identical values across all observations in this group
+        let allFieldsIdentical = true;
+        this.activeFields.forEach(f => {
+          const firstVal = group[0][f.key];
+          const allSame = group.every(obs => String(obs[f.key]) === String(firstVal));
+          if (!allSame) {
+            allFieldsIdentical = false;
+          }
+        });
+        if (allFieldsIdentical) {
+          identicalPotReplicatesCount++;
+        }
+      }
+    });
+
+    this.duplicatePotWarning = false;
+    if (potReplicatesCount > 0 && identicalPotReplicatesCount === potReplicatesCount) {
+      this.duplicatePotWarning = true;
+    }
   }
 
   async processObservationsWithAI() {
@@ -1606,9 +1666,32 @@ export class AdvancedReportGenerator {
       });
     }
 
+    if (this.duplicatePotWarning) {
+      ws.mergeCells(`A${vRow}:B${vRow}`);
+      ws.getCell(`A${vRow}`).value = '⚠ Duplicate Subsamples Alert: Every pot within a treatment × replication block has identical measurements. The data appear to be plot-level measurements copied to multiple pots; recommend analysing block means rather than treating each pot as an independent replicate.';
+      ws.getCell(`A${vRow}`).font = { color: { rgb: 'C0392B' }, bold: true };
+      vRow++;
+    }
+
+    if (this.skippedFields && this.skippedFields.length > 0) {
+      vRow += 2;
+      ws.mergeCells(`A${vRow}:B${vRow}`);
+      ws.getCell(`A${vRow}`).value = 'PARAMETERS NOT ANALYSED (SKIPPED)';
+      ws.getCell(`A${vRow}`).font = { bold: true, size: 11, color: { rgb: 'FFFFFF' } };
+      ws.getCell(`A${vRow}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: '7F8C8D' } };
+      vRow++;
+
+      this.skippedFields.forEach(f => {
+        ws.getCell(`A${vRow}`).value = f.label;
+        ws.getCell(`A${vRow}`).font = { bold: true };
+        ws.getCell(`B${vRow}`).value = f.reason || 'No observations recorded';
+        vRow++;
+      });
+    }
+
     ws.column_dimensions = {
       'A': { width: 35 },
-      'B': { width: 55 }
+      'B': { width: 65 }
     };
   }
 
@@ -2818,7 +2901,21 @@ export class AdvancedReportGenerator {
     this.activeFields.forEach(f => {
       if (f.key === 'nue') return;
       const anova = calculateAnovaRCB(this.observations, f.key, this.category, this.design);
-      if (anova.error) return;
+      if (anova.error) {
+        if (anova.error.includes('No variability detected')) {
+          const firstVal = parseFloat(this.observations[0]?.[f.key] || 0);
+          ws.getRow(r).values = [
+            f.label,
+            this.design,
+            'N/A', '0.00', '0.00', '1.000', 'ns', '0.00', '0.00', '0.0%',
+            firstVal,
+            'All Treatments: a',
+            anova.error
+          ];
+          r++;
+        }
+        return;
+      }
 
       const sig = anova.p_value < 0.01 ? '**' : anova.p_value < 0.05 ? '*' : 'ns';
       
@@ -2897,7 +2994,18 @@ export class AdvancedReportGenerator {
     this.activeFields.forEach(f => {
       if (f.key === 'nue') return;
       const anova = calculateAnovaRCB(this.observations, f.key, this.category, this.design);
-      if (anova.error) return;
+      if (anova.error) {
+        if (anova.error.includes('No variability detected')) {
+          const firstVal = parseFloat(this.observations[0]?.[f.key] || 0);
+          const rowVals = [f.label, parseFloat(firstVal.toFixed(4))];
+          this.treatmentNames.slice(1).forEach(() => {
+            rowVals.push(parseFloat(firstVal.toFixed(4)), '0.00%');
+          });
+          ws.getRow(r).values = rowVals;
+          r++;
+        }
+        return;
+      }
 
       const controlMean = anova.treatmentMeans[1]?.mean ?? 0;
       const rowVals = [f.label, parseFloat(controlMean.toFixed(4))];
