@@ -6,7 +6,7 @@ import Modal from '../components/Modal.jsx';
 import { addFormulation, deleteFormulation, updateFormulation, validateCategoryDataOperation } from '../services/dataLayer.js';
 import { safeJsonParse } from '../utils/helpers.js';
 import { getCategoryConfig } from '../utils/categoryConfig.js';
-import { Plus, X, Share2 } from 'lucide-react';
+import { Plus, X, Share2, Edit, Trash2, Copy } from 'lucide-react';
 import AppSharingModal from '../components/AppSharingModal.jsx';
 
 export default function Formulations({ onMenuClick }) {
@@ -307,78 +307,130 @@ export default function Formulations({ onMenuClick }) {
               const isShared = !!(form.CreatedBy && form.CreatedBy !== ownUid);
               const isSharedEdit = Array.isArray(form.SharedWithEdit) && form.SharedWithEdit.includes(ownUid);
               return (
-                <div key={form.ID} className="bg-white p-6 rounded-xl shadow-lg relative transition-all duration-300 hover:shadow-xl hover:-translate-y-1 border border-transparent hover:border-emerald-500/50">
-                  {!isViewer && (isOwn || isSharedEdit) && (
-                    <div className="absolute top-4 right-4 flex gap-2 items-center">
-                      {isAdmin && (
-                        <button onClick={(e) => handleOpenShareModal(e, form)} className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-md text-sm hover:bg-indigo-200" title="Share Formulation">Share</button>
-                      )}
-                      {isOwn && (
-                        <button onClick={() => handleOpenModal(form, true)} className="bg-slate-200 text-slate-700 px-3 py-1 rounded-md text-sm hover:bg-slate-300">Duplicate</button>
-                      )}
-                      <button onClick={() => handleOpenModal(form)} className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-md text-sm hover:bg-emerald-200">Edit</button>
-                      {isOwn && (
-                        <button onClick={() => handleDelete(form.ID)} className="text-red-500 hover:text-red-700 font-bold text-xl leading-none">&times;</button>
+                <div key={form.ID} className="bg-white p-6 rounded-xl shadow-lg relative transition-all duration-300 hover:shadow-xl hover:-translate-y-1 border border-transparent hover:border-emerald-500/50 flex flex-col justify-between">
+                  <div>
+                    <div className="flex justify-between items-start gap-3 mb-3">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-bold text-base text-slate-800 break-words leading-tight">{form.Name}</h3>
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {isShared && (
+                            <span className="text-[9px] px-2 py-0.5 rounded-full font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 flex items-center gap-0.5">
+                              <Share2 className="w-2.5 h-2.5 animate-pulse" /> Shared{isSharedEdit ? ' (Edit)' : ''}
+                            </span>
+                          )}
+                          {!isShared && Array.isArray(form.SharedWith) && form.SharedWith.length > 0 && (
+                            <span className="text-[9px] px-2 py-0.5 rounded-full font-bold bg-teal-50 text-teal-700 border border-teal-100 flex items-center gap-0.5" title={`Shared with ${form.SharedWith.length} user(s)`}>
+                              <Share2 className="w-2.5 h-2.5" /> Shared ({form.SharedWith.length})
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {!isViewer && (isOwn || isSharedEdit) && (
+                        <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-lg border border-slate-100 flex-shrink-0">
+                          {isAdmin && (
+                            <button 
+                              onClick={(e) => handleOpenShareModal(e, form)} 
+                              className="p-1.5 text-indigo-600 hover:bg-indigo-100 rounded transition" 
+                              title="Share Formulation"
+                            >
+                              <Share2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          {isOwn && (
+                            <button 
+                              onClick={() => handleOpenModal(form, true)} 
+                              className="p-1.5 text-slate-600 hover:bg-slate-200 rounded transition" 
+                              title="Duplicate Formulation"
+                            >
+                              <Copy className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          <button 
+                            onClick={() => handleOpenModal(form)} 
+                            className="p-1.5 text-emerald-600 hover:bg-emerald-100 rounded transition" 
+                            title="Edit"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                          </button>
+                          {isOwn && (
+                            <button 
+                              onClick={() => handleDelete(form.ID)} 
+                              className="p-1.5 text-red-500 hover:bg-red-100 rounded transition" 
+                              title="Delete"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
-                  )}
 
-                  <div className="flex items-center gap-2 mb-1">
-                    <h3 className="font-bold text-lg text-slate-800">{form.Name}</h3>
-                    {isShared && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 flex items-center gap-0.5">
-                        <Share2 className="w-2.5 h-2.5 animate-pulse" /> Shared{isSharedEdit ? ' (Edit Access)' : ''}
-                      </span>
-                    )}
-                    {!isShared && Array.isArray(form.SharedWith) && form.SharedWith.length > 0 && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-teal-50 text-teal-700 border border-teal-200 flex items-center gap-0.5" title={`Shared with ${form.SharedWith.length} user(s)`}>
-                        <Share2 className="w-2.5 h-2.5" /> Shared ({form.SharedWith.length})
-                      </span>
-                    )}
+                    <div className="mt-3 text-sm text-slate-600">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Ingredients</p>
+                      <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                        {ings.map((ing, i) => (
+                          <div key={i} className="flex justify-between items-center bg-slate-50/80 px-2.5 py-1.5 rounded-lg border border-slate-100 text-xs">
+                            <span className="font-semibold text-slate-700 truncate mr-2">{ing.name}</span>
+                            <span className="text-slate-600 font-semibold bg-white px-2 py-0.5 rounded border border-slate-200/60 font-mono flex-shrink-0">
+                              {ing.quantity} {ing.unit}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Category-specific formulation fields */}
+                      {(() => {
+                        const catConfig = getCategoryConfig(form.Category || 'herbicide');
+                        const fields = catConfig.formulationFields?.map(f => {
+                          const val = form[f.key];
+                          if (!val) return null;
+                          return (
+                            <div className="flex justify-between text-xs py-1 border-b border-dashed border-slate-100" key={f.key}>
+                              <span className="text-slate-400">{f.label}:</span>
+                              <span className="font-semibold text-slate-700">{val}</span>
+                            </div>
+                          );
+                        }).filter(Boolean);
+                        
+                        if (!fields || fields.length === 0) return null;
+                        return <div className="space-y-0.5 mt-2 border-t border-slate-100 pt-2">{fields}</div>;
+                      })()}
+
+                      {form.Notes && (
+                        <div className="mt-3 bg-slate-50/40 p-2.5 rounded-lg border border-slate-100 text-xs">
+                          <strong className="text-slate-600 block mb-0.5 text-[10px] uppercase tracking-wider">Notes</strong>
+                          <p className="italic leading-relaxed text-slate-500 break-words">{form.Notes}</p>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="mt-2 text-sm text-gray-600">
-                    <ul className="list-disc list-inside">
-                      {ings.map((ing, i) => (
-                        <li key={i}>{ing.name} ({ing.quantity} {ing.unit})</li>
-                      ))}
-                    </ul>
-                    {/* Category-specific formulation fields */}
-                    {(() => {
-                      const catConfig = getCategoryConfig(form.Category || 'herbicide');
-                      return catConfig.formulationFields?.map(f => {
-                        const val = form[f.key];
-                        if (!val) return null;
-                        return (
-                          <p className="mt-1 text-xs text-slate-500" key={f.key}>
-                            <strong>{f.label}:</strong> {val}
-                          </p>
-                        );
-                      });
-                    })()}
-                    {form.Notes && (
-                      <p className="mt-2"><strong>Notes:</strong> {form.Notes}</p>
-                    )}
-                  </div>
+                  <div className="mt-4 pt-4 border-t border-slate-100 flex justify-between items-center gap-2 flex-wrap">
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 block uppercase tracking-wider">Estimated Cost</span>
+                      <p className="font-extrabold text-base text-emerald-600 leading-none mt-1">
+                        {CURRENCY_SYMBOL}{parseFloat(form.EstimatedCost || 0).toFixed(2)}
+                      </p>
+                    </div>
 
-                  <p className="mt-4 font-semibold text-emerald-700">
-                    Cost: {CURRENCY_SYMBOL}{parseFloat(form.EstimatedCost || 0).toFixed(2)}
-                  </p>
-
-                  <div className="mt-2 flex items-center gap-2 flex-wrap">
-                    {trialsCount > 0 && (
-                      <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-medium">
-                        {trialsCount} trial{trialsCount !== 1 ? 's' : ''}
-                      </span>
-                    )}
-                    {avgLabel && (
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${avgLabelColor[avgLabel]}`}>
-                        Avg: {avgLabel}
-                      </span>
-                    )}
-                    {ratedTrials.length > 0 && (
-                      <span className="text-xs text-slate-400">{ratedTrials.length} rated</span>
-                    )}
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {trialsCount > 0 && (
+                        <span className="text-[11px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-semibold border border-slate-200/40">
+                          {trialsCount} trial{trialsCount !== 1 ? 's' : ''}
+                        </span>
+                      )}
+                      {avgLabel && (
+                        <span className={`text-[11px] px-2 py-0.5 rounded-full font-bold border ${
+                          avgLabel === 'Excellent' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                          avgLabel === 'Good' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                          avgLabel === 'Fair' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                          'bg-red-50 text-red-700 border-red-200'
+                        }`}>
+                          Avg: {avgLabel}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
