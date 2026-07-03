@@ -140,7 +140,6 @@ Keep it precise and factual. Do NOT include markdown styling or headers, just pl
     console.warn('Failed to generate AI conclusions during export:', e);
     return null;
   }
-  }
 }
 
 // Scientific helper: Root-to-Shoot Ratio
