@@ -82,6 +82,7 @@ Detailed Agronomic Interpretation:
 ${interpretation}
 Observations summary: ${obsSummary}
 CRITICAL INSTRUCTION: Avoid all causal physiological, biological or metabolic claims (such as "nutrient uptake", "assimilation", "photosynthetic rate", "metabolic demand") unless those biological parameters were directly measured. Focus strictly on physical, visual, and statistical observations (e.g. height, vigor, leaf color, SPAD, yield). Use objective scientific phrasing like "The observed improvements are consistent with crop response to treatment."
+If stating performance conclusions, use publication-friendly statements like: "Under the conditions of this study, no statistically significant performance advantage of the test treatment over the comparative treatments was demonstrated."
 Do NOT use markdown headers or lists. Keep it strictly scientific, professional, and factual.`;
 
     const text = await generateTextWithAI(prompt, 'You are a professional agronomist.');
@@ -133,9 +134,9 @@ ${interpretation}
 ANOVA Results: ${JSON.stringify(anovaResults || {})}
 CRITICAL INSTRUCTION: 
 1. Avoid all causal physiological, biological or metabolic claims (such as "nutrient uptake", "assimilation", "photosynthetic rate", "metabolic demand") unless those biological parameters were directly measured. Focus strictly on physical, visual, and statistical observations (e.g. height, vigor, leaf color, SPAD, yield).
-2. Write generalized scientific conclusions comparing all treatments together. Avoid referencing only one specific test product unless it performed significantly differently from all others (e.g. instead of focusing only on one product, use phrases like: "No statistically significant differences were detected among the evaluated treatments under the conditions of this trial.").
+2. Write generalized scientific conclusions comparing all treatments together. Avoid referencing only one specific test product unless it performed significantly differently from all others (e.g. instead of focusing only on one product, use phrases like: "Under the conditions of this study, no statistically significant performance advantage of the test treatment over the comparative treatments was demonstrated.").
 3. Provide research-oriented recommendations, such as: repeating the trial under additional agro-climatic conditions, increasing replication to improve statistical precision, extending the observation period, evaluating across multiple seasons, or validating under commercial farming conditions. Do NOT recommend business-oriented actions (like cost-benefit analyses).
-4. If high coefficients of variation (CV%) are observed, use statistically precise and cautious wording such as: "The high coefficients of variation observed for several symptom-related variables indicate substantial experimental variability, which may have reduced the sensitivity of the statistical analysis." Avoid claiming that high CV "likely contributed to the absence of statistical power".
+4. If high coefficients of variation (CV%) are observed, use statistically precise and cautious wording such as: "The observed experimental variability may have reduced the statistical power to detect small treatment effects." Avoid claiming that high CV "likely contributed to the absence of statistical power".
 Keep it precise and factual. Do NOT include markdown styling or headers, just plain text with bullets.`;
 
     const text = await generateTextWithAI(prompt, 'You are a senior agricultural scientist.');
@@ -1262,6 +1263,56 @@ export class AdvancedReportGenerator {
     ws.mergeCells('A17:F20');
     ws.getCell('A17').value = conclusionText;
     ws.getCell('A17').alignment = { wrapText: true, vertical: 'top' };
+
+    // Executive Summary Dashboard
+    ws.mergeCells('A22:F22');
+    ws.getCell('A22').value = 'EXECUTIVE SUMMARY DASHBOARD';
+    ws.getCell('A22').font = { bold: true, size: 12 };
+    ws.getCell('A22').fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'F3F4F6' } };
+
+    const maxDaa = this.observations.length ? Math.max(...this.observations.map(o => Number(o.daa || 0))) : 0;
+    const sigParams = [];
+    this.activeFields.forEach(f => {
+      const anova = calculateAnovaRCB(this.observations, f.key, this.category, this.design);
+      if (!anova.error && anova.p_value < 0.05) {
+        sigParams.push(f.label);
+      }
+    });
+    const sigParamsList = sigParams.length ? sigParams.join(', ') : 'None';
+
+    const primaryMetricKey = this.config.primaryMetric?.key || 'plantHeight';
+    const primaryAnova = calculateAnovaRCB(this.observations, primaryMetricKey, this.category, this.design);
+    let bestTrtName = 'N/A';
+    if (primaryAnova && !primaryAnova.error) {
+      const sortedTrts = Object.entries(primaryAnova.treatmentMeans)
+        .map(([trtNum, stats]) => ({
+          name: this.treatmentNames[parseInt(trtNum) - 1] || `Treatment ${trtNum}`,
+          mean: stats.mean
+        }))
+        .sort((a, b) => b.mean - a.mean);
+      if (sortedTrts.length > 0) {
+        bestTrtName = sortedTrts[0].name;
+      }
+    }
+
+    const execSummaryRows = [
+      ['Trial Design', this.design === 'CRD' ? 'Completely Randomized Design (CRD)' : this.design === 'PotTrial' ? 'Pot Trial Design' : 'Randomized Complete Block Design (RCBD)'],
+      ['Treatments Evaluated', this.treatmentNames.length],
+      ['Replications / Blocks', this.trial.Replication || 6],
+      ['Observation Period', `${maxDaa} DAA`],
+      ['Statistically Significant Parameters', sigParamsList],
+      ['Numerically Superior Treatment', bestTrtName],
+      ['Statistical Significance Detected', sigParams.length > 0 ? 'Yes (p < 0.05)' : 'No (p >= 0.05)'],
+      ['Key Recommendation', 'Additional multi-location validation & trial replication']
+    ];
+
+    execSummaryRows.forEach((rowVals, idx) => {
+      const rIdx = 24 + idx;
+      ws.getCell(`A${rIdx}`).value = rowVals[0];
+      ws.getCell(`A${rIdx}`).font = { bold: true };
+      ws.getCell(`B${rIdx}`).value = rowVals[1];
+      ws.mergeCells(`B${rIdx}:F${rIdx}`);
+    });
   }
 
   // 2. Trial Info Sheet
@@ -2088,5 +2139,47 @@ export class AdvancedReportGenerator {
     ws.getColumn(10).width = 28;
     ws.getColumn(11).width = 15;
     ws.getColumn(12).width = 65;
+
+    r += 3;
+    ws.mergeCells(`A${r}:L${r}`);
+    ws.getCell(`A${r}`).value = 'TREATMENT MEANS & EFFICACY PERCENT OVERVIEW (RELATIVE TO CONTROL)';
+    ws.getCell(`A${r}`).font = { bold: true, size: 12, color: { rgb: 'FFFFFF' } };
+    ws.getCell(`A${r}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: this.config.color.hex.replace('#', '') } };
+    ws.getRow(r).height = 25;
+    r++;
+
+    const headers = ['Parameter / Metric', 'Control Mean'];
+    this.treatmentNames.slice(1).forEach(name => {
+      headers.push(`${name} Mean`, `% Efficacy`);
+    });
+    ws.getRow(r).values = headers;
+    ws.getRow(r).font = { bold: true };
+    ws.getRow(r).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'ECF0F1' } };
+    r++;
+
+    this.activeFields.forEach(f => {
+      const anova = calculateAnovaRCB(this.observations, f.key, this.category, this.design);
+      if (anova.error) return;
+
+      const controlMean = anova.treatmentMeans[1]?.mean ?? 0;
+      const rowVals = [f.label, parseFloat(controlMean.toFixed(4))];
+
+      this.treatmentNames.slice(1).forEach((name, idx) => {
+        const trtNum = idx + 2;
+        const trtMean = anova.treatmentMeans[trtNum]?.mean ?? 0;
+        
+        let pctEff = 0;
+        if (controlMean > 0) {
+          pctEff = isReductionMetric(f.key, this.category)
+            ? ((controlMean - trtMean) / controlMean) * 100
+            : ((trtMean - controlMean) / controlMean) * 100;
+        }
+
+        rowVals.push(parseFloat(trtMean.toFixed(4)), `${pctEff.toFixed(2)}%`);
+      });
+
+      ws.getRow(r).values = rowVals;
+      r++;
+    });
   }
 }
