@@ -247,7 +247,7 @@ export default function Ingredients({ onMenuClick }) {
     <div className="flex-1 flex flex-col h-full overflow-hidden">
       <TopBar title="Ingredient Costs" onMenuClick={onMenuClick} />
 
-      <div className="flex-1 overflow-y-auto p-6 max-w-4xl mx-auto w-full">
+      <div className="flex-1 overflow-y-auto p-6 pb-24 max-w-4xl mx-auto w-full">
         <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6">
           <h2 className="text-xl font-bold text-slate-800">Ingredients Library</h2>
           {!isViewer && (
