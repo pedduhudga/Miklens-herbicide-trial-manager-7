@@ -371,7 +371,7 @@ export default function PlotScanner({ onMenuClick }) {
     if (cropCallbackRef.current) {
       let finalUrl = croppedUrl;
       try {
-        finalUrl = await compressImage(croppedUrl, 3072, 0.95);
+        finalUrl = await compressImage(croppedUrl, 2048, 0.85);
       } catch (err) {
         console.warn('[PlotScanner] Crop compression failed:', err);
       }
