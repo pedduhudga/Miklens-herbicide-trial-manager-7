@@ -136,7 +136,7 @@ CRITICAL INSTRUCTION:
 1. Avoid all causal physiological, biological or metabolic claims (such as "nutrient uptake", "assimilation", "photosynthetic rate", "metabolic demand") unless those biological parameters were directly measured. Focus strictly on physical, visual, and statistical observations (e.g. height, vigor, leaf color, SPAD, yield).
 2. Write generalized scientific conclusions comparing all treatments together. Avoid referencing only one specific test product unless it performed significantly differently from all others (e.g. instead of focusing only on one product, use phrases like: "Under the conditions of this study, no statistically significant performance advantage of the test treatment over the comparative treatments was demonstrated.").
 3. Provide research-oriented recommendations, such as: repeating the trial under additional agro-climatic conditions, increasing replication to improve statistical precision, extending the observation period, evaluating across multiple seasons, or validating under commercial farming conditions. Do NOT recommend business-oriented actions (like cost-benefit analyses).
-4. If high coefficients of variation (CV%) are observed, use statistically precise and cautious wording such as: "The observed experimental variability may have reduced the statistical power to detect small treatment effects." Avoid claiming that high CV "likely contributed to the absence of statistical power".
+4. If high coefficients of variation (CV%) are observed (especially for SPAD/chlorophyll measurements), use statistically precise and cautious wording such as: "The SPAD measurements exhibited relatively high variability (CV = 35.6%), which may have reduced the sensitivity of the statistical analysis." Avoid claiming that high CV "likely contributed to the absence of statistical power".
 Keep it precise and factual. Do NOT include markdown styling or headers, just plain text with bullets.`;
 
     const text = await generateTextWithAI(prompt, 'You are a senior agricultural scientist.');
@@ -2189,12 +2189,17 @@ export class AdvancedReportGenerator {
 
     r += 2;
     ws.mergeCells(`A${r}:L${r}`);
-    ws.getCell(`A${r}`).value = '* Note: Percentage efficacy values are descriptive only and should not be interpreted as statistically significant unless supported by the ANOVA results.';
+    ws.getCell(`A${r}`).value = '* Note: Percentage efficacy values are descriptive and should not be interpreted as statistically significant unless supported by inferential statistical tests.';
     ws.getCell(`A${r}`).font = { italic: true, size: 9, color: { rgb: '7F8C8D' } };
     r++;
 
     ws.mergeCells(`A${r}:L${r}`);
     ws.getCell(`A${r}`).value = '* Note: F-value of 0.00 and P-value of 1.00 indicate identical measurements across all treatments and replicates (zero variance within and between groups).';
+    ws.getCell(`A${r}`).font = { italic: true, size: 9, color: { rgb: '7F8C8D' } };
+    r++;
+
+    ws.mergeCells(`A${r}:L${r}`);
+    ws.getCell(`A${r}`).value = '* Note: Nutrient Use Efficiency (NUE) values are derived/calculated from observed crop yield and nitrogen application rates, rather than directly measured physiological parameters.';
     ws.getCell(`A${r}`).font = { italic: true, size: 9, color: { rgb: '7F8C8D' } };
   }
 }
