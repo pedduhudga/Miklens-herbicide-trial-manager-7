@@ -2052,18 +2052,23 @@ export class AdvancedReportGenerator {
         ? 'N/A (Mean near zero / low incidence)'
         : (anova.cv ? `${anova.cv.toFixed(2)}%` : 'N/A');
 
+      const safeFloatFixed = (val, digits = 4, fallback = 'N/A') => {
+        if (val === undefined || val === null || isNaN(val)) return fallback;
+        return parseFloat(Number(val).toFixed(digits));
+      };
+
       ws.getRow(r).values = [
         f.label,
         this.design,
-        `${anova.df_treatment}, ${anova.df_error}`,
-        parseFloat(anova.ms_error.toFixed(4)),
-        parseFloat(anova.f_value.toFixed(4)),
-        parseFloat(anova.p_value.toFixed(4)),
+        (anova.df_treatment !== undefined && anova.df_error !== undefined) ? `${anova.df_treatment}, ${anova.df_error}` : 'N/A',
+        safeFloatFixed(anova.ms_error),
+        safeFloatFixed(anova.f_value),
+        safeFloatFixed(anova.p_value),
         sig,
-        anova.lsd ? parseFloat(anova.lsd.toFixed(4)) : 'N/A',
-        anova.sem ? parseFloat(anova.sem.toFixed(4)) : 'N/A',
+        safeFloatFixed(anova.lsd),
+        safeFloatFixed(anova.sem),
         cvDisplay,
-        parseFloat(anova.grandMean.toFixed(4)),
+        safeFloatFixed(anova.grandMean),
         groupings
       ];
       r++;
