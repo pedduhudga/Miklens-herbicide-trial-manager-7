@@ -1773,6 +1773,10 @@ export class AdvancedReportGenerator {
     const potCols = proj?.PotCols ? parseInt(proj.PotCols) : null;
     const gridInfo = (potRows && potCols) ? ` (${potRows}×${potCols} = ${potRows * potCols} pots)` : '';
 
+    const trtCount = this.treatmentNames.length;
+    const independentUnits = trtCount * computedReplications;
+    const totalPots = (potRows && potCols) ? potRows * potCols : (this.isProjectWide ? (this.trials || []).length : this.observations.length);
+
     let layoutText = `Replications: ${computedReplications}${gridInfo}\nPlots layout:\n`;
     if (this.isProjectWide && this.trials) {
       const repGroups = {};
