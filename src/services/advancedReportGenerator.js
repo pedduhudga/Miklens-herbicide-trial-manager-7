@@ -137,8 +137,8 @@ CRITICAL INSTRUCTION:
 1. Avoid all causal physiological, biological or metabolic claims (such as "nutrient uptake", "assimilation", "photosynthetic rate", "metabolic demand") unless those biological parameters were directly measured. Focus strictly on physical, visual, and statistical observations (e.g. height, vigor, leaf color, SPAD, yield).
 2. Write generalized scientific conclusions comparing all treatments together. Avoid referencing only one specific test product unless it performed significantly differently from all others (e.g. instead of focusing only on one product, use phrases like: "No statistically significant differences among treatments were detected under the conditions of this study.").
 3. Provide research-oriented recommendations, such as: repeating the trial under additional agro-climatic conditions, increasing replication to improve statistical precision, extending the observation period, evaluating across multiple seasons, or validating under commercial farming conditions. Do NOT recommend business-oriented actions (like cost-benefit analyses).
-4. If high coefficients of variation (CV%) are observed (especially for SPAD/chlorophyll measurements), use statistically precise and cautious wording such as: "The relatively high variability in SPAD measurements (CV = 35.6%) may have reduced the ability to detect small treatment effects." Avoid claiming that high CV "likely contributed to the absence of statistical power".
-5. For visual vigor or leaf color CV, use phrasing like: "Low coefficients of variation for visual vigor (7.0%) and leaf color (4.2%) indicate good experimental consistency." Avoid implying precision solely from CV values.
+4. If high coefficients of variation (CV%) are observed for a measured parameter, use statistically precise and cautious wording such as: "The relatively high variability in [Parameter Name] measurements (CV = [Value]%) may have reduced the ability to detect small treatment effects." Avoid claiming that high CV "likely contributed to the absence of statistical power", and NEVER reference "SPAD" or "chlorophyll" unless that metric is actually present in the dataset.
+5. If low coefficients of variation (CV%) are observed, use phrasing like: "Low coefficients of variation for [Parameter Name] ([Value]%) indicate good experimental consistency." Avoid implying precision solely from CV values, and only reference parameters present in the dataset.
 6. If identical values are observed for a parameter (resulting in F = 0.00 and P = 1.000), do NOT state that ANOVA could not be applied due to lack of variance. Instead, state: "Plant height exhibited identical treatment means (F = 0.00, P = 1.000), indicating no detectable treatment effect under the conditions of this study."
 Keep it precise and factual. Do NOT include markdown styling or headers, just plain text with bullets.`;
 
@@ -1551,7 +1551,7 @@ export class AdvancedReportGenerator {
         dates.forEach((date, colIdx) => {
           const cLetter = String.fromCharCode(66 + colIdx);
           ws.getCell(`${cLetter}${r + trtNum}`).value = {
-            formula: `AVERAGEIFS('Assessment Data Summary'!${fieldCol}:${fieldCol}, 'Assessment Data Summary'!F:F, ${trtNum}, 'Assessment Data Summary'!A:A, "${date}")`
+            formula: `IFERROR(AVERAGEIFS('Assessment Data Summary'!${fieldCol}:${fieldCol}, 'Assessment Data Summary'!F:F, ${trtNum}, 'Assessment Data Summary'!A:A, "${date}"), 0)`
           };
         });
       });
