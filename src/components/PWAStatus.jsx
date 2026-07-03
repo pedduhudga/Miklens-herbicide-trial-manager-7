@@ -1,34 +1,51 @@
 import React, { useState, useEffect } from 'react';
-import { Download, Smartphone, Wifi, WifiOff, RefreshCw, X, ChevronRight } from 'lucide-react';
+import { Download, Smartphone, Wifi, WifiOff, RefreshCw, X, ChevronRight, Plus } from 'lucide-react';
 
 export default function PWAStatus() {
   const [isInstallable, setIsInstallable] = useState(false);
   const [isInstalled, setIsInstalled] = useState(false);
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [isOnline, setIsOnline] = useState(true);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [showUpdate, setShowUpdate] = useState(false);
   const [updateRegistration, setUpdateRegistration] = useState(null);
   const [dismissed, setDismissed] = useState(false);
+  const [installPromptShown, setInstallPromptShown] = useState(false);
 
   useEffect(() => {
     // Check if app is already installed
-    if (window.matchMedia('(display-mode: standalone)').matches ||
-        window.navigator.standalone === true) {
-      setIsInstalled(true);
-    }
+    const checkInstalled = () => {
+      const standalone = window.matchMedia('(display-mode: standalone)').matches;
+      const iosStandalone = window.navigator.standalone === true;
+      return standalone || iosStandalone;
+    };
 
-    // Listen for install prompt
+    setIsInstalled(checkInstalled());
+
+    // Listen for display-mode changes
+    const mediaQuery = window.matchMedia('(display-mode: standalone)');
+    const handleModeChange = (e) => {
+      if (e.matches) {
+        setIsInstalled(true);
+      }
+    };
+    mediaQuery.addEventListener('change', handleModeChange);
+
+    // Listen for install prompt - this is the key event!
     const handleBeforeInstallPrompt = (e) => {
+      console.log('[PWA] beforeinstallprompt fired', e);
       e.preventDefault();
       setDeferredPrompt(e);
-      // Only show install prompt if not installed and not dismissed
-      if (!isInstalled && !dismissed) {
+      
+      // Show install prompt if not installed and not dismissed
+      if (!checkInstalled() && !dismissed && !installPromptShown) {
         setIsInstallable(true);
+        setInstallPromptShown(true);
       }
     };
 
     // Listen for app installed
-    const handleAppInstalled = () => {
+    const handleAppInstalled = (e) => {
+      console.log('[PWA] App installed', e);
       setIsInstalled(true);
       setIsInstallable(false);
       setDeferredPrompt(null);
@@ -40,34 +57,56 @@ export default function PWAStatus() {
 
     // Listen for Service Worker updates
     const handleSWUpdate = (e) => {
+      console.log('[PWA] SW update available', e);
       setUpdateRegistration(e.detail);
       setShowUpdate(true);
     };
 
+    // Add listeners
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     window.addEventListener('appinstalled', handleAppInstalled);
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     window.addEventListener('sw-update-available', handleSWUpdate);
 
+    // Initial online status
+    setIsOnline(navigator.onLine);
+
+    // Check again after a delay (some browsers delay the event)
+    setTimeout(() => {
+      if (!checkInstalled() && !dismissed && !installPromptShown && !deferredPrompt) {
+        // Try to trigger install prompt check
+        console.log('[PWA] Checking installability after delay');
+      }
+    }, 3000);
+
     return () => {
+      mediaQuery.removeEventListener('change', handleModeChange);
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       window.removeEventListener('appinstalled', handleAppInstalled);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
       window.removeEventListener('sw-update-available', handleSWUpdate);
     };
-  }, [isInstalled, dismissed]);
+  }, [dismissed, installPromptShown, deferredPrompt]);
 
   const handleInstallClick = async () => {
+    console.log('[PWA] Install clicked', deferredPrompt);
     if (deferredPrompt) {
       deferredPrompt.prompt();
       const { outcome } = await deferredPrompt.userChoice;
+      console.log('[PWA] Install outcome:', outcome);
       
       if (outcome === 'accepted') {
         setIsInstallable(false);
         setDeferredPrompt(null);
       }
+    } else {
+      // Fallback for browsers that don't support beforeinstallprompt
+      // Try to trigger install via Safari's UI
+      console.log('[PWA] No deferredPrompt - using fallback');
+      // On iOS, users need to use the Share button
+      alert('To install this app:\n\n• iOS Safari: Tap Share button → "Add to Home Screen"\n• Android Chrome: Tap menu → "Install App"');
     }
   };
 
@@ -83,9 +122,13 @@ export default function PWAStatus() {
     setDismissed(true);
   };
 
+  // Log current state for debugging
+  useEffect(() => {
+    console.log('[PWA Status]', { isInstallable, isInstalled, isOnline, deferredPrompt: !!deferredPrompt });
+  }, [isInstallable, isInstalled, isOnline, deferredPrompt]);
+
   // Don't show install prompt if already installed
   if (isInstalled && !showUpdate) {
-    // Still show online/offline indicator for installed apps
     return (
       <div 
         className="md:hidden fixed bottom-[calc(5rem+env(safe-area-inset-bottom,0px))] left-4 z-40"
@@ -205,7 +248,7 @@ export default function PWAStatus() {
           </div>
         )}
 
-        {/* Install prompt - mobile */}
+        {/* Install prompt - mobile - always show on mobile if not installed */}
         {isInstallable && !showUpdate && (
           <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-lg border border-slate-200/80 p-4 animate-slide-up">
             <div className="flex items-center gap-3">
@@ -238,8 +281,19 @@ export default function PWAStatus() {
           </div>
         )}
 
+        {/* Fallback install button for when beforeinstallprompt doesn't fire (iOS Safari, some browsers) */}
+        {!isInstalled && !isInstallable && !showUpdate && (
+          <button
+            onClick={handleInstallClick}
+            className="bg-emerald-600/90 backdrop-blur-md text-white px-4 py-3 rounded-2xl text-sm font-semibold hover:bg-emerald-700 transition flex items-center justify-center gap-2 shadow-lg animate-slide-up"
+          >
+            <Plus className="w-5 h-5" />
+            Add to Home Screen
+          </button>
+        )}
+
         {/* Online/offline status - mobile */}
-        {!isInstallable && !showUpdate && (
+        {(!isInstallable || showUpdate) && !isInstalled && (
           <div className={`self-start flex items-center gap-2 px-3 py-2 rounded-full text-xs font-medium shadow-sm backdrop-blur-md ${
             isOnline 
               ? 'bg-emerald-100/90 text-emerald-700' 

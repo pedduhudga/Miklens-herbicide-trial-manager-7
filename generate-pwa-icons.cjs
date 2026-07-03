@@ -20,28 +20,43 @@ const SCREENSHOTS_DIR = path.join(__dirname, 'public', 'screenshots');
   }
 });
 
-// SVG source for the icon (green gradient with flask symbol)
-const iconSvg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+// SVG source for the MiklensBio icon (flask with sprout + green fields)
+const iconSvg = `<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#059669"/>
-      <stop offset="100%" style="stop-color:#047857"/>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a8f5c"/>
+      <stop offset="55%" stop-color="#1f9d8f"/>
+      <stop offset="100%" stop-color="#1e5b8a"/>
+    </linearGradient>
+    <linearGradient id="leafGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8cc63f"/>
+      <stop offset="100%" stop-color="#4caf50"/>
+    </linearGradient>
+    <linearGradient id="fieldGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#a8d98f"/>
+      <stop offset="50%" stop-color="#4caf50"/>
+      <stop offset="100%" stop-color="#2e7d32"/>
+    </linearGradient>
+    <linearGradient id="liquidGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#d4f1e0" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#a8d98f"/>
     </linearGradient>
   </defs>
-  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
-  <g fill="none" stroke="white" stroke-width="24" stroke-linecap="round" stroke-linejoin="round">
-    <!-- Flask body -->
-    <path d="M176 160 L256 96 L336 160 L336 400 C336 424 288 448 256 448 C224 448 176 424 176 400 Z"/>
-    <!-- Flask neck -->
-    <path d="M220 160 L220 112 L292 112 L292 160"/>
-    <!-- Liquid -->
-    <path d="M196 320 C196 350 220 380 256 380 C292 380 316 350 316 320" stroke="#34d399" stroke-width="20"/>
-    <!-- Bubbles -->
-    <circle cx="236" cy="280" r="12" fill="#34d399" stroke="none"/>
-    <circle cx="276" cy="300" r="8" fill="#34d399" stroke="none"/>
-    <circle cx="256" cy="250" r="10" fill="#34d399" stroke="none"/>
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)"/>
+  <path d="M212 120 L212 175 L150 320 C138 350 160 388 200 396 C230 402 282 402 312 396 C352 388 374 350 362 320 L300 175 L300 120 Z" fill="#ffffff" stroke="#ffffff" stroke-width="10" stroke-linejoin="round"/>
+  <rect x="200" y="108" width="112" height="20" rx="10" fill="#ffffff"/>
+  <clipPath id="flaskClip"><path d="M216 180 L162 318 C152 344 172 378 204 384 C232 389 280 389 308 384 C340 378 360 344 350 318 L296 180 Z"/></clipPath>
+  <g clip-path="url(#flaskClip)">
+    <rect x="150" y="180" width="212" height="130" fill="url(#liquidGrad)"/>
+    <path d="M150 300 Q200 270 256 292 Q320 315 362 285 L362 400 L150 400 Z" fill="url(#fieldGrad)"/>
+    <path d="M150 330 Q210 305 256 322 Q320 342 362 318 L362 400 L150 400 Z" fill="#2e7d32" opacity="0.55"/>
+    <circle cx="230" cy="230" r="10" fill="#8cc63f" opacity="0.8"/>
+    <circle cx="255" cy="210" r="7" fill="#a8d98f" opacity="0.8"/>
+    <circle cx="245" cy="255" r="6" fill="#66bb6a" opacity="0.8"/>
   </g>
+  <path d="M256 120 L256 80" stroke="#4caf50" stroke-width="10" stroke-linecap="round"/>
+  <path d="M256 96 C270 40 330 30 372 44 C360 96 306 118 256 96 Z" fill="url(#leafGrad)" stroke="#ffffff" stroke-width="8" stroke-linejoin="round"/>
+  <path d="M256 104 C238 58 190 52 156 66 C168 110 214 128 256 104 Z" fill="url(#leafGrad)" stroke="#ffffff" stroke-width="8" stroke-linejoin="round"/>
 </svg>`;
 
 // Try to use sharp, otherwise use placeholder approach

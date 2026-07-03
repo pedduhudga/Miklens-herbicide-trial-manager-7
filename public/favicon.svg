@@ -1,7 +1,85 @@
-<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="32" height="32" rx="6" fill="#059669"/>
-  <path d="M8 12C8 10.8954 8.89543 10 10 10H22C23.1046 10 24 10.8954 24 12V20C24 21.1046 23.1046 22 22 22H10C8.89543 22 8 21.1046 8 20V12Z" fill="white"/>
-  <path d="M10 14H14V18H10V14Z" fill="#059669"/>
-  <path d="M16 14H20V16H16V14Z" fill="#059669"/>
-  <path d="M16 18H22V20H16V18Z" fill="#059669"/>
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a8f5c"/>
+      <stop offset="55%" stop-color="#1f9d8f"/>
+      <stop offset="100%" stop-color="#1e5b8a"/>
+    </linearGradient>
+    <linearGradient id="leafGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8cc63f"/>
+      <stop offset="100%" stop-color="#4caf50"/>
+    </linearGradient>
+    <linearGradient id="fieldGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#a8d98f"/>
+      <stop offset="50%" stop-color="#4caf50"/>
+      <stop offset="100%" stop-color="#2e7d32"/>
+    </linearGradient>
+    <linearGradient id="liquidGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#d4f1e0" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#a8d98f"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded background -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)"/>
+
+  <!-- Subtle hexagon molecule pattern (left) -->
+  <g stroke="#ffffff" stroke-width="2.5" opacity="0.12" fill="none">
+    <polygon points="70,150 95,135 120,150 120,180 95,195 70,180"/>
+    <polygon points="120,180 145,165 170,180 170,210 145,225 120,210"/>
+    <polygon points="70,210 95,195 120,210 120,240 95,255 70,240"/>
+    <line x1="120" y1="150" x2="145" y2="165"/>
+    <line x1="120" y1="210" x2="145" y2="195"/>
+  </g>
+
+  <!-- Subtle bar chart (right) -->
+  <g fill="#ffffff" opacity="0.12">
+    <rect x="380" y="380" width="18" height="60" rx="3"/>
+    <rect x="405" y="350" width="18" height="90" rx="3"/>
+    <rect x="430" y="320" width="18" height="120" rx="3"/>
+  </g>
+  <polyline points="378,360 405,335 430,310 448,290" stroke="#ffffff" stroke-width="3" opacity="0.15" fill="none" stroke-linecap="round"/>
+
+  <!-- Flask white outline/body -->
+  <path d="M212 120 L212 175 L150 320 C138 350 160 388 200 396 L200 396 C230 402 282 402 312 396 C352 388 374 350 362 320 L300 175 L300 120 Z"
+        fill="#ffffff" stroke="#ffffff" stroke-width="10" stroke-linejoin="round"/>
+
+  <!-- Flask neck rim -->
+  <rect x="200" y="108" width="112" height="20" rx="10" fill="#ffffff"/>
+
+  <!-- Liquid + field scene clipped inside flask -->
+  <clipPath id="flaskClip">
+    <path d="M216 180 L162 318 C152 344 172 378 204 384 C232 389 280 389 308 384 C340 378 360 344 350 318 L296 180 Z"/>
+  </clipPath>
+  <g clip-path="url(#flaskClip)">
+    <!-- upper liquid -->
+    <rect x="150" y="180" width="212" height="130" fill="url(#liquidGrad)"/>
+    <!-- rolling green fields -->
+    <path d="M150 300 Q200 270 256 292 Q320 315 362 285 L362 400 L150 400 Z" fill="url(#fieldGrad)"/>
+    <path d="M150 330 Q210 305 256 322 Q320 342 362 318 L362 400 L150 400 Z" fill="#2e7d32" opacity="0.55"/>
+    <!-- field rows -->
+    <path d="M170 360 Q256 335 350 358" stroke="#1b5e20" stroke-width="3" fill="none" opacity="0.4"/>
+    <path d="M165 378 Q256 352 356 376" stroke="#1b5e20" stroke-width="3" fill="none" opacity="0.4"/>
+    <!-- small sprout inside -->
+    <path d="M300 300 C300 285 312 278 318 272" stroke="#2e7d32" stroke-width="5" fill="none" stroke-linecap="round"/>
+    <path d="M300 300 C296 288 285 282 278 278" stroke="#2e7d32" stroke-width="5" fill="none" stroke-linecap="round"/>
+    <ellipse cx="320" cy="270" rx="12" ry="7" fill="#4caf50" transform="rotate(-30 320 270)"/>
+    <ellipse cx="276" cy="276" rx="12" ry="7" fill="#66bb6a" transform="rotate(30 276 276)"/>
+    <!-- bubbles -->
+    <circle cx="230" cy="230" r="10" fill="#8cc63f" opacity="0.8"/>
+    <circle cx="255" cy="210" r="7" fill="#a8d98f" opacity="0.8"/>
+    <circle cx="245" cy="255" r="6" fill="#66bb6a" opacity="0.8"/>
+  </g>
+
+  <!-- Two big sprout leaves growing from flask neck -->
+  <!-- stem -->
+  <path d="M256 120 L256 80" stroke="#4caf50" stroke-width="10" stroke-linecap="round"/>
+  <!-- right leaf -->
+  <path d="M256 96 C270 40 330 30 372 44 C360 96 306 118 256 96 Z"
+        fill="url(#leafGrad)" stroke="#ffffff" stroke-width="8" stroke-linejoin="round"/>
+  <path d="M270 84 C300 66 336 58 360 58" stroke="#ffffff" stroke-width="4" fill="none" opacity="0.6" stroke-linecap="round"/>
+  <!-- left leaf -->
+  <path d="M256 104 C238 58 190 52 156 66 C168 110 214 128 256 104 Z"
+        fill="url(#leafGrad)" stroke="#ffffff" stroke-width="8" stroke-linejoin="round"/>
+  <path d="M244 92 C218 76 188 70 168 72" stroke="#ffffff" stroke-width="4" fill="none" opacity="0.6" stroke-linecap="round"/>
 </svg>
