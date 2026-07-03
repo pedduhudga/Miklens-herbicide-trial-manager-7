@@ -655,7 +655,7 @@ export class AdvancedReportGenerator {
       
       if (photo) {
         const src = photo.fileData || photo.url || photo.src;
-        if (src) {
+        if (src && src !== '[base64-removed]') {
           try {
             let analysis = null;
             if (typeof window !== 'undefined' && window.calculateExGIndex) {
