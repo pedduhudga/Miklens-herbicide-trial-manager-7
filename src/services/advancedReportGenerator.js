@@ -74,7 +74,7 @@ async function generateNarrativeWithAI(trial, category, observations, activeFiel
     const interpretation = compileAgronomicInterpretation(observations, activeFields, treatmentNames, category, design);
 
     const prompt = `You are a professional agronomist. Write a concise, executive-level scientific narrative (2 paragraphs) summarizing the results of this trial.
-Trial: ${trial.FormulationName || 'Test formulation'} on crop ${trial.CropCrop || trial.Crop || 'Tomato'}.
+Trial: ${trial.FormulationName || 'Test formulation'} on crop ${trial.CropCrop || trial.Crop || 'N/A'}.
 Category: ${category}
 Design: ${design}
 ANOVA Results / Efficacy: ${JSON.stringify(anovaResults || {})}
@@ -696,6 +696,7 @@ export class AdvancedReportGenerator {
     // Attempt to lookup backup project if design or custom pot fields are needed
     const projects = getBackupProjects();
     const proj = projects.find(p => String(p.ID) === String(representative.ProjectID));
+    this.project = proj || null;
     
     if (proj?.Design === 'PotTrial' || representative?.Design === 'PotTrial') {
       const potFields = proj?.PotFields || representative?.PotFields || ['Plant Height', 'Branches', 'Flowers', 'Fruit Count', 'Yield'];
@@ -705,6 +706,8 @@ export class AdvancedReportGenerator {
     }
 
     // Append category-specific advanced agronomic metrics
+    // NOTE: These derived metrics are only included if actual data exists for them.
+    // They are added tentatively here and pruned after observations are loaded (see end of constructor).
     if (this.category === 'biostimulant') {
       this.activeFields.push({ key: 'rootToShootRatio', label: 'Root-to-Shoot Ratio' });
     } else if (this.category === 'fungicide') {
@@ -723,8 +726,8 @@ export class AdvancedReportGenerator {
       this.trial = {
         ID: `PROJ-${firstTrial.ProjectID || 'ALL'}`,
         FormulationName: firstTrial.FormulationName || 'Consolidated Project Plots',
-        Crop: firstTrial.Crop || firstTrial.CropCrop || 'N/A',
-        CropCrop: firstTrial.CropCrop || firstTrial.Crop || 'N/A',
+        Crop: firstTrial.Crop || firstTrial.CropCrop || proj?.Crop || 'N/A',
+        CropCrop: firstTrial.CropCrop || firstTrial.Crop || proj?.Crop || 'N/A',
         InvestigatorName: firstTrial.InvestigatorName || 'Project Team',
         Location: firstTrial.Location || 'Various',
         Dosage: firstTrial.Dosage || 'Various',
@@ -825,6 +828,16 @@ export class AdvancedReportGenerator {
       });
       this.soil = safeJsonParse(trialOrTrials.SoilDataJSON, null);
     }
+
+    // Prune derived metrics (NUE, AUDPC, rootToShootRatio) that have zero actual data
+    this.activeFields = this.activeFields.filter(f => {
+      const isDerived = ['nue', 'audpc', 'rootToShootRatio'].includes(f.key);
+      if (!isDerived) return true;
+      return this.observations.some(obs => {
+        const val = parseFloat(obs[f.key]);
+        return !isNaN(val) && val !== 0;
+      });
+    });
   }
 
   async processObservationsWithAI() {
@@ -1210,7 +1223,7 @@ export class AdvancedReportGenerator {
     if (!findingsText) {
       const isSig = anovaResults && !anovaResults.error && anovaResults.p_value < 0.05;
       const metricsText = this.activeFields.map(f => f.label).join(', ');
-      findingsText = `The trial evaluating "${this.trial.FormulationName || 'test formulation'}" on crop "${this.trial.CropCrop || this.trial.Crop || 'Tomato'}" (Design: ${this.trial.TrialDesign || this.trial.Design || this.design}, Category: ${this.category}) was successfully conducted. Observations were recorded for key parameters including ${metricsText}. `;
+      findingsText = `The trial evaluating "${this.trial.FormulationName || 'test formulation'}" on crop "${this.trial.CropCrop || this.trial.Crop || this.project?.Crop || 'N/A'}" (Design: ${this.trial.TrialDesign || this.trial.Design || this.design}, Category: ${this.category}) was successfully conducted. Observations were recorded for key parameters including ${metricsText}. `;
       if (isSig) {
         findingsText += `Statistical analysis (ANOVA) confirmed significant treatment differences (p < 0.05) across the primary evaluation parameters, demonstrating significant efficacy of the applied formulation over the control replicates.`;
       } else {
@@ -1239,8 +1252,16 @@ export class AdvancedReportGenerator {
       methodParts.push(`Investigator: ${this.trial.InvestigatorName}`);
     }
     
+    // ── Derive design parameters from REAL project data ──
+    const proj = this.project;
     const repsList = [...new Set(this.observations.map(o => o.replication || o.rep).filter(Boolean))];
-    const computedReplications = repsList.length > 0 ? repsList.length : (this.trial.Replication && !isNaN(this.trial.Replication) ? parseInt(this.trial.Replication) : 3);
+    const computedReplications = repsList.length > 0
+      ? repsList.length
+      : (proj?.PotBlocks && !isNaN(proj.PotBlocks))
+        ? parseInt(proj.PotBlocks)
+        : (this.trial.Replication && !isNaN(this.trial.Replication))
+          ? parseInt(this.trial.Replication)
+          : 3;
 
     const designLabel = this.design === 'CRD' 
       ? 'Completely Randomized Design (CRD)' 
@@ -1252,7 +1273,21 @@ export class AdvancedReportGenerator {
     if (this.trial.Dosage && this.trial.Dosage !== 'N/A') {
       methodParts.push(`Dosage applied: ${this.trial.Dosage}`);
     }
-    methodParts.push("All observations recorded dynamically");
+
+    // Add real pot grid and observation mode info
+    const potRows = proj?.PotRows ? parseInt(proj.PotRows) : null;
+    const potCols = proj?.PotCols ? parseInt(proj.PotCols) : null;
+    if (potRows && potCols) {
+      methodParts.push(`Pot layout: ${potRows} rows × ${potCols} columns (${potRows * potCols} total pots)`);
+    }
+    const rawObsMode = proj?.PotObsMode || '';
+    if (rawObsMode === 'column-wise') {
+      methodParts.push('Observation mode: Treatment Column-wise');
+    } else if (rawObsMode === 'row-wise') {
+      methodParts.push('Observation mode: Row-wise');
+    } else if (rawObsMode === 'plant-wise' || rawObsMode === 'pot-wise') {
+      methodParts.push('Observation mode: Plant-wise (Individual Pot)');
+    }
     
     const methodologyText = methodParts.join('. ') + '.';
     ws.mergeCells('A12:F14');
@@ -1320,10 +1355,13 @@ export class AdvancedReportGenerator {
       }
     }
 
+    const totalPots = (potRows && potCols) ? potRows * potCols : (this.isProjectWide ? (this.trials || []).length : this.observations.length);
+
     const execSummaryRows = [
-      ['Trial Design', this.design === 'CRD' ? 'Completely Randomized Design (CRD)' : this.design === 'PotTrial' ? 'Pot Trial Design' : 'Randomized Complete Block Design (RCBD)'],
+      ['Trial Design', designLabel],
       ['Treatments Evaluated', this.treatmentNames.length],
       ['Replications / Blocks', computedReplications],
+      ['Total Pots', totalPots],
       ['Observation Period', `${maxDaa} DAA`],
       ['Statistically Significant Parameters', sigParamsList],
       ['Numerically Superior Treatment', bestTrtName],
@@ -1358,38 +1396,82 @@ export class AdvancedReportGenerator {
         ? 'Pot Trial Design' 
         : 'RCB (Randomized Complete Block)';
 
+    // ── Derive design parameters from REAL project data ──
+    const proj = this.project;
     const repsList = [...new Set(this.observations.map(o => o.replication || o.rep).filter(Boolean))];
-    const computedReplications = repsList.length > 0 ? repsList.length : (this.trial.Replication && !isNaN(this.trial.Replication) ? parseInt(this.trial.Replication) : 3);
+    const computedReplications = repsList.length > 0
+      ? repsList.length
+      : (proj?.PotBlocks && !isNaN(proj.PotBlocks))
+        ? parseInt(proj.PotBlocks)
+        : (this.trial.Replication && !isNaN(this.trial.Replication))
+          ? parseInt(this.trial.Replication)
+          : 3;
 
-    const totalObs = this.observations.length;
     const trtCount = this.treatmentNames.length;
     const independentUnits = trtCount * computedReplications;
-    
-    let obsMode = 'Treatment Column-wise';
-    let totalPots = totalObs;
-    let unitText = `Statistical analysis was performed using ${independentUnits} independent experimental units.`;
 
-    if (totalObs > independentUnits) {
+    // Read actual pot grid dimensions from the project object
+    const potRows = proj?.PotRows ? parseInt(proj.PotRows) : null;
+    const potCols = proj?.PotCols ? parseInt(proj.PotCols) : null;
+    const totalPots = (potRows && potCols) ? potRows * potCols : (this.isProjectWide ? (this.trials || []).length : this.observations.length);
+    const potsPerUnit = independentUnits > 0 ? Math.round(totalPots / independentUnits) : 1;
+
+    // Read real observation mode from the project
+    const rawObsMode = proj?.PotObsMode || '';
+    let obsMode = 'N/A';
+    let expUnit = 'Treatment × Replication';
+    if (rawObsMode === 'column-wise') {
+      obsMode = 'Treatment Column-wise';
+      expUnit = 'Treatment Column';
+    } else if (rawObsMode === 'row-wise') {
+      obsMode = 'Row-wise';
+      expUnit = 'Row';
+    } else if (rawObsMode === 'plant-wise' || rawObsMode === 'pot-wise') {
+      obsMode = 'Plant-wise (Individual Pot)';
+      expUnit = 'Individual Pot';
+    } else if (totalPots > independentUnits) {
       obsMode = 'Plant-wise';
-      unitText = `Statistical analysis was performed using ${independentUnits} experimental units (Treatment × Replication means), while observations were collected from ${totalObs} pots (${(totalObs / independentUnits).toFixed(0)} pots per experimental unit).`;
+      expUnit = 'Treatment × Replication (mean)';
+    } else {
+      obsMode = 'Treatment Column-wise';
+      expUnit = 'Treatment × Block';
     }
+
+    // Build methodology note from real data
+    let unitText;
+    if (potsPerUnit > 1) {
+      unitText = `Statistical analysis was performed using ${independentUnits} experimental units (${expUnit} means), while observations were collected from ${totalPots} pots (${potsPerUnit} pots per experimental unit).`;
+    } else {
+      unitText = `Statistical analysis was performed using ${independentUnits} independent experimental units (${totalPots} total pots).`;
+    }
+
+    // Read pot layout from project
+    const rawLayout = proj?.PotLayout || '';
+    let layoutLabel = '';
+    if (rawLayout === 'rcbd-pot') layoutLabel = 'RCBD Pot Trial';
+    else if (rawLayout === 'stripe') layoutLabel = 'Stripe Layout';
+    else if (rawLayout === 'randomized-row') layoutLabel = 'Randomized Row';
+    else if (rawLayout) layoutLabel = rawLayout;
 
     const rawMetadata = [
       ['Trial ID', this.trial.ID],
       ['Investigator', this.trial.InvestigatorName],
-      ['Sponsor', this.trial.Sponsor || 'N/A'],
+      ['Sponsor', this.trial.Sponsor],
       ['Location', this.trial.Location],
-      ['Crop', this.trial.CropCrop || this.trial.Crop || 'Tomato'],
+      ['Crop', this.trial.CropCrop || this.trial.Crop || proj?.Crop],
       ['Variety', this.trial.CropVariety || this.trial.Variety],
       ['Previous Crop', this.trial.PreviousCrop],
       ['Irrigation Method', this.trial.IrrigationMethod],
       ['Plant Population (plants/ha)', this.trial.PlantPopulation],
       ['Design Type', designLabel],
-      ['Replications', computedReplications],
-      ['Experimental Unit', 'Treatment × Block'],
+      ['Pot Layout', layoutLabel],
+      ['Pot Grid Dimensions', (potRows && potCols) ? `${potRows} rows × ${potCols} columns` : ''],
+      ['Replications / Blocks', computedReplications],
+      ['Experimental Unit', expUnit],
       ['Independent Units Used', independentUnits],
-      ['Total Pots Observed', totalPots],
-      ['Observation Mode', obsMode],
+      ['Total Pots', totalPots],
+      ['Pots per Experimental Unit', potsPerUnit > 1 ? potsPerUnit : ''],
+      ['Observation Mode', obsMode !== 'N/A' ? obsMode : ''],
       ['Methodology Note', unitText],
       ['Trial Start Date', this.trial.Date],
       ['Soil pH', this.soil?.ph],
@@ -1472,10 +1554,21 @@ export class AdvancedReportGenerator {
     ws.getCell(`A${mapStartRow}`).value = 'Field Trial Layout Map (RCB Grid)';
     ws.getCell(`A${mapStartRow}`).font = { bold: true, size: 12 };
 
+    const proj = this.project;
     const repsList = [...new Set(this.observations.map(o => o.replication || o.rep).filter(Boolean))];
-    const computedReplications = repsList.length > 0 ? repsList.length : (this.trial.Replication && !isNaN(this.trial.Replication) ? parseInt(this.trial.Replication) : 3);
+    const computedReplications = repsList.length > 0
+      ? repsList.length
+      : (proj?.PotBlocks && !isNaN(proj.PotBlocks))
+        ? parseInt(proj.PotBlocks)
+        : (this.trial.Replication && !isNaN(this.trial.Replication))
+          ? parseInt(this.trial.Replication)
+          : 3;
 
-    let layoutText = `Replications: ${computedReplications}\nPlots layout:\n`;
+    const potRows = proj?.PotRows ? parseInt(proj.PotRows) : null;
+    const potCols = proj?.PotCols ? parseInt(proj.PotCols) : null;
+    const gridInfo = (potRows && potCols) ? ` (${potRows}×${potCols} = ${potRows * potCols} pots)` : '';
+
+    let layoutText = `Replications: ${computedReplications}${gridInfo}\nPlots layout:\n`;
     if (this.isProjectWide && this.trials) {
       const repGroups = {};
       this.trials.forEach(t => {
@@ -1494,7 +1587,14 @@ export class AdvancedReportGenerator {
         layoutText += `Rep ${rep}: ${plots}\n`;
       });
     } else {
-      layoutText += `Rep 1: Plot 101 (Trt 1) | Plot 102 (Trt 2)\nRep 2: Plot 201 (Trt 2) | Plot 202 (Trt 1)\nRep 3: Plot 301 (Trt 1) | Plot 302 (Trt 2)\nRep 4: Plot 401 (Trt 2) | Plot 402 (Trt 1)\nRep 5: Plot 501 (Trt 1) | Plot 502 (Trt 2)\nRep 6: Plot 601 (Trt 2) | Plot 602 (Trt 1)`;
+      // Generate dynamic layout from treatment names and computed replications
+      for (let r = 1; r <= computedReplications; r++) {
+        const plots = this.treatmentNames.map((name, idx) => {
+          const plotNum = r * 100 + (idx + 1);
+          return `Plot ${plotNum} (Trt ${idx + 1}: ${name})`;
+        }).join(' | ');
+        layoutText += `Rep ${r}: ${plots}\n`;
+      }
     }
 
     ws.mergeCells(`A${mapStartRow + 1}:F${mapStartRow + 6}`);
