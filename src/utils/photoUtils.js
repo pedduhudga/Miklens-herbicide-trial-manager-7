@@ -81,7 +81,7 @@ export function stripPhotoArrayForMirror(jsonStr) {
  * Compress base64/dataURL image to a manageable size (max dimension and quality)
  * Optimized specifically for AI analysis (Bug, Disease, Weed, and Pest detection).
  */
-export async function compressImage(dataUrl, maxDimension = 3072, quality = 0.95) {
+export async function compressImage(dataUrl, maxDimension = 1600, quality = 0.80) {
   if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) {
     return dataUrl;
   }
