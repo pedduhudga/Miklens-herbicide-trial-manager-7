@@ -131,7 +131,10 @@ Observations summary: ${obsSummary}
 Detailed Agronomic Interpretation:
 ${interpretation}
 ANOVA Results: ${JSON.stringify(anovaResults || {})}
-CRITICAL INSTRUCTION: Avoid all causal physiological, biological or metabolic claims (such as "nutrient uptake", "assimilation", "photosynthetic rate", "metabolic demand") unless those biological parameters were directly measured. Focus strictly on physical, visual, and statistical observations (e.g. height, vigor, leaf color, SPAD, yield).
+CRITICAL INSTRUCTION: 
+1. Avoid all causal physiological, biological or metabolic claims (such as "nutrient uptake", "assimilation", "photosynthetic rate", "metabolic demand") unless those biological parameters were directly measured. Focus strictly on physical, visual, and statistical observations (e.g. height, vigor, leaf color, SPAD, yield).
+2. Write generalized scientific conclusions comparing all treatments together. Avoid referencing only one specific test product unless it performed significantly differently from all others (e.g. instead of focusing only on one product, use phrases like: "No statistically significant differences were detected among the evaluated treatments under the conditions of this trial.").
+3. Provide research-oriented recommendations, such as: repeating the trial under additional agro-climatic conditions, increasing replication to improve statistical precision, extending the observation period, evaluating across multiple seasons, or validating under commercial farming conditions. Do NOT recommend business-oriented actions (like cost-benefit analyses).
 Keep it precise and factual. Do NOT include markdown styling or headers, just plain text with bullets.`;
 
     const text = await generateTextWithAI(prompt, 'You are a senior agricultural scientist.');
@@ -937,9 +940,29 @@ export class AdvancedReportGenerator {
 
     // Group unique DAA by date
     const daaByDate = {};
+    const seenPlotsAtDaa = {};
+    const trtDaaCounts = {};
+    const trtRepSets = {};
 
     // 2. Check observations
     this.observations.forEach((obs, idx) => {
+      const daa = obs.daa ?? 0;
+      const trt = obs.treatment || 'Untreated Check (Control)';
+      const rep = obs.rep || obs.replication || 1;
+      const plot = obs.plotNumber || obs.plot || (idx + 1);
+
+      if (!trtRepSets[trt]) trtRepSets[trt] = new Set();
+      trtRepSets[trt].add(rep);
+
+      if (!trtDaaCounts[trt]) trtDaaCounts[trt] = {};
+      trtDaaCounts[trt][daa] = (trtDaaCounts[trt][daa] || 0) + 1;
+
+      const plotKey = `${daa}_${plot}_${rep}`;
+      if (seenPlotsAtDaa[plotKey]) {
+        warnings.push(`Duplicate Entry Warning: Replicated plot/pot combination (${plot}, Rep ${rep}) recorded multiple times at DAA ${daa}.`);
+      }
+      seenPlotsAtDaa[plotKey] = true;
+
       if (!obs.treatment) {
         warnings.push(`Observation #${idx + 1}: Missing treatment name.`);
       }
@@ -972,8 +995,27 @@ export class AdvancedReportGenerator {
         }
       }
 
-      const rep = obs.rep || obs.replication;
-      if (rep === undefined || rep === null || rep === '') {
+      // Check for impossible values
+      this.activeFields.forEach(f => {
+        const val = parseFloat(obs[f.key]);
+        if (!isNaN(val)) {
+          if (val < 0) {
+            warnings.push(`Observation #${idx + 1}: Impossible negative value (${val}) recorded for ${f.label}.`);
+          }
+          if (f.key === 'ndvi' && val > 1.0) {
+            warnings.push(`Observation #${idx + 1}: Impossible NDVI value (${val} > 1.0) recorded.`);
+          }
+          if (/spad|chlorophyll/i.test(f.key) && val > 150) {
+            warnings.push(`Observation #${idx + 1}: Unrealistic chlorophyll/SPAD value (${val}) recorded.`);
+          }
+          if (/percent|pct|cover|severity/i.test(f.key) && val > 100) {
+            warnings.push(`Observation #${idx + 1}: Percentage value (${val}% > 100%) recorded for ${f.label}.`);
+          }
+        }
+      });
+
+      const repVal = obs.rep || obs.replication;
+      if (repVal === undefined || repVal === null || repVal === '') {
         warnings.push(`Observation #${idx + 1}: Missing replication number.`);
       }
     });
@@ -1000,6 +1042,27 @@ export class AdvancedReportGenerator {
 
     if (sequenceError) {
       warnings.push("Chronological Warning: DAA values do not follow a strictly sequential progression over time.");
+    }
+
+    // Check missing observations for a treatment at a DAA
+    const uniqueDaas = [...new Set(this.observations.map(o => o.daa ?? 0))];
+    this.treatmentNames.forEach(trtName => {
+      uniqueDaas.forEach(daa => {
+        if (!trtDaaCounts[trtName] || !trtDaaCounts[trtName][daa]) {
+          warnings.push(`Missing Observation: Treatment "${trtName}" has no data recorded at DAA ${daa}.`);
+        }
+      });
+    });
+
+    // Unequal replication counts check
+    const repCounts = Object.entries(trtRepSets).map(([trt, set]) => ({ trt, count: set.size }));
+    if (repCounts.length > 1) {
+      const firstCount = repCounts[0].count;
+      const isUnequal = repCounts.some(rc => rc.count !== firstCount);
+      if (isUnequal) {
+        const countsStr = repCounts.map(rc => `"${rc.trt}": ${rc.count} reps`).join(', ');
+        warnings.push(`Experimental Bias Warning: Unequal replication counts detected across treatments (${countsStr}).`);
+      }
     }
 
     if (this.treatmentNames.length < 2) {
@@ -1639,8 +1702,9 @@ export class AdvancedReportGenerator {
         return 'Poor';
       };
 
-      const isMeanNearZero = anova.grandMean < 2.0 || 
-        ((/deficiency|severity|chlorosis|necrosis|pest|disease|injury|mortality/i.test(f.key)) && anova.grandMean < 5.0);
+      const isSymptom = /deficiency|severity|chlorosis|necrosis|pest|disease|injury|mortality/i.test(f.key) || 
+                       /deficiency|severity|chlorosis|necrosis|pest|disease|injury|mortality/i.test(f.label);
+      const isMeanNearZero = anova.grandMean < 2.0 || (isSymptom && anova.grandMean < 5.0);
       const cvDisplay = isMeanNearZero 
         ? 'N/A (Mean near zero / low incidence)'
         : (anova.cv ? `${anova.cv.toFixed(2)}% (${getCvRating(anova.cv)})` : 'N/A');
@@ -1938,7 +2002,7 @@ export class AdvancedReportGenerator {
     const ws = this.workbook.addWorksheet('ANOVA Summary');
     ws.views = [{ showGridLines: true }];
 
-    ws.mergeCells('A1:G1');
+    ws.mergeCells('A1:L1');
     const titleCell = ws.getCell('A1');
     titleCell.value = 'PROJECT ANOVA & POST-HOC SUMMARY';
     titleCell.font = { name: 'Calibri', size: 16, bold: true, color: { rgb: 'FFFFFF' } };
@@ -1953,11 +2017,16 @@ export class AdvancedReportGenerator {
     ws.getRow(5).values = [
       'Parameter / Metric',
       'Design Type',
+      'DF (Trt, Err)',
+      'Mean Square Error (MSE)',
       'F-Value',
       'P-Value',
       'Significance',
-      'Tukey Groupings (Treatment: Group)',
-      'CV (%)'
+      'LSD (p=0.05)',
+      'SEm±',
+      'CV (%)',
+      'Grand Mean',
+      'Tukey Groupings (Treatment: Group)'
     ];
     ws.getRow(5).font = { bold: true };
     ws.getRow(5).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'ECF0F1' } };
@@ -1976,8 +2045,9 @@ export class AdvancedReportGenerator {
         })
         .join(', ');
 
-      const isMeanNearZero = anova.grandMean < 2.0 || 
-        ((/deficiency|severity|chlorosis|necrosis|pest|disease|injury|mortality/i.test(f.key)) && anova.grandMean < 5.0);
+      const isSymptom = /deficiency|severity|chlorosis|necrosis|pest|disease|injury|mortality/i.test(f.key) || 
+                       /deficiency|severity|chlorosis|necrosis|pest|disease|injury|mortality/i.test(f.label);
+      const isMeanNearZero = anova.grandMean < 2.0 || (isSymptom && anova.grandMean < 5.0);
       const cvDisplay = isMeanNearZero 
         ? 'N/A (Mean near zero / low incidence)'
         : (anova.cv ? `${anova.cv.toFixed(2)}%` : 'N/A');
@@ -1985,21 +2055,31 @@ export class AdvancedReportGenerator {
       ws.getRow(r).values = [
         f.label,
         this.design,
+        `${anova.df_treatment}, ${anova.df_error}`,
+        parseFloat(anova.ms_error.toFixed(4)),
         parseFloat(anova.f_value.toFixed(4)),
         parseFloat(anova.p_value.toFixed(4)),
         sig,
-        groupings,
-        cvDisplay
+        anova.lsd ? parseFloat(anova.lsd.toFixed(4)) : 'N/A',
+        anova.sem ? parseFloat(anova.sem.toFixed(4)) : 'N/A',
+        cvDisplay,
+        parseFloat(anova.grandMean.toFixed(4)),
+        groupings
       ];
       r++;
     });
 
-    ws.getColumn(1).width = 25;
-    ws.getColumn(2).width = 15;
-    ws.getColumn(3).width = 12;
-    ws.getColumn(4).width = 12;
-    ws.getColumn(5).width = 15;
-    ws.getColumn(6).width = 50;
+    ws.getColumn(1).width = 30;
+    ws.getColumn(2).width = 25;
+    ws.getColumn(3).width = 15;
+    ws.getColumn(4).width = 22;
+    ws.getColumn(5).width = 12;
+    ws.getColumn(6).width = 12;
     ws.getColumn(7).width = 12;
+    ws.getColumn(8).width = 15;
+    ws.getColumn(9).width = 12;
+    ws.getColumn(10).width = 28;
+    ws.getColumn(11).width = 15;
+    ws.getColumn(12).width = 65;
   }
 }
