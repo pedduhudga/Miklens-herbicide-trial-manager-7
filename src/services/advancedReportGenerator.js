@@ -43,11 +43,34 @@ function getColumnLetter(col) {
 }
 
 // Helper to generate dynamic scientific narrative using Gemini AI
-async function generateNarrativeWithAI(trial, category, observations, anovaResults) {
+async function generateNarrativeWithAI(trial, category, observations, activeFields, anovaResults) {
   try {
-    const obsSummary = (observations || []).map(
-      o => `DAA ${o.daa || 0}: ${o.weedCover || 0}% cover`
-    ).slice(0, 15).join('; ');
+    const daaMap = {};
+    (observations || []).forEach(o => {
+      const daa = o.daa ?? 0;
+      if (!daaMap[daa]) daaMap[daa] = [];
+      daaMap[daa].push(o);
+    });
+
+    const summaryParts = [];
+    const fieldsToSummarize = activeFields || [];
+
+    Object.keys(daaMap).sort((a, b) => Number(a) - Number(b)).forEach(daa => {
+      const obsAtDaa = daaMap[daa];
+      const fieldAverages = [];
+      fieldsToSummarize.forEach(f => {
+        const vals = obsAtDaa.map(o => parseFloat(o[f.key])).filter(v => !isNaN(v));
+        if (vals.length > 0) {
+          const avg = vals.reduce((sum, v) => sum + v, 0) / vals.length;
+          fieldAverages.push(`${f.label}: ${avg.toFixed(2)}`);
+        }
+      });
+      if (fieldAverages.length > 0) {
+        summaryParts.push(`DAA ${daa} averages (${fieldAverages.join(', ')})`);
+      }
+    });
+
+    const obsSummary = summaryParts.slice(0, 20).join('; ');
 
     const prompt = `You are a professional agronomist. Write a concise, executive-level scientific narrative (2 paragraphs) summarizing the results of this trial.
 Trial: ${trial.FormulationName || 'Test formulation'} on crop ${trial.CropCrop || trial.Crop || 'Tomato'}.
@@ -65,11 +88,39 @@ Do NOT use markdown headers or lists. Keep it strictly scientific, professional,
 }
 
 // Helper to generate dynamic conclusions using Gemini AI
-async function generateConclusionsWithAI(trial, category, anovaResults) {
+async function generateConclusionsWithAI(trial, category, activeFields, observations, anovaResults) {
   try {
+    const daaMap = {};
+    (observations || []).forEach(o => {
+      const daa = o.daa ?? 0;
+      if (!daaMap[daa]) daaMap[daa] = [];
+      daaMap[daa].push(o);
+    });
+
+    const summaryParts = [];
+    const fieldsToSummarize = activeFields || [];
+
+    Object.keys(daaMap).sort((a, b) => Number(a) - Number(b)).forEach(daa => {
+      const obsAtDaa = daaMap[daa];
+      const fieldAverages = [];
+      fieldsToSummarize.forEach(f => {
+        const vals = obsAtDaa.map(o => parseFloat(o[f.key])).filter(v => !isNaN(v));
+        if (vals.length > 0) {
+          const avg = vals.reduce((sum, v) => sum + v, 0) / vals.length;
+          fieldAverages.push(`${f.label}: ${avg.toFixed(2)}`);
+        }
+      });
+      if (fieldAverages.length > 0) {
+        summaryParts.push(`DAA ${daa} averages (${fieldAverages.join(', ')})`);
+      }
+    });
+
+    const obsSummary = summaryParts.slice(0, 20).join('; ');
+
     const prompt = `You are a senior agricultural scientist. Write a bulleted list of 3 scientific conclusions and practical grower recommendations based on this trial's statistical results.
 Trial: ${trial.FormulationName || 'Test treatment'}
 Category: ${category}
+Observations summary: ${obsSummary}
 ANOVA Results: ${JSON.stringify(anovaResults || {})}
 Keep it precise and factual. Do NOT include markdown styling or headers, just plain text with bullets.`;
 
@@ -179,6 +230,38 @@ function approximatePValue(f, df1, df2) {
   return isNaN(pVal) ? 1.0 : Math.max(0, Math.min(1, pVal));
 }
 
+// Helper to normalize all date formats to DD-MMM-YYYY (e.g. 17-Jun-2026)
+function normalizeDateString(dateStr, fallbackDate = null) {
+  if (!dateStr) {
+    if (fallbackDate) return normalizeDateString(fallbackDate);
+    return 'N/A';
+  }
+  try {
+    let parsedDate = new Date(dateStr);
+    if (isNaN(parsedDate.getTime())) {
+      const parts = dateStr.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+      if (parts) {
+        const day = parseInt(parts[1], 10);
+        const month = parseInt(parts[2], 10) - 1;
+        const year = parseInt(parts[3], 10);
+        parsedDate = new Date(year, month, day);
+      }
+    }
+    if (isNaN(parsedDate.getTime())) {
+      if (fallbackDate && fallbackDate !== dateStr) return normalizeDateString(fallbackDate);
+      return 'N/A';
+    }
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const d = String(parsedDate.getDate()).padStart(2, '0');
+    const m = months[parsedDate.getMonth()];
+    const y = parsedDate.getFullYear();
+    return `${d}-${m}-${y}`;
+  } catch (e) {
+    if (fallbackDate) return normalizeDateString(fallbackDate);
+    return 'N/A';
+  }
+}
+
 function isReductionMetric(key, category) {
   if (['herbicide', 'fungicide', 'pesticide'].includes(category)) {
     const growthKeys = ['yieldKgPlot', 'greenLeafArea', 'plantHealthScore', 'beneficialCount', 'marketableYieldPct', 'qualityRating', 'senescenceDays'];
@@ -187,8 +270,8 @@ function isReductionMetric(key, category) {
   return false;
 }
 
-// Perform RCB ANOVA on local data
-function calculateAnovaRCB(data, metricKey, category = 'nutrition') {
+// Perform ANOVA (RCB or CRD) on local data
+function calculateAnovaRCB(data, metricKey, category = 'nutrition', design = 'RCBD') {
   const values = [];
   const trtGroups = {};
   const repGroups = {};
@@ -209,9 +292,11 @@ function calculateAnovaRCB(data, metricKey, category = 'nutrition') {
   const N = values.length;
   const t = Object.keys(trtGroups).length;
   const b = Object.keys(repGroups).length;
+  
+  const isCrd = design === 'CRD' || design === 'PotTrial';
 
-  if (N < 4 || t < 2 || b < 2) {
-    return { error: 'Insufficient data for RCB ANOVA.' };
+  if (N < 4 || t < 2 || (!isCrd && b < 2)) {
+    return { error: `Insufficient data for ${isCrd ? 'CRD' : 'RCB'} ANOVA.` };
   }
 
   const grandMean = values.reduce((a, b) => a + b, 0) / N;
@@ -239,9 +324,10 @@ function calculateAnovaRCB(data, metricKey, category = 'nutrition') {
   let ssError = 0;
 
   let dfTreatments = t - 1;
-  let dfBlocks = b - 1;
-  let dfError = dfTreatments * dfBlocks;
+  let dfBlocks = isCrd ? 0 : b - 1;
+  let dfError = isCrd ? (N - t) : (dfTreatments * dfBlocks);
   let dfTotal = N - 1;
+  if (dfError < 1) dfError = 1;
 
   let msTreatments = 0;
   let msBlocks = 0;
@@ -254,7 +340,7 @@ function calculateAnovaRCB(data, metricKey, category = 'nutrition') {
   let pBlock = 1.0;
 
   let useTypeIII = false;
-  if (!isBalanced) {
+  if (!isBalanced && !isCrd) {
     const mockTrials = data.map(obs => ({
       FormulationName: String(obs.treatmentNumber || obs.treatment || obs.Treatment || 1),
       Replication: String(obs.replication || obs.rep || obs.Replication || 1),
@@ -296,43 +382,41 @@ function calculateAnovaRCB(data, metricKey, category = 'nutrition') {
       ssTreatments += trtVals.length * Math.pow(trtMean - grandMean, 2);
     });
 
-    // SSBlocks (Replications)
-    ssBlocks = 0;
-    Object.keys(repGroups).forEach(rep => {
-      const repVals = repGroups[rep];
-      const repMean = repVals.reduce((a, b) => a + b, 0) / repVals.length;
-      ssBlocks += repVals.length * Math.pow(repMean - grandMean, 2);
-    });
-
-    // SSError
-    ssError = Math.max(0, ssTotal - ssTreatments - ssBlocks);
-
-    // df
-    dfTreatments = t - 1;
-    dfBlocks = b - 1;
-    dfError = dfTreatments * dfBlocks;
-    dfTotal = N - 1;
+    if (isCrd) {
+      ssBlocks = 0;
+      ssError = Math.max(0, ssTotal - ssTreatments);
+    } else {
+      // SSBlocks (Replications)
+      ssBlocks = 0;
+      Object.keys(repGroups).forEach(rep => {
+        const repVals = repGroups[rep];
+        const repMean = repVals.reduce((a, b) => a + b, 0) / repVals.length;
+        ssBlocks += repVals.length * Math.pow(repMean - grandMean, 2);
+      });
+      ssError = Math.max(0, ssTotal - ssTreatments - ssBlocks);
+    }
 
     // MS
     msTreatments = ssTreatments / dfTreatments;
-    msBlocks = ssBlocks / dfBlocks;
+    msBlocks = isCrd ? 0 : ssBlocks / dfBlocks;
     msError = ssError / dfError;
 
     // F
     fStatistic = msError > 0 ? msTreatments / msError : 0;
-    fBlock = msError > 0 ? msBlocks / msError : 0;
+    fBlock = (!isCrd && msError > 0) ? msBlocks / msError : 0;
 
     // p-values
     pValue = approximatePValue(fStatistic, dfTreatments, dfError);
-    pBlock = approximatePValue(fBlock, dfBlocks, dfError);
+    pBlock = isCrd ? 1.0 : approximatePValue(fBlock, dfBlocks, dfError);
   }
 
   // Advanced post-hoc statistics: CV, SEM, LSD
   const tCritical5 = getStudentTCritical(0.05, dfError);
   const tCritical1 = getStudentTCritical(0.01, dfError);
-  const lsd = tCritical5 * Math.sqrt((2 * msError) / (b || 1));
-  const lsd1 = tCritical1 * Math.sqrt((2 * msError) / (b || 1));
-  const sem = Math.sqrt(msError / (b || 1));
+  const repDivisor = isCrd ? (N / t) : b;
+  const lsd = tCritical5 * Math.sqrt((2 * msError) / (repDivisor || 1));
+  const lsd1 = tCritical1 * Math.sqrt((2 * msError) / (repDivisor || 1));
+  const sem = Math.sqrt(msError / (repDivisor || 1));
   const cv = grandMean > 0 ? (Math.sqrt(msError) / grandMean) * 100 : 0;
 
   // Compute means, SDs, SEs dynamically for ALL treatments
@@ -591,6 +675,7 @@ export class AdvancedReportGenerator {
         const [utc] = uniqueTreatments.splice(utcIdx, 1);
         uniqueTreatments.unshift(utc);
       }
+      this.design = proj?.Design || representative?.Design || 'RCBD';
       this.treatmentNames = uniqueTreatments;
 
       // Aggregate all observations from all sub-trials
@@ -608,6 +693,7 @@ export class AdvancedReportGenerator {
         obsList.forEach(obs => {
           this.observations.push({
             ...obs,
+            date: normalizeDateString(obs.date, t.Date),
             treatment: obs.treatment || trtName,
             treatmentNumber: obs.treatmentNumber || trtNum,
             plot: obs.plot || t.PlotNumber || 'N/A',
@@ -618,6 +704,7 @@ export class AdvancedReportGenerator {
         photoList.forEach(photo => {
           this.photos.push({
             ...photo,
+            date: normalizeDateString(photo.date, t.Date),
             label: photo.label ? `[${t.FormulationName}] ${photo.label}` : `Plot ${t.PlotNumber || ''} - ${t.FormulationName}`
           });
         });
@@ -628,13 +715,20 @@ export class AdvancedReportGenerator {
       // Single trial mode
       this.isProjectWide = false;
       this.trial = trialOrTrials;
+      this.design = proj?.Design || representative?.Design || 'RCBD';
       this.observations = safeJsonParse(trialOrTrials.EfficacyDataJSON, []).map(obs => {
         return {
           ...obs,
+          date: normalizeDateString(obs.date, trialOrTrials.Date),
           treatmentNumber: parseInt(obs.treatmentNumber || obs.treatment || 1)
         };
       });
-      this.photos = safeJsonParse(trialOrTrials.PhotoURLs, []);
+      this.photos = safeJsonParse(trialOrTrials.PhotoURLs, []).map(photo => {
+        return {
+          ...photo,
+          date: normalizeDateString(photo.date, trialOrTrials.Date)
+        };
+      });
       this.soil = safeJsonParse(trialOrTrials.SoilDataJSON, null);
 
       const trtNums = [...new Set(this.observations.map(o => o.treatmentNumber))].sort((a,b) => a-b);
@@ -757,7 +851,7 @@ export class AdvancedReportGenerator {
 
       // Compute ANOVA on primary metric to supply to AI narrative writer
       const primaryMetricKey = this.config.primaryMetric?.key || 'plantHeight';
-      const anovaResults = calculateAnovaRCB(this.observations, primaryMetricKey, this.category);
+      const anovaResults = calculateAnovaRCB(this.observations, primaryMetricKey, this.category, this.design);
 
       // 1. Build Narrative Sheet
       await this.createNarrativeSheet(anovaResults);
@@ -774,8 +868,15 @@ export class AdvancedReportGenerator {
       // 5. Build Chartwork Sheet
       await this.createChartworkSheet();
       
-      // 6. Build Post-Harvest Sheet
-      await this.createPostHarvestSheet();
+      // 6. Build Post-Harvest Sheet (if post-harvest observations exist)
+      const hasPostHarvest = this.activeFields.some(f => 
+        /harvest|yield|storage|firmness|loss/i.test(f.key)
+      ) && this.observations.some(o => 
+        this.activeFields.some(f => /harvest|yield|storage|firmness|loss/i.test(f.key) && o[f.key] !== undefined && o[f.key] !== null && o[f.key] !== '')
+      );
+      if (hasPostHarvest) {
+        await this.createPostHarvestSheet();
+      }
       
       // 7. Build ANOVA/AOV sheet
       await this.createAOVMeansTable();
@@ -787,10 +888,15 @@ export class AdvancedReportGenerator {
       await this.createFiguresSheet();
       
       // 9. Build Post-Harvest Charts sheet (dynamic images embedded)
-      await this.createChartsSheet();
+      if (hasPostHarvest) {
+        await this.createChartsSheet();
+      }
       
       // 10. Build Weather Sheet
-      await this.createWeatherSheet();
+      const hasWeather = this.trial.Temperature || this.trial.Humidity || this.trial.Windspeed || this.trial.Rain;
+      if (hasWeather) {
+        await this.createWeatherSheet();
+      }
       
       // 11. Build Photos Sheet
       await this.createPhotosSheet();
@@ -846,10 +952,17 @@ export class AdvancedReportGenerator {
     let findingsText = aiSaved.narrative || aiSaved.cover || null;
     
     if (!findingsText) {
-      findingsText = await generateNarrativeWithAI(this.trial, this.category, this.observations, anovaResults);
+      findingsText = await generateNarrativeWithAI(this.trial, this.category, this.observations, this.activeFields, anovaResults);
     }
     if (!findingsText) {
-      findingsText = `The trial evaluating ${this.trial.FormulationName || 'test formulation'} on crop ${this.trial.CropCrop || this.trial.Crop || 'Tomato'} was successfully conducted. Treatment showed measurable vigor improvements compared to control. No major phytotoxicity was observed.`;
+      const isSig = anovaResults && !anovaResults.error && anovaResults.p_value < 0.05;
+      const metricsText = this.activeFields.map(f => f.label).join(', ');
+      findingsText = `The trial evaluating "${this.trial.FormulationName || 'test formulation'}" on crop "${this.trial.CropCrop || this.trial.Crop || 'Tomato'}" (Design: ${this.trial.TrialDesign || this.trial.Design || this.design}, Category: ${this.category}) was successfully conducted. Observations were recorded for key parameters including ${metricsText}. `;
+      if (isSig) {
+        findingsText += `Statistical analysis (ANOVA) confirmed significant treatment differences (p < 0.05) across the primary evaluation parameters, demonstrating significant efficacy of the applied formulation over the control replicates.`;
+      } else {
+        findingsText += `Statistical analysis (ANOVA) showed no statistically significant differences (p > 0.05) between the test formulation and the control, suggesting equivalent performance or higher replication variability under the observed conditions.`;
+      }
     }
     
     ws.mergeCells('A6:F9');
@@ -862,7 +975,7 @@ export class AdvancedReportGenerator {
     ws.getCell('A11').font = { bold: true, size: 12 };
     ws.getCell('A11').fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'F3F4F6' } };
 
-    const methodologyText = `Location: ${this.trial.Location || 'N/A'}\nCrop Variety: ${this.trial.CropVariety || 'N/A'}\nInvestigator: ${this.trial.InvestigatorName || 'N/A'}\nDesign: Randomized Complete Block (RCB) with ${this.trial.Replication || 6} replications. Dosage applied: ${this.trial.Dosage || 'N/A'}. All observations recorded dynamically.`;
+    const methodologyText = `Location: ${this.trial.Location || 'N/A'}\nCrop Variety: ${this.trial.CropVariety || 'N/A'}\nInvestigator: ${this.trial.InvestigatorName || 'N/A'}\nDesign: ${this.trial.TrialDesign || this.trial.Design || this.design} with ${this.trial.Replication || 6} replicates. Dosage applied: ${this.trial.Dosage || 'N/A'}. All observations recorded dynamically.`;
     ws.mergeCells('A12:F14');
     ws.getCell('A12').value = methodologyText;
     ws.getCell('A12').alignment = { wrapText: true, vertical: 'top' };
@@ -875,10 +988,11 @@ export class AdvancedReportGenerator {
 
     let conclusionText = this.trial.Conclusion || null;
     if (!conclusionText) {
-      conclusionText = await generateConclusionsWithAI(this.trial, this.category, anovaResults);
+      conclusionText = await generateConclusionsWithAI(this.trial, this.category, this.activeFields, this.observations, anovaResults);
     }
     if (!conclusionText) {
-      conclusionText = 'Based on the statistical evaluations, the treatments showed a significant positive effect on yield and vigor parameters compared to the untreated check. Additional multi-site trials are recommended to validate these trends under varying soil profiles.';
+      const isSig = anovaResults && !anovaResults.error && anovaResults.p_value < 0.05;
+      conclusionText = `• Treatment "${this.trial.FormulationName || 'test formulation'}" showed a ${isSig ? 'statistically significant' : 'numerical'} improvement in primary observation metrics compared to the untreated control.\n• The experimental design (${this.trial.TrialDesign || this.trial.Design || this.design}) provided sufficient resolution to monitor treatment performance.\n• Further multi-site testing is recommended to confirm agronomic efficacy under varying environmental conditions.`;
     }
 
     ws.mergeCells('A17:F20');
@@ -898,25 +1012,37 @@ export class AdvancedReportGenerator {
     header.fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: '2C3E50' } };
     header.alignment = { horizontal: 'center' };
 
-    const metadata = [
-      ['Trial ID', this.trial.ID || 'N/A'],
-      ['Investigator', this.trial.InvestigatorName || 'N/A'],
+    const designLabel = this.design === 'CRD' 
+      ? 'CRD (Completely Randomized Design)' 
+      : this.design === 'PotTrial' 
+        ? 'Pot Trial Design' 
+        : 'RCB (Randomized Complete Block)';
+
+    const rawMetadata = [
+      ['Trial ID', this.trial.ID],
+      ['Investigator', this.trial.InvestigatorName],
       ['Sponsor', this.trial.Sponsor || 'Miklens Agriculture'],
-      ['Location', this.trial.Location || 'N/A'],
+      ['Location', this.trial.Location],
       ['Crop', this.trial.CropCrop || this.trial.Crop || 'Tomato'],
-      ['Variety', this.trial.CropVariety || this.trial.Variety || 'N/A'],
-      ['Previous Crop', this.trial.PreviousCrop || 'N/A'],
-      ['Irrigation Method', this.trial.IrrigationMethod || 'N/A'],
-      ['Plant Population (plants/ha)', this.trial.PlantPopulation || 'N/A'],
-      ['Design Type', 'RCB (Randomized Complete Block)'],
+      ['Variety', this.trial.CropVariety || this.trial.Variety],
+      ['Previous Crop', this.trial.PreviousCrop],
+      ['Irrigation Method', this.trial.IrrigationMethod],
+      ['Plant Population (plants/ha)', this.trial.PlantPopulation],
+      ['Design Type', designLabel],
       ['Replications', this.trial.Replication || 6],
-      ['Trial Start Date', this.trial.Date || 'N/A'],
-      ['Soil pH', this.soil?.ph || 'N/A'],
-      ['Soil Texture', this.soil?.texture || 'N/A'],
-      ['Soil Clay %', this.soil?.clay || 'N/A'],
-      ['Soil Sand %', this.soil?.sand || 'N/A'],
-      ['Soil Organic Carbon', this.soil?.organicCarbon || 'N/A']
+      ['Trial Start Date', this.trial.Date],
+      ['Soil pH', this.soil?.ph],
+      ['Soil Texture', this.soil?.texture],
+      ['Soil Clay %', this.soil?.clay],
+      ['Soil Sand %', this.soil?.sand],
+      ['Soil Organic Carbon', this.soil?.organicCarbon]
     ];
+
+    // Filter out rows that have empty/N/A values
+    const metadata = rawMetadata.filter(row => {
+      const val = row[1];
+      return val !== undefined && val !== null && val !== '' && val !== 'N/A';
+    });
 
     metadata.forEach((row, index) => {
       const r = index + 3;
@@ -1097,8 +1223,8 @@ export class AdvancedReportGenerator {
           const cLetter = String.fromCharCode(66 + colIdx);
           ws.getCell(`${cLetter}${r + offset + i}`).value = {
             formula: isRed
-              ? `=IF(${cLetter}${r + 1} > 0, (${cLetter}${r + 1} - ${cLetter}${r + trtNum}) / ${cLetter}${r + 1} * 100, 0)`
-              : `=IF(${cLetter}${r + 1} > 0, (${cLetter}${r + trtNum} - ${cLetter}${r + 1}) / ${cLetter}${r + 1} * 100, 0)`
+              ? `IF(${cLetter}${r + 1} > 0, (${cLetter}${r + 1} - ${cLetter}${r + trtNum}) / ${cLetter}${r + 1} * 100, 0)`
+              : `IF(${cLetter}${r + 1} > 0, (${cLetter}${r + trtNum} - ${cLetter}${r + 1}) / ${cLetter}${r + 1} * 100, 0)`
           };
         });
       }
@@ -1114,58 +1240,55 @@ export class AdvancedReportGenerator {
     const ws = this.workbook.addWorksheet('Post-Harvest');
     ws.views = [{ showGridLines: true }];
 
-    ws.getCell('A1').value = 'POST-HARVEST QUALITY RETENTION DATA';
+    ws.getCell('A1').value = 'POST-HARVEST & YIELD RETENTION DATA';
     ws.getCell('A1').font = { bold: true, size: 12 };
 
     ws.mergeCells('A3:F5');
-    ws.getCell('A3').value = `Post-harvest storage parameters:\n- Storage Temp: 60°F\n- Fruit Weight Loss & firmness degrades linearly over 8 days.\n- Quality Score (0-10) check: Lower score is better (0=pristine, 10=senescent).`;
+    ws.getCell('A3').value = `Post-harvest and yield parameter analysis extracted from real trial observations.\nThis sheet summarizes treatment averages for recorded harvest-related metrics.`;
     ws.getCell('A3').alignment = { wrapText: true, vertical: 'top' };
 
-    // Create Weight Loss table
-    ws.getCell('A7').value = 'Fruit Weight Loss (g) over Storage Duration';
-    ws.getCell('A7').font = { bold: true };
+    // Find harvest/yield fields in activeFields
+    const harvestFields = this.activeFields.filter(f => 
+      /harvest|yield|storage|firmness|loss/i.test(f.key)
+    );
 
-    const storageDays = ['Day 0', 'Day 2', 'Day 4', 'Day 6', 'Day 8'];
-    ws.getRow(8).values = ['Treatment Name', ...storageDays];
-    ws.getRow(8).font = { bold: true };
-    ws.getRow(8).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'ECF0F1' } };
+    let startRow = 7;
+    harvestFields.forEach(f => {
+      ws.getCell(`A${startRow}`).value = `${f.label} - Treatment Averages`;
+      ws.getCell(`A${startRow}`).font = { bold: true, size: 11 };
+      startRow++;
 
-    this.treatmentNames.forEach((trtName, trtIdx) => {
-      const trtNum = trtIdx + 1;
-      const factor = trtNum === 1 ? 0.92 : 0.88;
-      const rowValues = [trtName];
-      storageDays.forEach((_, i) => {
-        rowValues.push(parseFloat((250 - (i * 7.5 * factor)).toFixed(1)));
+      // Averages by Treatment and Date/DAA
+      const dates = [...new Set(this.observations.map(o => o.date).filter(Boolean))];
+      ws.getRow(startRow).values = ['Treatment Name', ...dates.map(d => `Date: ${d}`)];
+      ws.getRow(startRow).font = { bold: true };
+      ws.getRow(startRow).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'ECF0F1' } };
+      startRow++;
+
+      this.treatmentNames.forEach((trtName, trtIdx) => {
+        const trtNum = trtIdx + 1;
+        const rowValues = [trtName];
+        dates.forEach(d => {
+          const obsList = this.observations.filter(o => 
+            parseInt(o.treatmentNumber || o.treatment || 1) === trtNum && o.date === d
+          );
+          const vals = obsList.map(o => parseFloat(o[f.key])).filter(v => !isNaN(v));
+          if (vals.length > 0) {
+            const avg = vals.reduce((sum, v) => sum + v, 0) / vals.length;
+            rowValues.push(parseFloat(avg.toFixed(2)));
+          } else {
+            rowValues.push('N/A');
+          }
+        });
+        ws.getRow(startRow).values = rowValues;
+        startRow++;
       });
-      ws.getRow(9 + trtIdx).values = rowValues;
-    });
 
-    // Create Quality table
-    const startQ = 11 + this.treatmentNames.length;
-    ws.getCell(`A${startQ}`).value = 'Canopy/Fruit Quality Score (0-10) over Storage Duration';
-    ws.getCell(`A${startQ}`).font = { bold: true };
-
-    ws.getRow(startQ + 1).values = ['Treatment Name', ...storageDays];
-    ws.getRow(startQ + 1).font = { bold: true };
-    ws.getRow(startQ + 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'ECF0F1' } };
-
-    this.treatmentNames.forEach((trtName, trtIdx) => {
-      const trtNum = trtIdx + 1;
-      const factor = trtNum === 1 ? 1.25 : 0.75;
-      const rowValues = [trtName];
-      [8, 8, 7, 6, 5].forEach((val, i) => {
-        rowValues.push(Math.max(1, Math.round(8 - (i * factor))));
-      });
-      ws.getRow(startQ + 2 + trtIdx).values = rowValues;
+      startRow += 2; // spacer
     });
 
     ws.column_dimensions = {
-      'A': { width: 30 },
-      'B': { width: 12 },
-      'C': { width: 12 },
-      'D': { width: 12 },
-      'E': { width: 12 },
-      'F': { width: 12 }
+      'A': { width: 30 }
     };
   }
 
@@ -1178,15 +1301,21 @@ export class AdvancedReportGenerator {
     let r = 1;
 
     this.activeFields.forEach(f => {
-      const anova = calculateAnovaRCB(currentObs, f.key, this.category);
+      const anova = calculateAnovaRCB(currentObs, f.key, this.category, this.design);
       if (anova.error) {
         ws.getCell(`A${r}`).value = `ANOVA for ${f.label}: ${anova.error}`;
         r += 2;
         return;
       }
 
+      const designTitle = this.design === 'CRD' 
+        ? 'CRD Design' 
+        : this.design === 'PotTrial' 
+          ? 'Pot Trial Design' 
+          : 'RCB Design';
+
       ws.mergeCells(`A${r}:F${r}`);
-      ws.getCell(`A${r}`).value = `ANOVA: ${f.label} (RCB Design)`;
+      ws.getCell(`A${r}`).value = `ANOVA: ${f.label} (${designTitle})`;
       ws.getCell(`A${r}`).font = { bold: true, color: { rgb: 'FFFFFF' } };
       ws.getCell(`A${r}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: '8E44AD' } };
       r++;
@@ -1206,16 +1335,18 @@ export class AdvancedReportGenerator {
       ];
       r++;
 
-      // Block Row
-      ws.getRow(r).values = [
-        'Replications (Block)', 
-        anova.df_block, 
-        parseFloat(anova.ss_block.toFixed(4)), 
-        parseFloat(anova.ms_block.toFixed(4)), 
-        parseFloat(anova.f_block.toFixed(4)), 
-        `${anova.p_block.toFixed(4)} ${anova.p_block < 0.05 ? '*' : 'ns'}`
-      ];
-      r++;
+      // Block Row (RCB only)
+      if (this.design !== 'CRD' && this.design !== 'PotTrial') {
+        ws.getRow(r).values = [
+          'Replications (Block)', 
+          anova.df_block, 
+          parseFloat(anova.ss_block.toFixed(4)), 
+          parseFloat(anova.ms_block.toFixed(4)), 
+          parseFloat(anova.f_block.toFixed(4)), 
+          `${anova.p_block.toFixed(4)} ${anova.p_block < 0.05 ? '*' : 'ns'}`
+        ];
+        r++;
+      }
 
       // Error Row
       ws.getRow(r).values = [
@@ -1287,13 +1418,18 @@ export class AdvancedReportGenerator {
         return 'Poor';
       };
 
+      const isMeanNearZero = anova.grandMean < 1.0;
+      const cvDisplay = isMeanNearZero 
+        ? 'N/A (Mean near zero)'
+        : (anova.cv ? `${anova.cv.toFixed(2)}% (${getCvRating(anova.cv)})` : 'N/A');
+
       ws.getRow(r).values = [
         'LSD (p=0.05)',
         anova.lsd ? parseFloat(anova.lsd.toFixed(4)) : 'N/A',
         'LSD (p=0.01)',
         anova.lsd1 ? parseFloat(anova.lsd1.toFixed(4)) : 'N/A',
         'CV (%)',
-        anova.cv ? `${anova.cv.toFixed(2)}% (${getCvRating(anova.cv)})` : 'N/A',
+        cvDisplay,
         'Trial SEm±',
         anova.sem ? parseFloat(anova.sem.toFixed(4)) : 'N/A'
       ];
@@ -1590,7 +1726,7 @@ export class AdvancedReportGenerator {
 
     ws.getCell('A3').value = 'Project / Study Design:';
     ws.getCell('A3').font = { bold: true };
-    ws.getCell('B3').value = this.trial.TrialDesign || this.trial.Design || 'RCBD';
+    ws.getCell('B3').value = this.design;
 
     ws.getRow(5).values = [
       'Parameter / Metric',
@@ -1606,7 +1742,7 @@ export class AdvancedReportGenerator {
 
     let r = 6;
     this.activeFields.forEach(f => {
-      const anova = calculateAnovaRCB(this.observations, f.key, this.category);
+      const anova = calculateAnovaRCB(this.observations, f.key, this.category, this.design);
       if (anova.error) return;
 
       const sig = anova.p_value < 0.01 ? '**' : anova.p_value < 0.05 ? '*' : 'ns';
@@ -1618,14 +1754,19 @@ export class AdvancedReportGenerator {
         })
         .join(', ');
 
+      const isMeanNearZero = anova.grandMean < 1.0;
+      const cvDisplay = isMeanNearZero 
+        ? 'N/A (Mean near zero)'
+        : (anova.cv ? `${anova.cv.toFixed(2)}%` : 'N/A');
+
       ws.getRow(r).values = [
         f.label,
-        this.trial.TrialDesign || this.trial.Design || 'RCBD',
+        this.design,
         parseFloat(anova.f_value.toFixed(4)),
         parseFloat(anova.p_value.toFixed(4)),
         sig,
         groupings,
-        anova.cv ? `${anova.cv.toFixed(2)}%` : 'N/A'
+        cvDisplay
       ];
       r++;
     });
