@@ -589,7 +589,7 @@ RIGOROUS SCIENTIFIC ANSWERING PROTOCOL:
           <div className="fixed inset-0 bg-black/50 z-10 md:hidden" onClick={() => setIsSidebarOpen(false)} />
         )}
 
-        <div className="flex-1 flex flex-col min-h-0 md:p-4 max-w-5xl mx-auto w-full relative">
+        <div className="flex-1 flex flex-col min-h-0 pb-20 md:pb-0 md:p-4 max-w-5xl mx-auto w-full relative">
           <div className="flex-1 bg-white md:rounded-2xl md:shadow-sm md:border md:border-slate-200 flex flex-col min-h-0 overflow-hidden">
 
           {/* Header */}
