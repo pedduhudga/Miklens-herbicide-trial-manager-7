@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { X, Zap } from 'lucide-react';
+import { X, Zap, Focus } from 'lucide-react';
 
 export default function CameraCapture({ isOpen = true, onClose, onCapture, initialAspectRatio = '3:4', onAspectChange }) {
   const videoRef = useRef(null);
@@ -9,6 +9,8 @@ export default function CameraCapture({ isOpen = true, onClose, onCapture, initi
   const [stream, setStream] = useState(null);
   const [flashSupported, setFlashSupported] = useState(false);
   const [flashOn, setFlashOn] = useState(false);
+  const [focusMode, setFocusMode] = useState('continuous'); // 'continuous' or 'manual'
+  const [focusSupported, setFocusSupported] = useState(false);
   const [aspectRatio, setAspectRatio] = useState(initialAspectRatio || '3:4');
   const [parentDims, setParentDims] = useState({ width: 0, height: 0 });
 
@@ -29,18 +31,24 @@ export default function CameraCapture({ isOpen = true, onClose, onCapture, initi
 
         // Apply advanced hardware constraints on the active video track (autofocus, raw frame resolution)
         const track = s.getVideoTracks()[0];
-        if (track && track.applyConstraints) {
+        if (track) {
           const capabilities = track.getCapabilities ? track.getCapabilities() : {};
           const constraintsToApply = {};
 
-          if (capabilities.focusMode && capabilities.focusMode.includes('continuous')) {
-            constraintsToApply.focusMode = 'continuous';
+          if (capabilities.focusMode) {
+            setFocusSupported(true);
+            if (capabilities.focusMode.includes(focusMode)) {
+              constraintsToApply.focusMode = focusMode;
+            } else if (capabilities.focusMode.includes('continuous')) {
+              constraintsToApply.focusMode = 'continuous';
+              setFocusMode('continuous');
+            }
           }
           if (capabilities.resizeMode && capabilities.resizeMode.includes('none')) {
             constraintsToApply.resizeMode = 'none';
           }
 
-          if (Object.keys(constraintsToApply).length > 0) {
+          if (Object.keys(constraintsToApply).length > 0 && track.applyConstraints) {
             try {
               await track.applyConstraints(constraintsToApply);
               console.log("[CameraCapture] Track hardware constraints applied successfully:", constraintsToApply);
@@ -148,6 +156,31 @@ export default function CameraCapture({ isOpen = true, onClose, onCapture, initi
         setFlashOn(newFlashState);
       } catch (err) {
         console.warn('Flash toggle failed', err);
+      }
+    }
+  };
+
+  const toggleFocusMode = async () => {
+    if (!stream) return;
+    const track = stream.getVideoTracks()[0];
+    if (track && track.applyConstraints) {
+      try {
+        const nextMode = focusMode === 'continuous' ? 'manual' : 'continuous';
+        const constraintsToApply = { focusMode: nextMode };
+        
+        const capabilities = track.getCapabilities ? track.getCapabilities() : {};
+        if (nextMode === 'manual' && capabilities.focusDistance) {
+          const min = capabilities.focusDistance.min || 0;
+          const max = capabilities.focusDistance.max || 1;
+          constraintsToApply.focusDistance = (min + max) / 2;
+        }
+
+        await track.applyConstraints(constraintsToApply);
+        setFocusMode(nextMode);
+        console.log(`[CameraCapture] Focus mode set to ${nextMode}`);
+      } catch (err) {
+        console.warn('Focus mode toggle failed', err);
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Focus mode override not supported on this device.', type: 'warning' } }));
       }
     }
   };
@@ -381,7 +414,21 @@ export default function CameraCapture({ isOpen = true, onClose, onCapture, initi
             <div className="w-[58px] h-[58px] rounded-full border-2 border-black bg-white active:bg-slate-200 transition-colors"></div>
           </button>
 
-          <div className="w-12 h-12"></div> {/* Spacer for flex balance */}
+          <div className="w-12 h-12 flex items-center justify-center">
+             {focusSupported && (
+               <button
+                  onClick={toggleFocusMode}
+                  className={`w-12 h-12 rounded-full flex items-center justify-center transition-all duration-200 ${
+                    focusMode === 'continuous'
+                      ? 'bg-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] border border-emerald-400/20'
+                      : 'bg-black/40 text-slate-300 border border-white/10 hover:text-white'
+                  }`}
+                  title={focusMode === 'continuous' ? 'Auto Focus (Continuous)' : 'Normal Photo (Fixed Focus)'}
+               >
+                  <Focus className="w-6 h-6 animate-pulse" style={{ animationDuration: focusMode === 'continuous' ? '3s' : '0s' }} />
+               </button>
+             )}
+          </div>
         </div>
       </div>
     </div>
