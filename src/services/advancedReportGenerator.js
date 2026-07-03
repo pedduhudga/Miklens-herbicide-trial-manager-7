@@ -77,16 +77,20 @@ async function generateNarrativeWithAI(trial, category, observations, activeFiel
 Trial: ${trial.FormulationName || 'Test formulation'} on crop ${trial.CropCrop || trial.Crop || 'N/A'}.
 Category: ${category}
 Design: ${design}
+Treatments Evaluated: ${treatmentNames.join(', ')}
 ANOVA Results / Efficacy: ${JSON.stringify(anovaResults || {})}
 Detailed Agronomic Interpretation:
 ${interpretation}
 Observations summary: ${obsSummary}
 CRITICAL INSTRUCTION: 
-1. Avoid all causal physiological, biological or metabolic claims (such as "nutrient uptake", "assimilation", "photosynthetic rate", "metabolic demand") unless those biological parameters were directly measured. Focus strictly on physical, visual, and statistical observations (e.g. height, vigor, leaf color, SPAD, yield). Use objective scientific phrasing like "The observed improvements are consistent with crop response to treatment."
-2. Analyze and interpret every single measured parameter listed in the Detailed Agronomic Interpretation (including plant height, fruit counts, yield, vigor, deficiencies, etc.) that is present. Do not skip any parameter. 
-3. Compare all treatment groups collectively (e.g. Untreated Control, NPK formulation treatments, synthetic references) instead of focusing on just one treatment. Clearly indicate which treatment performed best in which parameters, and overall which is the best performer across all combined metrics.
-4. If stating performance conclusions, use publication-friendly, neutral statements like: "No statistically significant differences among treatments were detected under the conditions of this study."
-5. If identical values are observed (e.g., F = 0, P = 1), do NOT state that ANOVA could not be applied. Instead, state: "Plant height exhibited identical treatment means (F = 0.00, P = 1.000), indicating no detectable treatment effect under the conditions of this study."
+1. Avoid all causal physiological, biological or metabolic claims (such as "nutrient uptake", "assimilation", "photosynthetic rate", "metabolic demand") unless those biological parameters were directly measured. Focus strictly on physical, visual, and statistical observations (e.g. height, vigor, leaf color, SPAD, yield).
+2. Differentiate clearly between numerical differences and statistically significant differences. Do NOT write that observations were "uniform" across replicates unless all replicate data values are identical; describe the numerical means observed for the treatments and state that the differences were not statistically significant.
+3. Only state that deficiency symptoms were not noted if the actual deficiency or chlorosis values in the data are zero or absent.
+4. Never infer that the experiment lacked sufficient data, inadequate replication, or inadequate statistical power unless those conditions are explicitly supported by the statistical output. Do NOT claim the trial has "insufficient data" (it has multiple replication blocks and pots).
+5. Do NOT mention "Completely Randomized Design" or "CRD" unless the selected design is explicitly CRD.
+6. Compare all treatment groups collectively: ${treatmentNames.join(', ')}. Indicate which treatment achieved the numerically highest and lowest means, and state whether those differences were statistically distinguishable at the 5% significance level.
+7. Use neutral phrasing like: "no statistically significant treatment effects were detected under the conditions of this study" or "Given the absence of statistically significant treatment differences..." instead of "lack of variance".
+8. If identical values are observed (e.g., F = 0, P = 1), state: "Plant height exhibited identical treatment means (F = 0.00, P = 1.000), indicating no detectable treatment effect under the conditions of this study."
 Do NOT use markdown headers or lists. Keep it strictly scientific, professional, and factual.`;
 
     const text = await generateTextWithAI(prompt, 'You are a professional agronomist.');
@@ -132,17 +136,22 @@ async function generateConclusionsWithAI(trial, category, activeFields, observat
 Trial: ${trial.FormulationName || 'Test treatment'}
 Category: ${category}
 Design: ${design}
+Treatments Evaluated: ${treatmentNames.join(', ')}
 Observations summary: ${obsSummary}
 Detailed Agronomic Interpretation:
 ${interpretation}
 ANOVA Results: ${JSON.stringify(anovaResults || {})}
 CRITICAL INSTRUCTION: 
-1. Avoid all causal physiological, biological or metabolic claims (such as "nutrient uptake", "assimilation", "photosynthetic rate", "metabolic demand") unless those biological parameters were directly measured. Focus strictly on physical, visual, and statistical observations (e.g. height, vigor, leaf color, SPAD, yield).
-2. Analyze and interpret every single measured parameter listed in the Detailed Agronomic Interpretation (including plant height, fruit counts, yield, vigor, deficiencies, etc.) that is present. Clearly indicate which treatment performed best in which parameters, and overall which is the best performer across all combined metrics. Compare all treatment groups collectively (e.g. Untreated Control, formulation treatments, synthetic references) instead of focusing on just one treatment.
-3. Provide research-oriented recommendations, such as: repeating the trial under additional agro-climatic conditions, increasing replication to improve statistical precision, extending the observation period, evaluating across multiple seasons, or validating under commercial farming conditions. Do NOT recommend business-oriented actions (like cost-benefit analyses).
-4. If high coefficients of variation (CV%) are observed for a measured parameter, use statistically precise and cautious wording such as: "The relatively high variability in [Parameter Name] measurements (CV = [Value]%) may have reduced the ability to detect small treatment effects." Avoid claiming that high CV "likely contributed to the absence of statistical power", and NEVER reference "SPAD" or "chlorophyll" unless that metric is actually present in the dataset.
-5. If low coefficients of variation (CV%) are observed, use phrasing like: "Low coefficients of variation for [Parameter Name] ([Value]%) indicate good experimental consistency." Avoid implying precision solely from CV values, and only reference parameters present in the dataset.
-6. If identical values are observed for a parameter (resulting in F = 0.00 and P = 1.000), do NOT state that ANOVA could not be applied due to lack of variance. Instead, state: "Plant height exhibited identical treatment means (F = 0.00, P = 1.000), indicating no detectable treatment effect under the conditions of this study."
+1. Avoid all causal physiological, biological or metabolic claims unless biological parameters were directly measured. Focus strictly on physical, visual, and statistical observations.
+2. Differentiate clearly between numerical differences and statistically significant differences. Do NOT write that observations were "uniform" across replicates unless all replicate data values are identical.
+3. Compare all treatment groups collectively: ${treatmentNames.join(', ')}. Use the exact treatment names.
+4. Never infer that the experiment lacked sufficient data, inadequate replication, or inadequate statistical power unless those conditions are explicitly supported by the statistical output.
+5. Do NOT mention "Completely Randomized Design" or "CRD" unless the selected design is CRD.
+6. Provide research-oriented recommendations, such as: repeating the trial under additional agro-climatic conditions, evaluating across multiple seasons, or validating under commercial farming conditions. Do NOT recommend business-oriented actions.
+7. Use neutral phrasing like: "Given the absence of statistically significant treatment differences..." instead of "lack of variance".
+8. If high coefficients of variation (CV%) are observed for a measured parameter, write: "The relatively high variability in [Parameter Name] measurements (CV = [Value]%) may have reduced the ability to detect small treatment effects." Do not reference "SPAD" or "chlorophyll" unless that metric is actually present in the dataset.
+9. If low coefficients of variation (CV%) are observed, write: "Low coefficients of variation for [Parameter Name] ([Value]%) indicate good experimental consistency."
+10. If identical values are observed (resulting in F = 0.00 and P = 1.000), state: "Plant height exhibited identical treatment means (F = 0.00, P = 1.000), indicating no detectable treatment effect under the conditions of this study."
 Keep it precise and factual. Do NOT include markdown styling or headers, just plain text with bullets.`;
 
     const text = await generateTextWithAI(prompt, 'You are a senior agricultural scientist.');
