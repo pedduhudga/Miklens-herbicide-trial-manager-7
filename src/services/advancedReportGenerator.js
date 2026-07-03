@@ -1166,6 +1166,9 @@ export class AdvancedReportGenerator {
       // 3. Build Treatment List & Map Sheet
       await this.createTreatmentListSheet();
       
+      // 3.5. Build Assessment Summary Sheet (Descriptive Statistics & Rankings)
+      await this.createAssessmentSummarySheet();
+
       // 4. Build Assessment Data Sheet
       await this.createAssessmentDataSheet();
       
@@ -1738,6 +1741,256 @@ export class AdvancedReportGenerator {
     // Formatting column widths
     headerRow.forEach((_, colIndex) => {
       ws.getColumn(colIndex + 1).width = 15;
+    });
+  }
+
+  async createAssessmentSummarySheet() {
+    const ws = this.workbook.addWorksheet('Assessment Summary');
+    ws.views = [{ showGridLines: true }];
+
+    // Title Block
+    ws.mergeCells('A1:J1');
+    const header = ws.getCell('A1');
+    header.value = 'DESCRIPTIVE STATISTICS & ASSESSMENT SUMMARY';
+    header.font = { name: 'Calibri', bold: true, size: 14, color: { rgb: 'FFFFFF' } };
+    header.fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: '2C3E50' } };
+    header.alignment = { horizontal: 'center', vertical: 'middle' };
+    ws.getRow(1).height = 35;
+
+    // 1. Trial Overview Section
+    ws.mergeCells('A3:D3');
+    ws.getCell('A3').value = '1. TRIAL OVERVIEW';
+    ws.getCell('A3').font = { name: 'Calibri', bold: true, size: 11, color: { rgb: '2980B9' } };
+    
+    const proj = this.project;
+    const repsList = [...new Set(this.observations.map(o => o.replication || o.rep).filter(Boolean))];
+    const computedReplications = repsList.length > 0
+      ? repsList.length
+      : (proj?.PotBlocks && !isNaN(proj.PotBlocks))
+        ? parseInt(proj.PotBlocks)
+        : (this.trial.Replication && !isNaN(this.trial.Replication))
+          ? parseInt(this.trial.Replication)
+          : 3;
+
+    const potRows = proj?.PotRows ? parseInt(proj.PotRows) : null;
+    const potCols = proj?.PotCols ? parseInt(proj.PotCols) : null;
+    const totalPots = (potRows && potCols) ? potRows * potCols : this.observations.length;
+    const rawObsMode = proj?.PotObsMode || '';
+    const obsMode = rawObsMode === 'column-wise' ? 'Treatment Column-wise' : rawObsMode === 'row-wise' ? 'Row-wise' : 'Plant-wise';
+    const dates = [...new Set(this.observations.map(o => o.date || 'N/A'))];
+    const daas = [...new Set(this.observations.map(o => o.daa ?? 0))].sort((a,b)=>a-b);
+    const daaRange = daas.length > 0 ? `${daas[0]} - ${daas[daas.length - 1]} DAA` : 'N/A';
+
+    const overviewRows = [
+      ['Total Treatments', this.treatmentNames.length],
+      ['Total Replications / Blocks', computedReplications],
+      ['Total Pots Observed', totalPots],
+      ['Observation Mode', obsMode],
+      ['Experimental Units', proj?.ExperimentalUnit || 'Treatment × Block'],
+      ['Assessment Dates Count', dates.length],
+      ['DAA Range Covered', daaRange]
+    ];
+
+    overviewRows.forEach((row, idx) => {
+      const r = 4 + idx;
+      ws.getCell(`A${r}`).value = row[0];
+      ws.getCell(`A${r}`).font = { name: 'Calibri', bold: true };
+      ws.getCell(`B${r}`).value = row[1];
+    });
+
+    // 2. Observation Summary Section (Overall Parameter Metrics)
+    let curRow = 13;
+    ws.mergeCells(`A${curRow}:J${curRow}`);
+    ws.getCell(`A${curRow}`).value = '2. OVERALL OBSERVATION STATISTICS BY PARAMETER';
+    ws.getCell(`A${curRow}`).font = { name: 'Calibri', bold: true, size: 11, color: { rgb: '2980B9' } };
+    curRow++;
+
+    const descHeaders = ['Parameter', 'Min', 'Max', 'Mean', 'Median', 'Std Dev', 'CV %', 'Range', 'Sample Size', 'Variability Class'];
+    ws.getRow(curRow).values = descHeaders;
+    ws.getRow(curRow).font = { name: 'Calibri', bold: true, color: { rgb: 'FFFFFF' } };
+    ws.getRow(curRow).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: '34495E' } };
+    curRow++;
+
+    this.activeFields.forEach(f => {
+      const vals = this.observations.map(o => {
+        // Handle pot-wise values if present to get accurate min/max/stdDev overall
+        if (f.key.toLowerCase().replace(/\s/g, '') === 'plantheight' && o.potHeights) {
+          return o.potHeights.map(h => parseFloat(h)).filter(v => !isNaN(v));
+        }
+        return parseFloat(o[f.key]);
+      }).flat().filter(v => !isNaN(v));
+
+      if (!vals.length) return;
+
+      const min = Math.min(...vals);
+      const max = Math.max(...vals);
+      const sum = vals.reduce((a, b) => a + b, 0);
+      const mean = sum / vals.length;
+      const range = max - min;
+      const sampleSize = vals.length;
+
+      const sorted = [...vals].sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      const median = sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+
+      const variance = vals.length > 1 ? vals.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / (vals.length - 1) : 0;
+      const stdDev = Math.sqrt(variance);
+      const cv = mean > 0 ? (stdDev / mean) * 100 : 0;
+
+      let variabilityClass = 'Excellent';
+      if (cv > 30) variabilityClass = 'High';
+      else if (cv > 20) variabilityClass = 'Moderate';
+      else if (cv > 10) variabilityClass = 'Good';
+
+      ws.getRow(curRow).values = [
+        f.label,
+        parseFloat(min.toFixed(2)),
+        parseFloat(max.toFixed(2)),
+        parseFloat(mean.toFixed(2)),
+        parseFloat(median.toFixed(2)),
+        parseFloat(stdDev.toFixed(2)),
+        parseFloat(cv.toFixed(1)) + '%',
+        parseFloat(range.toFixed(2)),
+        sampleSize,
+        variabilityClass
+      ];
+      
+      // Styling the CV and Variability Class
+      const varCell = ws.getCell(curRow, 10);
+      if (cv > 30) {
+        varCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'FCE4D6' } };
+        varCell.font = { name: 'Calibri', color: { rgb: 'C00000' }, bold: true };
+      } else if (cv < 10) {
+        varCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'E2EFDA' } };
+        varCell.font = { name: 'Calibri', color: { rgb: '375623' }, bold: true };
+      }
+
+      curRow++;
+    });
+
+    // 3. Treatment Rankings & Improvement over Control
+    curRow += 2;
+    ws.mergeCells(`A${curRow}:J${curRow}`);
+    ws.getCell(`A${curRow}`).value = '3. TREATMENT PERFORMANCE RANKINGS & COMPARATIVE ANALYSIS';
+    ws.getCell(`A${curRow}`).font = { name: 'Calibri', bold: true, size: 11, color: { rgb: '2980B9' } };
+    curRow++;
+
+    const rankHeaders = ['Parameter', 'Treatment', 'Mean Value', 'Rank', '% vs Control', 'Best / Worst Classification'];
+    ws.getRow(curRow).values = rankHeaders;
+    ws.getRow(curRow).font = { name: 'Calibri', bold: true, color: { rgb: 'FFFFFF' } };
+    ws.getRow(curRow).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: '34495E' } };
+    curRow++;
+
+    this.activeFields.forEach(f => {
+      // Calculate treatment means
+      const trtMeans = this.treatmentNames.map((name, idx) => {
+        const trtNum = idx + 1;
+        const trtVals = this.observations.filter(o => (o.treatmentNumber || o.treatment || 1) === trtNum)
+                                         .map(o => {
+                                           if (f.key.toLowerCase().replace(/\s/g, '') === 'plantheight' && o.potHeights) {
+                                             return o.potHeights.map(h => parseFloat(h)).filter(v => !isNaN(v));
+                                           }
+                                           return parseFloat(o[f.key]);
+                                         })
+                                         .flat()
+                                         .filter(v => !isNaN(v));
+        const avg = trtVals.length ? trtVals.reduce((sum, v) => sum + v, 0) / trtVals.length : 0;
+        return { name, trtNum, mean: avg };
+      });
+
+      const isRed = isReductionMetric(f.key, this.category);
+      
+      // Sort treatments (best to worst)
+      const sortedTrts = [...trtMeans].sort((a, b) => isRed ? a.mean - b.mean : b.mean - a.mean);
+      
+      const controlMean = trtMeans[0]?.mean || 1;
+
+      sortedTrts.forEach((trt, sortIdx) => {
+        const rank = sortIdx + 1;
+        const pctDiff = controlMean > 0 ? ((trt.mean - controlMean) / controlMean) * 100 : 0;
+        const diffStr = trt.trtNum === 1 ? 'Control (Ref)' : `${pctDiff > 0 ? '+' : ''}${pctDiff.toFixed(2)}%`;
+
+        let classification = 'Intermediate';
+        if (sortIdx === 0) classification = 'Best Performer';
+        else if (sortIdx === sortedTrts.length - 1) classification = 'Lowest Performer';
+
+        ws.getRow(curRow).values = [
+          f.label,
+          trt.name,
+          parseFloat(trt.mean.toFixed(2)),
+          rank,
+          diffStr,
+          classification
+        ];
+
+        // Highlight Best Performer
+        if (classification === 'Best Performer') {
+          ws.getCell(curRow, 6).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'E2EFDA' } };
+          ws.getCell(curRow, 6).font = { name: 'Calibri', color: { rgb: '375623' }, bold: true };
+        } else if (classification === 'Lowest Performer') {
+          ws.getCell(curRow, 6).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'FFF2CC' } };
+        }
+
+        curRow++;
+      });
+    });
+
+    // 4. DAA Trends Analysis
+    curRow += 2;
+    ws.mergeCells(`A${curRow}:F${curRow}`);
+    ws.getCell(`A${curRow}`).value = '4. DAA-WISE DEVELOPMENTAL TRENDS';
+    ws.getCell(`A${curRow}`).font = { name: 'Calibri', bold: true, size: 11, color: { rgb: '2980B9' } };
+    curRow++;
+
+    ws.getRow(curRow).values = ['Parameter', 'Initial Mean (DAA Min)', 'Final Mean (DAA Max)', 'Net Change', 'Trend Classification'];
+    ws.getRow(curRow).font = { name: 'Calibri', bold: true, color: { rgb: 'FFFFFF' } };
+    ws.getRow(curRow).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: '34495E' } };
+    curRow++;
+
+    this.activeFields.forEach(f => {
+      const daaList = [...new Set(this.observations.map(o => o.daa ?? 0))].sort((a,b)=>a-b);
+      if (daaList.length < 2) return;
+
+      const firstDaa = daaList[0];
+      const lastDaa = daaList[daaList.length - 1];
+
+      const firstVals = this.observations.filter(o => (o.daa ?? 0) === firstDaa).map(o => {
+        if (f.key.toLowerCase().replace(/\s/g, '') === 'plantheight' && o.potHeights) {
+          return o.potHeights.map(h => parseFloat(h)).filter(v => !isNaN(v));
+        }
+        return parseFloat(o[f.key]);
+      }).flat().filter(v => !isNaN(v));
+
+      const lastVals = this.observations.filter(o => (o.daa ?? 0) === lastDaa).map(o => {
+        if (f.key.toLowerCase().replace(/\s/g, '') === 'plantheight' && o.potHeights) {
+          return o.potHeights.map(h => parseFloat(h)).filter(v => !isNaN(v));
+        }
+        return parseFloat(o[f.key]);
+      }).flat().filter(v => !isNaN(v));
+
+      const firstMean = firstVals.length ? firstVals.reduce((sum, v) => sum + v, 0) / firstVals.length : 0;
+      const lastMean = lastVals.length ? lastVals.reduce((sum, v) => sum + v, 0) / lastVals.length : 0;
+      const netChange = lastMean - firstMean;
+
+      let trend = 'Stable';
+      if (netChange > (firstMean * 0.05)) trend = 'Increasing';
+      else if (netChange < -(firstMean * 0.05)) trend = 'Decreasing';
+
+      ws.getRow(curRow).values = [
+        f.label,
+        parseFloat(firstMean.toFixed(2)),
+        parseFloat(lastMean.toFixed(2)),
+        parseFloat(netChange.toFixed(2)),
+        trend
+      ];
+
+      curRow++;
+    });
+
+    // Formatting column widths
+    const columnWidthHeaders = ['Parameter', 'Min', 'Max', 'Mean', 'Median', 'Std Dev', 'CV %', 'Range', 'Sample Size', 'Variability Class'];
+    columnWidthHeaders.forEach((_, colIndex) => {
+      ws.getColumn(colIndex + 1).width = 16;
     });
   }
 
