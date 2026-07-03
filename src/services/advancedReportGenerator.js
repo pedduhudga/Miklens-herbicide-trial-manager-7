@@ -90,6 +90,7 @@ CRITICAL INSTRUCTION:
 5. Do NOT mention "Completely Randomized Design" or "CRD" unless the selected design is explicitly CRD.
 9. Avoid informal phrases like: "performed comparably", "showed comparable vigor", or "uniform". Instead, write: "no statistically significant treatment differences were detected under the conditions of this study."
 10. If the design is PotTrial, refer to it consistently as "Randomized Complete Block Pot Trial (RCBD Pot Trial)".
+11. Do NOT write that the trial "did not establish a baseline of nutrient deficiency". Instead, write: "Deficiency symptoms remained minimal throughout the observation period..."
 Do NOT use markdown headers or lists. Keep it strictly scientific, professional, and factual.`;
 
     const text = await generateTextWithAI(prompt, 'You are a professional agronomist.');
@@ -151,6 +152,7 @@ CRITICAL INSTRUCTION:
 8. If high coefficients of variation (CV%) are observed for a measured parameter, write: "The relatively high variability in [Parameter Name] measurements (CV = [Value]%) may have reduced the ability to detect small treatment effects." Do not reference "SPAD" or "chlorophyll" unless that metric is actually present in the dataset.
 9. Avoid informal phrases like: "performed comparably", "showed comparable vigor", or "uniform". Instead, write: "no statistically significant treatment differences were detected under the conditions of this study."
 10. If the design is PotTrial, refer to it consistently as "Randomized Complete Block Pot Trial (RCBD Pot Trial)".
+11. Do NOT write that the trial "did not establish a baseline of nutrient deficiency". Instead, write: "Deficiency symptoms remained minimal throughout the observation period..."
 Do NOT use markdown headers or lists. Keep it strictly scientific, professional, and factual.`;
 
     const text = await generateTextWithAI(prompt, 'You are a senior agricultural scientist.');
@@ -1212,6 +1214,10 @@ export class AdvancedReportGenerator {
       seenTrts.add(tName);
     });
 
+    if (this.duplicatePotWarning) {
+      warnings.push('Duplicate Subsamples Alert: Every pot within a treatment × replication block has identical measurements. The data appear to be plot-level measurements copied to multiple pots; recommend analysing block means rather than treating each pot as an independent replicate.');
+    }
+
     return warnings;
   }
 
@@ -1381,9 +1387,12 @@ export class AdvancedReportGenerator {
     ws.getCell('A11').font = { bold: true, size: 12 };
     ws.getCell('A11').fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'F3F4F6' } };
 
+    const rawLoc = this.trial.Location;
+    const displayLoc = (!rawLoc || rawLoc === 'N/A' || rawLoc === 'Various') ? 'Not specified' : rawLoc;
+    
     const methodParts = [];
-    if (this.trial.Location && this.trial.Location !== 'N/A' && this.trial.Location !== 'Various') {
-      methodParts.push(`Location: ${this.trial.Location}`);
+    if (displayLoc !== 'Not specified') {
+      methodParts.push(`Location: ${displayLoc}`);
     }
     if (this.trial.CropVariety && this.trial.CropVariety !== 'N/A') {
       methodParts.push(`Crop Variety: ${this.trial.CropVariety}`);
@@ -1406,30 +1415,38 @@ export class AdvancedReportGenerator {
     const designLabel = this.design === 'CRD' 
       ? 'Completely Randomized Design (CRD)' 
       : this.design === 'PotTrial' 
-        ? 'Pot Trial Design' 
+        ? 'Randomized Complete Block Pot Trial (RCBD Pot Trial)' 
         : 'Randomized Complete Block Design (RCBD)';
-
-    methodParts.push(`Design: ${designLabel} with ${computedReplications} replicates`);
-    if (this.trial.Dosage && this.trial.Dosage !== 'N/A') {
-      methodParts.push(`Dosage applied: ${this.trial.Dosage}`);
-    }
 
     // Add real pot grid and observation mode info
     const potRows = proj?.PotRows ? parseInt(proj.PotRows) : null;
     const potCols = proj?.PotCols ? parseInt(proj.PotCols) : null;
-    if (potRows && potCols) {
-      methodParts.push(`Pot layout: ${potRows} rows × ${potCols} columns (${potRows * potCols} total pots)`);
-    }
-    const rawObsMode = proj?.PotObsMode || '';
-    if (rawObsMode === 'column-wise') {
-      methodParts.push('Observation mode: Treatment Column-wise');
-    } else if (rawObsMode === 'row-wise') {
-      methodParts.push('Observation mode: Row-wise');
-    } else if (rawObsMode === 'plant-wise' || rawObsMode === 'pot-wise') {
-      methodParts.push('Observation mode: Plant-wise (Individual Pot)');
+    const totalPots = (potRows && potCols) ? potRows * potCols : (this.isProjectWide ? (this.trials || []).length : this.observations.length);
+    const potsPerUnit = (proj?.PotsPerUnit && !isNaN(proj.PotsPerUnit)) ? parseInt(proj.PotsPerUnit) : 1;
+
+    let methodologyText;
+    if (this.design === 'PotTrial') {
+      const trtCount = this.treatmentNames.length;
+      methodologyText = `Randomized Complete Block Pot Trial consisting of ${trtCount} treatments, ${computedReplications} blocks (replications), and ${totalPots} pots (${potsPerUnit} pots per treatment × block).`;
+    } else {
+      methodParts.push(`Design: ${designLabel} with ${computedReplications} replicates`);
+      if (this.trial.Dosage && this.trial.Dosage !== 'N/A') {
+        methodParts.push(`Dosage applied: ${this.trial.Dosage}`);
+      }
+      if (potRows && potCols) {
+        methodParts.push(`Pot layout: ${potRows} rows × ${potCols} columns (${potRows * potCols} total pots)`);
+      }
+      const rawObsMode = proj?.PotObsMode || '';
+      if (rawObsMode === 'column-wise') {
+        methodParts.push('Observation mode: Treatment Column-wise');
+      } else if (rawObsMode === 'row-wise') {
+        methodParts.push('Observation mode: Row-wise');
+      } else if (rawObsMode === 'plant-wise' || rawObsMode === 'pot-wise') {
+        methodParts.push('Observation mode: Plant-wise (Individual Pot)');
+      }
+      methodologyText = methodParts.join('. ') + '.';
     }
     
-    const methodologyText = methodParts.join('. ') + '.';
     ws.mergeCells('A12:F14');
     ws.getCell('A12').value = methodologyText;
     ws.getCell('A12').alignment = { wrapText: true, vertical: 'top' };
@@ -1502,7 +1519,7 @@ export class AdvancedReportGenerator {
       }
     }
 
-    const totalPots = (potRows && potCols) ? potRows * potCols : (this.isProjectWide ? (this.trials || []).length : this.observations.length);
+
 
     const execSummaryRows = [
       ['Trial Design', designLabel],
@@ -2412,10 +2429,10 @@ export class AdvancedReportGenerator {
       }
 
       const designTitle = this.design === 'CRD' 
-        ? 'CRD Design' 
+        ? 'Completely Randomized Design (CRD)' 
         : this.design === 'PotTrial' 
-          ? 'Pot Trial Design' 
-          : 'RCB Design';
+          ? 'Randomized Complete Block Pot Trial (RCBD Pot Trial)' 
+          : 'Randomized Complete Block Design (RCBD)';
 
       ws.mergeCells(`A${r}:F${r}`);
       ws.getCell(`A${r}`).value = `ANOVA: ${f.label} (${designTitle})`;
@@ -2509,7 +2526,7 @@ export class AdvancedReportGenerator {
           const pctVal = cStats.mean > 0 ? (isReductionMetric(f.key, this.category) ? ((cStats.mean - trtStats.mean) / cStats.mean) * 100 : ((trtStats.mean - cStats.mean) / cStats.mean) * 100) : 0;
           
           ws.getRow(r).values = [
-            `Diff / Efficacy (${this.treatmentNames[i]})`,
+            `Difference from Control (${this.treatmentNames[i]})`,
             parseFloat(diffVal.toFixed(2)),
             '',
             '', '', '', 
@@ -2644,7 +2661,7 @@ export class AdvancedReportGenerator {
       }
     }
     if (chartIndex === 0) {
-      this.workbook.removeWorksheet(ws.id);
+      this.workbook.removeWorksheet(ws.name);
     }
   }
 
@@ -2901,7 +2918,7 @@ export class AdvancedReportGenerator {
 
     ws.getCell('A3').value = 'Project / Study Design:';
     ws.getCell('A3').font = { bold: true };
-    ws.getCell('B3').value = this.design;
+    ws.getCell('B3').value = this.design === 'PotTrial' ? 'Randomized Complete Block Pot Trial (RCBD Pot Trial)' : this.design;
 
     ws.getRow(5).values = [
       'Parameter / Metric',
@@ -3032,11 +3049,13 @@ export class AdvancedReportGenerator {
       }
 
       const controlMean = anova.treatmentMeans[1]?.mean ?? 0;
-      const rowVals = [f.label, parseFloat(controlMean.toFixed(4))];
+      const controlLetter = anova.treatmentMeans[1]?.group || 'a';
+      const rowVals = [f.label, `${controlMean.toFixed(2)} ${controlLetter}`];
 
       this.treatmentNames.slice(1).forEach((name, idx) => {
         const trtNum = idx + 2;
         const trtMean = anova.treatmentMeans[trtNum]?.mean ?? 0;
+        const trtLetter = anova.treatmentMeans[trtNum]?.group || 'a';
         
         let pctEff = 0;
         if (controlMean > 0) {
@@ -3045,7 +3064,7 @@ export class AdvancedReportGenerator {
             : ((trtMean - controlMean) / controlMean) * 100;
         }
 
-        rowVals.push(parseFloat(trtMean.toFixed(4)), `${pctEff.toFixed(2)}%`);
+        rowVals.push(`${trtMean.toFixed(2)} ${trtLetter}`, `${pctEff.toFixed(2)}%`);
       });
 
       ws.getRow(r).values = rowVals;
