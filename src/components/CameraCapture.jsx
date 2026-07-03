@@ -394,8 +394,18 @@ export default function CameraCapture({ isOpen = true, onClose, onCapture, initi
           </div>
         </div>
 
+        {/* Focus Mode Status Indicator */}
+        {focusSupported && (
+          <div className="mt-4 text-[10px] tracking-widest font-bold bg-[#0f172a]/95 border border-white/10 px-3 py-1.5 rounded-full backdrop-blur-md shadow-lg flex items-center gap-2 select-none">
+            <span className={`w-2 h-2 rounded-full ${focusMode === 'continuous' ? 'bg-emerald-500 animate-pulse' : 'bg-sky-400'}`}></span>
+            <span className="text-slate-300">
+              {focusMode === 'continuous' ? 'AUTO FOCUS' : 'NORMAL / FIXED FOCUS'}
+            </span>
+          </div>
+        )}
+
         {/* Bottom Bar */}
-        <div className="w-full flex justify-around items-center px-4 mt-4 z-[10001] min-h-[80px]">
+        <div className="w-full flex justify-around items-center px-4 mt-2 z-[10001] min-h-[80px]">
           <div className="w-12 h-12 flex items-center justify-center">
              {flashSupported && (
                <button
