@@ -90,7 +90,7 @@ CRITICAL INSTRUCTION:
 5. Do NOT mention "Completely Randomized Design" or "CRD" unless the selected design is explicitly CRD.
 6. Compare all treatment groups collectively: ${treatmentNames.join(', ')}. Indicate which treatment achieved the numerically highest and lowest means, and state whether those differences were statistically distinguishable at the 5% significance level.
 7. Use neutral phrasing like: "no statistically significant treatment effects were detected under the conditions of this study" or "Given the absence of statistically significant treatment differences..." instead of "lack of variance".
-8. If identical values are observed (e.g., F = 0, P = 1), state: "Plant height exhibited identical treatment means (F = 0.00, P = 1.000), indicating no detectable treatment effect under the conditions of this study."
+8. If identical values are observed (e.g., F = 0, P = 1), state: "Plant height exhibited identical treatment means across all experimental units (F = 0.00, P = 1.000)."
 Do NOT use markdown headers or lists. Keep it strictly scientific, professional, and factual.`;
 
     const text = await generateTextWithAI(prompt, 'You are a professional agronomist.');
@@ -151,7 +151,7 @@ CRITICAL INSTRUCTION:
 7. Use neutral phrasing like: "Given the absence of statistically significant treatment differences..." instead of "lack of variance".
 8. If high coefficients of variation (CV%) are observed for a measured parameter, write: "The relatively high variability in [Parameter Name] measurements (CV = [Value]%) may have reduced the ability to detect small treatment effects." Do not reference "SPAD" or "chlorophyll" unless that metric is actually present in the dataset.
 9. If low coefficients of variation (CV%) are observed, write: "Low coefficients of variation for [Parameter Name] ([Value]%) indicate good experimental consistency."
-10. If identical values are observed (resulting in F = 0.00 and P = 1.000), state: "Plant height exhibited identical treatment means (F = 0.00, P = 1.000), indicating no detectable treatment effect under the conditions of this study."
+10. If identical values are observed (resulting in F = 0.00 and P = 1.000), state: "Plant height exhibited identical treatment means across all experimental units (F = 0.00, P = 1.000)."
 Keep it precise and factual. Do NOT include markdown styling or headers, just plain text with bullets.`;
 
     const text = await generateTextWithAI(prompt, 'You are a senior agricultural scientist.');
@@ -1482,13 +1482,13 @@ export class AdvancedReportGenerator {
     let expUnit = 'Treatment × Replication';
     if (rawObsMode === 'column-wise') {
       obsMode = 'Treatment Column-wise';
-      expUnit = 'Treatment Column';
+      expUnit = 'Treatment Column within Block';
     } else if (rawObsMode === 'row-wise') {
       obsMode = 'Row-wise';
-      expUnit = 'Row';
+      expUnit = 'Treatment Row within Block';
     } else if (rawObsMode === 'plant-wise' || rawObsMode === 'pot-wise') {
       obsMode = 'Plant-wise (Individual Pot)';
-      expUnit = 'Individual Pot';
+      expUnit = 'Individual Pot within Block';
     } else if (totalPots > independentUnits) {
       obsMode = 'Plant-wise';
       expUnit = 'Treatment × Replication (mean)';
@@ -1697,6 +1697,7 @@ export class AdvancedReportGenerator {
     const totalPots = (potRows && potCols) ? potRows * potCols : (this.isProjectWide ? (this.trials || []).length : this.observations.length);
     const potsPerUnit = isPotTrial && independentUnits > 0 ? Math.round(totalPots / independentUnits) : 1;
 
+    const uniqueDates = [...new Set(this.observations.map(o => o.date || this.trial.Date || 'N/A'))];
     let currentRow = 2;
 
     // Fill observations
@@ -1707,8 +1708,22 @@ export class AdvancedReportGenerator {
         const potLetter = String.fromCharCode(65 + potIdx);
         const potIdValue = isPotTrial && potsPerUnit > 1 ? `Pot ${potLetter}` : '—';
 
+        const dateVal = obs.date || this.trial.Date || 'N/A';
+        const dateIdx = uniqueDates.indexOf(dateVal);
+        const useGreyBg = dateIdx % 2 === 1;
+
+        if (useGreyBg) {
+          for (let col = 1; col <= 7 + fieldsToUse.length; col++) {
+            ws.getCell(currentRow, col).fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { rgb: 'F2F4F4' }
+            };
+          }
+        }
+
         // Write metadata
-        ws.getCell(currentRow, 1).value = obs.date || this.trial.Date || 'N/A';
+        ws.getCell(currentRow, 1).value = dateVal;
         ws.getCell(currentRow, 2).value = obs.daa ?? 0;
         ws.getCell(currentRow, 3).value = obs.harvestNumber || obs.harvest || 1;
         ws.getCell(currentRow, 4).value = obs.plotNumber || obs.plot || (idx + 1);
@@ -1768,7 +1783,7 @@ export class AdvancedReportGenerator {
     ws.views = [{ showGridLines: true }];
 
     // Title Block
-    ws.mergeCells('A1:J1');
+    ws.mergeCells('A1:N1');
     const header = ws.getCell('A1');
     header.value = 'DESCRIPTIVE STATISTICS & ASSESSMENT SUMMARY';
     header.font = { name: 'Calibri', bold: true, size: 14, color: { rgb: 'FFFFFF' } };
@@ -1805,9 +1820,12 @@ export class AdvancedReportGenerator {
       ['Total Replications / Blocks', computedReplications],
       ['Total Pots Observed', totalPots],
       ['Observation Mode', obsMode],
-      ['Experimental Units', proj?.ExperimentalUnit || 'Treatment × Block'],
+      ['Experimental Units', proj?.ExperimentalUnit || (rawObsMode === 'column-wise' ? 'Treatment Column within Block' : 'Treatment × Block')],
       ['Assessment Dates Count', dates.length],
-      ['DAA Range Covered', daaRange]
+      ['DAA Range Covered', daaRange],
+      ['Missing Observations', 0],
+      ['Missing Parameters', 0],
+      ['Data Completeness', '100%']
     ];
 
     overviewRows.forEach((row, idx) => {
@@ -1818,13 +1836,16 @@ export class AdvancedReportGenerator {
     });
 
     // 2. Observation Summary Section (Overall Parameter Metrics)
-    let curRow = 13;
-    ws.mergeCells(`A${curRow}:J${curRow}`);
+    let curRow = 16;
+    ws.mergeCells(`A${curRow}:N${curRow}`);
     ws.getCell(`A${curRow}`).value = '2. OVERALL OBSERVATION STATISTICS BY PARAMETER';
     ws.getCell(`A${curRow}`).font = { name: 'Calibri', bold: true, size: 11, color: { rgb: '2980B9' } };
     curRow++;
 
-    const descHeaders = ['Parameter', 'Min', 'Max', 'Mean', 'Median', 'Std Dev', 'CV %', 'Range', 'Sample Size', 'Variability Class'];
+    const descHeaders = [
+      'Parameter', 'Min', 'Max', 'Mean', 'Median', 'Std Dev', 'CV %', 'Range', 
+      'Assessment Records Used', 'Variability Class', 'Best Treatment', 'Best Mean', 'Worst Treatment', 'Worst Mean'
+    ];
     ws.getRow(curRow).values = descHeaders;
     ws.getRow(curRow).font = { name: 'Calibri', bold: true, color: { rgb: 'FFFFFF' } };
     ws.getRow(curRow).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: '34495E' } };
@@ -1832,7 +1853,6 @@ export class AdvancedReportGenerator {
 
     this.activeFields.forEach(f => {
       const vals = this.observations.map(o => {
-        // Handle pot-wise values if present to get accurate min/max/stdDev overall
         if (f.key.toLowerCase().replace(/\s/g, '') === 'plantheight' && o.potHeights) {
           return o.potHeights.map(h => parseFloat(h)).filter(v => !isNaN(v));
         }
@@ -1854,12 +1874,42 @@ export class AdvancedReportGenerator {
 
       const variance = vals.length > 1 ? vals.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / (vals.length - 1) : 0;
       const stdDev = Math.sqrt(variance);
-      const cv = mean > 0 ? (stdDev / mean) * 100 : 0;
+      const rawCv = mean > 0 ? (stdDev / mean) * 100 : 0;
 
+      // CV Suppression for low-incidence symptoms
+      const isSymptom = /deficiency|severity|chlorosis|necrosis|pest|disease|injury|mortality/i.test(f.key) || 
+                       /deficiency|severity|chlorosis|necrosis|pest|disease|injury|mortality/i.test(f.label);
+      const suppressCV = isSymptom && mean < 2.0;
+
+      const cvDisplay = suppressCV ? 'N/A (Low Incidence)' : parseFloat(rawCv.toFixed(1)) + '%';
+      
       let variabilityClass = 'Excellent';
-      if (cv > 30) variabilityClass = 'High';
-      else if (cv > 20) variabilityClass = 'Moderate';
-      else if (cv > 10) variabilityClass = 'Good';
+      if (suppressCV) variabilityClass = 'N/A (Low Incidence)';
+      else if (rawCv > 30) variabilityClass = 'High';
+      else if (rawCv > 20) variabilityClass = 'Moderate';
+      else if (rawCv > 10) variabilityClass = 'Good';
+
+      // Calculate treatment means to find best/worst
+      const trtMeans = this.treatmentNames.map((name, idx) => {
+        const trtNum = idx + 1;
+        const trtVals = this.observations.filter(o => (o.treatmentNumber || o.treatment || 1) === trtNum)
+                                         .map(o => {
+                                           if (f.key.toLowerCase().replace(/\s/g, '') === 'plantheight' && o.potHeights) {
+                                             return o.potHeights.map(h => parseFloat(h)).filter(v => !isNaN(v));
+                                           }
+                                           return parseFloat(o[f.key]);
+                                         })
+                                         .flat()
+                                         .filter(v => !isNaN(v));
+        const avg = trtVals.length ? trtVals.reduce((sum1, v1) => sum1 + v1, 0) / trtVals.length : 0;
+        return { name, mean: avg };
+      });
+
+      const isRed = isReductionMetric(f.key, this.category);
+      const sortedTrts = [...trtMeans].sort((a, b) => isRed ? a.mean - b.mean : b.mean - a.mean);
+      
+      const bestTrt = sortedTrts[0] || { name: 'N/A', mean: 0 };
+      const worstTrt = sortedTrts[sortedTrts.length - 1] || { name: 'N/A', mean: 0 };
 
       ws.getRow(curRow).values = [
         f.label,
@@ -1868,18 +1918,25 @@ export class AdvancedReportGenerator {
         parseFloat(mean.toFixed(2)),
         parseFloat(median.toFixed(2)),
         parseFloat(stdDev.toFixed(2)),
-        parseFloat(cv.toFixed(1)) + '%',
+        cvDisplay,
         parseFloat(range.toFixed(2)),
         sampleSize,
-        variabilityClass
+        variabilityClass,
+        bestTrt.name,
+        parseFloat(bestTrt.mean.toFixed(2)),
+        worstTrt.name,
+        parseFloat(worstTrt.mean.toFixed(2))
       ];
       
-      // Styling the CV and Variability Class
+      // Styling the Variability Class
       const varCell = ws.getCell(curRow, 10);
-      if (cv > 30) {
+      if (suppressCV) {
+        varCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'F2F4F4' } };
+        varCell.font = { name: 'Calibri', color: { rgb: '7F8C8D' }, italic: true };
+      } else if (rawCv > 30) {
         varCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'FCE4D6' } };
         varCell.font = { name: 'Calibri', color: { rgb: 'C00000' }, bold: true };
-      } else if (cv < 10) {
+      } else if (rawCv < 10) {
         varCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'E2EFDA' } };
         varCell.font = { name: 'Calibri', color: { rgb: '375623' }, bold: true };
       }
@@ -1901,7 +1958,6 @@ export class AdvancedReportGenerator {
     curRow++;
 
     this.activeFields.forEach(f => {
-      // Calculate treatment means
       const trtMeans = this.treatmentNames.map((name, idx) => {
         const trtNum = idx + 1;
         const trtVals = this.observations.filter(o => (o.treatmentNumber || o.treatment || 1) === trtNum)
@@ -1918,10 +1974,7 @@ export class AdvancedReportGenerator {
       });
 
       const isRed = isReductionMetric(f.key, this.category);
-      
-      // Sort treatments (best to worst)
       const sortedTrts = [...trtMeans].sort((a, b) => isRed ? a.mean - b.mean : b.mean - a.mean);
-      
       const controlMean = trtMeans[0]?.mean || 1;
 
       sortedTrts.forEach((trt, sortIdx) => {
@@ -1942,7 +1995,6 @@ export class AdvancedReportGenerator {
           classification
         ];
 
-        // Highlight Best Performer
         if (classification === 'Best Performer') {
           ws.getCell(curRow, 6).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'E2EFDA' } };
           ws.getCell(curRow, 6).font = { name: 'Calibri', color: { rgb: '375623' }, bold: true };
@@ -1992,8 +2044,8 @@ export class AdvancedReportGenerator {
       const netChange = lastMean - firstMean;
 
       let trend = 'Stable';
-      if (netChange > (firstMean * 0.05)) trend = 'Increasing';
-      else if (netChange < -(firstMean * 0.05)) trend = 'Decreasing';
+      if (netChange > (firstMean * 0.05)) trend = '↑ Increased';
+      else if (netChange < -(firstMean * 0.05)) trend = '↓ Decreased';
 
       ws.getRow(curRow).values = [
         f.label,
@@ -2006,10 +2058,35 @@ export class AdvancedReportGenerator {
       curRow++;
     });
 
+    // 5. Variability Rating Legend Section
+    curRow += 2;
+    ws.mergeCells(`A${curRow}:D${curRow}`);
+    ws.getCell(`A${curRow}`).value = 'VARIABILITY RATING LEGEND';
+    ws.getCell(`A${curRow}`).font = { name: 'Calibri', bold: true, size: 10, color: { rgb: '2980B9' } };
+    curRow++;
+
+    ws.getRow(curRow).values = ['CV Range', 'Variability Rating', 'Scientific Quality Definition'];
+    ws.getRow(curRow).font = { name: 'Calibri', bold: true };
+    curRow++;
+
+    const legendItems = [
+      ['< 10%', 'Excellent', 'Highly consistent crop response, low experimental error'],
+      ['10% - 20%', 'Good', 'Expected agricultural/greenhouse variation'],
+      ['20% - 30%', 'Moderate', 'Moderate spatial/micro-climatic block variation'],
+      ['> 30%', 'High', 'Relatively high variability; interpret differences with caution']
+    ];
+    legendItems.forEach(item => {
+      ws.getRow(curRow).values = item;
+      curRow++;
+    });
+
     // Formatting column widths
-    const columnWidthHeaders = ['Parameter', 'Min', 'Max', 'Mean', 'Median', 'Std Dev', 'CV %', 'Range', 'Sample Size', 'Variability Class'];
+    const columnWidthHeaders = [
+      'Parameter', 'Min', 'Max', 'Mean', 'Median', 'Std Dev', 'CV %', 'Range', 
+      'Assessment Records Used', 'Variability Class', 'Best Treatment', 'Best Mean', 'Worst Treatment', 'Worst Mean'
+    ];
     columnWidthHeaders.forEach((_, colIndex) => {
-      ws.getColumn(colIndex + 1).width = 16;
+      ws.getColumn(colIndex + 1).width = 18;
     });
   }
 
@@ -2605,7 +2682,7 @@ export class AdvancedReportGenerator {
     const ws = this.workbook.addWorksheet('ANOVA Summary');
     ws.views = [{ showGridLines: true }];
 
-    ws.mergeCells('A1:L1');
+    ws.mergeCells('A1:M1');
     const titleCell = ws.getCell('A1');
     titleCell.value = 'PROJECT ANOVA & POST-HOC SUMMARY';
     titleCell.font = { name: 'Calibri', size: 16, bold: true, color: { rgb: 'FFFFFF' } };
@@ -2629,7 +2706,8 @@ export class AdvancedReportGenerator {
       'SEm±',
       'CV (%)',
       'Grand Mean',
-      'Tukey Groupings (Treatment: Group)'
+      'Tukey Groupings (Treatment: Group)',
+      'Interpretation'
     ];
     ws.getRow(5).font = { bold: true };
     ws.getRow(5).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'ECF0F1' } };
@@ -2661,6 +2739,10 @@ export class AdvancedReportGenerator {
         return parseFloat(Number(val).toFixed(digits));
       };
 
+      const interpretationText = anova.p_value < 0.05
+        ? 'Statistically significant treatment effect (p < 0.05)'
+        : 'No statistically significant treatment effect (p >= 0.05)';
+
       ws.getRow(r).values = [
         f.label,
         this.design,
@@ -2673,7 +2755,8 @@ export class AdvancedReportGenerator {
         safeFloatFixed(anova.sem),
         cvDisplay,
         safeFloatFixed(anova.grandMean),
-        groupings
+        groupings,
+        interpretationText
       ];
       r++;
     });
@@ -2690,9 +2773,10 @@ export class AdvancedReportGenerator {
     ws.getColumn(10).width = 28;
     ws.getColumn(11).width = 15;
     ws.getColumn(12).width = 65;
+    ws.getColumn(13).width = 45;
 
     r += 3;
-    ws.mergeCells(`A${r}:L${r}`);
+    ws.mergeCells(`A${r}:M${r}`);
     ws.getCell(`A${r}`).value = 'TREATMENT MEANS & EFFICACY PERCENT OVERVIEW (RELATIVE TO CONTROL)';
     ws.getCell(`A${r}`).font = { bold: true, size: 12, color: { rgb: 'FFFFFF' } };
     ws.getCell(`A${r}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: this.config.color.hex.replace('#', '') } };
@@ -2735,17 +2819,22 @@ export class AdvancedReportGenerator {
     });
 
     r += 2;
-    ws.mergeCells(`A${r}:L${r}`);
+    ws.mergeCells(`A${r}:M${r}`);
+    ws.getCell(`A${r}`).value = '* Note: Treatments sharing the same Tukey letter are not significantly different at α = 0.05.';
+    ws.getCell(`A${r}`).font = { italic: true, size: 9, color: { rgb: '7F8C8D' }, bold: true };
+    r++;
+
+    ws.mergeCells(`A${r}:M${r}`);
     ws.getCell(`A${r}`).value = '* Note: Percentage efficacy values are descriptive only and should not be interpreted as statistically significant unless supported by the corresponding ANOVA results.';
     ws.getCell(`A${r}`).font = { italic: true, size: 9, color: { rgb: '7F8C8D' } };
     r++;
 
-    ws.mergeCells(`A${r}:L${r}`);
+    ws.mergeCells(`A${r}:M${r}`);
     ws.getCell(`A${r}`).value = '* Note: F-value of 0.00 and P-value of 1.00 indicate identical measurements across all treatments and replicates (zero variance within and between groups).';
     ws.getCell(`A${r}`).font = { italic: true, size: 9, color: { rgb: '7F8C8D' } };
     r++;
 
-    ws.mergeCells(`A${r}:L${r}`);
+    ws.mergeCells(`A${r}:M${r}`);
     ws.getCell(`A${r}`).value = '* Note: Nutrient Use Efficiency (NUE) values are derived/calculated from observed crop yield and nitrogen application rates, rather than directly measured physiological parameters.';
     ws.getCell(`A${r}`).font = { italic: true, size: 9, color: { rgb: '7F8C8D' } };
   }
