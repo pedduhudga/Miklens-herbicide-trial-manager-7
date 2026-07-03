@@ -25,8 +25,8 @@ db.version(1).stores({
 
 // Core assets to cache immediately on install
 const PRECACHE_URLS = [
-  '/',
-  '/index.html',
+  './',
+  './index.html',
   './manifest.json',
   './favicon.svg',
 ];
