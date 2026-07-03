@@ -82,7 +82,7 @@ Detailed Agronomic Interpretation:
 ${interpretation}
 Observations summary: ${obsSummary}
 CRITICAL INSTRUCTION: Avoid all causal physiological, biological or metabolic claims (such as "nutrient uptake", "assimilation", "photosynthetic rate", "metabolic demand") unless those biological parameters were directly measured. Focus strictly on physical, visual, and statistical observations (e.g. height, vigor, leaf color, SPAD, yield). Use objective scientific phrasing like "The observed improvements are consistent with crop response to treatment."
-If stating performance conclusions, use publication-friendly statements like: "Under the conditions of this study, no statistically significant performance advantage of the test treatment over the comparative treatments was demonstrated."
+If stating performance conclusions, use publication-friendly, neutral statements like: "No statistically significant differences among treatments were detected under the conditions of this study."
 If identical values are observed (e.g., F = 0, P = 1), do NOT state that ANOVA could not be applied. Instead, state: "Plant height exhibited identical treatment means (F = 0.00, P = 1.000), indicating no detectable treatment effect under the conditions of this study."
 Do NOT use markdown headers or lists. Keep it strictly scientific, professional, and factual.`;
 
@@ -135,7 +135,7 @@ ${interpretation}
 ANOVA Results: ${JSON.stringify(anovaResults || {})}
 CRITICAL INSTRUCTION: 
 1. Avoid all causal physiological, biological or metabolic claims (such as "nutrient uptake", "assimilation", "photosynthetic rate", "metabolic demand") unless those biological parameters were directly measured. Focus strictly on physical, visual, and statistical observations (e.g. height, vigor, leaf color, SPAD, yield).
-2. Write generalized scientific conclusions comparing all treatments together. Avoid referencing only one specific test product unless it performed significantly differently from all others (e.g. instead of focusing only on one product, use phrases like: "Under the conditions of this study, no statistically significant performance advantage of the test treatment over the comparative treatments was demonstrated.").
+2. Write generalized scientific conclusions comparing all treatments together. Avoid referencing only one specific test product unless it performed significantly differently from all others (e.g. instead of focusing only on one product, use phrases like: "No statistically significant differences among treatments were detected under the conditions of this study.").
 3. Provide research-oriented recommendations, such as: repeating the trial under additional agro-climatic conditions, increasing replication to improve statistical precision, extending the observation period, evaluating across multiple seasons, or validating under commercial farming conditions. Do NOT recommend business-oriented actions (like cost-benefit analyses).
 4. If high coefficients of variation (CV%) are observed (especially for SPAD/chlorophyll measurements), use statistically precise and cautious wording such as: "The relatively high variability in SPAD measurements (CV = 35.6%) may have reduced the ability to detect small treatment effects." Avoid claiming that high CV "likely contributed to the absence of statistical power".
 5. For visual vigor or leaf color CV, use phrasing like: "Low coefficients of variation for visual vigor (7.0%) and leaf color (4.2%) indicate good experimental consistency." Avoid implying precision solely from CV values.
@@ -2194,7 +2194,7 @@ export class AdvancedReportGenerator {
 
     r += 2;
     ws.mergeCells(`A${r}:L${r}`);
-    ws.getCell(`A${r}`).value = '* Note: Percentage efficacy values are descriptive and should not be interpreted as statistically significant unless supported by inferential statistical tests.';
+    ws.getCell(`A${r}`).value = '* Note: Percentage efficacy values are descriptive only and should not be interpreted as statistically significant unless supported by the corresponding ANOVA results.';
     ws.getCell(`A${r}`).font = { italic: true, size: 9, color: { rgb: '7F8C8D' } };
     r++;
 
