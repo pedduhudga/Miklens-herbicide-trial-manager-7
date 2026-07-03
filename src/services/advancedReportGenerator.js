@@ -135,6 +135,7 @@ CRITICAL INSTRUCTION:
 1. Avoid all causal physiological, biological or metabolic claims (such as "nutrient uptake", "assimilation", "photosynthetic rate", "metabolic demand") unless those biological parameters were directly measured. Focus strictly on physical, visual, and statistical observations (e.g. height, vigor, leaf color, SPAD, yield).
 2. Write generalized scientific conclusions comparing all treatments together. Avoid referencing only one specific test product unless it performed significantly differently from all others (e.g. instead of focusing only on one product, use phrases like: "No statistically significant differences were detected among the evaluated treatments under the conditions of this trial.").
 3. Provide research-oriented recommendations, such as: repeating the trial under additional agro-climatic conditions, increasing replication to improve statistical precision, extending the observation period, evaluating across multiple seasons, or validating under commercial farming conditions. Do NOT recommend business-oriented actions (like cost-benefit analyses).
+4. If high coefficients of variation (CV%) are observed, use statistically precise and cautious wording such as: "The high coefficients of variation observed for several symptom-related variables indicate substantial experimental variability, which may have reduced the sensitivity of the statistical analysis." Avoid claiming that high CV "likely contributed to the absence of statistical power".
 Keep it precise and factual. Do NOT include markdown styling or headers, just plain text with bullets.`;
 
     const text = await generateTextWithAI(prompt, 'You are a senior agricultural scientist.');
@@ -482,6 +483,7 @@ function calculateAnovaRCB(data, metricKey, category = 'nutrition', design = 'RC
     ms_treatment: msTreatments,
     f_value: fStatistic,
     p_value: pValue,
+    grandMean: grandMean,
 
     ss_block: ssBlocks,
     df_block: dfBlocks,
