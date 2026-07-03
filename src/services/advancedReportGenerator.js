@@ -91,6 +91,8 @@ CRITICAL INSTRUCTION:
 9. Avoid informal phrases like: "performed comparably", "showed comparable vigor", or "uniform". Instead, write: "no statistically significant treatment differences were detected under the conditions of this study."
 10. If the design is PotTrial, refer to it consistently as "Randomized Complete Block Pot Trial (RCBD Pot Trial)".
 11. Do NOT write that the trial "did not establish a baseline of nutrient deficiency". Instead, write: "Deficiency symptoms remained minimal throughout the observation period..."
+12. Do NOT use the word "variance" when describing percentage differences between treatment means (e.g. do not write "20% numerical variance"). Instead, use "higher/lower numerical mean" (e.g. "20% higher numerical mean").
+13. Avoid using terms like "colorimetric indices". Instead, use "visual and physiological observations" (such as leaf color, SPAD, vigor, plant height).
 Do NOT use markdown headers or lists. Keep it strictly scientific, professional, and factual.`;
 
     const text = await generateTextWithAI(prompt, 'You are a professional agronomist.');
@@ -153,6 +155,8 @@ CRITICAL INSTRUCTION:
 9. Avoid informal phrases like: "performed comparably", "showed comparable vigor", or "uniform". Instead, write: "no statistically significant treatment differences were detected under the conditions of this study."
 10. If the design is PotTrial, refer to it consistently as "Randomized Complete Block Pot Trial (RCBD Pot Trial)".
 11. Do NOT write that the trial "did not establish a baseline of nutrient deficiency". Instead, write: "Deficiency symptoms remained minimal throughout the observation period..."
+12. Do NOT use the word "variance" when describing percentage differences between treatment means (e.g. do not write "20% numerical variance"). Instead, use "higher/lower numerical mean" (e.g. "20% higher numerical mean").
+13. Avoid using terms like "colorimetric indices". Instead, use "visual and physiological observations" (such as leaf color, SPAD, vigor, plant height).
 Do NOT use markdown headers or lists. Keep it strictly scientific, professional, and factual.`;
 
     const text = await generateTextWithAI(prompt, 'You are a senior agricultural scientist.');
@@ -1421,8 +1425,9 @@ export class AdvancedReportGenerator {
     // Add real pot grid and observation mode info
     const potRows = proj?.PotRows ? parseInt(proj.PotRows) : null;
     const potCols = proj?.PotCols ? parseInt(proj.PotCols) : null;
-    const totalPots = (potRows && potCols) ? potRows * potCols : (this.isProjectWide ? (this.trials || []).length : this.observations.length);
-    const potsPerUnit = (proj?.PotsPerUnit && !isNaN(proj.PotsPerUnit)) ? parseInt(proj.PotsPerUnit) : 1;
+    const trtCount = this.treatmentNames.length;
+    const independentUnits = trtCount * computedReplications;
+    const potsPerUnit = independentUnits > 0 ? Math.round(totalPots / independentUnits) : 1;
 
     let methodologyText;
     if (this.design === 'PotTrial') {
@@ -1499,8 +1504,13 @@ export class AdvancedReportGenerator {
     }
 
     let bestTrtName = 'N/A';
+    let bestTrtLabel = 'Numerically Highest Mean (Primary Parameter)';
     if (primaryAnova && !primaryAnova.error) {
       const isRed = isReductionMetric(primaryMetricKey, this.category);
+      bestTrtLabel = isRed 
+        ? 'Numerically Lowest Mean (Primary Parameter)' 
+        : 'Numerically Highest Mean (Primary Parameter)';
+
       const sortedTrts = Object.entries(primaryAnova.treatmentMeans)
         .map(([trtNum, stats]) => ({
           name: this.treatmentNames[parseInt(trtNum) - 1] || `Treatment ${trtNum}`,
@@ -1514,12 +1524,10 @@ export class AdvancedReportGenerator {
         
         const isPrimarySig = primaryAnova.p_value < 0.05;
         bestTrtName = isPrimarySig
-          ? `${trtNamesStr} (Statistically superior at α = 0.05)`
-          : `${trtNamesStr} (Not statistically different from other treatments)`;
+          ? `${trtNamesStr} (Statistically superior)`
+          : `${trtNamesStr} (Not statistically different)`;
       }
     }
-
-
 
     const execSummaryRows = [
       ['Trial Design', designLabel],
@@ -1528,7 +1536,7 @@ export class AdvancedReportGenerator {
       ['Total Pots', totalPots],
       ['Observation Period', `${maxDaa} DAA`],
       ['Statistically Significant Parameters', sigParamsList],
-      ['Numerically Best Treatment(s) (Primary Parameter)', bestTrtName],
+      [bestTrtLabel, bestTrtName],
       ['Statistical Significance Detected', sigParams.length > 0 ? 'Yes (p < 0.05)' : 'No (p >= 0.05)'],
       ['Key Recommendation', sigParams.length > 0 ? 'Proceed with commercial validation & scaling' : 'Additional replication and multi-site validation recommended']
     ];
@@ -1796,6 +1804,16 @@ export class AdvancedReportGenerator {
     ws.mergeCells(`A${mapStartRow + 1}:F${mapStartRow + 6}`);
     ws.getCell(`A${mapStartRow + 1}`).value = layoutText;
     ws.getCell(`A${mapStartRow + 1}`).alignment = { wrapText: true, vertical: 'top' };
+
+    // Add summary metadata below the layout map
+    const summaryStartRow = mapStartRow + 8;
+    ws.getCell(`A${summaryStartRow}`).value = 'Experimental Units';
+    ws.getCell(`A${summaryStartRow}`).font = { bold: true };
+    ws.getCell(`B${summaryStartRow}`).value = independentUnits;
+
+    ws.getCell(`A${summaryStartRow + 1}`).value = 'Total Pots';
+    ws.getCell(`A${summaryStartRow + 1}`).font = { bold: true };
+    ws.getCell(`B${summaryStartRow + 1}`).value = totalPots;
   }
 
   // 4. Assessment Data Summary Sheet
@@ -2525,12 +2543,16 @@ export class AdvancedReportGenerator {
           const diffVal = trtStats.mean - cStats.mean;
           const pctVal = cStats.mean > 0 ? (isReductionMetric(f.key, this.category) ? ((cStats.mean - trtStats.mean) / cStats.mean) * 100 : ((trtStats.mean - cStats.mean) / cStats.mean) * 100) : 0;
           
+          const isSameGroup = (trtStats.group || 'a') === (cStats.group || 'a');
+          const significanceNote = isSameGroup ? ' (Not statistically significant)' : '';
+          const pctDisplay = `${pctVal > 0 ? '+' : ''}${pctVal.toFixed(1)}%${significanceNote}`;
+
           ws.getRow(r).values = [
             `Difference from Control (${this.treatmentNames[i]})`,
             parseFloat(diffVal.toFixed(2)),
             '',
             '', '', '', 
-            `${pctVal.toFixed(1)}%`
+            pctDisplay
           ];
           r++;
         }
@@ -2865,27 +2887,25 @@ export class AdvancedReportGenerator {
             photoTrtName = this.trial.FormulationName || '';
           }
 
-          const infoParts = [];
-          if (photoTrtName) infoParts.push(`Trt: ${photoTrtName}`);
-          if (p.plot || p.plotNumber || this.trial.PlotNumber) {
-            infoParts.push(`Plot: ${p.plot || p.plotNumber || this.trial.PlotNumber}`);
-          }
+          const traceParts = [];
           const repVal = p.rep || p.replication || p.block;
           if (repVal) {
-            infoParts.push(`Rep: ${repVal}`);
+            traceParts.push(`Rep ${repVal}`);
           } else if (this.trial.Replication && !isNaN(this.trial.Replication)) {
             const totalReps = parseInt(this.trial.Replication);
-            if (totalReps === 1) {
-              infoParts.push(`Rep: 1`);
-            }
-          }
-          if (p.tag) {
-            infoParts.push(`Tag: ${p.tag}`);
-          } else if (p.pot || p.potNumber) {
-            infoParts.push(`Pot: ${p.pot || p.potNumber}`);
+            if (totalReps === 1) traceParts.push(`Rep 1`);
           }
           
-          const metaInfo = infoParts.length > 0 ? infoParts.join(' | ') : 'Unspecified';
+          const plotVal = p.plot || p.plotNumber || this.trial.PlotNumber;
+          if (plotVal) traceParts.push(`Plot ${plotVal}`);
+          
+          const potVal = p.pot || p.potNumber || p.tag;
+          if (potVal) traceParts.push(`Pot ${potVal}`);
+
+          let metaInfo = traceParts.length > 0 ? traceParts.join(' • ') : 'Unspecified';
+          if (photoTrtName) {
+            metaInfo += ` (${photoTrtName})`;
+          }
           ws.getCell(`${colStart}${startRow + 9}`).value = `Info: ${metaInfo}`;
           ws.getCell(`${colStart}${startRow + 9}`).font = { size: 9, bold: true, color: { rgb: '2980B9' } };
           
@@ -2947,7 +2967,7 @@ export class AdvancedReportGenerator {
           const firstVal = parseFloat(this.observations[0]?.[f.key] || 0);
           ws.getRow(r).values = [
             f.label,
-            this.design,
+            this.design === 'PotTrial' ? 'RCBD Pot Trial' : this.design,
             'N/A', '0.00', '0.00', '1.000', 'ns', '0.00', '0.00', '0.0%',
             firstVal,
             'All Treatments: a',
@@ -2985,7 +3005,7 @@ export class AdvancedReportGenerator {
 
       ws.getRow(r).values = [
         f.label,
-        this.design,
+        this.design === 'PotTrial' ? 'RCBD Pot Trial' : this.design,
         (anova.df_treatment !== undefined && anova.df_error !== undefined) ? `${anova.df_treatment}, ${anova.df_error}` : 'N/A',
         safeFloatFixed(anova.ms_error),
         safeFloatFixed(anova.f_value),
