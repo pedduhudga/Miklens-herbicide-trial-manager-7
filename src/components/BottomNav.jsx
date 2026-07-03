@@ -50,13 +50,17 @@ export default function BottomNav({ onMoreClick }) {
               }`
             }
           >
-            <div className="relative">
-              {item.icon}
-              {isActive && (
-                <span className={`absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full ${colors.fab}`} />
-              )}
-            </div>
-            <span className="text-[11px] font-semibold mt-0.5">{item.label}</span>
+            {({ isActive }) => (
+              <>
+                <div className="relative">
+                  {item.icon}
+                  {isActive && (
+                    <span className={`absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full ${colors.fab}`} />
+                  )}
+                </div>
+                <span className="text-[11px] font-semibold mt-0.5">{item.label}</span>
+              </>
+            )}
           </NavLink>
         ))}
 
@@ -70,18 +74,22 @@ export default function BottomNav({ onMoreClick }) {
             }`
           }
         >
-          <div 
-            className={`
-              ${colors.fab} ${colors.fabHover} text-white rounded-2xl p-3.5 
-              shadow-lg shadow-emerald-500/30 border-[3px] border-white
-              hover:shadow-xl hover:shadow-emerald-500/40 transition-all
-            `}
-          >
-            <QrCode className="w-7 h-7" />
-          </div>
-          <span className={`text-[10px] font-semibold mt-1 ${isActive ? colors.active : 'text-slate-600'}`}>
-            Scan
-          </span>
+          {({ isActive }) => (
+            <>
+              <div 
+                className={`
+                  ${colors.fab} ${colors.fabHover} text-white rounded-2xl p-3.5 
+                  shadow-lg shadow-emerald-500/30 border-[3px] border-white
+                  hover:shadow-xl hover:shadow-emerald-500/40 transition-all
+                `}
+              >
+                <QrCode className="w-7 h-7" />
+              </div>
+              <span className={`text-[10px] font-semibold mt-1 ${isActive ? colors.active : 'text-slate-600'}`}>
+                Scan
+              </span>
+            </>
+          )}
         </NavLink>
 
         {/* Menu Button */}
