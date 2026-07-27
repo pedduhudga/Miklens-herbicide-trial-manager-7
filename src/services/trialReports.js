@@ -2517,16 +2517,20 @@ export function exportMultipleTrialsToCSV(trials, category = null) {
   const mainCatId = activeCategory || uniqueCategories[0] || 'herbicide';
   const mainCatConfig = getCategoryConfig(mainCatId);
 
-  // Gather active specific fields collected by forms for these categories
+  // Gather active specific fields collected by forms for these categories (excluding main headers and obsFields duplicates)
   const specificFields = [];
   uniqueCategories.forEach(catId => {
     const config = getCategoryConfig(catId);
     config.specificFields?.forEach(f => {
-      // Exclude primary target fields as they have dedicated targetLabel column
-      const isTargetField = [
-        'WeedSpecies', 'DiseaseTarget', 'PestTarget', 'NutrientType', 'BiostimulantType'
+      // Exclude primary target fields as they have dedicated targetLabel column, and yield/appMethod as they are in main headers
+      const isHandledInMainHeader = [
+        'WeedSpecies', 'DiseaseTarget', 'PestTarget', 'NutrientType', 'BiostimulantType',
+        'YieldValue', 'Yield', 'ApplicationMethod', 'CropStageAtApplication', 'CropStage'
       ].includes(f.key);
-      if (!isTargetField && !specificFields.some(x => x.key === f.key)) {
+
+      const isAlsoInObs = config.observationFields?.some(obsF => obsF.key === f.key);
+
+      if (!isHandledInMainHeader && !isAlsoInObs && !specificFields.some(x => x.key === f.key)) {
         specificFields.push(f);
       }
     });
