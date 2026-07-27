@@ -863,6 +863,10 @@ export default function Trials({ onMenuClick }) {
       return;
     }
     const trimmedFormName = (formData.FormulationName || '').trim();
+    if (!trimmedFormName) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Linked Formulation / Product is mandatory. Please select or enter a formulation name.', type: 'error' } }));
+      return;
+    }
     const formMatch = formulations.find(f => 
       (formData.FormulationID && f.ID === formData.FormulationID) ||
       f.Name.trim().toLowerCase() === trimmedFormName.toLowerCase()
