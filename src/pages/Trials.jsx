@@ -20,7 +20,7 @@ import {
 import { safeJsonParse } from '../utils/helpers.js';
 import { resolvePhotoSrc, getPhotoThumbnailSrc, isPhotoBroken, getDriveFileId, compressImage } from '../utils/photoUtils.js';
 import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryValue, calculateEfficacy, getRatingFromEfficacy } from '../utils/categoryConfig.js';
-import { calculateDAA, toDateKey, formatPhotoDate, toDatetimeLocal, formatDate, formatDateTime, parseDateFromFilename, parsePhotoInfoFromFilename } from '../utils/dateUtils.js';
+import { calculateDAA, toDateKey, formatPhotoDate, toDatetimeLocal, formatDate, formatDateTime, parseDateFromFilename, parsePhotoInfoFromFilename, parseCustomDate } from '../utils/dateUtils.js';
 import { normalizeObservation } from '../utils/categoryObservationUtils.js';
 import { validateEfficacyData } from '../utils/analysisUtils.js';
 import { canonicalizeWeedSpecies } from '../utils/weedUtils.js';
