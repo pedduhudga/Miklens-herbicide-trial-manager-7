@@ -220,34 +220,72 @@ export function exportComparisonPdf(trialSeries, allDaa, aiSummaryText, activeCa
 
   let y = 55;
 
-  // 2. AI Executive summary box
+  // Helper to clean raw markdown formatting for PDF rendering
+  const cleanPdfMarkdown = (text) => {
+    if (!text) return ['No AI summary generated. Click "Generate AI Report" in the comparison dashboard to create one.'];
+    const lines = text.split('\n');
+    const result = [];
+    for (let line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      // Skip markdown table header separators like | :--- | :--- |
+      if (/^\|?\s*:?-+:?\s*\|/.test(trimmed)) continue;
+      // Format markdown table rows | col1 | col2 | as clean bullet items
+      if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+        const cells = trimmed.split('|').map(c => c.trim()).filter(Boolean);
+        if (cells.length > 0) {
+          result.push('• ' + cells.join('  —  '));
+          continue;
+        }
+      }
+      // Clean headers like ### 1. Executive Summary -> 1. EXECUTIVE SUMMARY
+      if (trimmed.startsWith('#')) {
+        result.push(trimmed.replace(/^#+\s*/, '').toUpperCase());
+        continue;
+      }
+      // Clean bold/italic asterisks
+      const cleaned = trimmed.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\*(.*?)\*/g, '$1');
+      result.push(cleaned);
+    }
+    return result;
+  };
+
+  // 2. AI Executive Summary Section
   doc.setFont('Helvetica', 'bold');
   doc.setFontSize(11);
   doc.setTextColor(...DARK);
   doc.text('AI COMPARATIVE AGRONOMIST REPORT', MARGIN, y);
-  y += 5;
+  y += 6;
 
-  const aiText = aiSummaryText || 'No AI summary generated. Click "Generate AI Report" in the comparison dashboard to create one.';
-  doc.setFont('Helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.setTextColor(50, 50, 50);
+  const parsedAiLines = cleanPdfMarkdown(aiSummaryText);
 
-  const splitAiText = doc.splitTextToSize(aiText, PAGE_WIDTH - (MARGIN * 2) - 4);
-  const textHeight = splitAiText.length * 4.5 + 6;
+  parsedAiLines.forEach(lineText => {
+    const isHeading = lineText.toUpperCase() === lineText && lineText.length < 70 && !lineText.startsWith('•');
+    if (isHeading) {
+      y += 3;
+      if (y > PAGE_HEIGHT - 22) { doc.addPage(); y = 20; }
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(9.5);
+      doc.setTextColor(...DARK);
+    } else {
+      doc.setFont('Helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(50, 50, 50);
+    }
 
-  // Draw light background for AI box
-  doc.setFillColor(245, 243, 255); // light purple
-  doc.setDrawColor(221, 214, 254);
-  doc.setLineWidth(0.3);
-  doc.roundedRect(MARGIN, y, PAGE_WIDTH - (MARGIN * 2), textHeight, 2, 2, 'FD');
-
-  let textY = y + 4.5;
-  splitAiText.forEach(line => {
-    doc.text(line, MARGIN + 3, textY);
-    textY += 4.5;
+    const wrappedLines = doc.splitTextToSize(lineText, PAGE_WIDTH - (MARGIN * 2));
+    wrappedLines.forEach(wLine => {
+      if (y > PAGE_HEIGHT - 22) {
+        doc.addPage();
+        y = 20;
+      }
+      doc.text(wLine, MARGIN, y);
+      y += 4.5;
+    });
   });
 
-  y += textHeight + 10;
+  y += 8;
+  if (y > PAGE_HEIGHT - 35) { doc.addPage(); y = 20; }
 
   // 3. Efficacy Timeline Table
   doc.setFont('Helvetica', 'bold');
