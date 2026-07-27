@@ -192,6 +192,10 @@ export default function Trials({ onMenuClick }) {
   const [filterProject, setFilterProject] = useState('');
   const [sortBy, setSortBy] = useState('date-desc');
   const [showFilters, setShowFilters] = useState(false);
+  const [isTimelineView, setIsTimelineView] = useState(() => {
+    const saved = localStorage.getItem('isTimelineView');
+    return saved !== null ? saved === 'true' : true;
+  });
   const [selectedForBulk, setSelectedForBulk] = useState(new Set());
   const [collapsedSections, setCollapsedSections] = useState({});
   const [projectSearchQuery, setProjectSearchQuery] = useState('');
@@ -617,6 +621,46 @@ export default function Trials({ onMenuClick }) {
     sortBy,
     user
   });
+
+  const groupedTimelineTrials = useMemo(() => {
+    if (activeTab === 'rcbd') return [];
+    
+    const getTrialDateGroupKey = (trialDateStr) => {
+      if (!trialDateStr) return 'No Date Set';
+      const d = parseCustomDate(trialDateStr);
+      if (!d || isNaN(d.getTime())) return 'No Date Set';
+      
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      
+      const trialDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      
+      if (trialDate.getTime() === today.getTime()) {
+        return 'Today';
+      } else if (trialDate.getTime() === yesterday.getTime()) {
+        return 'Yesterday';
+      } else {
+        return trialDate.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' });
+      }
+    };
+
+    const grouped = [];
+    const groupMap = {};
+
+    filteredTrials.forEach(t => {
+      const key = getTrialDateGroupKey(t.Date);
+      if (!groupMap[key]) {
+        const groupObj = { key, trials: [] };
+        groupMap[key] = groupObj;
+        grouped.push(groupObj);
+      }
+      groupMap[key].trials.push(t);
+    });
+
+    return grouped;
+  }, [filteredTrials, activeTab]);
 
   const groupedRcbdTrials = useMemo(() => {
     if (activeTab !== 'rcbd') return { groups: {}, orphaned: [] };
@@ -5415,6 +5459,17 @@ If none are present, write "None".`;
             <button onClick={() => setShowFilters(v => !v)} className={`p-2 rounded-lg border transition ${showFilters ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'border-slate-200 text-slate-500'}`}>
               <SlidersHorizontal className="w-4 h-4" />
             </button>
+            <button 
+              onClick={() => {
+                const newVal = !isTimelineView;
+                setIsTimelineView(newVal);
+                localStorage.setItem('isTimelineView', String(newVal));
+              }}
+              title={isTimelineView ? "Switch to Grid View" : "Switch to Timeline View"}
+              className={`p-2 rounded-lg border transition ${isTimelineView ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'border-slate-200 text-slate-500'}`}
+            >
+              {isTimelineView ? <Grid className="w-4 h-4" /> : <Calendar className="w-4 h-4" />}
+            </button>
             {!isViewer && (
               <>
                 <button onClick={exportAllCsv} title="Export all trials to CSV" className="p-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 transition">
@@ -5850,6 +5905,59 @@ If none are present, write "None".`;
                     </div>
                   );
                 })()}
+              </div>
+            ) : isTimelineView ? (
+              <div className="space-y-8">
+                {groupedTimelineTrials.map(group => (
+                  <div key={group.key} className="space-y-4">
+                    {/* Sticky Date Header with premium glassmorphism & shadow */}
+                    <div className="flex items-center gap-3 sticky top-[108px] z-10 bg-white/95 dark:bg-slate-900/95 py-2.5 px-1 backdrop-blur-md border-b border-slate-100 dark:border-slate-800/60 shadow-[0_1px_0_0_rgba(0,0,0,0.05)]">
+                      <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm md:text-base tracking-tight">
+                        {group.key}
+                      </h3>
+                      <span className="bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-100/50 dark:border-emerald-900/30">
+                        {group.trials.length} {group.trials.length === 1 ? 'trial' : 'trials'}
+                      </span>
+                    </div>
+                    {/* Trial Cards Grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                      {group.trials.map(t => (
+                        <TrialCard
+                          key={t.ID}
+                          trial={t}
+                          project={projectMap[t.ProjectID]}
+                          isSelected={selectedForBulk.has(t.ID)}
+                          isPendingSync={isTrialPendingSync(t)}
+                          isMenuOpen={openCardMenu === t.ID}
+                          onToggleBulk={toggleBulk}
+                          onToggleMenu={handleToggleMenu}
+                          onViewDetails={handleViewDetails}
+                          onEdit={handleOpenModal}
+                          onDuplicate={handleDuplicate}
+                          onMoveToProject={handleMoveToProject}
+                          onExportPdf={handleExportPdf}
+                          onExportSciPdf={handleExportSciPdf}
+                          onExportPpt={handleExportPpt}
+                          onExportHtml={exportHtmlSlide}
+                          onExportTxt={exportTxtReport}
+                          onExportCsv={exportCsv}
+                          onExportJson={exportJson}
+                          onShare={shareTrial}
+                          onAppSharing={handleOpenShareModal}
+                          onAiGenerate={handleAiSingleGenerate}
+                          onDelete={handleDelete}
+                          onActivateToggle={handleActivateToggle}
+                          onQuickRate={handleQuickRate}
+                          onQuickPhoto={handleQuickPhoto}
+                          onQuickGalleryUpload={handleQuickGalleryUpload}
+                          onMarkComplete={handleMarkComplete}
+                          onEditControlDays={handleEditControlDays}
+                          onRecordWeather={handleRecordWeather}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
