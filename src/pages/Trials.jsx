@@ -106,6 +106,7 @@ const emptyForm = (category = 'herbicide') => {
     Category: category,
     TrialName: '',
     ProjectID: '', BlockID: '', FormulationID: '', FormulationName: '', InvestigatorName: '',
+    TrialDesign: 'Standard',
     Date: toDatetimeLocal(new Date()), Location: '', Dosage: '',
     Lat: '', Lon: '',
     Result: '', Notes: '', Conclusion: '',
@@ -6316,7 +6317,19 @@ If none are present, write "None".`;
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Project (Layout Group)</label>
-              <select value={formData.ProjectID} onChange={e => setFormData({...formData, ProjectID: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
+              <select 
+                value={formData.ProjectID} 
+                onChange={e => {
+                  const projId = e.target.value;
+                  const selectedProj = projects.find(p => p.ID === projId);
+                  setFormData(prev => ({
+                    ...prev, 
+                    ProjectID: projId,
+                    TrialDesign: projId ? (selectedProj?.Design || 'RCBD') : 'Standard'
+                  }));
+                }} 
+                className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
+              >
                 <option value="">— Standard Trial —</option>
                 {projects.map(p => <option key={p.ID} value={p.ID}>{p.Name}</option>)}
               </select>
@@ -6341,7 +6354,8 @@ If none are present, write "None".`;
                   <Info className="w-3.5 h-3.5" /> Guide
                 </button>
               </div>
-              <select value={formData.TrialDesign || 'RCBD'} onChange={e => setFormData({...formData, TrialDesign: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
+              <select value={formData.TrialDesign || 'Standard'} onChange={e => setFormData({...formData, TrialDesign: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                <option value="Standard">Standard / Individual Trial</option>
                 <option value="RCBD">RCBD (Randomized Complete Block)</option>
                 <option value="CRD">CRD (Completely Randomized Design)</option>
                 <option value="Split-Plot">Split-Plot Design</option>
