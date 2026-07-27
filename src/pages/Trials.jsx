@@ -191,6 +191,7 @@ export default function Trials({ onMenuClick }) {
   const [filterResult, setFilterResult] = useState('');
   const [filterProject, setFilterProject] = useState('');
   const [sortBy, setSortBy] = useState('date-desc');
+  const [filterOwner, setFilterOwner] = useState('all');
   const [showFilters, setShowFilters] = useState(false);
   const [isTimelineView, setIsTimelineView] = useState(() => {
     const saved = localStorage.getItem('isTimelineView');
@@ -619,7 +620,8 @@ export default function Trials({ onMenuClick }) {
     filterDateStart,
     filterDateEnd,
     sortBy,
-    user
+    user,
+    filterOwner
   });
 
   const groupedTimelineTrials = useMemo(() => {
@@ -4576,6 +4578,15 @@ Rules:
     finalized: trials.filter(t => t.IsCompleted === true || t.IsCompleted === 'true').length,
   }), [trials]);
 
+  const ownerOptions = useMemo(() => {
+    const owners = new Set();
+    trials.forEach(t => {
+      if (t.InvestigatorName) owners.add(t.InvestigatorName);
+      if (t.AuthorEmail) owners.add(t.AuthorEmail);
+    });
+    return Array.from(owners).sort();
+  }, [trials]);
+
   // DAA coverage analysis for photos/observations
   const daaCoverage = useMemo(() => {
     if (!activeTrial) return { allDAAs: [], obsDAAs: [], photoDAAs: [], hasGaps: false, missingMilestones: [] };
@@ -5456,6 +5467,26 @@ If none are present, write "None".`;
               />
               {search && <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"><X className="w-4 h-4" /></button>}
             </div>
+            <div className="w-44 md:w-56">
+              <select
+                value={filterOwner}
+                onChange={e => setFilterOwner(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white font-medium text-slate-700 cursor-pointer shadow-sm"
+              >
+                <option value="all">All Trials</option>
+                <option value="mine">My Trials Only</option>
+                <option value="others">Shared / Employee Trials</option>
+                {ownerOptions.length > 0 && (
+                  <optgroup label="Filter by Scientist">
+                    {ownerOptions.map(owner => (
+                      <option key={owner} value={owner}>
+                        {owner}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+            </div>
             <button onClick={() => setShowFilters(v => !v)} className={`p-2 rounded-lg border transition ${showFilters ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'border-slate-200 text-slate-500'}`}>
               <SlidersHorizontal className="w-4 h-4" />
             </button>
@@ -5537,7 +5568,7 @@ If none are present, write "None".`;
                 <span className="text-xs font-semibold text-slate-500 shrink-0">To</span>
                 <input type="date" value={filterDateEnd} onChange={e => setFilterDateEnd(e.target.value)} className="flex-1 text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-400" />
               </div>
-              <button onClick={() => { setSearch(''); setFilterFormulation(''); setFilterResult(''); setFilterProject(''); setFilterDateStart(''); setFilterDateEnd(''); setSortBy('date-desc'); }}
+              <button onClick={() => { setSearch(''); setFilterFormulation(''); setFilterResult(''); setFilterProject(''); setFilterDateStart(''); setFilterDateEnd(''); setSortBy('date-desc'); setFilterOwner('all'); }}
                 className="text-xs text-red-600 font-semibold bg-red-50 rounded-lg px-3 py-1.5 hover:bg-red-100">Reset Filters</button>
             </div>
           )}

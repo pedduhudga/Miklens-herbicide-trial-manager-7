@@ -28,7 +28,8 @@ export function useTrialsFilter(trials, {
   filterDateStart,
   filterDateEnd,
   sortBy,
-  user
+  user,
+  filterOwner
 }) {
   return useMemo(() => {
     let list = [...trials];
@@ -38,6 +39,18 @@ export function useTrialsFilter(trials, {
     else if (activeTab === 'rcbd') list = list.filter(t => !!t.ProjectID);
     else if (activeTab === 'control') list = list.filter(t => (t.IsControl === true || t.IsControl === 'true') && !t.ProjectID);
     else if (activeTab === 'finalized') list = list.filter(t => t.IsCompleted === true || t.IsCompleted === 'true');
+
+    // Owner / Scientist filters
+    if (filterOwner && filterOwner !== 'all') {
+      const ownUid = user?.uid || user?.ID || user?.id;
+      if (filterOwner === 'mine') {
+        list = list.filter(t => t.CreatedBy === ownUid || t.AuthorID === ownUid || (!t.CreatedBy && !t.AuthorID));
+      } else if (filterOwner === 'others') {
+        list = list.filter(t => (t.CreatedBy && t.CreatedBy !== ownUid) || (t.AuthorID && t.AuthorID !== ownUid));
+      } else {
+        list = list.filter(t => t.InvestigatorName === filterOwner || t.AuthorEmail === filterOwner || t.CreatedBy === filterOwner);
+      }
+    }
 
     // Fuzzy search
     if (deferredSearch) {
@@ -138,6 +151,7 @@ export function useTrialsFilter(trials, {
     filterDateStart,
     filterDateEnd,
     sortBy,
-    user
+    user,
+    filterOwner
   ]);
 }
