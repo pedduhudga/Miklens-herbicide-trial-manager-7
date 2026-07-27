@@ -6341,10 +6341,6 @@ If none are present, write "None".`;
               </div>
             )}
             <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Variety / Hybrid</label>
-              <input type="text" value={formData.Variety || ''} onChange={e => setFormData({...formData, Variety: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="e.g. IR-64, DK-9133" />
-            </div>
-            <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="block text-xs font-semibold text-slate-500 uppercase">Trial Design Type</label>
                 <button
@@ -6458,14 +6454,16 @@ If none are present, write "None".`;
                     {catConfig.applicationTimings.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                   </select>
                 </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Site Type</label>
+                  <select value={formData.SiteType || ''} onChange={e => setFormData({...formData, SiteType: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]">
+                    <option value="">— Select Site Type —</option>
+                    {['Open field', 'Fallow land', 'Pot trial', 'Roadside', 'Bund', 'Non-Crop', 'Crop'].map(st => <option key={st} value={st}>{st}</option>)}
+                  </select>
+                </div>
                 {catConfig.specificFields.map(field => {
-                  if (field.key === 'WeedSpecies' || field.key === 'DiseaseTarget' || field.key === 'PestTarget') {
-                    const eppoType = field.key === 'WeedSpecies' ? 'weed' : field.key === 'DiseaseTarget' ? 'disease' : 'pest';
-                    return (
-                      <div key={field.key}>
-                        {renderTargetFieldAutocomplete(field.key, field.label, 'focus:ring-[var(--primary-color)]', eppoType)}
-                      </div>
-                    );
+                  if (field.key === 'WeedSpecies' || field.key === 'DiseaseTarget' || field.key === 'PestTarget' || field.key === 'TargetFungus' || field.key === 'YieldValue' || field.key === 'CropYield') {
+                    return null;
                   }
                   if (field.key === 'CropStageAtApplication' || field.key === 'WeedGrowthStage') {
                     return (
