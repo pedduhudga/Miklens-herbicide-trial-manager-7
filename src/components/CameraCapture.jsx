@@ -108,8 +108,8 @@ export default function CameraCapture({ isOpen = true, onClose, onCapture, initi
     const initialConstraints = {
       video: {
           facingMode: { ideal: 'environment' },
-          width: { ideal: 3840 },
-          height: { ideal: 2160 },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
           focusMode: { ideal: 'continuous' },
           resizeMode: { ideal: 'none' }
       }
