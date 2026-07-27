@@ -197,7 +197,10 @@ export default function Sidebar({ isOpen, onClose }) {
 
       <aside className={sidebarClass}>
         {/* Category-themed header */}
-        <div className="px-5 py-4 border-b border-white/50">
+        <div 
+          className="px-5 py-4 border-b border-white/50"
+          style={{ paddingTop: 'calc(1rem + env(safe-area-inset-top, 0px))' }}
+        >
           <div className="flex justify-between items-center mb-2">
             <h2 className={`font-bold text-lg ${accent.iconBg} flex items-center gap-2 tracking-tight`}>
               <CatIcon className="h-5 w-5" />
@@ -325,7 +328,10 @@ export default function Sidebar({ isOpen, onClose }) {
         </nav>
 
         {user && (
-          <div className="mt-auto p-4 border-t border-slate-200/50 bg-white/50">
+          <div 
+            className="mt-auto p-4 border-t border-slate-200/50 bg-white/50"
+            style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}
+          >
             {state.syncQueue && state.syncQueue.length > 0 && (
               <div className="mb-4 p-3 bg-slate-50 border border-slate-100 rounded-xl space-y-1.5">
                 <div className="flex justify-between items-center text-[10px]">

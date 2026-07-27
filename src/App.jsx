@@ -336,7 +336,7 @@ function AppLayout() {
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
       {/* Main content area - mobile optimized */}
-      <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-transparent">
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-transparent pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:pb-0">
         <Routes>
           <Route path="/categories" element={
             <ErrorBoundary inline>
