@@ -242,11 +242,13 @@ OUTPUT FORMAT - JSON ONLY (no extra text, no markdown wrapper around the JSON):
       return `${catConfig.aiPhotoPrompt}
 ${tagInstruction}
 
-PLOT INFORMATION:
+PLANT & PLOT INFORMATION:
+- Category: ${catConfig.name}
+- Crop Type: ${context.crop || context.Crop || 'General Crop'}
+- Target Specified in Trial: ${context.targetPest || context.PestTarget || context.DiseaseTarget || context.targetDisease || context.targetValue || 'None Specified'}
 - Treatment/Product: ${context.treatment || 'Unknown'}
 - Days After Application (DAA): ${context.daa ?? 0}
 - Replication: ${context.rep || 1}
-- Category: ${catConfig.name}
 ${historyNote}
 
 ADDITIONAL ANALYSIS FEATURES: ${catConfig.aiFeatures.join(', ')}
@@ -258,11 +260,35 @@ RULES FOR SCIENTIFIC ASSESSMENT (CRITICAL - AVOID HALLUCINATION):
 4. STRICT VERIFICATION & CONFIDENCE: Only report disease lesions, insect pests, nutrient deficiencies, or vigor differences that you are 100% sure exist based on visual evidence. If a symptom is ambiguous or invisible, set its estimated metric value to 0 or leave it out of targets.
 5. CONCISE, FACTUAL NARRATIVES: Keep the "overallAssessment" and "notes" fields extremely brief, direct, and factual (1-2 sentences maximum). Do not use fluff, advice, or recommendations.
 6. TARGET LEVEL CONFIDENCE: For each item in the "targets" list, you MUST include a "confidence" field containing an estimated percentage confidence (integer 0-100) based on visual clarity and characteristic symptom presentation.
-7. ACCURATE AGRO-TAXONOMY IDENTIFICATION:
-   - Pesticide Category: Identify exact pest species, insects, mites, or larvae present with high entomological precision. Provide format "Common Name (Scientific name)", e.g. "Fall Armyworm (Spodoptera frugiperda)", "Whitefly (Bemisia tabaci)", "Brown Planthopper (Nilaparvata lugens)", "Cotton Aphid (Aphis gossypii)", "Two-Spotted Spider Mite (Tetranychus urticae)", "Chilli Thrips (Scirtothrips dorsalis)", "Rice Stem Borer (Scirpophaga incertulas)", "Mealybug (Planococcus citri)", "Flea Beetle (Epitrix spp.)", "Bollworm (Helicoverpa armigera)". Inspect feeding damage patterns (hole chewing, skeletonization, leaf stippling, leaf mining, frass, honeydew/sooty mold).
-   - Fungicide Category: Identify exact plant diseases or fungal/bacterial/viral pathogens with high pathological precision. Provide format "Common Name (Scientific name)", e.g. "Late Blight (Phytophthora infestans)", "Early Blight (Alternaria solani)", "Powdery Mildew (Erysiphe necator)", "Downy Mildew (Pseudoperonospora cubensis)", "Rice Blast (Pyricularia oryzae)", "Anthracnose (Colletotrichum spp.)", "Leaf Rust (Puccinia spp.)", "Septoria Leaf Spot (Septoria lycopersici)", "Bacterial Spot (Xanthomonas spp.)", "Botrytis Gray Mold (Botrytis cinerea)". Inspect lesion morphology, concentric rings, halo chlorosis, water-soaked margins, fungal pustules, and sporulation.
-   - Nutrition Category: "Nitrogen Deficiency", "Phosphorus Deficiency", "Potassium Deficiency", "Magnesium Deficiency", "Calcium Deficiency", "Iron Deficiency", "Zinc Deficiency", "Sufficient Nutrient Vigor".
-   - Biostimulant Category: "Canopy Expansion", "Shoot Density", "Wilting Recovery", "Abiotic Stress Tolerance", "Root Development Indicator".
+7. HIGH-PRECISION AGRO-TAXONOMY & DIAGNOSTIC SYMPTOM MATRIX:
+   Cross-examine the photo using the following diagnostic morphological keys:
+   
+   PATHOLOGY / FUNGICIDE DIAGNOSTIC KEYS:
+   * Late Blight (Phytophthora infestans): Water-soaked lesions with pale green halos on leaf tips/margins, white sporangia mold underneath in humid conditions.
+   * Early Blight (Alternaria solani): Target-board concentric ring lesions, chlorotic yellow border, lower foliage first.
+   * Powdery Mildew (Erysiphe / Oidium spp.): White/gray talcum powder-like patches on upper leaf surfaces and stems.
+   * Downy Mildew (Pseudoperonospora / Peronospora): Angular yellow leaf lesions bounded by veins, purplish-gray sporangia underneath.
+   * Rice Blast (Pyricularia oryzae): Spindle/diamond-shaped gray-centered lesions with reddish-brown margins.
+   * Sheath Blight (Rhizoctonia solani): Oval snake-skin lesions on lower leaf sheaths near water line.
+   * Anthracnose (Colletotrichum spp.): Circular dark sunken necrotic spots with gelatinous pink/orange spore drops.
+   * Rust (Puccinia spp.): Raised yellow, orange, or reddish-brown powdery uredinial pustules rupturing epidermis.
+   * Bacterial Spot / Blight (Xanthomonas / Pseudomonas): Water-soaked translucent spots turning dark brown with greasy yellow halo.
+   * Botrytis Gray Mold (Botrytis cinerea): Soft gray velvety mold growth on flowers, fruits, and rotting stem bases.
+   * Septoria Leaf Spot (Septoria lycopersici): Small circular gray spots with black specks (pycnidia) in center.
+
+   ENTOMOLOGY / PESTICIDE DIAGNOSTIC KEYS:
+   * Fall Armyworm (Spodoptera frugiperda): Ragged windowpane leaf chewing, whorl destruction, sawdust-like frass in leaf axils.
+   * Whitefly (Bemisia tabaci): Small snow-white 1mm winged flies on leaf undersides, leaf yellowing, honeydew/sooty mold.
+   * Cotton / Melon Aphid (Aphis gossypii): Pear-shaped soft-bodied green/black clusters on growing tips, leaf puckering.
+   * Brown Planthopper (Nilaparvata lugens): Brown wedge-shaped nymphs/adults at tiller base near mud, hopperburn yellowing.
+   * Two-Spotted Spider Mite (Tetranychus urticae): Fine webbing underneath leaves, pale yellow stippling dots, bronzing.
+   * Chilli / Flower Thrips (Scirtothrips dorsalis): Silvery/bronze scarred streaks, black tar frass specks, upward boat-shaped leaf curling.
+   * Rice Stem Borer (Scirpophaga / Chilo): Withered central shoot (deadheart) or empty white grain panicle (whitehead).
+   * Mealybug (Planococcus / Phenacoccus): White cottony waxy egg sacs/nymphs clustered in leaf node axils and fruit pedicels.
+   * Flea Beetle (Epitrix / Phyllotreta): Pinhole "shot-hole" round punctures scattered across leaf lamina.
+   * Fruit Borer / Helicoverpa (Helicoverpa armigera): Round bored holes in fruits/capsules with head buried inside.
+
+   Taxonomy Format Requirement: Always format detected target names as "Common Name (Scientific name)" (e.g. "Fall Armyworm (Spodoptera frugiperda)" or "Late Blight (Phytophthora infestans)").
 8. CATEGORY STATUS LABELS: You MUST ONLY use plant-health/crop-health status values for targets status: "Sufficient", "Deficient", "Marginal", "Healthy", "Symptomatic", "Stressed", or "Vigorous". You are strictly PROHIBITED from using herbicide-specific status terms like "Unaffected", "Controlled", "Burndown", "Slight/Moderate/Severe Injury", or "Dead/Desiccated".
 9. BBCH GROWTH STAGE: Identify the overall growth stage of the crop and select the exact matching label from: "BBCH 00: Dry seed / Winter dormancy", "BBCH 09: Emergence / Bud burst", "BBCH 10: First leaf unfolded", "BBCH 13: 3 leaves unfolded", "BBCH 19: 9 or more leaves unfolded", "BBCH 20: No tillers", "BBCH 25: 5 tillers visible", "BBCH 29: Main shoot maximum tillers", "BBCH 30: Beginning of stem elongation", "BBCH 39: Flag leaf fully unrolled", "BBCH 49: First awns visible", "BBCH 51: Inflorescence beginning to emerge", "BBCH 59: Inflorescence fully emerged", "BBCH 61: Beginning of flowering", "BBCH 65: Full flowering", "BBCH 69: End of flowering", "BBCH 71: Watery ripe grain / young fruit", "BBCH 79: Fruit/grain reached maximum size", "BBCH 83: Early dough stage", "BBCH 89: Fully ripe", "BBCH 92: Leaves begin to discolour", "BBCH 99: Harvested product / Dormant plant".
 
