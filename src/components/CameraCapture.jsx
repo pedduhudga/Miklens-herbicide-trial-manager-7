@@ -44,9 +44,6 @@ export default function CameraCapture({ isOpen = true, onClose, onCapture, initi
               setFocusMode('continuous');
             }
           }
-          if (capabilities.resizeMode && capabilities.resizeMode.includes('none')) {
-            constraintsToApply.resizeMode = 'none';
-          }
 
           if (Object.keys(constraintsToApply).length > 0 && track.applyConstraints) {
             try {
@@ -72,8 +69,7 @@ export default function CameraCapture({ isOpen = true, onClose, onCapture, initi
                 facingMode: { ideal: 'environment' },
                 width: { ideal: 1920 },
                 height: { ideal: 1080 },
-                focusMode: { ideal: 'continuous' },
-                resizeMode: { ideal: 'none' }
+                focusMode: { ideal: 'continuous' }
               }
             });
           } else if (c.video.width && c.video.width.ideal === 1920) {
@@ -108,10 +104,9 @@ export default function CameraCapture({ isOpen = true, onClose, onCapture, initi
     const initialConstraints = {
       video: {
           facingMode: { ideal: 'environment' },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-          focusMode: { ideal: 'continuous' },
-          resizeMode: { ideal: 'none' }
+          width: { ideal: 3840 },
+          height: { ideal: 2160 },
+          focusMode: { ideal: 'continuous' }
       }
     };
     startCamera(initialConstraints);
