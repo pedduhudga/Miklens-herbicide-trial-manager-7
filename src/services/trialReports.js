@@ -2482,54 +2482,54 @@ export async function generatePpt(trial) {
 //  EXPORT 4 — exportToCSV  (observations spreadsheet — same as legacy)
 // ═════════════════════════════════════════════════════════════════════════════
 export function exportToCSV(trial, category = null) {
-  // Category validation for single trial export
-  if (category && trial) {
-    const validCategories = ['herbicide', 'fungicide', 'pesticide', 'nutrition', 'biostimulant'];
-    if (!validCategories.includes(category)) {
-      console.warn(`Invalid category "${category}" provided to exportToCSV. Proceeding without category validation.`);
-    } else {
-      // Validate that the trial belongs to the specified category
-      const trialCategory = trial.Category || 'herbicide';
-      if (trialCategory !== category) {
-        console.warn(`Trial category "${trialCategory}" does not match specified category "${category}". Export cancelled.`);
-        return;
-      }
-    }
-  }
-  
-  exportMultipleTrialsToCSV([trial], category);
+  if (!trial) return;
+  const activeCat = category || trial.Category || 'herbicide';
+  const enrichedTrial = { ...trial, Category: trial.Category || activeCat };
+  exportMultipleTrialsToCSV([enrichedTrial], activeCat);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
 export function exportMultipleTrialsToCSV(trials, category = null) {
   if (!trials || !trials.length) return;
   
-  // Category filtering and validation
-  if (category) {
-    const validCategories = ['herbicide', 'fungicide', 'pesticide', 'nutrition', 'biostimulant'];
-    if (!validCategories.includes(category)) {
-      console.warn(`Invalid category "${category}" provided to exportMultipleTrialsToCSV. Proceeding without category filter.`);
-      category = null;
-    } else {
-      // Filter trials to only include those matching the specified category
-      trials = trials.filter(t => 
-        (t.Category === category) || (!t.Category && category === 'herbicide')
-      );
-      
-      if (trials.length === 0) {
-        console.warn(`No trials found for category "${category}". Export cancelled.`);
-        return;
-      }
+  const validCategories = ['herbicide', 'fungicide', 'pesticide', 'nutrition', 'biostimulant'];
+  const activeCategory = (category && validCategories.includes(String(category).toLowerCase())) 
+    ? String(category).toLowerCase() 
+    : null;
+
+  let preparedTrials = trials.map(t => {
+    const trialCat = (t.Category && validCategories.includes(String(t.Category).toLowerCase())) 
+      ? String(t.Category).toLowerCase() 
+      : (activeCategory || 'herbicide');
+    return { ...t, Category: trialCat };
+  });
+
+  // Filter to requested category if explicitly provided and matches
+  if (activeCategory) {
+    const filtered = preparedTrials.filter(t => t.Category === activeCategory);
+    if (filtered.length > 0) {
+      preparedTrials = filtered;
     }
   }
 
-  const firstTrial = trials[0];
-  const repConfig = getReportConfig(firstTrial);
-  const uniqueCategories = [...new Set(trials.map(t => t.Category || 'herbicide'))];
+  const firstTrial = preparedTrials[0];
+  const uniqueCategories = [...new Set(preparedTrials.map(t => t.Category))];
   const allSameCategory = uniqueCategories.length === 1;
-  const uniqueDesigns = [...new Set(trials.map(t => t.TrialDesign || t.Design || 'RCBD'))];
+  const mainCatId = activeCategory || uniqueCategories[0] || 'herbicide';
+  const mainCatConfig = getCategoryConfig(mainCatId);
 
-  // Gather active observation fields for these categories
+  // Gather specificFields across all categories in the selection
+  const specificFields = [];
+  uniqueCategories.forEach(catId => {
+    const config = getCategoryConfig(catId);
+    config.specificFields?.forEach(f => {
+      if (!specificFields.some(x => x.key === f.key)) {
+        specificFields.push(f);
+      }
+    });
+  });
+
+  // Gather observationFields across all categories in the selection
   const obsFields = [];
   uniqueCategories.forEach(catId => {
     const config = getCategoryConfig(catId);
@@ -2540,129 +2540,107 @@ export function exportMultipleTrialsToCSV(trials, category = null) {
     });
   });
 
-  // Gather active specific parameters for these categories
-  const specificFields = [];
-  uniqueCategories.forEach(catId => {
-    const config = getCategoryConfig(catId);
-    config.specificFields?.forEach(f => {
-      const isSharedOrTarget = [
-        'WeedSpecies', 'DiseaseTarget', 'PestTarget', 'NutrientType', 'BiostimulantType',
-        'YieldValue', 'Yield', 'ApplicationMethod', 'CropStageAtApplication', 'CropStage'
-      ].includes(f.key);
-      if (!isSharedOrTarget && !specificFields.some(x => x.key === f.key)) {
-        specificFields.push(f);
-      }
-    });
-  });
+  // Gather unique trial designs
+  const uniqueDesigns = [...new Set(preparedTrials.map(t => t.TrialDesign || t.Design || 'RCBD'))];
+  const hasPotTrial = uniqueDesigns.some(d => d === 'PotTrial' || d === 'rcbd-pot');
 
-  // Gather active design parameters
-  const designFields = [];
-  if (uniqueDesigns.some(d => d === 'PotTrial' || d === 'rcbd-pot')) {
-    designFields.push(
-      { key: 'PotRow', label: 'Pot Row' },
-      { key: 'PotCol', label: 'Pot Column' },
-      { key: 'PotLabel', label: 'Pot Label' },
-      { key: 'PotLayout', label: 'Pot Layout' },
-      { key: 'PotObsMode', label: 'Pot Observation Mode' }
-    );
-  }
-  if (uniqueDesigns.some(d => d === 'Split-Plot' || d === 'Strip-Plot')) {
-    designFields.push(
-      { key: 'MainFactor', label: 'Main Factor' },
-      { key: 'SubFactor', label: 'Sub Factor' }
-    );
-  }
-  if (uniqueDesigns.some(d => d === 'Lattice')) {
-    designFields.push(
-      { key: 'SubBlockID', label: 'Sub-Block ID' }
-    );
-  }
+  const targetHeaderLabel = allSameCategory ? mainCatConfig.targetLabel : 'Target / Parameter';
+  const primaryMetricHeaderLabel = allSameCategory 
+    ? (mainCatConfig.primaryMetric?.label || 'Efficacy (%)') 
+    : 'Primary Efficacy Metric';
 
   const header = [
-    'Trial ID', 'Category', 'Formulation', 'Investigator', 'Date', 'Location', 'Dosage',
-    'Crop', 'Variety', 'Previous Crop', 'Irrigation Method', 'Plant Population (plants/ha)',
-    'Yield', 'Application Timing', 'Growth Stage', 'BBCH Code', 'App Method', 'Spray Vol (L/ha)', 'Nozzle',
-    'Soil pH', 'Soil Clay %', 'Soil Sand %', 'Soil OC', 'Soil Texture', 'Soil N (ppm)', 'Soil P (ppm)', 'Soil K (ppm)', 'Soil CEC', 'Soil Moisture %',
-    'Trial Design', 'Replication / Block ID'
+    'Trial ID', 'Category', 'Formulation Name', 'Investigator', 'Trial Date', 'Location', 'GPS Lat/Lng', 'Dosage / Rate',
+    'Crop / Site', 'Variety', 'Previous Crop', 'Irrigation Method', 'Plant Population', 'Yield',
+    'Application Timing', 'Growth Stage', 'BBCH Code', 'App Method', 'Spray Vol (L/ha)', 'Nozzle Type', 'Water pH', 'Adjuvants / Tank Mix',
+    'Soil pH', 'Soil Clay %', 'Soil Sand %', 'Soil Silt %', 'Soil OC %', 'Soil Texture', 'Soil N (ppm)', 'Soil P (ppm)', 'Soil K (ppm)', 'Soil CEC', 'Soil Moisture %',
+    'App Temp (°C)', 'App Humidity (%)', 'App Wind (km/h)', 'App Rain (mm)', 'App Cloud Cover',
+    'Trial Design', 'Replication / Block ID', 'Plot #'
   ];
 
-  // Add design specific fields to header
-  designFields.forEach(f => {
-    header.push(f.label);
-  });
-
-  if (allSameCategory) {
-    header.push(repConfig.targetLabel);
-  } else {
-    header.push('Target Label', 'Target Value');
+  if (hasPotTrial) {
+    header.push('Pot Row', 'Pot Column', 'Pot Label', 'Pot Layout', 'Pot Obs Mode');
   }
 
-  header.push('Overall Result', 'Trial Status');
+  header.push(targetHeaderLabel, primaryMetricHeaderLabel, 'Overall Result', 'Finalized Status');
 
-  // Add category specific fields to header
+  // Category specific fields (e.g., FRAC Group, Pathogen, IRAC, Soil Rate, Fertilizer Form, etc.)
   specificFields.forEach(f => {
     header.push(f.label);
   });
 
-  header.push('DAA', 'Obs Date');
+  header.push('DAA (Days)', 'Observation Date');
 
-  // Dynamic observation fields
+  // Category dynamic observation fields
   obsFields.forEach(f => {
     header.push(f.label);
   });
 
   if (uniqueCategories.includes('herbicide')) {
-    header.push('Herbicide Species Detail', 'Herbicide Species Cover %');
+    header.push('Herbicide Species Detail');
   }
 
-  header.push('Obs Status', 'Temp (°C)', 'Humidity (%)', 'Wind (km/h)', 'Rain (mm)', 'Notes');
+  header.push('Obs Status', 'Obs Temp (°C)', 'Obs Humidity (%)', 'Obs Wind (km/h)', 'Obs Rain (mm)', 'Observation Notes');
 
   const rows = [];
 
-  trials.forEach(trial => {
+  preparedTrials.forEach(trial => {
+    const trialCat = trial.Category || 'herbicide';
+    const trialCatConfig = getCategoryConfig(trialCat);
     const dataFields = getAllTrialDataFields(trial);
-    const trialConfig = getReportConfig(trial);
     const proj = getProjectForTrial(trial);
+    const trialConfig = getReportConfig(trial);
     const efficacy = validateEfficacy(safeJsonParse(trial.EfficacyDataJSON, []));
     const isCompletedStr = (trial.IsCompleted === true || trial.IsCompleted === 'true') ? 'Finalized' : 'Ongoing';
 
+    const gpsStr = (trial.Latitude && trial.Longitude) ? `${trial.Latitude}, ${trial.Longitude}` : (trial.GPS || '—');
+    const weatherApp = safeJsonParse(trial.WeatherDataJSON, {}) || {};
+    const appTemp = trial.Temperature || weatherApp.temperature_2m || weatherApp.temp || '';
+    const appHum = trial.Humidity || weatherApp.relative_humidity_2m || weatherApp.humidity || '';
+    const appWind = trial.Windspeed || weatherApp.wind_speed_10m || weatherApp.wind || '';
+    const appRain = trial.Rain || weatherApp.precipitation || weatherApp.rain || '';
+    const appCloud = weatherApp.cloud_cover || '';
+
     const baseRow = [
-      trial.ID, trial.Category || 'herbicide', trial.FormulationName, trial.InvestigatorName, trial.Date, trial.Location, trial.Dosage,
+      trial.ID, trialCat.toUpperCase(), trial.FormulationName, trial.InvestigatorName, trial.Date, trial.Location, gpsStr, trial.Dosage,
       dataFields.crop, dataFields.variety, dataFields.previousCrop, dataFields.irrigationMethod, dataFields.plantPopulation,
       dataFields.yieldValue, dataFields.applicationTiming, dataFields.cropStage, dataFields.bbchCode,
-      dataFields.applicationMethod, dataFields.sprayVolume, dataFields.nozzle,
-      dataFields.soil?.ph || '', dataFields.soil?.clay || '', dataFields.soil?.sand || '', dataFields.soil?.organicCarbon || '', dataFields.soil?.texture || '',
+      dataFields.applicationMethod, dataFields.sprayVolume, dataFields.nozzle, trial.WaterPH || '—', trial.AdjuvantDetails || '—',
+      dataFields.soil?.ph || '', dataFields.soil?.clay || '', dataFields.soil?.sand || '', dataFields.soil?.silt || '', dataFields.soil?.organicCarbon || '', dataFields.soil?.texture || '',
       dataFields.soil?.nitrogen || '', dataFields.soil?.phosphorus || '', dataFields.soil?.potassium || '', dataFields.soil?.cec || '', dataFields.soil?.moisture || '',
+      appTemp, appHum, appWind, appRain, appCloud,
       trial.ProjectID ? (trial.TrialDesign || trial.Design || 'RCBD') : 'Individual',
-      trial.ProjectID ? (trial.Replication || trial.BlockID || 'R1') : '-'
+      trial.ProjectID ? (trial.Replication || trial.BlockID || 'R1') : '-',
+      trial.PlotNumber || '-'
     ];
 
-    // Push design fields values
-    designFields.forEach(f => {
-      if (f.key === 'PotLayout') {
-        baseRow.push(trial.PotLayout || proj?.PotLayout || '-');
-      } else if (f.key === 'PotObsMode') {
-        baseRow.push(trial.PotObsMode || proj?.PotObsMode || '-');
-      } else {
-        baseRow.push(trial[f.key] !== undefined && trial[f.key] !== null ? trial[f.key] : '-');
-      }
-    });
-
-    const trialMetadataRow = [];
-    if (allSameCategory) {
-      trialMetadataRow.push(trialConfig.targetValue);
-    } else {
-      trialMetadataRow.push(trialConfig.targetLabel, trialConfig.targetValue);
+    if (hasPotTrial) {
+      baseRow.push(
+        trial.PotRow ?? '-',
+        trial.PotCol ?? '-',
+        trial.PotLabel ?? '-',
+        trial.PotLayout || proj?.PotLayout || '-',
+        trial.PotObsMode || proj?.PotObsMode || '-'
+      );
     }
 
-    trialMetadataRow.push(trial.Result || 'Pending', isCompletedStr);
+    const primaryMetricVal = calcWCE(efficacy, trialCat, trial);
+    const primaryMetricStr = (primaryMetricVal !== null && primaryMetricVal !== undefined) ? `${primaryMetricVal}%` : 'Pending';
 
-    // Push specific fields values
+    const metadataRow = [
+      trialConfig.targetValue,
+      primaryMetricStr,
+      trial.Result || 'Pending',
+      isCompletedStr
+    ];
+
+    // Push values for specificFields
     specificFields.forEach(f => {
-      trialMetadataRow.push(trial[f.key] !== undefined && trial[f.key] !== null ? trial[f.key] : '');
+      const val = trial[f.key] ?? proj?.[f.key] ?? '';
+      metadataRow.push(val !== undefined && val !== null ? val : '');
     });
 
-    const fullBaseRow = [...baseRow, ...trialMetadataRow];
+    const fullBaseRow = [...baseRow, ...metadataRow];
     const blankPrefixRow = fullBaseRow.map(() => '');
 
     let isFirstRowOfTrial = true;
@@ -2677,57 +2655,57 @@ export function exportMultipleTrialsToCSV(trials, category = null) {
     if (efficacy.length) {
       const sortedObs = [...efficacy].sort((a, b) => (a.daa ?? 0) - (b.daa ?? 0));
       const baseObs = sortedObs.find(obs => (obs.daa ?? 0) === 0) || sortedObs[0];
-      const baseVal = baseObs ? (getObservationPrimaryValue(trialConfig.cat, baseObs) ?? 0) : 0;
+      const baseVal = baseObs ? (getObservationPrimaryValue(trialCat, baseObs) ?? 0) : 0;
 
-      efficacy.forEach(obs => {
+      efficacy.forEach((obs, idx) => {
         const obsDate = obs.date || '';
-        const daa = obs.daa ?? '';
+        const daa = obs.daa ?? idx * 7;
+        const pVal = getObservationPrimaryValue(trialCat, obs) ?? 0;
+        const status = calculateStatus(trialCat, pVal, baseVal);
 
-        // Let's determine rating / status
-        const pVal = getObservationPrimaryValue(trialConfig.cat, obs) ?? 0;
-        const status = calculateStatus(trialConfig.cat, pVal, baseVal);
+        const temp = obs.weatherTempAtObs ?? obs.weatherTemp ?? obs.temperature_2m ?? '';
+        const hum = obs.weatherHumidityAtObs ?? obs.weatherHumidity ?? obs.relative_humidity_2m ?? '';
+        const wind = obs.weatherWindAtObs ?? obs.weatherWind ?? obs.wind_speed_10m ?? '';
+        const rain = obs.weatherRain ?? obs.precipitation ?? '';
+        const notes = obs.notes || obs.ObsNotes || '';
 
-        const temp = obs.weatherTemp ?? obs.temperature_2m ?? '';
-        const hum = obs.weatherHumidity ?? obs.relative_humidity_2m ?? '';
-        const wind = obs.weatherWind ?? obs.wind_speed_10m ?? '';
-        const rain = obs.weatherRain ?? '';
-        const notes = obs.notes || '';
+        const row = [...getPrefixRow(), daa, obsDate];
 
-        // Herbicide detail handling
-        if (trialConfig.cat === 'herbicide') {
-          const details = obs.weedDetails?.length ? obs.weedDetails : [{ species: 'Total', cover: getObservationPrimaryValue(trialConfig.cat, obs) ?? '' }];
-          const speciesDetailStr = details.map(wd => `${wd.species || 'Total'}: ${wd.cover ?? ''}%`).join(' | ');
-
-          const row = [...getPrefixRow(), daa, obsDate];
-          // Push placeholders or values for other observation fields
-          obsFields.forEach(f => {
-            if (f.key === 'weedCover') {
-              row.push(getObservationPrimaryValue(trialConfig.cat, obs) ?? '');
-            } else {
-              row.push('');
-            }
-          });
-          row.push(speciesDetailStr, '', status, temp, hum, wind, rain, notes);
-          rows.push(row);
-        } else {
-          const row = [...getPrefixRow(), daa, obsDate];
-          obsFields.forEach(f => {
-            const val = obs[f.key];
-            row.push((val !== undefined && val !== null) ? val : '');
-          });
-          if (uniqueCategories.includes('herbicide')) {
-            row.push('', ''); // Herbicide species detail and cover placeholders
+        // Push category dynamic observation field values
+        obsFields.forEach(f => {
+          let val = obs[f.key];
+          // Key fallbacks for common observation field representations
+          if (val === undefined || val === null) {
+            if (f.key === 'weedCover') val = obs.weedCover ?? obs.controlPct ?? obs.wce;
+            else if (f.key === 'diseaseSeverity') val = obs.diseaseSeverity ?? obs.severity;
+            else if (f.key === 'diseaseIncidence') val = obs.diseaseIncidence;
+            else if (f.key === 'pestCount') val = obs.pestCount ?? obs.count ?? obs.liveInsectCount;
+            else if (f.key === 'visualVigor') val = obs.visualVigor ?? obs.vigor ?? obs.overallVigor;
+            else if (f.key === 'phytotoxicityPct' || f.key === 'phytotoxicity') val = obs.phytotoxicityPct ?? obs.phytotoxicity;
+            else if (f.key === 'phytotoxicityNotes') val = obs.phytotoxicityNotes;
           }
-          row.push(status, temp, hum, wind, rain, notes);
-          rows.push(row);
+          row.push((val !== undefined && val !== null) ? val : '');
+        });
+
+        if (uniqueCategories.includes('herbicide')) {
+          if (trialCat === 'herbicide') {
+            const details = obs.weedDetails?.length ? obs.weedDetails : [{ species: 'Total', cover: getObservationPrimaryValue(trialCat, obs) ?? '' }];
+            const speciesDetailStr = details.map(wd => `${wd.species || 'Total'}: ${wd.cover ?? ''}%`).join(' | ');
+            row.push(speciesDetailStr);
+          } else {
+            row.push('');
+          }
         }
+
+        row.push(status, temp, hum, wind, rain, notes);
+        rows.push(row);
       });
     } else {
       // Empty observations row
       const row = [...getPrefixRow(), '', ''];
       obsFields.forEach(() => row.push(''));
       if (uniqueCategories.includes('herbicide')) {
-        row.push('', '');
+        row.push('');
       }
       row.push('', '', '', '', '', '');
       rows.push(row);
@@ -2741,15 +2719,16 @@ export function exportMultipleTrialsToCSV(trials, category = null) {
   }).join(',')).join('\n');
 
   let filename = 'Trials_Export.csv';
-  if (trials.length === 1) {
-    const trial = trials[0];
-    filename = `Trial_${safeName(trial.FormulationName)}_${trial.Date || 'nodate'}.csv`;
+  if (preparedTrials.length === 1) {
+    const trial = preparedTrials[0];
+    filename = `${trial.Category.toUpperCase()}_Trial_${safeName(trial.FormulationName)}_${trial.Date || 'nodate'}.csv`;
   } else {
-    filename = `Selected_Trials_${new Date().toISOString().split('T')[0]}.csv`;
+    const catPrefix = activeCategory ? activeCategory.toUpperCase() : 'ALL';
+    filename = `${catPrefix}_Trials_Export_${new Date().toISOString().split('T')[0]}.csv`;
   }
 
   dlBlob(new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8' }), filename);
-  toast(`CSV exported (${trials.length} trial${trials.length > 1 ? 's' : ''})`, 'success');
+  toast(`CSV exported (${preparedTrials.length} trial${preparedTrials.length > 1 ? 's' : ''})`, 'success');
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -2758,64 +2737,72 @@ export function exportMultipleTrialsToCSV(trials, category = null) {
 export function exportAllTrialsCSV(trials, projects = [], category = null) {
   if (!trials || !trials.length) return;
   
-  // Category filtering and validation
-  if (category) {
-    const validCategories = ['herbicide', 'fungicide', 'pesticide', 'nutrition', 'biostimulant'];
-    if (!validCategories.includes(category)) {
-      console.warn(`Invalid category "${category}" provided to exportAllTrialsCSV. Proceeding without category filter.`);
-      category = null;
-    } else {
-      // Filter trials to only include those matching the specified category
-      trials = trials.filter(t => 
-        (t.Category === category) || (!t.Category && category === 'herbicide')
-      );
-      
-      // Filter projects to only include those matching the specified category
-      projects = projects.filter(p => 
-        (p.Category === category) || (!p.Category && category === 'herbicide')
-      );
-      
-      if (trials.length === 0) {
-        console.warn(`No trials found for category "${category}". Export cancelled.`);
-        return;
-      }
+  const validCategories = ['herbicide', 'fungicide', 'pesticide', 'nutrition', 'biostimulant'];
+  const activeCatId = (category && validCategories.includes(String(category).toLowerCase())) 
+    ? String(category).toLowerCase() 
+    : null;
+
+  let preparedTrials = trials.map(t => ({
+    ...t,
+    Category: (t.Category && validCategories.includes(String(t.Category).toLowerCase())) 
+      ? String(t.Category).toLowerCase() 
+      : (activeCatId || 'herbicide')
+  }));
+
+  if (activeCatId) {
+    const filtered = preparedTrials.filter(t => t.Category === activeCatId);
+    if (filtered.length > 0) {
+      preparedTrials = filtered;
     }
   }
-  
-  const firstTrial = trials[0];
-  const repConfig = getReportConfig(firstTrial);
-  const allSameCategory = trials.every(t => (t.Category || 'herbicide') === (firstTrial.Category || 'herbicide'));
-  const targetLabel = allSameCategory ? repConfig.targetLabel : 'Target Species';
 
-  const header = ['Trial ID', 'Category', 'Formulation', 'Investigator', 'Date', 'Location', 'Dosage',
-                  'Crop', 'Variety', 'Previous Crop', 'Irrigation Method', 'Plant Population',
-                  'Yield', 'Application Timing', 'Growth Stage', 'BBCH Code',
-                  targetLabel, 'Result', 'Status', 'Project', 'Replication',
-                  'Plot #', 'Temp (°C)', 'Humidity (%)', 'Wind (km/h)', 'Rain (mm)',
-                  'Observations', 'Photos'];
-  const rows = trials.map(t => {
+  const firstTrial = preparedTrials[0];
+  const mainCatId = activeCatId || firstTrial.Category || 'herbicide';
+  const mainCatConfig = getCategoryConfig(mainCatId);
+  const allSameCategory = preparedTrials.every(t => t.Category === mainCatId);
+
+  const targetLabel = allSameCategory ? mainCatConfig.targetLabel : 'Target / Parameter';
+  const metricLabel = allSameCategory ? (mainCatConfig.primaryMetric?.label || 'Efficacy (%)') : 'Primary Metric';
+
+  const header = [
+    'Trial ID', 'Category', 'Formulation Name', 'Investigator', 'Trial Date', 'Location', 'Dosage',
+    'Crop / Site', 'Variety', 'Previous Crop', 'Irrigation Method', 'Plant Population',
+    'Yield', 'Application Timing', 'Growth Stage', 'BBCH Code',
+    targetLabel, metricLabel, 'Result', 'Status', 'Project Name', 'Replication',
+    'Plot #', 'Temp (°C)', 'Humidity (%)', 'Wind (km/h)', 'Rain (mm)',
+    'Observation Count', 'Photo Count'
+  ];
+
+  const rows = preparedTrials.map(t => {
     const proj = projects.find(p => p.ID === t.ProjectID) || getProjectForTrial(t, { projects });
     const tConfig = getReportConfig(t);
     const dataFields = getAllTrialDataFields(t, { projects });
+    const efficacy = validateEfficacy(safeJsonParse(t.EfficacyDataJSON, []));
+    const metricVal = calcWCE(efficacy, t.Category, t);
+    const metricStr = (metricVal !== null && metricVal !== undefined) ? `${metricVal}%` : 'Pending';
+
     return [
-      t.ID, t.Category || 'herbicide', t.FormulationName, t.InvestigatorName, t.Date, t.Location, t.Dosage,
+      t.ID, t.Category.toUpperCase(), t.FormulationName, t.InvestigatorName, t.Date, t.Location, t.Dosage,
       dataFields.crop, dataFields.variety, dataFields.previousCrop, dataFields.irrigationMethod, dataFields.plantPopulation,
       dataFields.yieldValue, dataFields.applicationTiming, dataFields.cropStage, dataFields.bbchCode,
-      tConfig.targetValue, t.Result,
+      tConfig.targetValue, metricStr, t.Result || 'Pending',
       (t.IsCompleted === true || t.IsCompleted === 'true') ? 'Finalized' : 'Ongoing',
       proj?.Name || '', t.Replication || '', t.PlotNumber || '',
       t.Temperature || '', t.Humidity || '', t.Windspeed || '', t.Rain || '',
-      safeJsonParse(t.EfficacyDataJSON, []).length,
+      efficacy.length,
       safeJsonParse(t.PhotoURLs, []).length,
     ];
   });
+
   const csv = [header, ...rows].map(r => r.map(c => {
     let val = String(c ?? '');
     val = val.replace(/[\u2013\u2014]/g, '-');
     return `"${val.replace(/"/g, '""')}"`;
   }).join(',')).join('\n');
-  dlBlob(new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8' }), `All_Trials_${new Date().toISOString().split('T')[0]}.csv`);
-  toast(`Exported ${trials.length} trials to CSV`, 'success');
+
+  const catName = activeCatId ? activeCatId.toUpperCase() : 'ALL';
+  dlBlob(new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8' }), `${catName}_Trials_Summary_${new Date().toISOString().split('T')[0]}.csv`);
+  toast(`Exported ${preparedTrials.length} trials to CSV`, 'success');
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
