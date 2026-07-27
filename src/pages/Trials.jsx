@@ -5911,51 +5911,59 @@ If none are present, write "None".`;
                 {groupedTimelineTrials.map(group => (
                   <div key={group.key} className="space-y-4">
                     {/* Sticky Date Header with premium glassmorphism & shadow */}
-                    <div className="flex items-center gap-3 sticky top-[108px] z-10 bg-white/95 dark:bg-slate-900/95 py-2.5 px-1 backdrop-blur-md border-b border-slate-100 dark:border-slate-800/60 shadow-[0_1px_0_0_rgba(0,0,0,0.05)]">
-                      <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm md:text-base tracking-tight">
-                        {group.key}
-                      </h3>
-                      <span className="bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-100/50 dark:border-emerald-900/30">
-                        {group.trials.length} {group.trials.length === 1 ? 'trial' : 'trials'}
-                      </span>
+                    <div 
+                      onClick={() => toggleSection(group.key)}
+                      className="flex items-center justify-between sticky top-[108px] z-10 bg-white/90 dark:bg-slate-900/90 py-3 px-4 backdrop-blur-md border border-slate-100 dark:border-slate-800/60 rounded-xl cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-all select-none shadow-sm"
+                    >
+                      <div className="flex items-center gap-3">
+                        <ChevronRight className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${!collapsedSections[group.key] ? 'rotate-90 text-emerald-600' : ''}`} />
+                        <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm md:text-base tracking-tight">
+                          {group.key}
+                        </h3>
+                        <span className="bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 text-xs font-bold px-2.5 py-0.5 rounded-full border border-emerald-100/50 dark:border-emerald-900/30">
+                          {group.trials.length} {group.trials.length === 1 ? 'trial' : 'trials'}
+                        </span>
+                      </div>
                     </div>
                     {/* Trial Cards Grid */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                      {group.trials.map(t => (
-                        <TrialCard
-                          key={t.ID}
-                          trial={t}
-                          project={projectMap[t.ProjectID]}
-                          isSelected={selectedForBulk.has(t.ID)}
-                          isPendingSync={isTrialPendingSync(t)}
-                          isMenuOpen={openCardMenu === t.ID}
-                          onToggleBulk={toggleBulk}
-                          onToggleMenu={handleToggleMenu}
-                          onViewDetails={handleViewDetails}
-                          onEdit={handleOpenModal}
-                          onDuplicate={handleDuplicate}
-                          onMoveToProject={handleMoveToProject}
-                          onExportPdf={handleExportPdf}
-                          onExportSciPdf={handleExportSciPdf}
-                          onExportPpt={handleExportPpt}
-                          onExportHtml={exportHtmlSlide}
-                          onExportTxt={exportTxtReport}
-                          onExportCsv={exportCsv}
-                          onExportJson={exportJson}
-                          onShare={shareTrial}
-                          onAppSharing={handleOpenShareModal}
-                          onAiGenerate={handleAiSingleGenerate}
-                          onDelete={handleDelete}
-                          onActivateToggle={handleActivateToggle}
-                          onQuickRate={handleQuickRate}
-                          onQuickPhoto={handleQuickPhoto}
-                          onQuickGalleryUpload={handleQuickGalleryUpload}
-                          onMarkComplete={handleMarkComplete}
-                          onEditControlDays={handleEditControlDays}
-                          onRecordWeather={handleRecordWeather}
-                        />
-                      ))}
-                    </div>
+                    {!collapsedSections[group.key] && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pt-2">
+                        {group.trials.map(t => (
+                          <TrialCard
+                            key={t.ID}
+                            trial={t}
+                            project={projectMap[t.ProjectID]}
+                            isSelected={selectedForBulk.has(t.ID)}
+                            isPendingSync={isTrialPendingSync(t)}
+                            isMenuOpen={openCardMenu === t.ID}
+                            onToggleBulk={toggleBulk}
+                            onToggleMenu={handleToggleMenu}
+                            onViewDetails={handleViewDetails}
+                            onEdit={handleOpenModal}
+                            onDuplicate={handleDuplicate}
+                            onMoveToProject={handleMoveToProject}
+                            onExportPdf={handleExportPdf}
+                            onExportSciPdf={handleExportSciPdf}
+                            onExportPpt={handleExportPpt}
+                            onExportHtml={exportHtmlSlide}
+                            onExportTxt={exportTxtReport}
+                            onExportCsv={exportCsv}
+                            onExportJson={exportJson}
+                            onShare={shareTrial}
+                            onAppSharing={handleOpenShareModal}
+                            onAiGenerate={handleAiSingleGenerate}
+                            onDelete={handleDelete}
+                            onActivateToggle={handleActivateToggle}
+                            onQuickRate={handleQuickRate}
+                            onQuickPhoto={handleQuickPhoto}
+                            onQuickGalleryUpload={handleQuickGalleryUpload}
+                            onMarkComplete={handleMarkComplete}
+                            onEditControlDays={handleEditControlDays}
+                            onRecordWeather={handleRecordWeather}
+                          />
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
