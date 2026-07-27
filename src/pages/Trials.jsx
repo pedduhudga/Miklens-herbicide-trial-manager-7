@@ -104,7 +104,8 @@ const emptyForm = (category = 'herbicide') => {
   const catConfig = getCategoryConfig(category);
   const base = {
     Category: category,
-    ProjectID: '', BlockID: '', FormulationName: '', InvestigatorName: '',
+    TrialName: '',
+    ProjectID: '', BlockID: '', FormulationID: '', FormulationName: '', InvestigatorName: '',
     Date: toDatetimeLocal(new Date()), Location: '', Dosage: '',
     Lat: '', Lon: '',
     Result: '', Notes: '', Conclusion: '',
@@ -861,7 +862,11 @@ export default function Trials({ onMenuClick }) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'This trial belongs to another scientist and cannot be modified.', type: 'error' } }));
       return;
     }
-    const formMatch = formulations.find(f => f.Name === formData.FormulationName);
+    const trimmedFormName = (formData.FormulationName || '').trim();
+    const formMatch = formulations.find(f => 
+      (formData.FormulationID && f.ID === formData.FormulationID) ||
+      f.Name.trim().toLowerCase() === trimmedFormName.toLowerCase()
+    );
 
     let dateUpdatedAt = isEdit ? editingTrial.DateUpdatedAt : new Date().toISOString();
     if (isEdit && editingTrial.Date !== formData.Date) {
@@ -910,7 +915,9 @@ export default function Trials({ onMenuClick }) {
     const payload = {
       ...(isEdit ? editingTrial : {}),
       ...finalFormData,
-      FormulationID: formMatch?.ID || (isEdit ? editingTrial.FormulationID : ''),
+      TrialName: (formData.TrialName || '').trim() || trimmedFormName || 'Untitled Trial',
+      FormulationName: formMatch ? formMatch.Name : trimmedFormName,
+      FormulationID: formMatch ? formMatch.ID : (formData.FormulationID || (isEdit ? editingTrial.FormulationID : '')),
       DateUpdatedAt: dateUpdatedAt,
       ...(yieldDetails ? { YieldDetails: JSON.stringify(yieldDetails) } : {}),
       ...(isEdit ? { EfficacyDataJSON: baseEfficacyJSON } : {
@@ -6273,8 +6280,34 @@ If none are present, write "None".`;
         <form onSubmit={handleSave} className="space-y-5">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Formulation Name *</label>
-              <input type="text" list="form-list" required value={formData.FormulationName} onChange={e => setFormData({...formData, FormulationName: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="Select or type..." />
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Trial Name / Title (Optional)</label>
+              <input 
+                type="text" 
+                value={formData.TrialName || ''} 
+                onChange={e => setFormData({...formData, TrialName: e.target.value})} 
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" 
+                placeholder="e.g. Kharif Paddy Plot 101 (default: Formulation Name)" 
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Linked Formulation / Product *</label>
+              <input 
+                type="text" 
+                list="form-list" 
+                required 
+                value={formData.FormulationName || ''} 
+                onChange={e => {
+                  const val = e.target.value;
+                  const match = formulations.find(f => f.Name.trim().toLowerCase() === val.trim().toLowerCase());
+                  setFormData(prev => ({
+                    ...prev,
+                    FormulationName: val,
+                    FormulationID: match ? match.ID : prev.FormulationID
+                  }));
+                }} 
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" 
+                placeholder="Select or type formulation name..." 
+              />
               <datalist id="form-list">{formulations.map(f => <option key={f.ID} value={f.Name} />)}</datalist>
             </div>
             <div>

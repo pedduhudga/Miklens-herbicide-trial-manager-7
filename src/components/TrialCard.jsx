@@ -391,8 +391,13 @@ const TrialCard = memo(function TrialCard({
                   B{blockInfo.blockNum}
                 </span>
               )}
-              <span className="align-middle">{trial.FormulationName || 'Untitled'}</span>
+              <span className="align-middle">{trial.TrialName || trial.FormulationName || 'Untitled'}</span>
             </h3>
+            {trial.TrialName && trial.FormulationName && trial.TrialName.trim().toLowerCase() !== trial.FormulationName.trim().toLowerCase() && (
+              <p className="text-[11px] font-semibold text-slate-500 truncate">
+                Product: <span className="text-emerald-700 dark:text-emerald-400 font-bold">{trial.FormulationName}</span>
+              </p>
+            )}
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
               {isPendingSync && (
                 <span className="text-[10px] bg-amber-50 text-amber-600 border border-amber-200 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5 animate-pulse" title="Offline changes queued, pending sync">
