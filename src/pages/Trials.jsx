@@ -6334,10 +6334,12 @@ If none are present, write "None".`;
                 {projects.map(p => <option key={p.ID} value={p.ID}>{p.Name}</option>)}
               </select>
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Crop</label>
-              <input type="text" value={formData.Crop || ''} onChange={e => setFormData({...formData, Crop: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="e.g. Rice, Wheat, Maize" />
-            </div>
+            {activeCategory !== 'herbicide' && (
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Crop</label>
+                <input type="text" value={formData.Crop || ''} onChange={e => setFormData({...formData, Crop: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="e.g. Rice, Wheat, Maize" />
+              </div>
+            )}
             <div>
               <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Variety / Hybrid</label>
               <input type="text" value={formData.Variety || ''} onChange={e => setFormData({...formData, Variety: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="e.g. IR-64, DK-9133" />
@@ -6401,11 +6403,6 @@ If none are present, write "None".`;
                   </div>
                   <input type="text" value={formData.Dosage} onChange={e => setFormData({...formData, Dosage: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="e.g. 1500 ml/ha" />
                 </div>
-                {renderTargetFieldAutocomplete('WeedSpecies', 'Target Weed Species', 'focus:ring-emerald-400', 'weed')}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Yield (t/ha)</label>
-                  <input type="number" step="0.01" min="0" value={formData.YieldValue} onChange={e => setFormData({...formData, YieldValue: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="e.g. 3.5" />
-                </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Result</label>
                   <select value={formData.Result} onChange={e => setFormData({...formData, Result: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
@@ -6431,7 +6428,7 @@ If none are present, write "None".`;
                   <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Site Type</label>
                   <select value={formData.SiteType || ''} onChange={e => setFormData({...formData, SiteType: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
                     <option value="">— Select Site Type —</option>
-                    {['Open field', 'Fallow land', 'Roadside', 'Bund', 'Non-Crop', 'Crop'].map(st => <option key={st} value={st}>{st}</option>)}
+                    {['Open field', 'Fallow land', 'Pot trial', 'Roadside', 'Bund', 'Non-Crop', 'Crop'].map(st => <option key={st} value={st}>{st}</option>)}
                   </select>
                 </div>
               </>
@@ -6592,136 +6589,138 @@ If none are present, write "None".`;
             </div>
           )}
 
-          {/* Plot & Site Data collapsible — Task 55 */}
-          <div className="border border-slate-200 rounded-xl overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setPlotDataOpen(v => !v)}
-              className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-50 hover:bg-slate-100 transition text-xs font-semibold text-slate-600 uppercase"
-            >
-              <span className="flex items-center gap-2"><MapPin className="w-3.5 h-3.5 text-slate-400" /> Plot &amp; Site Data (optional)</span>
-              <ChevronRight className={`w-4 h-4 text-slate-400 transition-transform ${plotDataOpen ? 'rotate-90' : ''}`} />
-            </button>
-            {plotDataOpen && (
-              <div className="p-4 space-y-3">
-                {/* BBCH Code with lookup */}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">BBCH Code (crop growth stage)</label>
-                  <input
-                    type="text"
-                    value={formData.BBCHCode || ''}
-                    onChange={e => setFormData({...formData, BBCHCode: e.target.value})}
-                    className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                    placeholder="e.g. 12"
-                    maxLength={3}
-                  />
-                  {(() => {
-                    const code = (formData.BBCHCode || '').trim();
-                    if (!code) return null;
-                    const match = BBCH_STAGES.find(s => s.value === code || String(s.value) === code);
-                    if (match) return <p className="text-xs text-emerald-700 mt-0.5 bg-emerald-50 rounded px-2 py-1">📋 {match.label}</p>;
-                    const num = parseInt(code);
-                    if (!isNaN(num)) {
-                      const rangeMatch = BBCH_STAGES.find(s => {
-                        const sv = parseInt(s.value);
-                        return !isNaN(sv) && num >= sv && num < sv + 10;
-                      });
-                      if (rangeMatch) return <p className="text-xs text-blue-700 mt-0.5 bg-blue-50 rounded px-2 py-1">~{rangeMatch.label}</p>;
-                    }
-                    return <p className="text-xs text-amber-600 mt-0.5">Unknown BBCH code</p>;
-                  })()}
-                </div>
-                {/* GPS fields */}
-                <div className="grid grid-cols-2 gap-3">
+          {/* Plot & Site Data collapsible (Non-Herbicide) */}
+          {activeCategory !== 'herbicide' && (
+            <div className="border border-slate-200 rounded-xl overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setPlotDataOpen(v => !v)}
+                className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-50 hover:bg-slate-100 transition text-xs font-semibold text-slate-600 uppercase"
+              >
+                <span className="flex items-center gap-2"><MapPin className="w-3.5 h-3.5 text-slate-400" /> Plot &amp; Site Data (optional)</span>
+                <ChevronRight className={`w-4 h-4 text-slate-400 transition-transform ${plotDataOpen ? 'rotate-90' : ''}`} />
+              </button>
+              {plotDataOpen && (
+                <div className="p-4 space-y-3">
+                  {/* BBCH Code with lookup */}
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">GPS Latitude</label>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">BBCH Code (crop growth stage)</label>
                     <input
-                      type="number"
-                      step="0.000001"
-                      min="-90"
-                      max="90"
-                      value={formData.GPSLatitude || ''}
-                      onChange={e => setFormData({...formData, GPSLatitude: e.target.value})}
+                      type="text"
+                      value={formData.BBCHCode || ''}
+                      onChange={e => setFormData({...formData, BBCHCode: e.target.value})}
                       className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                      placeholder="-90 to 90"
+                      placeholder="e.g. 12"
+                      maxLength={3}
                     />
-                    {formData.GPSLatitude !== '' && (parseFloat(formData.GPSLatitude) < -90 || parseFloat(formData.GPSLatitude) > 90) && (
-                      <p className="text-xs text-red-600 mt-0.5">Must be between -90 and 90</p>
-                    )}
+                    {(() => {
+                      const code = (formData.BBCHCode || '').trim();
+                      if (!code) return null;
+                      const match = BBCH_STAGES.find(s => s.value === code || String(s.value) === code);
+                      if (match) return <p className="text-xs text-emerald-700 mt-0.5 bg-emerald-50 rounded px-2 py-1">📋 {match.label}</p>;
+                      const num = parseInt(code);
+                      if (!isNaN(num)) {
+                        const rangeMatch = BBCH_STAGES.find(s => {
+                          const sv = parseInt(s.value);
+                          return !isNaN(sv) && num >= sv && num < sv + 10;
+                        });
+                        if (rangeMatch) return <p className="text-xs text-blue-700 mt-0.5 bg-blue-50 rounded px-2 py-1">~{rangeMatch.label}</p>;
+                      }
+                      return <p className="text-xs text-amber-600 mt-0.5">Unknown BBCH code</p>;
+                    })()}
                   </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">GPS Longitude</label>
-                    <input
-                      type="number"
-                      step="0.000001"
-                      min="-180"
-                      max="180"
-                      value={formData.GPSLongitude || ''}
-                      onChange={e => setFormData({...formData, GPSLongitude: e.target.value})}
-                      className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                      placeholder="-180 to 180"
-                    />
-                    {formData.GPSLongitude !== '' && (parseFloat(formData.GPSLongitude) < -180 || parseFloat(formData.GPSLongitude) > 180) && (
-                      <p className="text-xs text-red-600 mt-0.5">Must be between -180 and 180</p>
-                    )}
+                  {/* GPS fields */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">GPS Latitude</label>
+                      <input
+                        type="number"
+                        step="0.000001"
+                        min="-90"
+                        max="90"
+                        value={formData.GPSLatitude || ''}
+                        onChange={e => setFormData({...formData, GPSLatitude: e.target.value})}
+                        className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                        placeholder="-90 to 90"
+                      />
+                      {formData.GPSLatitude !== '' && (parseFloat(formData.GPSLatitude) < -90 || parseFloat(formData.GPSLatitude) > 90) && (
+                        <p className="text-xs text-red-600 mt-0.5">Must be between -90 and 90</p>
+                      )}
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">GPS Longitude</label>
+                      <input
+                        type="number"
+                        step="0.000001"
+                        min="-180"
+                        max="180"
+                        value={formData.GPSLongitude || ''}
+                        onChange={e => setFormData({...formData, GPSLongitude: e.target.value})}
+                        className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                        placeholder="-180 to 180"
+                      />
+                      {formData.GPSLongitude !== '' && (parseFloat(formData.GPSLongitude) < -180 || parseFloat(formData.GPSLongitude) > 180) && (
+                        <p className="text-xs text-red-600 mt-0.5">Must be between -180 and 180</p>
+                      )}
+                    </div>
+                  </div>
+                  {/* Soil fields */}
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">Soil pH</label>
+                      <input type="number" step="0.1" min="0" max="14" value={formData.SoilPH || ''} onChange={e => setFormData({...formData, SoilPH: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" />
+                      {formData.SoilPH !== '' && (parseFloat(formData.SoilPH) < 0 || parseFloat(formData.SoilPH) > 14) && (
+                        <p className="text-xs text-red-600 mt-0.5">Must be 0–14</p>
+                      )}
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">Clay %</label>
+                      <input type="number" step="1" min="0" max="100" value={formData.SoilClay || ''} onChange={e => setFormData({...formData, SoilClay: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" />
+                      {formData.SoilClay !== '' && (parseFloat(formData.SoilClay) < 0 || parseFloat(formData.SoilClay) > 100) && (
+                        <p className="text-xs text-red-600 mt-0.5">Must be 0–100%</p>
+                      )}
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">Sand %</label>
+                      <input type="number" step="1" min="0" max="100" value={formData.SoilSand || ''} onChange={e => setFormData({...formData, SoilSand: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">Org. Carbon %</label>
+                      <input type="number" step="0.01" min="0" value={formData.SoilOC || ''} onChange={e => setFormData({...formData, SoilOC: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">Texture</label>
+                      <select value={formData.SoilTexture || ''} onChange={e => setFormData({...formData, SoilTexture: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                        <option value="">Any</option>
+                        {['Loam','Clay','Sandy Loam','Sand','Silt','Clay Loam'].map(t => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  {/* Agronomic Context */}
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">Previous Crop</label>
+                      <input type="text" value={formData.PreviousCrop || ''} onChange={e => setFormData({...formData, PreviousCrop: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="e.g. Wheat, Fallow" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">Irrigation Method</label>
+                      <select value={formData.IrrigationMethod || ''} onChange={e => setFormData({...formData, IrrigationMethod: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                        <option value="">— None / Rainfed —</option>
+                        {['Flood / Furrow','Sprinkler','Drip / Micro','Sub-surface Drip','Basin','Centre Pivot','Rainfed'].map(m => <option key={m} value={m}>{m}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">Plant Population (plants/ha)</label>
+                      <input type="number" min="0" step="1000" value={formData.PlantPopulation || ''} onChange={e => setFormData({...formData, PlantPopulation: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="e.g. 250000" />
+                    </div>
                   </div>
                 </div>
-                {/* Soil fields */}
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-xs text-slate-500 mb-1">Soil pH</label>
-                    <input type="number" step="0.1" min="0" max="14" value={formData.SoilPH || ''} onChange={e => setFormData({...formData, SoilPH: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" />
-                    {formData.SoilPH !== '' && (parseFloat(formData.SoilPH) < 0 || parseFloat(formData.SoilPH) > 14) && (
-                      <p className="text-xs text-red-600 mt-0.5">Must be 0–14</p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-xs text-slate-500 mb-1">Clay %</label>
-                    <input type="number" step="1" min="0" max="100" value={formData.SoilClay || ''} onChange={e => setFormData({...formData, SoilClay: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" />
-                    {formData.SoilClay !== '' && (parseFloat(formData.SoilClay) < 0 || parseFloat(formData.SoilClay) > 100) && (
-                      <p className="text-xs text-red-600 mt-0.5">Must be 0–100%</p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-xs text-slate-500 mb-1">Sand %</label>
-                    <input type="number" step="1" min="0" max="100" value={formData.SoilSand || ''} onChange={e => setFormData({...formData, SoilSand: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-slate-500 mb-1">Org. Carbon %</label>
-                    <input type="number" step="0.01" min="0" value={formData.SoilOC || ''} onChange={e => setFormData({...formData, SoilOC: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-slate-500 mb-1">Texture</label>
-                    <select value={formData.SoilTexture || ''} onChange={e => setFormData({...formData, SoilTexture: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
-                      <option value="">Any</option>
-                      {['Loam','Clay','Sandy Loam','Sand','Silt','Clay Loam'].map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </div>
-                </div>
-                {/* Agronomic Context */}
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-xs text-slate-500 mb-1">Previous Crop</label>
-                    <input type="text" value={formData.PreviousCrop || ''} onChange={e => setFormData({...formData, PreviousCrop: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="e.g. Wheat, Fallow" />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-slate-500 mb-1">Irrigation Method</label>
-                    <select value={formData.IrrigationMethod || ''} onChange={e => setFormData({...formData, IrrigationMethod: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
-                      <option value="">— None / Rainfed —</option>
-                      {['Flood / Furrow','Sprinkler','Drip / Micro','Sub-surface Drip','Basin','Centre Pivot','Rainfed'].map(m => <option key={m} value={m}>{m}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs text-slate-500 mb-1">Plant Population (plants/ha)</label>
-                    <input type="number" min="0" step="1000" value={formData.PlantPopulation || ''} onChange={e => setFormData({...formData, PlantPopulation: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="e.g. 250000" />
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
 
-          {/* Yield Data Panel — Task 58 */}
-          {(() => {
+          {/* Yield Data Panel (Non-Herbicide) */}
+          {activeCategory !== 'herbicide' && (() => {
             const yieldVal = parseFloat(formData.YieldValue);
             const projectYieldsForOutlier = formData.ProjectID
               ? (state.trials || [])
