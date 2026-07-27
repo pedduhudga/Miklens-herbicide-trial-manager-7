@@ -501,7 +501,10 @@ const TrialCard = memo(function TrialCard({
         </div>
 
         <div className="space-y-1.5 text-xs text-slate-500">
-          <div className="flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5 shrink-0" /><span>{formatDateTime(trial.Date) || '—'}</span></div>
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50/90 text-emerald-950 border border-emerald-200 font-bold text-[11px] shadow-xs">
+            <Calendar className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
+            <span>{formatDateTime(trial.Date) || '—'}</span>
+          </div>
           {(() => {
             const trialLocation = trial.Location || project?.Location;
             return (

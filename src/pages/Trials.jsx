@@ -5944,14 +5944,19 @@ If none are present, write "None".`;
                     {/* Sticky Date Header with premium glassmorphism & shadow */}
                     <div 
                       onClick={() => toggleSection(group.key)}
-                      className="flex items-center justify-between sticky top-[108px] z-10 bg-white/90 dark:bg-slate-900/90 py-3 px-4 backdrop-blur-md border border-slate-100 dark:border-slate-800/60 rounded-xl cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-all select-none shadow-sm"
+                      className="flex items-center justify-between sticky top-[108px] z-10 bg-white/95 dark:bg-slate-900/95 py-3 px-4 backdrop-blur-md border-l-4 border-l-emerald-500 border border-slate-200/80 rounded-xl cursor-pointer hover:bg-emerald-50/40 transition-all select-none shadow-sm"
                     >
                       <div className="flex items-center gap-3">
-                        <ChevronRight className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${!collapsedSections[group.key] ? 'rotate-90 text-emerald-600' : ''}`} />
-                        <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm md:text-base tracking-tight">
-                          {group.key}
-                        </h3>
-                        <span className="bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 text-xs font-bold px-2.5 py-0.5 rounded-full border border-emerald-100/50 dark:border-emerald-900/30">
+                        <ChevronRight className={`w-4 h-4 text-emerald-600 transition-transform duration-200 ${!collapsedSections[group.key] ? 'rotate-90' : ''}`} />
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-7 h-7 rounded-lg bg-emerald-500 text-white flex items-center justify-center shadow-sm shrink-0">
+                            <Calendar className="w-4 h-4" />
+                          </div>
+                          <h3 className="font-extrabold text-emerald-950 dark:text-emerald-100 text-sm md:text-base tracking-tight">
+                            {group.key}
+                          </h3>
+                        </div>
+                        <span className="bg-emerald-100 text-emerald-800 text-xs font-extrabold px-2.5 py-0.5 rounded-full border border-emerald-200">
                           {group.trials.length} {group.trials.length === 1 ? 'trial' : 'trials'}
                         </span>
                       </div>
