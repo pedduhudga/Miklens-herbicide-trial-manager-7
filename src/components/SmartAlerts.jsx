@@ -177,7 +177,7 @@ export default function SmartAlerts({ onViewTrial, compact = false }) {
           )}
         </div>
         <p className="text-amber-100 text-sm mt-1">
-          AI-powered monitoring for regrowth, efficacy decline, and rescue opportunities
+          Automated scientific monitoring for weed regrowth, trial lifecycle reminders, and observation checks
         </p>
       </div>
 
@@ -185,9 +185,8 @@ export default function SmartAlerts({ onViewTrial, compact = false }) {
       <div className="flex border-b border-slate-200 overflow-x-auto">
         {[
           { id: 'all', label: 'All', count: alerts.length - dismissed.size },
-          { id: 'critical', label: 'Critical', count: counts.critical },
-          { id: 'rescue', label: 'Rescue', count: alerts.filter(a => a.type === ALERT_TYPES.RESCUE_RECOMMENDED && !dismissed.has(a.id)).length },
-          { id: 'observation', label: 'Due', count: alerts.filter(a => a.type === ALERT_TYPES.OBSERVATION_DUE && !dismissed.has(a.id)).length },
+          { id: 'critical', label: 'High Priority', count: counts.critical + counts.high },
+          { id: 'observation', label: 'Observation Due', count: alerts.filter(a => (a.type === ALERT_TYPES.OBSERVATION_DUE || a.type === ALERT_TYPES.PHOTO_REMINDER) && !dismissed.has(a.id)).length },
           { id: 'regrowth', label: 'Regrowth', count: alerts.filter(a => a.type === ALERT_TYPES.REGROWTH_DETECTED && !dismissed.has(a.id)).length },
           { id: 'stagnant', label: 'Stagnant', count: alerts.filter(a => a.type === 'stagnant' && !dismissed.has(a.id)).length },
           { id: 'anomaly', label: 'Anomalies', count: alerts.filter(a => a.type === 'anomaly' && !dismissed.has(a.id)).length }

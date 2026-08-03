@@ -294,7 +294,7 @@ export function generateTrialAlerts(trial, projectTrials = []) {
       details: regrowth,
       timestamp: new Date().toISOString(),
       actionable: true,
-      actionLabel: 'Add Observation'
+      actionLabel: 'View Trial'
     });
   }
   
@@ -305,34 +305,18 @@ export function generateTrialAlerts(trial, projectTrials = []) {
       id: `${trial.ID}-decline`,
       type: ALERT_TYPES.EFFICACY_DECLINE,
       severity: ALERT_SEVERITY.MEDIUM,
-      title: 'Efficacy Declining',
+      title: 'Efficacy Decline Observed',
       message: `Control efficacy decreased by ${decline.decline.toFixed(1)}% over ${decline.daysElapsed} days`,
       trialId: trial.ID,
       trialName: trial.FormulationName,
       details: decline,
       timestamp: new Date().toISOString(),
       actionable: true,
-      actionLabel: 'View Trend'
+      actionLabel: 'View Trial'
     });
   }
   
-  // 3. Check for rescue recommendation
-  const rescue = checkRescueRecommended(trial, projectTrials);
-  if (rescue.recommended) {
-    alerts.push({
-      id: `${trial.ID}-rescue`,
-      type: ALERT_TYPES.RESCUE_RECOMMENDED,
-      severity: rescue.severity,
-      title: 'Rescue Treatment Recommended',
-      message: rescue.reason,
-      trialId: trial.ID,
-      trialName: trial.FormulationName,
-      details: rescue,
-      timestamp: new Date().toISOString(),
-      actionable: true,
-      actionLabel: 'Plan Rescue'
-    });
-  }
+  // 3. (Rescue recommendations removed for scientific evaluation trials)
   
   // 4. Check if observation is due
   const obsDue = checkObservationDue(trial);
