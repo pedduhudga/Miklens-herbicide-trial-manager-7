@@ -1,4 +1,4 @@
-﻿/**
+/**
  * trialLifecycle.js
  * ─────────────────────────────────────────────────────────────────────────────
  * Core calculation logic for Trial Auto-Finalization and Photo Reminders.
@@ -30,6 +30,27 @@ export function getTrialLastActivityDate(trial) {
         if (!isNaN(obsD.getTime())) {
           if (!latestDate || obsD > latestDate) {
             latestDate = obsD;
+          }
+        }
+      }
+    }
+  }
+
+  // Also check photo dates in PhotoURLs and WeedPhotosJSON
+  const photos = [
+    ...safeJsonParse(trial.PhotoURLs, []),
+    ...safeJsonParse(trial.WeedPhotosJSON, [])
+  ];
+  if (Array.isArray(photos)) {
+    for (const photo of photos) {
+      if (photo && !photo.deleted) {
+        const rawDate = photo.date || photo.timestamp || photo.capturedAt || photo.createdAt;
+        if (rawDate) {
+          const photoD = new Date(rawDate);
+          if (!isNaN(photoD.getTime())) {
+            if (!latestDate || photoD > latestDate) {
+              latestDate = photoD;
+            }
           }
         }
       }
