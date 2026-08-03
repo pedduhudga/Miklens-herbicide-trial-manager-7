@@ -342,7 +342,26 @@ export default function Trials({ onMenuClick }) {
     reader.readAsText(file);
     e.target.value = '';
   }, [trials, updateState, getAppState]);
+  // --- Navigation & Highlight handler from Toast / Alerts ---
+  useEffect(() => {
+    const handleNavigateToTrial = (e) => {
+      const targetId = e.detail?.trialId;
+      if (!targetId) return;
+      updateState({ highlightTrialId: targetId });
+      setTimeout(() => {
+        const el = document.getElementById(`trial-card-${targetId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 200);
+      setTimeout(() => {
+        updateState({ highlightTrialId: null });
+      }, 3500);
+    };
 
+    window.addEventListener('app:navigate_to_trial', handleNavigateToTrial);
+    return () => window.removeEventListener('app:navigate_to_trial', handleNavigateToTrial);
+  }, [updateState]);
 
   // --- Card 3-dot menus ---
   const [openCardMenu, setOpenCardMenu] = useState(null);
@@ -5876,6 +5895,7 @@ If none are present, write "None".`;
                                 trial={t}
                                 project={proj}
                                 isSelected={selectedForBulk.has(t.ID)}
+                                isHighlighted={state.highlightTrialId === t.ID}
                                 isPendingSync={isTrialPendingSync(t)}
                                 isMenuOpen={openCardMenu === t.ID}
                                 onToggleBulk={toggleBulk}

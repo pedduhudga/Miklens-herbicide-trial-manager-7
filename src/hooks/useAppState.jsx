@@ -26,6 +26,7 @@ const initialState = {
   croppedPhotosData: [],
   photoDeletionRequested: false,
   currentTrialIdForCamera: null,
+  highlightTrialId: null,
   cameraMode: 'general',
   aiChatHistory: [],
   aiChatSessions: [],

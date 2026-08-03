@@ -13,6 +13,8 @@ export const ALERT_TYPES = {
   EFFICACY_DECLINE: 'efficacy_decline',
   RESCUE_RECOMMENDED: 'rescue_recommended',
   OBSERVATION_DUE: 'observation_due',
+  PHOTO_REMINDER: 'photo_reminder',
+  AUTO_FINALIZED: 'auto_finalized',
   WEATHER_RISK: 'weather_risk',
   TRIAL_INCOMPLETE: 'trial_incomplete',
   CONTROL_CHECK: 'control_check',
@@ -576,6 +578,52 @@ export function generateAllAlerts(state) {
       
       alerts.push(...trialAlerts);
     });
+  });
+
+  // Lifecycle & Photo Reminder Alerts
+  categoryTrials.forEach(trial => {
+    const isCompleted = trial.IsCompleted === true || trial.IsCompleted === 'true' || trial.ControlFinalized === true;
+    if (trial.AutoFinalized) {
+      alerts.push({
+        id: `${trial.ID}-auto-finalized`,
+        type: ALERT_TYPES.AUTO_FINALIZED,
+        severity: ALERT_SEVERITY.MEDIUM,
+        title: 'Trial Auto-Finalized',
+        message: `Trial "${trial.FormulationName || 'Trial'}" was automatically finalized due to inactivity.`,
+        trialId: trial.ID,
+        trialName: trial.FormulationName || 'Unknown Formulation',
+        timestamp: trial.AutoFinalizedAt || new Date().toISOString(),
+        actionable: true,
+        actionLabel: 'View Trial'
+      });
+    } else if (!isCompleted && trial.Date) {
+      const observations = safeJsonParse(trial.EfficacyDataJSON || trial.observations, []);
+      let lastDate = new Date(trial.Date);
+      if (Array.isArray(observations)) {
+        observations.forEach(obs => {
+          const rawD = obs.date || obs.ObservationDate || obs.timestamp;
+          if (rawD) {
+            const d = new Date(rawD);
+            if (!isNaN(d.getTime()) && d > lastDate) lastDate = d;
+          }
+        });
+      }
+      const daysSince = Math.max(0, Math.floor((Date.now() - lastDate.getTime()) / (1000 * 60 * 60 * 24)));
+      if (daysSince === 2) {
+        alerts.push({
+          id: `${trial.ID}-photo-reminder`,
+          type: ALERT_TYPES.PHOTO_REMINDER,
+          severity: ALERT_SEVERITY.HIGH,
+          title: 'Photo Observation Reminder',
+          message: `Trial "${trial.FormulationName || 'Trial'}" has no photos for 2 days. Capture photo today to prevent auto-finalization tomorrow.`,
+          trialId: trial.ID,
+          trialName: trial.FormulationName || 'Unknown Formulation',
+          timestamp: new Date().toISOString(),
+          actionable: true,
+          actionLabel: 'View Trial'
+        });
+      }
+    }
   });
   
   // Sort by severity (critical first) then timestamp

@@ -78,7 +78,7 @@ export default function Dashboard({ onMenuClick }) {
   const [fWeed, setFWeed] = useState('');
   const [fLocation, setFLocation] = useState('');
 
-  // ── Core stats
+  // ── Core stats & Lifecycle partitioning
   const stats = useMemo(() => {
     const active = trials.filter(t => t.IsCompleted !== true && t.IsCompleted !== 'true');
     const finalized = trials.filter(t => t.IsCompleted === true || t.IsCompleted === 'true');
@@ -88,7 +88,33 @@ export default function Dashboard({ onMenuClick }) {
     const positiveResults = resultCounts.Excellent + resultCounts.Good;
     const ratedTrials = Object.values(resultCounts).reduce((a, b) => a + b, 0);
     const successRate = ratedTrials > 0 ? Math.round((positiveResults / ratedTrials) * 100) : null;
-    return { active: active.length, finalized: finalized.length, totalObs, successRate, resultCounts };
+
+    // Lifecycle breakdown
+    let reminderCount = 0;
+    let autoFinalizedCount = 0;
+    const now = Date.now();
+
+    trials.forEach(t => {
+      if (t.AutoFinalized) autoFinalizedCount++;
+      const isCompleted = t.IsCompleted === true || t.IsCompleted === 'true';
+      if (!isCompleted && t.Date) {
+        const obs = safeJsonParse(t.EfficacyDataJSON || t.observations, []);
+        let lastDate = new Date(t.Date);
+        if (Array.isArray(obs)) {
+          obs.forEach(o => {
+            const rawD = o.date || o.ObservationDate || o.timestamp;
+            if (rawD) {
+              const d = new Date(rawD);
+              if (!isNaN(d.getTime()) && d > lastDate) lastDate = d;
+            }
+          });
+        }
+        const daysSince = Math.max(0, Math.floor((now - lastDate.getTime()) / (1000 * 60 * 60 * 24)));
+        if (daysSince === 2) reminderCount++;
+      }
+    });
+
+    return { active: active.length, finalized: finalized.length, totalObs, successRate, resultCounts, reminderCount, autoFinalizedCount };
   }, [trials]);
 
   // ── Trials Over Time (last 12 months)
@@ -277,13 +303,15 @@ export default function Dashboard({ onMenuClick }) {
         <div className="p-4 space-y-5">
 
           {/* ── Stat cards ─────────────────────────────────────────── */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
             <StatCard icon={Activity}    label="Total Trials"   value={trials.length}        sub={`${stats.active} active`}   color="emerald" onClick={() => navigate('/trials')} />
-            <StatCard icon={CheckCircle} label="Finalized"      value={stats.finalized}                                        color="blue"    onClick={() => navigate('/trials')} />
+            <StatCard icon={CheckCircle} label="Finalized"      value={stats.finalized}      sub={`${stats.autoFinalizedCount} auto-closed`} color="blue" onClick={() => navigate('/trials')} />
+            <StatCard icon={AlertCircle} label="Photo Reminders" value={stats.reminderCount}  sub="Due today" color="amber" onClick={() => navigate('/alerts')} />
             <StatCard icon={FolderOpen}  label="Projects"       value={projects.length}                                        color="purple"  onClick={() => navigate('/projects')} />
             <StatCard icon={FlaskConical}label="Formulations"   value={formulations.length}                                    color="amber"   onClick={() => navigate('/formulations')} />
             <StatCard icon={Leaf}        label="Ingredients"    value={ingredients.length}                                     color="emerald" onClick={() => navigate('/ingredients')} />
             <StatCard icon={BarChart3}   label="Observations"   value={stats.totalObs}                                         color="blue"    onClick={() => navigate('/analytics')} />
+            <StatCard icon={Sprout}      label="Auto-Closed"    value={stats.autoFinalizedCount} sub="Due to inactivity" color="emerald" onClick={() => navigate('/alerts')} />
           </div>
 
           {/* ── Smart Alerts ──────────────────────────────────────── */}

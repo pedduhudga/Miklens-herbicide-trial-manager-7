@@ -211,6 +211,11 @@ function AppLayout() {
           blocks: Array.isArray(result?.blocks) ? result.blocks : [],
           hasLoadedInitialData: true
         });
+
+        // Trigger Daily Trial Lifecycle Auto-Finalize & Photo Reminder Check
+        import('./services/trialAutoFinalize.js').then(({ runDailyLifecycleCheck }) => {
+          runDailyLifecycleCheck(result.trials, user, getAppState);
+        }).catch(err => console.error('[AutoFinalize] Failed to run lifecycle check:', err));
       } catch (error) {
         if (!cancelled) {
           const source = firebaseEnabled ? 'Firebase' : 'Google Sheet';

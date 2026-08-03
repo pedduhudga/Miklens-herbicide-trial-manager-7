@@ -44,6 +44,7 @@ const TrialCard = memo(function TrialCard({
   project,
   subTrialLabel,
   isSelected,
+  isHighlighted,
   isMenuOpen,
   onToggleBulk,
   onToggleMenu,
@@ -337,10 +338,11 @@ const TrialCard = memo(function TrialCard({
 
   return (
     <div
+      id={`trial-card-${trial.ID}`}
       onClick={handleCardClick}
       className={`cv-auto bg-white rounded-xl shadow-sm relative transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md cursor-pointer flex flex-col
         ${resultBorderClass}
-        ${isSelected ? 'border-2 border-emerald-500 ring-2 ring-emerald-100' : 'border border-slate-100 hover:border-emerald-300'}`}
+        ${isHighlighted ? 'ring-4 ring-amber-400 border-amber-500 shadow-xl animate-pulse scale-[1.01] z-10' : isSelected ? 'border-2 border-emerald-500 ring-2 ring-emerald-100' : 'border border-slate-100 hover:border-emerald-300'}`}
     >
       {/* Checkbox */}
       {!isViewer && !isShared && (

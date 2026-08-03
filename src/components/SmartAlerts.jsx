@@ -300,16 +300,13 @@ export default function SmartAlerts({ onViewTrial, compact = false }) {
                       {alert.actionable && (
                         <div className="flex gap-2 mt-3">
                           <button
-                            onClick={() => window.location.href = `#/trials?focus=${alert.trialId}`}
-                            className="px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
+                            onClick={() => {
+                              window.dispatchEvent(new CustomEvent('app:navigate_to_trial', { detail: { trialId: alert.trialId } }));
+                              if (onViewTrial) onViewTrial(alert.trialId);
+                            }}
+                            className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 transition cursor-pointer"
                           >
-                            View Trial
-                          </button>
-                          <button
-                            onClick={() => window.location.href = `#/trials?focus=${alert.trialId}`}
-                            className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 transition"
-                          >
-                            {alert.actionLabel}
+                            {alert.actionLabel || 'View Trial'} →
                           </button>
                         </div>
                       )}
