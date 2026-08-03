@@ -618,3 +618,87 @@ export async function fbSaveAiChatSession(data, userId) {
 export async function fbDeleteAiChatSession(id) {
   return fbDelete(COLLECTIONS.aiChatSessions, id);
 }
+
+// ─── Account Data Recovery & Re-Linking ──────────────────────────────────────
+/**
+ * Scans all root and category-specific collections for records matching
+ * a given user email/username or previous UID, and re-binds CreatedBy to targetUid.
+ */
+export async function fbReclaimOrphanedUserData(emailOrUsername, targetUid, previousUids = []) {
+  if (!targetUid) throw new Error('targetUid is required for data reclamation');
+  if (!emailOrUsername) return { success: true, count: 0, collectionsUpdated: {} };
+
+  const db = getFirebaseDB();
+  const searchTerms = new Set([emailOrUsername.toLowerCase().trim()]);
+  if (Array.isArray(previousUids)) {
+    previousUids.forEach(u => u && searchTerms.add(u));
+  }
+
+  // Gather all unique collection names across all categories & root
+  const categories = ['herbicide', 'fungicide', 'pesticide', 'nutrition', 'biostimulant'];
+  const types = ['trials', 'projects', 'formulations', 'ingredients', 'blocks'];
+  const collectionsToScan = new Set(['organisations', 'sprayLogs', 'aiChatSessions', ...types]);
+
+  categories.forEach(cat => {
+    types.forEach(t => collectionsToScan.add(getCategoryCollection(cat, t)));
+  });
+
+  let totalUpdated = 0;
+  const collectionsUpdated = {};
+
+  for (const colName of collectionsToScan) {
+    try {
+      const colRef = collection(db, colName);
+      const docsToUpdate = new Map();
+
+      for (const term of searchTerms) {
+        // Search CreatedBy equal to email/username or old UID
+        const q = query(colRef, where("CreatedBy", "==", term));
+        const snap = await getDocs(q);
+        snap.docs.forEach(d => {
+          if (d.id && d.data().CreatedBy !== targetUid) {
+            docsToUpdate.set(d.id, d.ref);
+          }
+        });
+
+        // Also search case-sensitive email string if different from lowercase
+        if (term !== emailOrUsername && emailOrUsername) {
+          const qExact = query(colRef, where("CreatedBy", "==", emailOrUsername));
+          const snapExact = await getDocs(qExact);
+          snapExact.docs.forEach(d => {
+            if (d.id && d.data().CreatedBy !== targetUid) {
+              docsToUpdate.set(d.id, d.ref);
+            }
+          });
+        }
+      }
+
+      if (docsToUpdate.size > 0) {
+        const batch = writeBatch(db);
+        let batchCount = 0;
+        for (const [docId, docRef] of docsToUpdate.entries()) {
+          batch.update(docRef, {
+            CreatedBy: targetUid,
+            _updatedAt: serverTimestamp()
+          });
+          batchCount++;
+          if (batchCount >= 450) { // Keep batch under Firestore 500 limit
+            await batch.commit();
+            batchCount = 0;
+          }
+        }
+        if (batchCount > 0) {
+          await batch.commit();
+        }
+        collectionsUpdated[colName] = docsToUpdate.size;
+        totalUpdated += docsToUpdate.size;
+      }
+    } catch (err) {
+      console.warn(`[DataRecovery] Error scanning collection ${colName}:`, err);
+    }
+  }
+
+  console.log(`[DataRecovery] Successfully reclaimed ${totalUpdated} records for ${emailOrUsername} -> ${targetUid}`);
+  return { success: true, count: totalUpdated, collectionsUpdated };
+}
+

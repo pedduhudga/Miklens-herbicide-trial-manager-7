@@ -237,16 +237,35 @@ function getAllowedUids(getAppState) {
     return null; // admin sees all
   }
 
+  const username = user.Username || user.username || state.auth?.username;
+  const previousUids = user.previousUids || user.PreviousUids || [];
+
   if (role === 'developer') {
     // developer can see everything (all data) ONLY if allowDataAccess is explicitly true
     const allowData = !!user.allowDataAccess || !!user.AllowDataAccess;
-    return allowData ? null : [uid]; // returns own uid so they see only their own test data
+    if (allowData) return null;
+    const devAllowed = [uid].filter(Boolean);
+    if (username && !devAllowed.includes(username)) devAllowed.push(username);
+    if (Array.isArray(previousUids)) {
+      previousUids.forEach(p => p && !devAllowed.includes(p) && devAllowed.push(p));
+    }
+    return devAllowed;
   }
 
   // Regular user (scientist/viewer)
-  // Retrieve their own UID and any viewableUsers (cross-user sharing)
+  // Retrieve their own UID, Username, previous UIDs, and any viewableUsers (cross-user sharing)
   const viewable = user.viewableUsers || user.ViewableUsers || [];
-  const allowed = [uid];
+  const allowed = [uid].filter(Boolean);
+  if (username && !allowed.includes(username)) {
+    allowed.push(username);
+  }
+  if (Array.isArray(previousUids)) {
+    for (const prev of previousUids) {
+      if (prev && typeof prev === 'string' && !allowed.includes(prev)) {
+        allowed.push(prev);
+      }
+    }
+  }
   if (Array.isArray(viewable)) {
     for (const val of viewable) {
       if (val && typeof val === 'string' && !allowed.includes(val)) {
@@ -287,17 +306,25 @@ function checkOwnership(collectionType, recordId, getAppState, action = 'edit') 
   const ownUid = state.auth?.uid || user.ID || user.uid;
   if (!ownUid) return false;
 
+  const username = user.Username || user.username || state.auth?.username;
+  const previousUids = user.previousUids || user.PreviousUids || [];
+  const ownIdentifiers = [ownUid];
+  if (username) ownIdentifiers.push(username);
+  if (Array.isArray(previousUids)) {
+    previousUids.forEach(p => p && typeof p === 'string' && ownIdentifiers.push(p));
+  }
+
   const list = state[collectionType] || [];
   const record = list.find(r => r.ID === recordId || r.id === recordId);
   if (!record) return true; // new record or not in state
 
-  const isOwner = !record.CreatedBy || record.CreatedBy === ownUid;
+  const isOwner = !record.CreatedBy || ownIdentifiers.includes(record.CreatedBy);
   if (isOwner) return true;
 
   if (action === 'edit') {
     // Allow editing if the user is in the SharedWithEdit array
     const sharedWithEdit = record.SharedWithEdit || [];
-    return Array.isArray(sharedWithEdit) && sharedWithEdit.includes(ownUid);
+    return Array.isArray(sharedWithEdit) && ownIdentifiers.some(id => sharedWithEdit.includes(id));
   }
 
   // Deletions are strictly restricted to the creator

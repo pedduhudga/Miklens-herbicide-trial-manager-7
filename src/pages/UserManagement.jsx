@@ -2,9 +2,9 @@ import React, { useState, useMemo, useEffect } from 'react';
 import TopBar from '../components/TopBar.jsx';
 import { useAppState } from '../hooks/useAppState.jsx';
 import { useAuth } from '../hooks/useAuth.js';
-import { Users, ShieldAlert, CheckCircle, XCircle, Plus, Pencil, Trash2, X, UserCog, Leaf, Shield, Bug, Beaker, Sprout, Eye, EyeOff } from 'lucide-react';
+import { Users, ShieldAlert, CheckCircle, XCircle, Plus, Pencil, Trash2, X, UserCog, Leaf, Shield, Bug, Beaker, Sprout, Eye, EyeOff, RefreshCw, Link as LinkIcon } from 'lucide-react';
 import { CATEGORIES, DEFAULT_CATEGORY_ACCESS, ADMIN_CATEGORY_ACCESS } from '../utils/categoryConfig.js';
-import { fbGetAllUsers, fbUpdateUserProfile, fbRegisterUser, fbAdminUpdateUserPassword, fbResetPassword } from '../services/firebaseAuth.js';
+import { fbGetAllUsers, fbUpdateUserProfile, fbRegisterUser, fbAdminUpdateUserPassword, fbResetPassword, fbReclaimOrphanedUserData } from '../services/firebaseAuth.js';
 
 const ICON_MAP = { Leaf, Shield, Bug, Beaker, Sprout };
 
@@ -46,6 +46,35 @@ export default function UserManagement({ onMenuClick }) {
   const [showPassword, setShowPassword] = useState(false);
 
   const firebaseEnabled = !!state.settings?.firebaseEnabled;
+
+  const handleReclaimData = async (userToReclaim) => {
+    if (!firebaseEnabled) {
+      toast('Data recovery is only available when Firebase is enabled', 'warn');
+      return;
+    }
+    const username = userToReclaim.username || userToReclaim.Username || userToReclaim.email;
+    const uid = userToReclaim.id || userToReclaim.uid || userToReclaim.ID;
+    if (!username || !uid) {
+      toast('Invalid user details for recovery', 'error');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      toast(`Scanning database for records matching ${username}...`, 'info');
+      const prevUids = userToReclaim.previousUids || userToReclaim.PreviousUids || [];
+      const res = await fbReclaimOrphanedUserData(username, uid, prevUids);
+      if (res.success) {
+        toast(`Successfully re-linked ${res.count} records to ${username}!`, 'success');
+      } else {
+        toast('Data re-linking failed: ' + res.message, 'error');
+      }
+    } catch (err) {
+      toast('Re-link failed: ' + err.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const toast = (msg, type = 'success') =>
     window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg, type } }));
@@ -435,6 +464,13 @@ export default function UserManagement({ onMenuClick }) {
                         className={`text-xs font-semibold px-2.5 py-1 rounded-lg border transition ${u.disabled ? 'border-emerald-200 text-emerald-600 hover:bg-emerald-50' : 'border-amber-200 text-amber-600 hover:bg-amber-50'}`}>
                         {u.disabled ? 'Enable' : 'Disable'}
                       </button>
+                      {firebaseEnabled && (
+                        <button onClick={() => handleReclaimData(u)}
+                          title="Re-link & Recover User Account Data"
+                          className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition flex items-center gap-1">
+                          <LinkIcon className="w-4 h-4" />
+                        </button>
+                      )}
                       <button onClick={() => openModal(u)}
                         className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition">
                         <Pencil className="w-4 h-4" />

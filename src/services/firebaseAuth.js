@@ -15,6 +15,7 @@ import { doc, getDoc, setDoc, updateDoc, serverTimestamp, collection, getDocs, q
 import { initializeApp, getApps } from 'firebase/app';
 import { getFirebaseAuth, getFirebaseDB, COLLECTIONS } from './firebase.js';
 import { DEFAULT_CATEGORY_ACCESS } from '../utils/categoryConfig.js';
+import { fbReclaimOrphanedUserData } from './firebaseDB.js';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -35,9 +36,25 @@ async function createUserProfile(uid, profileData) {
 
   // Auto-promote first user or admin emails to Admin
   let isFirstUser = false;
+  let previousUids = [];
   try {
     const snap = await getDocs(collection(db, COLLECTIONS.users));
-    if (snap.empty) isFirstUser = true;
+    if (snap.empty) {
+      isFirstUser = true;
+    } else if (profileData.email) {
+      // Find old user profiles that matched this email (e.g. deleted or re-created)
+      const emailLower = profileData.email.toLowerCase().trim();
+      snap.docs.forEach(d => {
+        const u = d.data();
+        if (d.id !== uid && (u.Username?.toLowerCase() === emailLower || u.email?.toLowerCase() === emailLower)) {
+          previousUids.push(d.id);
+          if (Array.isArray(u.previousUids)) {
+            previousUids.push(...u.previousUids);
+          }
+        }
+      });
+      previousUids = [...new Set(previousUids)];
+    }
   } catch (e) {
     // If rules block listing users, we assume not first
   }
@@ -54,11 +71,20 @@ async function createUserProfile(uid, profileData) {
     ApiKeysJSON: '[]',
     categoryAccess: profileData.categoryAccess || { ...DEFAULT_CATEGORY_ACCESS },
     tabPermissions: profileData.tabPermissions || {},
+    previousUids,
     CreatedAt: new Date().toISOString(),
     UpdatedAt: new Date().toISOString(),
     _createdAt: serverTimestamp(),
   };
   await setDoc(doc(db, COLLECTIONS.users, uid), record);
+
+  // Trigger background data recovery/re-linking for this user
+  try {
+    fbReclaimOrphanedUserData(profileData.email, uid, previousUids);
+  } catch (reclaimErr) {
+    console.warn('[Firebase] Data auto-reclaim warning:', reclaimErr);
+  }
+
   return record;
 }
 
@@ -86,6 +112,14 @@ export async function fbLogin(email, password) {
       await signOut(auth);
       throw new Error('Account is disabled. Contact administrator.');
     }
+
+    // Auto-reclaim any orphaned data for this user asynchronously upon login
+    try {
+      fbReclaimOrphanedUserData(email, cred.user.uid, profile.previousUids || []);
+    } catch (recErr) {
+      console.warn('[Firebase] Login auto-reclaim warning:', recErr);
+    }
+
     return { success: true, user: { ...profile, uid: cred.user.uid }, uid: cred.user.uid, token };
   } catch (err) {
     const map = {
@@ -253,3 +287,6 @@ export async function fbAdminUpdateUserPassword(email, currentPassword, newPassw
     return { success: false, message: map[err.code] || err.message };
   }
 }
+
+export { fbReclaimOrphanedUserData };
+

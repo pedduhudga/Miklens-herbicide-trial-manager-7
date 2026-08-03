@@ -1,13 +1,14 @@
 import React, { useRef, useState, useEffect } from 'react';
 import TopBar from '../components/TopBar.jsx';
 import { useAppState } from '../hooks/useAppState.jsx';
-import { Database, Download, Upload, Archive, Activity, FileSpreadsheet, CheckCircle, AlertCircle, Wrench, Bot, Trash2, FileCode, Cloud, Import, RefreshCw, FileSpreadsheet as ExcelIcon, Table } from 'lucide-react';
+import { Database, Download, Upload, Archive, Activity, FileSpreadsheet, CheckCircle, AlertCircle, Wrench, Bot, Trash2, FileCode, Cloud, Import, RefreshCw, FileSpreadsheet as ExcelIcon, Table, Link as LinkIcon } from 'lucide-react';
 import CloudBackup from '../components/CloudBackup.jsx';
 import { exportCSV, exportZIP, importCSV, exportToExcel, exportTrialObservations } from '../utils/exportUtils.js';
 import { updateTrial, updateProject, updateFormulation } from '../services/dataLayer.js'; // Adjust as needed
 import { calculateDAA } from '../utils/dateUtils.js';
 import { analyzePhoto, generateTextWithAI, getAPIKeys } from '../services/multiProviderAI.js';
 import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryValue, calculateEfficacy } from '../utils/categoryConfig.js';
+import { fbReclaimOrphanedUserData } from '../services/firebaseAuth.js';
 
 
 // Initialize global states if not existing (Module scope)
@@ -25,6 +26,7 @@ import { useAuth } from '../hooks/useAuth.js';
 export default function DataManagement({ onMenuClick }) {
   const { state, updateState, getAppState, dispatch } = useAppState();
   const { isViewer, user } = useAuth();
+  const [isReclaiming, setIsReclaiming] = useState(false);
   const canDownload = user?.tabPermissions?.['Allow Downloads'] !== false;
   const activeCategory = state.activeCategory || 'herbicide';
   const catConfig = getCategoryConfig(activeCategory);
@@ -100,6 +102,43 @@ export default function DataManagement({ onMenuClick }) {
 
   const toast = (msg, type = 'success') =>
     window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg, type } }));
+
+  const handleReclaimMyData = async () => {
+    const firebaseEnabled = !!state.settings?.firebaseEnabled;
+    if (!firebaseEnabled) {
+      toast('Data recovery is only active when Firebase is enabled.', 'warn');
+      return;
+    }
+    const username = user?.Username || user?.username || user?.email || state.auth?.username;
+    const uid = state.auth?.uid || user?.ID || user?.uid;
+    if (!username || !uid) {
+      toast('Must be logged in with a valid user account.', 'error');
+      return;
+    }
+
+    setIsReclaiming(true);
+    try {
+      toast('Scanning database for orphaned records matching your account...', 'info');
+      const prevUids = user?.previousUids || user?.PreviousUids || [];
+      const res = await fbReclaimOrphanedUserData(username, uid, prevUids);
+      if (res.success) {
+        if (res.count > 0) {
+          toast(`Successfully recovered ${res.count} trial & experiment records! Reloading app data...`, 'success');
+          setTimeout(() => {
+            if (typeof window !== 'undefined') window.location.reload();
+          }, 1500);
+        } else {
+          toast('Account data scan complete. All your records are already properly linked.', 'info');
+        }
+      } else {
+        toast('Data recovery failed: ' + res.message, 'error');
+      }
+    } catch (err) {
+      toast('Recovery failed: ' + err.message, 'error');
+    } finally {
+      setIsReclaiming(false);
+    }
+  };
 
   // ── Export ────────────────────────────────────────────────────────────────
   const handleExportJSON = () => {
@@ -1520,6 +1559,28 @@ Provide a 2-sentence summary of expected efficacy based on typical performance p
             }`}
           >
             <Cloud className="w-4 h-4" /> Manage Cloud Backup
+          </button>
+        </div>
+
+        {/* ── Account Data Recovery & Re-linking ── */}
+        <div className="bg-white p-6 rounded-lg shadow border border-emerald-100">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-xl font-semibold text-emerald-700 flex items-center gap-2">
+              <LinkIcon className="w-5 h-5 text-emerald-600" /> Account Data Recovery & Re-linking
+            </h2>
+          </div>
+          <p className="text-gray-600 mb-4 text-sm">
+            If your account was re-created, password reset, or deleted and re-registered with the same email, click below to scan the database and re-link all your lost trials and experiment data.
+          </p>
+          <button
+            onClick={handleReclaimMyData}
+            disabled={isReclaiming}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition ${
+              isReclaiming ? "bg-slate-300 text-slate-500 cursor-not-allowed opacity-60" : "bg-emerald-600 text-white hover:bg-emerald-700"
+            }`}
+          >
+            <RefreshCw className={`w-4 h-4 ${isReclaiming ? 'animate-spin' : ''}`} />
+            {isReclaiming ? 'Scanning & Re-linking Data...' : 'Re-link & Recover My Account Data'}
           </button>
         </div>
 
