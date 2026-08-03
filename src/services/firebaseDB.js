@@ -622,16 +622,52 @@ export async function fbDeleteAiChatSession(id) {
 // ─── Account Data Recovery & Re-Linking ──────────────────────────────────────
 /**
  * Scans all root and category-specific collections for records matching
- * a given user email/username or previous UID, and re-binds CreatedBy to targetUid.
+ * a given user email/username or any associated old UIDs, and re-binds CreatedBy to targetUid.
  */
 export async function fbReclaimOrphanedUserData(emailOrUsername, targetUid, previousUids = []) {
   if (!targetUid) throw new Error('targetUid is required for data reclamation');
-  if (!emailOrUsername) return { success: true, count: 0, collectionsUpdated: {} };
+  if (!emailOrUsername) return { success: true, count: 0, collectionsUpdated: {}, discoveredUids: [] };
 
   const db = getFirebaseDB();
   const searchTerms = new Set([emailOrUsername.toLowerCase().trim()]);
+  const discoveredOldUids = new Set();
+
   if (Array.isArray(previousUids)) {
-    previousUids.forEach(u => u && searchTerms.add(u));
+    previousUids.forEach(u => {
+      if (u && typeof u === 'string' && u !== targetUid) {
+        searchTerms.add(u);
+        discoveredOldUids.add(u);
+      }
+    });
+  }
+
+  // 1. Automatically query the `users` collection to discover any other accounts sharing this email
+  try {
+    const usersCol = collection(db, COLLECTIONS.users);
+    const emailLower = emailOrUsername.toLowerCase().trim();
+    
+    // Fetch all users to safely match case-insensitively across Username / email fields
+    const usersSnap = await getDocs(usersCol);
+    usersSnap.docs.forEach(d => {
+      const uData = d.data();
+      const uEmail = (uData.Username || uData.username || uData.email || '').toLowerCase().trim();
+      if (uEmail === emailLower) {
+        if (d.id !== targetUid) {
+          discoveredOldUids.add(d.id);
+          searchTerms.add(d.id);
+        }
+        if (Array.isArray(uData.previousUids)) {
+          uData.previousUids.forEach(prev => {
+            if (prev && prev !== targetUid) {
+              discoveredOldUids.add(prev);
+              searchTerms.add(prev);
+            }
+          });
+        }
+      }
+    });
+  } catch (uErr) {
+    console.warn('[DataRecovery] Could not list users collection for auto-discovery:', uErr);
   }
 
   // Gather all unique collection names across all categories & root
@@ -661,7 +697,7 @@ export async function fbReclaimOrphanedUserData(emailOrUsername, targetUid, prev
           }
         });
 
-        // Also search case-sensitive email string if different from lowercase
+        // Also search case-exact email string if different from lowercase
         if (term !== emailOrUsername && emailOrUsername) {
           const qExact = query(colRef, where("CreatedBy", "==", emailOrUsername));
           const snapExact = await getDocs(qExact);
@@ -698,7 +734,27 @@ export async function fbReclaimOrphanedUserData(emailOrUsername, targetUid, prev
     }
   }
 
-  console.log(`[DataRecovery] Successfully reclaimed ${totalUpdated} records for ${emailOrUsername} -> ${targetUid}`);
-  return { success: true, count: totalUpdated, collectionsUpdated };
+  // 2. Persist discovered old UIDs into target user profile's previousUids array
+  if (discoveredOldUids.size > 0) {
+    try {
+      const targetUserRef = doc(db, COLLECTIONS.users, targetUid);
+      const targetSnap = await getDoc(targetUserRef);
+      if (targetSnap.exists()) {
+        const existingPrev = targetSnap.data().previousUids || [];
+        const mergedPrev = [...new Set([...existingPrev, ...discoveredOldUids])].filter(id => id && id !== targetUid);
+        await updateDoc(targetUserRef, {
+          previousUids: mergedPrev,
+          _updatedAt: serverTimestamp()
+        });
+      }
+    } catch (pErr) {
+      console.warn('[DataRecovery] Failed to update target user previousUids:', pErr);
+    }
+  }
+
+  const oldUidList = [...discoveredOldUids];
+  console.log(`[DataRecovery] Successfully reclaimed ${totalUpdated} records for ${emailOrUsername} -> ${targetUid}. Discovered Old UIDs:`, oldUidList);
+  return { success: true, count: totalUpdated, collectionsUpdated, discoveredUids: oldUidList };
 }
+
 

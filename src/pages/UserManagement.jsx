@@ -61,11 +61,19 @@ export default function UserManagement({ onMenuClick }) {
 
     setLoading(true);
     try {
-      toast(`Scanning database for records matching ${username}...`, 'info');
+      toast(`Scanning database & user records for ${username}...`, 'info');
       const prevUids = userToReclaim.previousUids || userToReclaim.PreviousUids || [];
       const res = await fbReclaimOrphanedUserData(username, uid, prevUids);
       if (res.success) {
-        toast(`Successfully re-linked ${res.count} records to ${username}!`, 'success');
+        const discCount = (res.discoveredUids || []).length;
+        if (res.count > 0) {
+          toast(`Successfully re-linked ${res.count} records to ${username}! (Linked ${discCount} old account UID(s))`, 'success');
+        } else if (discCount > 0) {
+          toast(`Linked ${discCount} old account UID(s) to ${username}'s active account profile!`, 'info');
+        } else {
+          toast(`Account data scan complete. ${username} is properly linked to all their data.`, 'info');
+        }
+        loadFbUsers();
       } else {
         toast('Data re-linking failed: ' + res.message, 'error');
       }
