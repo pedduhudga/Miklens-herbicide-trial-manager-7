@@ -4,7 +4,7 @@
  * Execution Engine for Trial Auto-Finalization and Notification Dispatch.
  */
 
-import { partitionTrialsByLifecycle, getTrialLastActivityDate } from '../utils/trialLifecycle.js';
+import { partitionTrialsByLifecycle, getTrialLastActivityDate, calculateEffectiveControlDays } from '../utils/trialLifecycle.js';
 import { fbCatUpdateTrial } from './firebaseDB.js';
 
 /**
@@ -23,14 +23,8 @@ export async function executeAutoFinalization(trialItems, getAppState, reason = 
     const lastDateObj = item.lastActivityDate || getTrialLastActivityDate(trial);
     const finDateStr = lastDateObj.toISOString().split('T')[0];
 
-    // Compute control duration from start date to last activity date
-    let controlDuration = null;
-    if (trial.Date) {
-      const start = new Date(trial.Date);
-      if (!isNaN(start.getTime())) {
-        controlDuration = Math.max(0, Math.round((lastDateObj - start) / (1000 * 60 * 60 * 24)));
-      }
-    }
+    // Compute scientific effective control duration (WCE >= 70% duration threshold)
+    const effectiveControlDays = calculateEffectiveControlDays(trial);
 
     const updatePayload = {
       ID: trial.ID,
@@ -39,7 +33,7 @@ export async function executeAutoFinalization(trialItems, getAppState, reason = 
       IsCompleted: true,
       ControlFinalized: true,
       FinalizationDate: finDateStr,
-      FinalControlDuration: controlDuration !== null ? String(controlDuration) : (trial.FinalControlDuration || '0'),
+      FinalControlDuration: String(effectiveControlDays),
       AutoFinalized: true,
       AutoFinalizedReason: reason,
       AutoFinalizedAt: new Date().toISOString(),

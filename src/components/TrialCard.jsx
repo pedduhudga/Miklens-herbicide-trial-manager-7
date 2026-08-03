@@ -2,6 +2,7 @@ import React, { memo, useMemo, useCallback, useState } from 'react';
 import { Calendar, MapPin, FlaskConical, Activity, Image as ImageIcon, ChevronLeft, ChevronRight, Edit, MoreVertical, Eye, Copy, FolderOpen, FileDown, ScanLine, MonitorPlay, Archive, FileCode, FileSpreadsheet, Share2, BrainCircuit, Trash2, Camera, CheckCircle, Clock, Pencil, CloudSun } from 'lucide-react';
 import { safeJsonParse } from '../utils/helpers.js';
 import { formatDateTime } from '../utils/dateUtils.js';
+import { calculateEffectiveControlDays } from '../utils/trialLifecycle.js';
 import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryValue } from '../utils/categoryConfig.js';
 import { useAuth } from '../hooks/useAuth.js';
 
@@ -167,35 +168,13 @@ const TrialCard = memo(function TrialCard({
     return '';
   }, [trial.PotRow, trial.PotCol, trial.TrialDesign, trial.Replication, project]);
 
-  // Control days calculation
+  // Control days calculation (Scientific WCE >= 70% Effective Duration)
   const controlDays = useMemo(() => {
     if (trial.FinalControlDuration && parseInt(trial.FinalControlDuration, 10) > 0) {
       return parseInt(trial.FinalControlDuration, 10);
     }
-    // Check max DAA directly from efficacyData observations
-    let maxObsDAA = 0;
-    if (Array.isArray(efficacyData) && efficacyData.length > 0) {
-      efficacyData.forEach(o => {
-        const daaVal = parseInt(o.daa ?? o.day ?? o.DAA ?? 0, 10);
-        if (!isNaN(daaVal) && daaVal > maxObsDAA) {
-          maxObsDAA = daaVal;
-        }
-      });
-    }
-
-    if (!trial.Date) {
-      return maxObsDAA > 0 ? maxObsDAA : null;
-    }
-
-    const start = new Date(trial.Date);
-    if (isNaN(start.getTime())) {
-      return maxObsDAA > 0 ? maxObsDAA : null;
-    }
-
-    const end = isCompleted && trial.FinalizationDate ? new Date(trial.FinalizationDate) : new Date();
-    const calculatedDays = Math.max(0, Math.round((end - start) / 86400000));
-    return Math.max(calculatedDays, maxObsDAA);
-  }, [trial.Date, trial.FinalControlDuration, trial.FinalizationDate, isCompleted, efficacyData]);
+    return calculateEffectiveControlDays(trial);
+  }, [trial, efficacyData]);
 
   const categoryId = project?.Category || trial?.Category || 'herbicide';
 

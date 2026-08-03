@@ -65,6 +65,82 @@ export function getTrialLastActivityDate(trial) {
 }
 
 /**
+ * SCIENTIFIC CONTROL DURATION CALCULATOR
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Calculates the exact Effective Days of Weed Control (WCE >= 70%).
+ * 
+ * Rules:
+ * 1. Scans observation timeline sorted by DAA.
+ * 2. Effective control continues as long as Weed Control Efficiency (WCE) >= 70%
+ *    (or Weed Cover <= 30%).
+ * 3. Once control drops below 70% (regrowth breakdown), control duration STOPS at 
+ *    the last successful DAA observation where control was maintained (>= 70%).
+ * 4. If control never dropped below 70%, control duration equals max DAA or total trial span.
+ */
+export function calculateEffectiveControlDays(trial) {
+  if (!trial) return 0;
+
+  const observations = safeJsonParse(trial.EfficacyDataJSON || trial.observations, []);
+  if (!Array.isArray(observations) || observations.length === 0) {
+    if (trial.FinalControlDuration) {
+      const parsed = parseInt(trial.FinalControlDuration, 10);
+      if (!isNaN(parsed) && parsed > 0) return parsed;
+    }
+    return 0;
+  }
+
+  // Sort observations chronologically by DAA
+  const sortedObs = [...observations].sort((a, b) => {
+    const daaA = parseFloat(a.daa ?? a.day ?? a.DAA ?? 0);
+    const daaB = parseFloat(b.daa ?? b.day ?? b.DAA ?? 0);
+    return daaA - daaB;
+  });
+
+  const category = trial.Category || 'herbicide';
+  let effectiveControlDays = 0;
+  let breakdownOccurred = false;
+
+  for (let i = 0; i < sortedObs.length; i++) {
+    const obs = sortedObs[i];
+    const daa = Math.max(0, parseInt(obs.daa ?? obs.day ?? obs.DAA ?? 0, 10));
+
+    // Calculate WCE percentage (0 to 100%)
+    let wce = null;
+    if (obs.wce !== undefined && obs.wce !== null) {
+      wce = parseFloat(obs.wce);
+    } else if (obs.controlPct !== undefined && obs.controlPct !== null) {
+      wce = parseFloat(obs.controlPct);
+    } else if (obs.weedCover !== undefined && obs.weedCover !== null) {
+      const cover = parseFloat(obs.weedCover);
+      const baselineCover = parseFloat(sortedObs[0]?.weedCover ?? 100) || 100;
+      wce = baselineCover > 0 ? Math.max(0, 100 - (cover / baselineCover) * 100) : 100 - cover;
+    }
+
+    // Default to 100% if no metric recorded yet
+    if (wce === null || isNaN(wce)) wce = 100;
+
+    // Scientific Threshold: Effective control requires WCE >= 70%
+    if (wce >= 70) {
+      if (!breakdownOccurred) {
+        effectiveControlDays = Math.max(effectiveControlDays, daa);
+      }
+    } else {
+      // Regrowth breakdown detected (< 70% control)!
+      // Control duration is locked to the last successful DAA before breakdown
+      breakdownOccurred = true;
+    }
+  }
+
+  // If no regrowth breakdown occurred throughout the trial, control equals max DAA or total span
+  if (!breakdownOccurred && effectiveControlDays === 0 && sortedObs.length > 0) {
+    const maxDAA = Math.max(...sortedObs.map(o => parseInt(o.daa ?? o.day ?? 0, 10) || 0));
+    effectiveControlDays = maxDAA;
+  }
+
+  return effectiveControlDays;
+}
+
+/**
  * Calculates days elapsed between a given date and now (in full days).
  */
 export function getDaysSinceDate(dateObj) {
