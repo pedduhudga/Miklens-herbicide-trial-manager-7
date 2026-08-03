@@ -6,7 +6,8 @@ export function resolvePhotoSrc(photo) {
   if (!photo) return null;
   if (typeof photo === 'string' && photo.trim()) {
     const s = photo.trim();
-    return s === '[base64-removed]' ? null : s;
+    if (s !== '[base64-removed]' && !s.includes('[base64-removed]')) return s;
+    return null;
   }
 
   if (typeof photo !== 'object') return null;
@@ -14,16 +15,26 @@ export function resolvePhotoSrc(photo) {
   const fileData = photo.fileData;
   if (typeof fileData === 'string' && fileData.trim()) {
     const fd = fileData.trim();
-    if (fd !== '[base64-removed]' && (fd.startsWith('data:') || fd.startsWith('http'))) return fd;
+    if (fd !== '[base64-removed]' && !fd.includes('[base64-removed]') && (fd.startsWith('data:') || fd.startsWith('http'))) return fd;
   }
 
   const url = photo.url || photo.src || photo.fileUrl || photo.photoUrl;
   if (typeof url === 'string' && url.trim()) {
     const u = url.trim();
-    if (u !== '[base64-removed]') return u;
+    if (u !== '[base64-removed]' && !u.includes('[base64-removed]')) return u;
   }
 
-  const driveId = photo.driveId || photo.fileId || photo.driveFileId;
+  // Extract Drive ID from any property (driveId, fileId, fileName, or embedded strings)
+  let driveId = photo.driveId || photo.fileId || photo.driveFileId || photo.id;
+  if (!driveId && typeof photo.fileName === 'string') {
+    const m = photo.fileName.match(/([a-zA-Z0-9_-]{15,})/);
+    if (m) driveId = m[1];
+  }
+  if (!driveId && typeof url === 'string') {
+    const m = url.match(/(?:[?&]id=|\/d\/)([a-zA-Z0-9_-]{10,})/);
+    if (m) driveId = m[1];
+  }
+
   if (typeof driveId === 'string' && driveId.length >= 10 && !driveId.includes('/')) {
     return `https://drive.google.com/uc?export=view&id=${driveId}`;
   }

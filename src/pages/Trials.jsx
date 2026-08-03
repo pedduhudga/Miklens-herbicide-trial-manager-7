@@ -288,6 +288,19 @@ export default function Trials({ onMenuClick }) {
   });
   const [isFetchingAppWeather, setIsFetchingAppWeather] = useState(false);
 
+  // Global Background Auto-Heal Trigger for Drive photos
+  useEffect(() => {
+    if (!state.trials || state.trials.length === 0) return;
+    const hasBrokenPhotos = state.trials.some(t => {
+      const photos = safeJsonParse(t.PhotoURLs, []);
+      return Array.isArray(photos) && photos.some(p => isPhotoBroken(p) && !p.deleted);
+    });
+    if (hasBrokenPhotos && !syncingAllPhotos) {
+      console.log('[AutoHeal] Detected broken photo links. Initiating silent background Drive healing...');
+      handleBatchSyncPhotos(true).catch(err => console.error('[AutoHeal] Background heal error:', err));
+    }
+  }, [state.trials]);
+
   // --- Bulk Edit modal ---
   const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
   const [bulkEditForm, setBulkEditForm] = useState({ InvestigatorName: '', Location: '', Result: '', Notes: '', Date: '', Dosage: '', Replication: '', TrialDesign: '', MainFactor: '', SubFactor: '' });
