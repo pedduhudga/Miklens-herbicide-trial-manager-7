@@ -297,7 +297,7 @@ export default function Trials({ onMenuClick }) {
     });
     if (hasBrokenPhotos && !syncingAllPhotos) {
       console.log('[AutoHeal] Detected broken photo links. Initiating silent background Drive healing...');
-      handleBatchSyncPhotos(true).catch(err => console.error('[AutoHeal] Background heal error:', err));
+      handleSyncAllPhotosFromDrive(true).catch(err => console.error('[AutoHeal] Background heal error:', err));
     }
   }, [state.trials]);
 
