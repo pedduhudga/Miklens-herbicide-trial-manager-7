@@ -347,16 +347,32 @@ export default function Trials({ onMenuClick }) {
     const handleNavigateToTrial = (e) => {
       const targetId = e.detail?.trialId;
       if (!targetId) return;
+
+      // Reset filters to ensure targeted trial card is visible
+      setActiveTab('all');
+      setSearch('');
+      setFilterFormulation('');
+      setFilterResult('');
+      setFilterProject('');
+
       updateState({ highlightTrialId: targetId });
-      setTimeout(() => {
+
+      // Retry scrolling to handle async rendering
+      let attempts = 0;
+      const scrollInterval = setInterval(() => {
+        attempts++;
         const el = document.getElementById(`trial-card-${targetId}`);
         if (el) {
           el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          clearInterval(scrollInterval);
+        } else if (attempts >= 10) {
+          clearInterval(scrollInterval);
         }
-      }, 200);
+      }, 150);
+
       setTimeout(() => {
         updateState({ highlightTrialId: null });
-      }, 3500);
+      }, 4000);
     };
 
     window.addEventListener('app:navigate_to_trial', handleNavigateToTrial);
