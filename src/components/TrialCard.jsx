@@ -551,7 +551,7 @@ const TrialCard = memo(function TrialCard({
               <div>Sub-Block: <span className="font-bold text-slate-700">{trial.SubBlockID}</span></div>
             </div>
           )}
-          {controlDays !== null && controlDays > 0 && (
+          {controlDays !== null && controlDays >= 0 && (
             <div className="flex items-center gap-1.5" onClick={stopPropagation}>
               <Clock className="w-3.5 h-3.5 shrink-0" />
               <span className={isCompleted ? 'text-emerald-600 font-semibold' : 'text-blue-600 font-semibold'}>
