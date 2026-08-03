@@ -2,6 +2,10 @@
  * aiMemory.js
  * Super-Memory Engine for the AI Assistant.
  * Builds a rich, pre-aggregated knowledge base from ALL in-memory data.
+ *
+ * KEY FIX: Active trials' elapsed time is NOT control duration.
+ * Only Finalized trials with FinalControlDuration have real control day data.
+ * Active trials are tracked separately as "still running".
  */
 
 import { safeJsonParse } from './helpers.js';
@@ -60,14 +64,29 @@ function parseTrial(trial, primaryObsField, categoryId) {
     peakEfficacy = effs.length > 0 ? Math.max(...effs) : null;
   }
 
-  let controlDays = null;
-  if (trial.FinalControlDuration) {
-    controlDays = parseInt(trial.FinalControlDuration, 10);
-    if (isNaN(controlDays)) controlDays = null;
-  } else if (trial.Date) {
-    const start = new Date(trial.Date);
-    const end = isCompleted && trial.FinalizationDate ? new Date(trial.FinalizationDate) : new Date();
-    controlDays = Math.max(0, Math.round((end - start) / 86400000));
+  // CRITICAL: Distinguish real control days from elapsed days
+  // - finalizedControlDays: only set if trial is Finalized (real measured duration)
+  // - elapsedDays: how long since trial started (NOT control duration for Active trials)
+  let finalizedControlDays = null;
+  let elapsedDays = null;
+
+  if (isCompleted) {
+    // Finalized trial: use recorded FinalControlDuration, or compute from finalization date
+    if (trial.FinalControlDuration) {
+      const parsed = parseInt(trial.FinalControlDuration, 10);
+      finalizedControlDays = isNaN(parsed) ? null : parsed;
+    }
+    if (finalizedControlDays === null && trial.Date && trial.FinalizationDate) {
+      const start = new Date(trial.Date);
+      const end = new Date(trial.FinalizationDate);
+      finalizedControlDays = Math.max(0, Math.round((end - start) / 86400000));
+    }
+  } else {
+    // Active trial: elapsed time is NOT a control duration measurement
+    if (trial.Date) {
+      const start = new Date(trial.Date);
+      elapsedDays = Math.max(0, Math.round((new Date() - start) / 86400000));
+    }
   }
 
   const obsTimeline = allEff.map(o => 'DAA' + o.daa + ':' + (o.ctrlPct !== null ? o.ctrlPct + '%' : '?')).join(', ');
@@ -84,11 +103,13 @@ function parseTrial(trial, primaryObsField, categoryId) {
     dateISO: trial.Date ? new Date(trial.Date).toISOString().split('T')[0] : null,
     month: trial.Date ? new Date(trial.Date).toLocaleString('en', { month: 'long', year: 'numeric' }) : null,
     isCompleted,
-    status: isCompleted ? 'Finalized' : 'Active',
-    controlDays,
+    status: isCompleted ? 'Finalized' : 'Active (still running)',
+    finalizedControlDays,   // REAL control days — only for Finalized trials
+    elapsedDays,            // Days since start — only for Active trials, NOT control duration
     finalEfficacy,
     peakEfficacy,
     baselineCover: round1(baselineVal),
+    observationCount: sorted.length,
     weather: {
       temp: fmt(trial.Temperature, null),
       humidity: fmt(trial.Humidity, null),
@@ -97,7 +118,6 @@ function parseTrial(trial, primaryObsField, categoryId) {
     },
     notes: fmt(trial.Conclusion || trial.Notes || '', null),
     obsTimeline,
-    observationCount: sorted.length,
     projectId: trial.ProjectID,
     projectName: '',
   };
@@ -119,19 +139,42 @@ function buildTargetRankings(parsedTrials, topN) {
       const fKey = entry[0], trials = entry[1];
       const parts = fKey.split('__');
       const formula = parts[0], dosage = parts[1];
+
       const efficacies = trials.map(t => t.finalEfficacy).filter(e => e !== null);
-      const controlDaysArr = trials.map(t => t.controlDays).filter(d => d !== null && d > 0);
       const resultCounts = { Excellent: 0, Good: 0, Fair: 0, Poor: 0, Unrated: 0 };
       trials.forEach(t => { resultCounts[t.result] = (resultCounts[t.result] || 0) + 1; });
+
+      // ONLY use finalized control days for rankings — active elapsed days are meaningless here
+      const finalizedTrials = trials.filter(t => t.isCompleted && t.finalizedControlDays !== null);
+      const controlDaysArr = finalizedTrials.map(t => t.finalizedControlDays).filter(d => d > 0);
+
       const avgEff = avg(efficacies);
-      const avgDays = avg(controlDaysArr);
+      const avgCtrlDays = avg(controlDaysArr);
+
+      // Score: efficacy 60% + finalized control days 40%
       const effScore = avgEff !== null ? avgEff : 0;
-      const dayScore = avgDays !== null ? Math.min(avgDays / 60 * 100, 100) : 0;
+      const dayScore = avgCtrlDays !== null ? Math.min(avgCtrlDays / 60 * 100, 100) : 0;
       const score = effScore * 0.6 + dayScore * 0.4;
-      return { formula, dosage, trialCount: trials.length, avgEfficacy: avgEff, avgControlDays: avgDays, resultBreakdown: resultCounts, score, locations: [...new Set(trials.map(t => t.location).filter(Boolean))], dates: trials.map(t => t.dateISO).filter(Boolean).sort() };
+
+      return {
+        formula, dosage, trialCount: trials.length,
+        finalizedTrialCount: finalizedTrials.length,
+        activeTrialCount: trials.filter(t => !t.isCompleted).length,
+        avgEfficacy: avgEff,
+        avgCtrlDays: avgCtrlDays,   // Only from Finalized trials
+        maxCtrlDays: controlDaysArr.length ? Math.max(...controlDaysArr) : null,
+        resultBreakdown: resultCounts,
+        score,
+        locations: [...new Set(trials.map(t => t.location).filter(Boolean))],
+        dates: trials.map(t => t.dateISO).filter(Boolean).sort()
+      };
     });
     formulaRanks.sort((a, b) => b.score - a.score);
-    rankings.push({ target, trialCount: Object.values(formulaMap).flat().length, topFormulas: formulaRanks.slice(0, topN).map((f, i) => Object.assign({ rank: i + 1 }, f)) });
+    rankings.push({
+      target,
+      trialCount: Object.values(formulaMap).flat().length,
+      topFormulas: formulaRanks.slice(0, topN).map((f, i) => Object.assign({ rank: i + 1 }, f))
+    });
   }
   rankings.sort((a, b) => b.trialCount - a.trialCount);
   return rankings;
@@ -155,11 +198,17 @@ function buildFailureAnalysis(parsedTrials) {
     const maxEff = Math.max(...withEff.map(t => t.finalEfficacy));
     const minEff = Math.min(...withEff.map(t => t.finalEfficacy));
     if (maxEff - minEff < 20) continue;
-    const cases = trials.filter(t => t.finalEfficacy !== null).sort((a, b) => (a.finalEfficacy || 0) - (b.finalEfficacy || 0)).map(t => ({
-      date: t.dateISO || t.date, month: t.month, result: t.result, efficacy: t.finalEfficacy,
-      controlDays: t.controlDays, location: t.location, investigator: t.investigator,
-      weather: t.weather, obsTimeline: t.obsTimeline
-    }));
+    const cases = trials
+      .filter(t => t.finalEfficacy !== null)
+      .sort((a, b) => (a.finalEfficacy || 0) - (b.finalEfficacy || 0))
+      .map(t => ({
+        date: t.dateISO || t.date, month: t.month, result: t.result, efficacy: t.finalEfficacy,
+        controlDuration: t.isCompleted
+          ? (t.finalizedControlDays !== null ? t.finalizedControlDays + 'd (Finalized)' : 'unknown')
+          : (t.elapsedDays !== null ? t.elapsedDays + 'd elapsed (Active-still running, not final)' : 'ongoing'),
+        location: t.location, investigator: t.investigator,
+        weather: t.weather, obsTimeline: t.obsTimeline
+      }));
     results.push({ formula, target, efficacyRange: round1(minEff) + '% - ' + round1(maxEff) + '%', cases });
   }
   results.sort((a, b) => {
@@ -181,11 +230,19 @@ function buildInvestigatorSummary(parsedTrials) {
     const efficacies = trials.map(t => t.finalEfficacy).filter(e => e !== null);
     const resultCounts = { Excellent: 0, Good: 0, Fair: 0, Poor: 0, Unrated: 0 };
     trials.forEach(t => { resultCounts[t.result] = (resultCounts[t.result] || 0) + 1; });
+    const finalizedTrials = trials.filter(t => t.isCompleted);
+    const finalCtrlDays = finalizedTrials.map(t => t.finalizedControlDays).filter(d => d !== null && d > 0);
     return {
-      investigator, trialCount: trials.length, completedTrials: trials.filter(t => t.isCompleted).length,
-      avgEfficacy: avg(efficacies), targets: [...new Set(trials.map(t => t.target).filter(Boolean))],
+      investigator,
+      trialCount: trials.length,
+      completedTrials: finalizedTrials.length,
+      activeTrials: trials.filter(t => !t.isCompleted).length,
+      avgEfficacy: avg(efficacies),
+      avgFinalizedCtrlDays: avg(finalCtrlDays),
+      targets: [...new Set(trials.map(t => t.target).filter(Boolean))],
       formulasUsed: [...new Set(trials.map(t => t.formulation).filter(Boolean))],
-      resultBreakdown: resultCounts, lastTrialDate: trials.map(t => t.dateISO).filter(Boolean).sort().pop() || null
+      resultBreakdown: resultCounts,
+      lastTrialDate: trials.map(t => t.dateISO).filter(Boolean).sort().pop() || null
     };
   }).sort((a, b) => b.trialCount - a.trialCount);
 }
@@ -202,20 +259,24 @@ function buildFormulaSummary(parsedTrials) {
     const parts = key.split('__');
     const formula = parts[0], dosage = parts[1];
     const efficacies = trials.map(t => t.finalEfficacy).filter(e => e !== null);
-    const controlDaysArr = trials.map(t => t.controlDays).filter(d => d !== null && d > 0);
     const resultCounts = { Excellent: 0, Good: 0, Fair: 0, Poor: 0, Unrated: 0 };
     trials.forEach(t => { resultCounts[t.result] = (resultCounts[t.result] || 0) + 1; });
+
+    // Only finalized control days for stats
+    const finalizedTrials = trials.filter(t => t.isCompleted && t.finalizedControlDays !== null);
+    const ctrlDaysArr = finalizedTrials.map(t => t.finalizedControlDays).filter(d => d > 0);
+
     return {
       formula, dosage, trialCount: trials.length,
+      finalizedCount: finalizedTrials.length,
+      activeCount: trials.filter(t => !t.isCompleted).length,
       targets: [...new Set(trials.map(t => t.target).filter(Boolean))],
       avgEfficacy: avg(efficacies),
       minEfficacy: efficacies.length ? Math.min(...efficacies) : null,
       maxEfficacy: efficacies.length ? Math.max(...efficacies) : null,
-      avgControlDays: avg(controlDaysArr),
-      maxControlDays: controlDaysArr.length ? Math.max(...controlDaysArr) : null,
+      avgFinalizedCtrlDays: avg(ctrlDaysArr),
+      maxFinalizedCtrlDays: ctrlDaysArr.length ? Math.max(...ctrlDaysArr) : null,
       resultBreakdown: resultCounts,
-      completedTrials: trials.filter(t => t.isCompleted).length,
-      activeTrials: trials.filter(t => !t.isCompleted).length,
       locations: [...new Set(trials.map(t => t.location).filter(Boolean))]
     };
   }).sort((a, b) => (b.avgEfficacy || 0) - (a.avgEfficacy || 0));
@@ -225,11 +286,25 @@ function buildTrialIndex(parsedTrials, projectMap) {
   return parsedTrials.map(t => {
     const proj = projectMap[t.projectId] ? '[' + projectMap[t.projectId] + ']' : '';
     const eff = t.finalEfficacy !== null ? t.finalEfficacy + '%eff' : 'no-eff';
-    const days = t.controlDays !== null ? t.controlDays + 'd' : '?d';
-    const wx = [t.weather.temp ? t.weather.temp + '\u00b0C' : null, t.weather.humidity ? t.weather.humidity + '%RH' : null, t.weather.wind ? t.weather.wind + 'km/h' : null, (t.weather.rain && t.weather.rain !== '0') ? 'rain:' + t.weather.rain : null].filter(Boolean).join('/') || 'no-wx';
+
+    // CLEAR labeling: Finalized real control days vs Active elapsed days
+    let ctrlStr;
+    if (t.isCompleted) {
+      ctrlStr = t.finalizedControlDays !== null ? t.finalizedControlDays + 'd-FINALIZED' : '?d-FINALIZED';
+    } else {
+      ctrlStr = t.elapsedDays !== null ? t.elapsedDays + 'd-ELAPSED(active,not-final)' : 'ongoing';
+    }
+
+    const wx = [
+      t.weather.temp ? t.weather.temp + 'C' : null,
+      t.weather.humidity ? t.weather.humidity + '%RH' : null,
+      t.weather.wind ? t.weather.wind + 'kmh' : null,
+      (t.weather.rain && t.weather.rain !== '0') ? 'rain:' + t.weather.rain : null
+    ].filter(Boolean).join('/') || 'no-wx';
+
     const notes = t.notes ? ' | notes:' + t.notes.slice(0, 80) : '';
     const obs = t.obsTimeline ? ' | obs:[' + t.obsTimeline + ']' : '';
-    return '* [' + t.id + '] ' + t.formulation + ' @' + t.dosage + ' | target:' + t.target + ' | ' + (t.dateISO || t.date) + ' | ' + t.location + ' | inv:' + t.investigator + ' | ' + eff + ' | ' + days + 'ctrl | ' + t.status + ' | result:' + t.result + proj + ' | wx:' + wx + obs + notes;
+    return '* [' + t.id + '] ' + t.formulation + ' @' + t.dosage + ' | target:' + t.target + ' | ' + (t.dateISO || t.date) + ' | ' + t.location + ' | inv:' + t.investigator + ' | ' + eff + ' | ' + ctrlStr + ' | ' + t.status + ' | result:' + t.result + proj + ' | wx:' + wx + obs + notes;
   }).join('\n');
 }
 
@@ -247,7 +322,10 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
   const projectMap = {};
   catProjects.forEach(p => { projectMap[p.ID] = p.Name; });
 
-  const targetFieldMap = { herbicide: 'WeedSpecies', fungicide: 'DiseaseTarget', pesticide: 'PestTarget', nutrition: 'CropTarget', biostimulant: 'CropTarget' };
+  const targetFieldMap = {
+    herbicide: 'WeedSpecies', fungicide: 'DiseaseTarget',
+    pesticide: 'PestTarget', nutrition: 'CropTarget', biostimulant: 'CropTarget'
+  };
   const targetField = targetFieldMap[categoryId] || 'WeedSpecies';
 
   const parsedTrials = catTrials.map(t => {
@@ -263,8 +341,13 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
   const formulaSums = buildFormulaSummary(parsedTrials);
   const trialIndex = buildTrialIndex(parsedTrials, projectMap);
 
+  const finalizedTrials = parsedTrials.filter(t => t.isCompleted);
+  const activeTrials = parsedTrials.filter(t => !t.isCompleted);
+
   const ingredientsCtx = catIngredients.length > 0
-    ? catIngredients.map(i => (i.name || i.Name) + ' | ' + (i.quantity || i.Quantity) + (i.unit || i.Unit) + ' @ Rs.' + (i.pricePerUnit || i.PricePerUnit) + '/' + (i.unit || i.Unit)).join('\n')
+    ? catIngredients.map(i =>
+        (i.name || i.Name) + ' | ' + (i.quantity || i.Quantity) + (i.unit || i.Unit) + ' @ Rs.' + (i.pricePerUnit || i.PricePerUnit) + '/' + (i.unit || i.Unit)
+      ).join('\n')
     : 'No ingredients recorded.';
 
   const formulationsCtx = catFormulations.length > 0
@@ -277,8 +360,8 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
 
   const stats = {
     totalTrials: catTrials.length,
-    completedTrials: parsedTrials.filter(t => t.isCompleted).length,
-    activeTrials: parsedTrials.filter(t => !t.isCompleted).length,
+    completedTrials: finalizedTrials.length,
+    activeTrials: activeTrials.length,
     uniqueTargets: [...new Set(parsedTrials.map(t => t.target))].length,
     uniqueFormulas: [...new Set(parsedTrials.map(t => t.formulation))].length,
     uniqueLocations: [...new Set(parsedTrials.map(t => t.location).filter(Boolean))].length,
@@ -291,32 +374,56 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
 
   const rankStr = targetRankings.map(r => {
     const topStr = r.topFormulas.map(f =>
-      '    #' + f.rank + ' ' + f.formula + ' @' + f.dosage + ' | avgEff:' + (f.avgEfficacy !== null ? f.avgEfficacy + '%' : '?') + ' | avgCtrlDays:' + (f.avgControlDays !== null ? f.avgControlDays : '?') + 'd | trials:' + f.trialCount + ' | E' + f.resultBreakdown.Excellent + '/G' + f.resultBreakdown.Good + '/F' + f.resultBreakdown.Fair + '/P' + f.resultBreakdown.Poor
+      '    #' + f.rank + ' ' + f.formula + ' @' + f.dosage +
+      ' | avgEff:' + (f.avgEfficacy !== null ? f.avgEfficacy + '%' : '?') +
+      ' | avgCtrlDays:' + (f.avgCtrlDays !== null ? f.avgCtrlDays + 'd (from ' + f.finalizedTrialCount + ' finalized trials)' : 'no-finalized-data') +
+      ' | maxCtrlDays:' + (f.maxCtrlDays !== null ? f.maxCtrlDays + 'd' : '?') +
+      ' | trials:' + f.trialCount + '(finalized:' + f.finalizedTrialCount + ', active:' + f.activeTrialCount + ')' +
+      ' | E' + f.resultBreakdown.Excellent + '/G' + f.resultBreakdown.Good + '/F' + f.resultBreakdown.Fair + '/P' + f.resultBreakdown.Poor
     ).join('\n');
     return '  TARGET: ' + r.target + ' (' + r.trialCount + ' trials)\n' + topStr;
   }).join('\n\n');
 
   const failStr = failureCases.map(f => {
     const caseStr = f.cases.map(c =>
-      '    [' + c.date + '|' + c.location + '|' + c.investigator + '] eff:' + (c.efficacy !== null ? c.efficacy + '%' : '?') + ' result:' + c.result + ' ctrl:' + (c.controlDays !== null ? c.controlDays + 'd' : '?') + ' wx:' + (c.weather.temp ? c.weather.temp + 'C' : '?') + '/' + (c.weather.humidity ? c.weather.humidity + '%RH' : '?') + '/' + (c.weather.rain ? 'rain:' + c.weather.rain : 'dry')
+      '    [' + c.date + '|' + c.location + '|' + c.investigator + '] eff:' + (c.efficacy !== null ? c.efficacy + '%' : '?') +
+      ' result:' + c.result + ' ctrl:' + c.controlDuration +
+      ' wx:' + (c.weather.temp ? c.weather.temp + 'C' : '?') + '/' + (c.weather.humidity ? c.weather.humidity + '%RH' : '?') + '/' + (c.weather.rain ? 'rain:' + c.weather.rain : 'dry')
     ).join('\n');
     return '  FORMULA: ' + f.formula + ' on TARGET: ' + f.target + ' (efficacy range: ' + f.efficacyRange + ')\n' + caseStr;
   }).join('\n\n');
 
   const invStr = investigatorSums.map(i =>
-    '  ' + i.investigator + ' | trials:' + i.trialCount + ' | completed:' + i.completedTrials + ' | avgEff:' + (i.avgEfficacy !== null ? i.avgEfficacy + '%' : '?') + ' | lastTrial:' + (i.lastTrialDate || '?') + ' | targets:[' + i.targets.slice(0, 5).join(', ') + ']'
+    '  ' + i.investigator + ' | trials:' + i.trialCount + ' | finalized:' + i.completedTrials + ' | active:' + i.activeTrials +
+    ' | avgEff:' + (i.avgEfficacy !== null ? i.avgEfficacy + '%' : '?') +
+    ' | avgFinalCtrlDays:' + (i.avgFinalizedCtrlDays !== null ? i.avgFinalizedCtrlDays + 'd' : 'no-finalized-data') +
+    ' | lastTrial:' + (i.lastTrialDate || '?') + ' | targets:[' + i.targets.slice(0, 5).join(', ') + ']'
   ).join('\n');
 
   const forSumStr = formulaSums.map(f =>
-    '  ' + f.formula + ' @' + f.dosage + ' | trials:' + f.trialCount + ' | avgEff:' + (f.avgEfficacy !== null ? f.avgEfficacy + '%' : '?') + ' | maxEff:' + (f.maxEfficacy !== null ? f.maxEfficacy + '%' : '?') + ' | avgCtrlDays:' + (f.avgControlDays !== null ? f.avgControlDays : '?') + 'd | maxCtrlDays:' + (f.maxControlDays !== null ? f.maxControlDays : '?') + 'd | targets:[' + f.targets.slice(0, 5).join(', ') + ']'
+    '  ' + f.formula + ' @' + f.dosage + ' | trials:' + f.trialCount + '(fin:' + f.finalizedCount + ',act:' + f.activeCount + ')' +
+    ' | avgEff:' + (f.avgEfficacy !== null ? f.avgEfficacy + '%' : '?') +
+    ' | maxEff:' + (f.maxEfficacy !== null ? f.maxEfficacy + '%' : '?') +
+    ' | avgCtrlDays(finalized-only):' + (f.avgFinalizedCtrlDays !== null ? f.avgFinalizedCtrlDays + 'd' : 'no-finalized-data') +
+    ' | maxCtrlDays(finalized-only):' + (f.maxFinalizedCtrlDays !== null ? f.maxFinalizedCtrlDays + 'd' : '?') +
+    ' | targets:[' + f.targets.slice(0, 5).join(', ') + ']'
   ).join('\n');
 
   const contextString = [
     '=== DATABASE OVERVIEW ===',
     'Category: ' + categoryId.toUpperCase(),
-    'Total Trials: ' + stats.totalTrials + ' (Completed: ' + stats.completedTrials + ' | Active: ' + stats.activeTrials + ')',
-    'Unique Targets: ' + stats.uniqueTargets + ' | Unique Formulas: ' + stats.uniqueFormulas + ' | Locations: ' + stats.uniqueLocations + ' | Investigators: ' + stats.uniqueInvestigators,
+    'Total Trials: ' + stats.totalTrials,
+    'Finalized Trials: ' + stats.completedTrials + ' (these have real control day measurements)',
+    'Active Trials: ' + stats.activeTrials + ' (still running — elapsed time is NOT control duration)',
+    'Unique Targets: ' + stats.uniqueTargets + ' | Unique Formulas: ' + stats.uniqueFormulas,
+    'Locations: ' + stats.uniqueLocations + ' | Investigators: ' + stats.uniqueInvestigators,
     'Date Range: ' + (stats.dateRange.earliest || '?') + ' to ' + (stats.dateRange.latest || '?'),
+    '',
+    '=== IMPORTANT: HOW TO INTERPRET CONTROL DAYS ===',
+    'FINALIZED trials: FinalControlDuration is the REAL, measured control period. Use this for comparisons.',
+    'ACTIVE trials: elapsedDays is just days since the trial started — it is NOT the control duration.',
+    'Never report Active trial elapsed days as "control days achieved" — the trial is still ongoing.',
+    'In the trial index below, FINALIZED control shows as "Xd-FINALIZED" and Active shows as "Xd-ELAPSED(active,not-final)".',
     '',
     '=== FORMULATION KNOWLEDGE BASE ===',
     formulationsCtx,
@@ -324,21 +431,20 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
     '=== INGREDIENT INVENTORY ===',
     ingredientsCtx,
     '',
-    '=== FORMULA PERFORMANCE OVERVIEW (ALL TRIALS) ===',
+    '=== FORMULA PERFORMANCE OVERVIEW (ALL TRIALS, ctrl days from Finalized only) ===',
     forSumStr || 'No performance data available.',
     '',
-    '=== TARGET-BASED FORMULA RANKINGS (Top 5 per target, computed from ALL trials) ===',
+    '=== TARGET-BASED FORMULA RANKINGS (Top 5 per target, ctrl days from Finalized only) ===',
     rankStr || 'No ranking data available.',
     '',
-    '=== SAME-FORMULA VARIABLE OUTCOMES - Weather/Timing Analysis ===',
-    'Cases where the SAME formula on the SAME target produced DIFFERENT results:',
+    '=== SAME-FORMULA VARIABLE OUTCOMES — Weather/Timing Analysis ===',
     failStr || 'No variable outcome cases detected.',
     '',
     '=== INVESTIGATOR SUMMARY ===',
     invStr || 'No investigator data available.',
     '',
     '=== COMPLETE TRIAL INDEX (ALL ' + stats.totalTrials + ' TRIALS) ===',
-    'Format: [ID] Formula @Dosage | target | date | location | inv:investigator | efficacy | controlDays | status | result | wx:weather | obs:timeline | notes',
+    'FINALIZED control = "Xd-FINALIZED" | Active elapsed time = "Xd-ELAPSED(active,not-final)"',
     trialIndex || 'No trials recorded.',
   ].join('\n');
 
