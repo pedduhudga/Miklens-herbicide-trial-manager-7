@@ -600,28 +600,32 @@ const TrialCard = memo(function TrialCard({
         </div>
         <div className="mt-2 flex items-center justify-between" onClick={stopPropagation}>
           <div className="flex items-center gap-1.5">
-            <span className={`w-2 h-2 rounded-full ${isLive && !isCompleted ? 'bg-green-500' : 'bg-slate-400'}`} />
-            <span className={`text-[10px] font-bold ${isLive && !isCompleted ? 'text-green-700' : 'text-slate-500'}`}>
-              {isLive && !isCompleted ? 'LIVE' : 'INACTIVE'}
-            </span>
+            {isCompleted ? (
+              <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">FINALIZED</span>
+            ) : (
+              <>
+                <span className={`w-2 h-2 rounded-full ${isLive ? 'bg-green-500' : 'bg-slate-400'}`} />
+                <span className={`text-[10px] font-bold ${isLive ? 'text-green-700' : 'text-slate-500'}`}>
+                  {isLive ? 'LIVE' : 'INACTIVE'}
+                </span>
+              </>
+            )}
           </div>
-          {isEditable && (
+          {isEditable && !isCompleted && (
             <div className="flex items-center gap-1">
-              {!isCompleted && (
-                <button onClick={handleMarkComplete}
-                  title="Mark as Completed"
-                  className="text-[10px] font-bold px-2 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 flex items-center gap-0.5 transition">
-                  <CheckCircle className="w-3 h-3" /> Done
-                </button>
-              )}
+              <button onClick={handleMarkComplete}
+                title="Mark as Completed"
+                className="text-[10px] font-bold px-2 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 flex items-center gap-0.5 transition">
+                <CheckCircle className="w-3 h-3" /> Done
+              </button>
               <button
                 onClick={handleActivateToggle}
                 className={`text-[10px] font-bold px-2 py-0.5 rounded border transition ${
-                  isLive && !isCompleted
+                  isLive
                     ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
                     : 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100'
                 }`}>
-                {isLive && !isCompleted ? 'Deactivate' : 'Activate'}
+                {isLive ? 'Deactivate' : 'Activate'}
               </button>
             </div>
           )}
