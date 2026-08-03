@@ -2581,11 +2581,29 @@ export default function Trials({ onMenuClick }) {
         : { ...photoEntry, tempId: undefined, aiStatus: 'pending' };
       currentPhotos.push(finalEntry);
 
-      const updatedTrial = { ...targetTrial, PhotoURLs: JSON.stringify(currentPhotos) };
+      const updatedTrial = {
+        ...targetTrial,
+        PhotoURLs: JSON.stringify(currentPhotos),
+        IsCompleted: false,
+        ControlFinalized: false,
+        FinalizationDate: '',
+        FinalControlDuration: '',
+        AutoFinalized: false,
+        IsLive: true
+      };
       updateState({ trials: getAppState().trials.map(t => t.ID === updatedTrial.ID ? updatedTrial : t) });
       if (activeTrial?.ID === targetTrial.ID) setActiveTrial(updatedTrial);
 
-      await updateTrial({ ID: updatedTrial.ID, PhotoURLs: updatedTrial.PhotoURLs }, getAppState);
+      await updateTrial({
+        ID: updatedTrial.ID,
+        PhotoURLs: updatedTrial.PhotoURLs,
+        IsCompleted: false,
+        ControlFinalized: false,
+        FinalizationDate: '',
+        FinalControlDuration: '',
+        AutoFinalized: false,
+        IsLive: true
+      }, getAppState);
 
       const daa = calculateDAA(photoDate, targetTrial.Date);
 
