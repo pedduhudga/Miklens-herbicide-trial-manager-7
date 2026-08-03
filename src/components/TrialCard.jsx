@@ -169,12 +169,33 @@ const TrialCard = memo(function TrialCard({
 
   // Control days calculation
   const controlDays = useMemo(() => {
-    if (trial.FinalControlDuration) return parseInt(trial.FinalControlDuration, 10);
-    if (!trial.Date) return null;
+    if (trial.FinalControlDuration && parseInt(trial.FinalControlDuration, 10) > 0) {
+      return parseInt(trial.FinalControlDuration, 10);
+    }
+    // Check max DAA directly from efficacyData observations
+    let maxObsDAA = 0;
+    if (Array.isArray(efficacyData) && efficacyData.length > 0) {
+      efficacyData.forEach(o => {
+        const daaVal = parseInt(o.daa ?? o.day ?? o.DAA ?? 0, 10);
+        if (!isNaN(daaVal) && daaVal > maxObsDAA) {
+          maxObsDAA = daaVal;
+        }
+      });
+    }
+
+    if (!trial.Date) {
+      return maxObsDAA > 0 ? maxObsDAA : null;
+    }
+
     const start = new Date(trial.Date);
+    if (isNaN(start.getTime())) {
+      return maxObsDAA > 0 ? maxObsDAA : null;
+    }
+
     const end = isCompleted && trial.FinalizationDate ? new Date(trial.FinalizationDate) : new Date();
-    return Math.max(0, Math.round((end - start) / 86400000));
-  }, [trial.Date, trial.FinalControlDuration, trial.FinalizationDate, isCompleted]);
+    const calculatedDays = Math.max(0, Math.round((end - start) / 86400000));
+    return Math.max(calculatedDays, maxObsDAA);
+  }, [trial.Date, trial.FinalControlDuration, trial.FinalizationDate, isCompleted, efficacyData]);
 
   const categoryId = project?.Category || trial?.Category || 'herbicide';
 
