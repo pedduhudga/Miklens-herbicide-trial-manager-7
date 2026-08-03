@@ -294,7 +294,23 @@ export default function LiveTrialPage() {
   const finalWce = latest
     ? calcWce(baseline, parseFloat(latest.weedCover ?? 0))
     : null;
-  const isActive = String(trial.IsLive).toLowerCase() !== "false";
+  // QR scan grace period logic: Allow scanning if trial is active OR within 7 days of finalization
+  const isCurrentlyLive = String(trial.IsLive).toLowerCase() !== "false";
+  let inGracePeriod = false;
+  if (!isCurrentlyLive || trial.IsCompleted) {
+    const finDateStr = trial.FinalizationDate || trial.AutoFinalizedAt || trial.Date;
+    if (finDateStr) {
+      const finDate = new Date(finDateStr);
+      if (!isNaN(finDate.getTime())) {
+        const daysSinceFin = Math.floor((Date.now() - finDate.getTime()) / (1000 * 60 * 60 * 24));
+        if (daysSinceFin <= 7) {
+          inGracePeriod = true;
+        }
+      }
+    }
+  }
+
+  const isActive = isCurrentlyLive || inGracePeriod;
 
   // Per-trial field visibility.
   // Priority: Firestore globalQR (set in Settings) > localStorage fallback > hardcoded defaults.

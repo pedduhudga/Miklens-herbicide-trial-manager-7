@@ -43,7 +43,7 @@ export async function executeAutoFinalization(trialItems, getAppState, reason = 
       AutoFinalized: true,
       AutoFinalizedReason: reason,
       AutoFinalizedAt: new Date().toISOString(),
-      IsLive: true // Keep QR code active for 7 days grace period
+      IsLive: false // Auto-finalized trials are marked IsLive: false (inactive)
     };
 
     try {
