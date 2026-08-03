@@ -3495,7 +3495,7 @@ Rules:
         processedCount++;
         window.dispatchEvent(new CustomEvent('app:toast', { 
           detail: { 
-            msg: `Syncing photos for "${trial.FormulationName || 'Trial'}" (${processedCount}/${trialsWithBroken.length})...`, 
+            msg: `Syncing photos for "${trial.FormulationName || 'Trial'}" (${processedCount}/${trialsToScan.length})...`, 
             type: 'info' 
           } 
         }));
