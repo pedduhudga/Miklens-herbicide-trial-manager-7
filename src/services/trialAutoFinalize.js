@@ -1,4 +1,4 @@
-﻿/**
+/**
  * trialAutoFinalize.js
  * ─────────────────────────────────────────────────────────────────────────────
  * Execution Engine for Trial Auto-Finalization and Notification Dispatch.
@@ -42,7 +42,8 @@ export async function executeAutoFinalization(trialItems, getAppState, reason = 
       FinalControlDuration: controlDuration !== null ? String(controlDuration) : (trial.FinalControlDuration || '0'),
       AutoFinalized: true,
       AutoFinalizedReason: reason,
-      AutoFinalizedAt: new Date().toISOString()
+      AutoFinalizedAt: new Date().toISOString(),
+      IsLive: true // Keep QR code active for 7 days grace period
     };
 
     try {
@@ -104,5 +105,31 @@ export async function runDailyLifecycleCheck(trials, user, getAppState) {
   if (trialsToFinalize.length > 0) {
     console.log(`[AutoFinalize] Auto-finalizing ${trialsToFinalize.length} inactive trials...`);
     await executeAutoFinalization(trialsToFinalize, getAppState, 'No photo captured for 3+ days');
+  }
+
+  // 3. Deactivate QR code (IsLive = false) for auto-finalized trials after 7 days grace period
+  const now = Date.now();
+  const state = getAppState ? getAppState() : (window.appState || {});
+  const activeCategory = state.activeCategory || 'herbicide';
+
+  for (const trial of trials) {
+    if (trial.AutoFinalized && trial.AutoFinalizedAt && String(trial.IsLive) !== 'false') {
+      const autoFinalizedDate = new Date(trial.AutoFinalizedAt);
+      if (!isNaN(autoFinalizedDate.getTime())) {
+        const daysSinceAutoFinalized = Math.floor((now - autoFinalizedDate.getTime()) / (1000 * 60 * 60 * 24));
+        if (daysSinceAutoFinalized >= 7) {
+          try {
+            await fbCatUpdateTrial(trial.Category || activeCategory, {
+              ID: trial.ID,
+              id: trial.ID,
+              IsLive: false
+            });
+            console.log(`[AutoFinalize] 7-day grace period ended for trial ${trial.ID}. QR code deactivated (IsLive = false).`);
+          } catch (err) {
+            console.error(`[AutoFinalize] Failed to deactivate trial ${trial.ID}:`, err);
+          }
+        }
+      }
+    }
   }
 }
