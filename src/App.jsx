@@ -16,11 +16,9 @@ import { getAllData } from './services/dataLayer.js';
 import { initAI } from './services/ai.js';
 import { getCategoryConfig } from './utils/categoryConfig.js';
 
-// A safe wrapper around React.lazy that catches chunk load errors (e.g. from app updates)
-// and triggers a full page reload to fetch the latest assets from the server.
 function safeLazy(importFn) {
   return lazy(() => {
-    return importFn().catch(error => {
+    return importFn().catch(async (error) => {
       console.error('[safeLazy] Failed to load chunk:', error);
       const errorMsg = error?.message || '';
       const isChunkError = 
@@ -33,9 +31,19 @@ function safeLazy(importFn) {
         const attempts = parseInt(sessionStorage.getItem(reloadKey) || '0', 10);
         if (attempts < 2) {
           sessionStorage.setItem(reloadKey, String(attempts + 1));
+          // Clear stale caches before reloading
+          try {
+            if ('caches' in window) {
+              const keys = await caches.keys();
+              await Promise.all(keys.map(k => caches.delete(k)));
+            }
+          } catch (e) {
+            console.warn('[safeLazy] Failed clearing cache:', e);
+          }
           window.location.reload();
-          // Return a pending promise so the UI stays in loading state while reloading
           return new Promise(() => {});
+        } else {
+          sessionStorage.removeItem(reloadKey);
         }
       }
       throw error;
@@ -190,6 +198,7 @@ function AppLayout() {
           window.dispatchEvent(new CustomEvent('app:toast', {
             detail: { msg: `Failed to load data: ${result.message || result._errType}`, type: 'error' }
           }));
+          updateState({ hasLoadedInitialData: true });
           return;
         }
 
@@ -206,6 +215,7 @@ function AppLayout() {
         if (!cancelled) {
           const source = firebaseEnabled ? 'Firebase' : 'Google Sheet';
           window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Failed to load ${source} data: ${error?.message || 'Unknown error'}`, type: 'error' } }));
+          updateState({ hasLoadedInitialData: true });
         }
       } finally {
         if (!cancelled) {
@@ -559,9 +569,11 @@ function WebPlatformAdapter({ children }) {
   const { updateState } = useAppState();
 
   React.useEffect(() => {
+    window.__appMounted = true;
     // Clear chunk reload attempts counter upon successful load of the main wrapper
     if (typeof sessionStorage !== 'undefined') {
       sessionStorage.removeItem('chunk_reload_attempts');
+      sessionStorage.removeItem('loader_auto_recovered');
     }
 
     // Setup the platform adapter methods in global state for hooks/services to use

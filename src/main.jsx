@@ -33,15 +33,6 @@ if ('serviceWorker' in navigator) {
     }).catch(registrationError => {
       console.log('SW registration failed: ', registrationError);
     });
-
-    // Reload the page when the active service worker changes (e.g. skipWaiting triggers)
-    let refreshing = false;
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (!refreshing) {
-        refreshing = true;
-        window.location.reload();
-      }
-    });
   });
 }
 

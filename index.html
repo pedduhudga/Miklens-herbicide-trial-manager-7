@@ -113,7 +113,29 @@
         <div class="spinner"></div>
         <p>Loading Trial Manager...</p>
       </div>
-    </div>
     <script type="module" src="/src/main.jsx"></script>
+    <script>
+      // Self-healing fallback: If initial loader is still present after 7s due to stale cache/chunk error
+      setTimeout(function() {
+        var loader = document.querySelector('.initial-loader');
+        if (loader && !window.__appMounted) {
+          console.warn('[Self-Healing] Initial load timeout detected. Clearing stale service worker & cache...');
+          if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function(regs) {
+              for (var i = 0; i < regs.length; i++) { regs[i].unregister(); }
+            });
+          }
+          if ('caches' in window) {
+            caches.keys().then(function(keys) {
+              keys.forEach(function(k) { caches.delete(k); });
+            });
+          }
+          if (!sessionStorage.getItem('loader_auto_recovered')) {
+            sessionStorage.setItem('loader_auto_recovered', 'true');
+            window.location.reload();
+          }
+        }
+      }, 7000);
+    </script>
   </body>
 </html>

@@ -1,10 +1,10 @@
 // Service Worker for Miklens Trial Manager PWA
-// Version: 2.0.0 - Enhanced caching strategies
+// Version: 2.1.0 - Enhanced caching strategies & navigation network-first fix
 
-const CACHE_NAME = 'trial-manager-v2.0.0';
-const STATIC_CACHE = 'static-v2.0.0';
-const DYNAMIC_CACHE = 'dynamic-v2.0.0';
-const IMAGE_CACHE = 'images-v2.0.0';
+const CACHE_NAME = 'trial-manager-v2.1.0';
+const STATIC_CACHE = 'static-v2.1.0';
+const DYNAMIC_CACHE = 'dynamic-v2.1.0';
+const IMAGE_CACHE = 'images-v2.1.0';
 
 // IndexedDB setup via Dexie for offline data
 importScripts('https://unpkg.com/dexie@4.4.4/dist/dexie.js');
@@ -86,7 +86,10 @@ self.addEventListener('fetch', (event) => {
   }
 
   // Handle different resource types with different strategies
-  if (isStaticAsset(url)) {
+  if (isNavigationRequest(request, url)) {
+    // Navigation & HTML requests - Network First to ensure index.html always has latest asset hashes
+    event.respondWith(networkFirst(request, DYNAMIC_CACHE));
+  } else if (isStaticAsset(url)) {
     // Static assets (JS, CSS, fonts) - Cache First
     event.respondWith(cacheFirst(request));
   } else if (isImage(url)) {
@@ -96,10 +99,18 @@ self.addEventListener('fetch', (event) => {
     // API requests - Network First (always try fresh)
     event.respondWith(networkFirst(request, DYNAMIC_CACHE));
   } else {
-    // Navigation and other requests - Stale While Revalidate
+    // Other requests - Stale While Revalidate
     event.respondWith(staleWhileRevalidate(request, DYNAMIC_CACHE));
   }
 });
+
+// Helper: Check if request is navigation / HTML
+function isNavigationRequest(request, url) {
+  return request.mode === 'navigate' ||
+         url.pathname === '/' ||
+         url.pathname.endsWith('/index.html') ||
+         request.headers.get('accept')?.includes('text/html');
+}
 
 // Helper: Check if request is for static asset
 function isStaticAsset(url) {
