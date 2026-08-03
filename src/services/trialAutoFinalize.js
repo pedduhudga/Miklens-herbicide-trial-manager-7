@@ -107,27 +107,48 @@ export async function runDailyLifecycleCheck(trials, user, getAppState) {
     await executeAutoFinalization(trialsToFinalize, getAppState, 'No photo captured for 3+ days');
   }
 
-  // 3. Deactivate QR code (IsLive = false) for auto-finalized trials after 7 days grace period
+  // 3. Self-Correction: Reactivate any trial that was auto-finalized by mistake but actually has recent activity (< 3 days)
   const now = Date.now();
   const state = getAppState ? getAppState() : (window.appState || {});
   const activeCategory = state.activeCategory || 'herbicide';
 
   for (const trial of trials) {
-    if (trial.AutoFinalized && trial.AutoFinalizedAt && String(trial.IsLive) !== 'false') {
-      const autoFinalizedDate = new Date(trial.AutoFinalizedAt);
-      if (!isNaN(autoFinalizedDate.getTime())) {
-        const daysSinceAutoFinalized = Math.floor((now - autoFinalizedDate.getTime()) / (1000 * 60 * 60 * 24));
-        if (daysSinceAutoFinalized >= 7) {
-          try {
-            await fbCatUpdateTrial(trial.Category || activeCategory, {
-              ID: trial.ID,
-              id: trial.ID,
-              IsLive: false
-            });
-            console.log(`[AutoFinalize] 7-day grace period ended for trial ${trial.ID}. QR code deactivated (IsLive = false).`);
-          } catch (err) {
-            console.error(`[AutoFinalize] Failed to deactivate trial ${trial.ID}:`, err);
+    const isCompleted = trial.IsCompleted === true || trial.IsCompleted === 'true';
+    if (isCompleted && trial.AutoFinalized) {
+      const lastActivity = getTrialLastActivityDate(trial);
+      const daysSinceLastActivity = Math.floor((now - lastActivity.getTime()) / (1000 * 60 * 60 * 24));
+      
+      // If last activity is less than 3 days ago, this trial is active! Un-finalize it automatically.
+      if (daysSinceLastActivity < 3) {
+        console.log(`[AutoFinalize] Self-correcting trial ${trial.ID} (${trial.FormulationName}): found recent activity (${daysSinceLastActivity} days ago). Reactivating trial...`);
+        try {
+          await fbCatUpdateTrial(trial.Category || activeCategory, {
+            ID: trial.ID,
+            id: trial.ID,
+            IsCompleted: false,
+            ControlFinalized: false,
+            FinalizationDate: '',
+            FinalControlDuration: '',
+            AutoFinalized: false,
+            IsLive: true
+          });
+          // Update memory state
+          if (state.trials) {
+            const updatedList = state.trials.map(t => String(t.ID) === String(trial.ID) ? {
+              ...t,
+              IsCompleted: false,
+              ControlFinalized: false,
+              FinalizationDate: '',
+              FinalControlDuration: '',
+              AutoFinalized: false,
+              IsLive: true
+            } : t);
+            if (typeof window !== 'undefined' && window.appState) {
+              window.appState.trials = updatedList;
+            }
           }
+        } catch (err) {
+          console.error(`[AutoFinalize] Failed to self-correct trial ${trial.ID}:`, err);
         }
       }
     }
