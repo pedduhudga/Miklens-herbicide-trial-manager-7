@@ -14,42 +14,43 @@ import {
   validateAnalysisResults,
   logCategoryIsolationMetrics 
 } from '../utils/aiCategoryIsolation.js';
+import { buildAIMemoryContext } from '../utils/aiMemory.js';
 
 const CATEGORY_PROMPTS = {
   herbicide: [
-    'Which formulation has the highest average efficacy across all trials?',
-    'Summarize the most recent 5 trials and highlight any patterns.',
-    'Which weed species appears most frequently across trials?',
-    'Which trials have no observations recorded yet?',
-    'Compare the efficacy of trials with Excellent vs Good result ratings.',
+    'Which formula gave the best weed control and how many days of control did it provide?',
+    'Rank the top 5 formulas for Bermuda Grass — show average efficacy and control days for each.',
+    'Why did the same formula show different results on different dates? Compare weather conditions.',
+    'Which weed species is the hardest to control? Show all formulas tried and their outcomes.',
+    'Show me all trials done by each investigator and compare their average efficacy results.',
   ],
   fungicide: [
-    'Which fungicide formulation has the highest disease control efficiency?',
-    'Summarize Rice Blast or Powdery Mildew trials and their outcomes.',
-    'What is the average green leaf area after treatment?',
-    'Which trials have the lowest disease severity recorded?',
-    'Analyze preventive vs curative application timings in the trials.',
+    'Which fungicide formula has the highest average disease control across all trials?',
+    'Compare preventive vs curative application timing outcomes for each disease target.',
+    'Which disease target is hardest to control? Rank the top formulas tried on it.',
+    'Why did the same fungicide fail on different dates? Analyze weather at application.',
+    'Show trials by each investigator and average control achieved.',
   ],
   pesticide: [
-    'Which pesticide formulation achieves the highest pest reduction?',
-    'Compare the pest mortality rates across different dosage rates.',
-    'Analyze the effect of treatments on beneficial insect count.',
-    'What is the average pre-harvest interval (PHI) for these trials?',
-    'Which pest species had the highest resistance in these tests?',
+    'Which pesticide formula achieved the highest pest mortality across all trials?',
+    'Compare dosage rates — which dosage gives the best results for each pest species?',
+    'Which pest species showed resistance or low response across all formulas tried?',
+    'Why did the same formula show different results on different dates?',
+    'Show me the top 3 formulas for each target pest species with their success rates.',
   ],
   nutrition: [
-    'Which fertilizer composition resulted in the highest plant height?',
-    'Summarize NPK composition trials and their yield improvement percentage.',
-    'Compare the SPAD chlorophyll readings across active nutrition treatments.',
-    'Analyze basal vs top dressing application methods in the trials.',
-    'Show the highest crop yield (kg/ha) recorded in these trials.',
+    'Which fertilizer formulation produced the highest yield improvement?',
+    'Compare basal vs top dressing application — which gives better SPAD and yield?',
+    'Which NPK composition resulted in the tallest plants and best leaf area?',
+    'Show me all trials by each investigator and their average crop yield results.',
+    'Which locations showed the best response to nutrition treatments?',
   ],
   biostimulant: [
-    'Which biostimulant type resulted in the highest root/shoot biomass ratio?',
-    'Compare stress tolerance scores between different seaweed extract trials.',
-    'What is the growth enhancement index of the tested formulations?',
-    'Summarize the impact of seed coating vs foliar spray on plant height.',
-    'Analyze active biological agents (e.g. Trichoderma) trials.',
+    'Which biostimulant achieved the highest growth enhancement index?',
+    'Compare seed coating vs foliar spray methods — which performs better?',
+    'Which active biological agent (e.g. Trichoderma, seaweed) showed the best results?',
+    'Why did the same biostimulant show different results in different trials?',
+    'Rank the top formulas by root/shoot biomass improvement across all trials.',
   ]
 };
 
@@ -285,7 +286,17 @@ export default function AIAssistant({ onMenuClick }) {
     updateState({ aiChatSessions: newSessions, currentAiChatSessionId: activeSessionId });
 
     try {
-      // Create category-aware AI context with strict isolation
+      // === SUPER MEMORY ENGINE ===
+      // Build full database knowledge base (ALL trials, not just 25)
+      const { contextString: memoryContext, stats: memStats } = buildAIMemoryContext(
+        state.trials,
+        state.formulations,
+        state.projects,
+        state.ingredients,
+        activeCategory
+      );
+
+      // Also run category isolation for metrics logging
       const aiContext = createCategoryAwareAIContext(
         activeCategory,
         state.trials,
@@ -293,128 +304,31 @@ export default function AIAssistant({ onMenuClick }) {
         state.formulations,
         state.auth?.user
       );
-      
-      // Log isolation metrics for monitoring
       logCategoryIsolationMetrics('AI Assistant Chat', activeCategory, aiContext.isolationMetrics);
-      
-      // Process trials data for AI context
-      const trials = aiContext.trials.sort((a, b) => new Date(b.Date || 0) - new Date(a.Date || 0));
-      
-      const trialsCtx = trials.slice(0, 25).map(t => {
-        const eff = safeJsonParse(t.EfficacyDataJSON, []);
-        
-        const sortedEff = [...eff].sort((a, b) => {
-          const daaA = a.daa ?? a.day ?? a.DAA ?? 0;
-          const daaB = b.daa ?? b.day ?? b.DAA ?? 0;
-          return daaA - daaB;
-        });
-        const baseline = sortedEff.find(obs => (obs.daa ?? obs.day ?? obs.DAA ?? 0) === 0) || sortedEff[0];
-        const baselineValue = baseline ? (Number(baseline[primaryObsField]) || null) : null;
 
-        const isCompleted = t.IsCompleted === true || t.IsCompleted === 'true';
-        let calculatedControlDays = null;
-        if (t.FinalControlDuration) {
-          calculatedControlDays = parseInt(t.FinalControlDuration, 10);
-        } else if (t.Date) {
-          const start = new Date(t.Date);
-          const end = isCompleted && t.FinalizationDate ? new Date(t.FinalizationDate) : new Date();
-          calculatedControlDays = Math.max(0, Math.round((end - start) / 86400000));
-        }
+      console.log(`[AI Memory] Built context for ${memStats.totalTrials} trials, ${memStats.uniqueFormulas} formulas, ${memStats.uniqueTargets} targets`);
 
-        const postTreatmentObs = sortedEff.filter(obs => {
-          const daa = obs.daa ?? obs.day ?? obs.DAA ?? 0;
-          return daa > 0;
-        });
+      const systemCtx = `You are a Senior ${config.name} Scientist and expert AI research assistant with complete access to this organization's entire ${config.name} trial database.
 
-        let calculatedFinalEfficacy = 0;
-        if (postTreatmentObs.length > 0) {
-          const latestObs = postTreatmentObs[postTreatmentObs.length - 1];
-          const lastVal = latestObs[primaryObsField] !== undefined ? Number(latestObs[primaryObsField]) : null;
-          let controlPct = latestObs.controlPct ?? latestObs.control ?? latestObs.efficacy ?? null;
-          
-          if (controlPct !== null) {
-            calculatedFinalEfficacy = parseFloat(controlPct);
-          } else if (baselineValue && lastVal !== null && baselineValue > 0) {
-            let pct;
-            if (activeCategory === 'nutrition' || activeCategory === 'biostimulant') {
-              pct = ((lastVal - baselineValue) / baselineValue) * 100;
-            } else {
-              pct = ((baselineValue - lastVal) / baselineValue) * 100;
-            }
-            calculatedFinalEfficacy = Math.max(-100, Math.min(100, Math.round(pct * 10) / 10));
-          }
-        }
+YOUR ROLE: Answer ANY question about trials, formulations, weeds/targets, weather effects, control days, investigators, locations, or experiment history using ONLY the data provided below. NEVER hallucinate — every fact you state must come from the database.
 
-        return {
-          id: t.ID,
-          formulation: t.FormulationName,
-          dosage: t.Dosage,
-          result: t.Result || 'Unrated',
-          target: t[config.targetField] || t.WeedSpecies,
-          location: t.Location,
-          date: t.Date,
-          status: isCompleted ? 'Finalized' : 'Active',
-          performanceDays: calculatedControlDays,
-          finalEfficacyPct: postTreatmentObs.length === 0 ? 0 : calculatedFinalEfficacy,
-          observations: eff.map(obs => {
-            const daa = obs.daa ?? obs.day ?? obs.DAA ?? 0;
-            const obsVal = obs[primaryObsField] ?? null;
-            let controlPct = obs.controlPct ?? obs.control ?? obs.efficacy ?? null;
-            
-            let wce = null;
-            if (daa === 0) {
-              wce = 0;
-            } else if (baselineValue && obsVal !== null && baselineValue > 0) {
-              if (activeCategory === 'nutrition' || activeCategory === 'biostimulant') {
-                wce = ((obsVal - baselineValue) / baselineValue) * 100;
-              } else {
-                wce = ((baselineValue - obsVal) / baselineValue) * 100;
-              }
-              wce = Math.max(-100, Math.min(100, Math.round(wce * 10) / 10));
-            }
+CRITICAL RULES:
+1. You are analyzing ${activeCategory.toUpperCase()} category data ONLY.
+2. Do NOT reference data from other categories (${['herbicide', 'fungicide', 'pesticide', 'nutrition', 'biostimulant'].filter(c => c !== activeCategory).join(', ')}).
+3. NEVER invent data. If something is not in the database, say "No data found for that query."
+4. For EVERY trial you mention, wrap it in a clickable link: [Formula - Dosage](#/trials?focus=TRIAL_ID)
+5. For simple greetings ("hi", "hello"), respond warmly as a Senior ${config.name} Scientist and ask what they'd like to analyze.
 
-            if (controlPct === null && wce !== null) {
-              controlPct = wce;
-            }
-
-            return {
-              daa,
-              controlPct: controlPct !== null ? Math.round(controlPct * 10) / 10 : null,
-              [primaryObsField]: obsVal,
-              cropInjury: obs.cropInjury ?? obs.injury ?? obs.injuryPct ?? null
-            };
-          })
-        };
-      });
-
-      const systemCtx = `You are a Senior ${config.name} Scientist and expert agricultural research assistant specialized in analyzing ${config.name} efficacy/growth trials. 
-
-CRITICAL CATEGORY ISOLATION: You are currently analyzing data for the ${activeCategory.toUpperCase()} category ONLY. Do not reference, compare, or include data from other categories (${['herbicide', 'fungicide', 'pesticide', 'nutrition', 'biostimulant'].filter(c => c !== activeCategory).join(', ')}) in your analysis.
-
-Category-Specific Analysis Context:
-- Active Category: ${activeCategory.toUpperCase()}
-- AI Analysis Prompt: ${config.aiPhotoPrompt || `Analyze ${activeCategory} trial data with category-specific methodology`}
-- Primary Metric: ${config.primaryMetric?.label || 'Efficacy'}
+ANALYSIS GUIDELINES:
+- Primary Metric: ${config.primaryMetric?.label || 'Efficacy'} (${config.primaryMetric?.unit || '%'})
 - Target Field: ${config.targetLabel || 'Target'}
+- When comparing formulas: always cite trial count, avg efficacy, avg control days, and result breakdown (Excellent/Good/Fair/Poor)
+- When analyzing failures: cite weather conditions (temp, humidity, rain) at application time
+- For rankings: use the pre-computed rankings from the database below
+- Control Days: if "Finalized" use FinalControlDuration; if "Active" note it's estimated elapsed time
+- DAA = Days After Application. Baseline is DAA=0, post-treatment is DAA>0
 
-The user has ${trials.length} trial(s) on record for the ${config.name} category. Here is a detailed summary of up to 25 recent trials, including all of their observation records:
-${JSON.stringify(trialsCtx, null, 2)}
-
-Projects: ${aiContext.projects.map(p => p.Name).join(', ') || 'None'}
-Formulations: ${aiContext.formulations.map(f => f.Name).join(', ') || 'None'}
-
-RIGOROUS SCIENTIFIC ANSWERING PROTOCOL:
-- **Scientific Persona**: Adopt a highly professional, objective, and analytical tone. Speak with scientific authority, using terms like "${config.primaryMetric.label}," "phytotoxicity/crop injury," and "sustained performance timeline."
-- **Simple Greetings / Conversational Openers**: If the user's message is a simple greeting (e.g. "hi", "hello", "good morning") or a short conversational prompt without a specific analytical question, DO NOT output any data tables, metrics, audits, or recommendations. Instead, respond with a polite, professional scientific greeting indicating your role as a Senior ${config.name} Scientist, and ask how you can help them analyze their trials today.
-- **Data-Driven Analysis**: For every answer comparing formulations or highlighting results, first perform a systematic parameter-by-parameter evaluation. Do not jump to conclusions without discussing:
-  1. The specific ${config.targetLabel} targeted.
-  2. The timeline of evaluations (DAA - Days After Application).
-  3. The ${config.primaryMetric.label} values across specific DAA steps.
-  4. The duration of performance (controlDays/performanceDays), noting if the duration is finalized or merely ongoing elapsed time.
-- **Anomalies and Data Auditing**: Explicitly identify and point out anomalies to the user like a meticulous researcher would. For instance:
-  - Mention if a trial remains "Active" with a large elapsed time but has only a DAA 0 baseline observation (pointing out that it was never finalized or stopped).
-  - Distinguish between pre-treatment baseline levels (DAA 0) and mature evaluation intervals (7, 14, 21, 28 DAA).
-- **Human-Readable Trial Names & Clickable Hyperlinks**: NEVER display raw, unreadable Trial IDs (like "1780124537550"). Instead, always represent every trial using its Formulation name and Dosage (e.g. "${activeCategory === 'nutrition' ? 'Fertilizer Mix - 50 kg/ha' : 'Treatment A - 2.5 L/ha'}"). Wrap every trial name reference in a clickable Markdown hyperlink pointing exactly to its details hash route format: \`[Formulation - Dosage](#/trials?focus=TRIAL_ID)\`.`;
+${memoryContext}`;
 
       const fullPrompt = `${systemCtx}\n\nUser: ${userMsg}`;
       let reply;
@@ -479,7 +393,7 @@ RIGOROUS SCIENTIFIC ANSWERING PROTOCOL:
       setIsLoading(false);
       setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [isLoading, attachedImage, history, currentSessionId, allSessions, activeCategory, state.trials, state.projects, state.formulations, primaryObsField, config, updateState, getAppState]);
+  }, [isLoading, attachedImage, history, currentSessionId, allSessions, activeCategory, state.trials, state.projects, state.formulations, state.ingredients, primaryObsField, config, updateState, getAppState]);
 
   const handleSubmit = (e) => { e.preventDefault(); sendMessage(input); };
 
