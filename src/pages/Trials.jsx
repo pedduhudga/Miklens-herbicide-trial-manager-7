@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppState } from '../hooks/useAppState.jsx';
 import { useAuth } from '../hooks/useAuth.js';
 import { useTrialsFilter } from '../hooks/useTrialsFilter.js';
+import { fbGetAllUsers } from '../services/firebaseAuth.js';
 import TopBar from '../components/TopBar.jsx';
 import Modal from '../components/Modal.jsx';
 import ErrorBoundary from '../components/ErrorBoundary.jsx';
@@ -518,6 +519,17 @@ export default function Trials({ onMenuClick }) {
     }
   }, []);
 
+  // Ensure registered users are loaded into state for clean scientist dropdown options
+  useEffect(() => {
+    if (state.settings?.firebaseEnabled && (!state.users || state.users.length === 0)) {
+      fbGetAllUsers().then(uList => {
+        if (Array.isArray(uList) && uList.length > 0) {
+          updateState({ users: uList });
+        }
+      }).catch(err => console.warn('Failed to load registered users for filter:', err));
+    }
+  }, [state.settings?.firebaseEnabled, state.users, updateState]);
+
   const handleRestoreRecoveryDraft = () => {
     if (recoveryDraft) {
       setFormData(recoveryDraft.formData);
@@ -623,7 +635,8 @@ export default function Trials({ onMenuClick }) {
     filterDateEnd,
     sortBy,
     user,
-    filterOwner
+    filterOwner,
+    registeredUsers: state.users || []
   });
 
   const groupedTimelineTrials = useMemo(() => {
@@ -4591,13 +4604,27 @@ Rules:
   }), [trials]);
 
   const ownerOptions = useMemo(() => {
-    const owners = new Set();
-    trials.forEach(t => {
-      if (t.InvestigatorName) owners.add(t.InvestigatorName);
-      if (t.AuthorEmail) owners.add(t.AuthorEmail);
+    const emailSet = new Set();
+    const registered = state.users || [];
+
+    // Add all registered user emails
+    registered.forEach(u => {
+      const email = u.Username || u.username || u.email;
+      if (email && email.includes('@')) {
+        emailSet.add(email.trim());
+      }
     });
-    return Array.from(owners).sort();
-  }, [trials]);
+
+    // Also include any author emails present in trials
+    trials.forEach(t => {
+      const email = t.AuthorEmail || (t.InvestigatorName && t.InvestigatorName.includes('@') ? t.InvestigatorName : null);
+      if (email && email.includes('@')) {
+        emailSet.add(email.trim());
+      }
+    });
+
+    return Array.from(emailSet).sort();
+  }, [trials, state.users]);
 
   // DAA coverage analysis for photos/observations
   const daaCoverage = useMemo(() => {

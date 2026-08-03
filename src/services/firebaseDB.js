@@ -641,20 +641,31 @@ export async function fbReclaimOrphanedUserData(emailOrUsername, targetUid, prev
     });
   }
 
-  // 1. Automatically query the `users` collection to discover any other accounts sharing this email
+  // 1. Automatically query the `users` collection to discover any other accounts sharing this email & name variations
+  const nameVariations = new Set();
   try {
     const usersCol = collection(db, COLLECTIONS.users);
     const emailLower = emailOrUsername.toLowerCase().trim();
+    const emailPrefix = emailLower.split('@')[0];
+    if (emailPrefix) nameVariations.add(emailPrefix);
     
-    // Fetch all users to safely match case-insensitively across Username / email fields
+    // Fetch all users to safely match case-insensitively across Username / email / Name fields
     const usersSnap = await getDocs(usersCol);
     usersSnap.docs.forEach(d => {
       const uData = d.data();
       const uEmail = (uData.Username || uData.username || uData.email || '').toLowerCase().trim();
-      if (uEmail === emailLower) {
+      if (uEmail === emailLower || d.id === targetUid) {
         if (d.id !== targetUid) {
           discoveredOldUids.add(d.id);
           searchTerms.add(d.id);
+        }
+        if (uData.Name) {
+          nameVariations.add(uData.Name.trim());
+          nameVariations.add(uData.Name.toLowerCase().trim());
+        }
+        if (uData.displayName) {
+          nameVariations.add(uData.displayName.trim());
+          nameVariations.add(uData.displayName.toLowerCase().trim());
         }
         if (Array.isArray(uData.previousUids)) {
           uData.previousUids.forEach(prev => {
@@ -687,26 +698,40 @@ export async function fbReclaimOrphanedUserData(emailOrUsername, targetUid, prev
       const colRef = collection(db, colName);
       const docsToUpdate = new Map();
 
-      for (const term of searchTerms) {
-        // Search CreatedBy equal to email/username or old UID
-        const q = query(colRef, where("CreatedBy", "==", term));
-        const snap = await getDocs(q);
-        snap.docs.forEach(d => {
+      // Search CreatedBy, InvestigatorName, and AuthorEmail against all terms and name variations
+      const allQueryTerms = new Set([...searchTerms, ...nameVariations]);
+
+      for (const term of allQueryTerms) {
+        if (!term) continue;
+        
+        // 1. Search CreatedBy
+        const qCreated = query(colRef, where("CreatedBy", "==", term));
+        const snapCreated = await getDocs(qCreated);
+        snapCreated.docs.forEach(d => {
           if (d.id && d.data().CreatedBy !== targetUid) {
             docsToUpdate.set(d.id, d.ref);
           }
         });
 
-        // Also search case-exact email string if different from lowercase
-        if (term !== emailOrUsername && emailOrUsername) {
-          const qExact = query(colRef, where("CreatedBy", "==", emailOrUsername));
-          const snapExact = await getDocs(qExact);
-          snapExact.docs.forEach(d => {
+        // 2. Search InvestigatorName (for trials/projects)
+        if (colName.includes('trials') || colName.includes('projects')) {
+          const qInv = query(colRef, where("InvestigatorName", "==", term));
+          const snapInv = await getDocs(qInv);
+          snapInv.docs.forEach(d => {
             if (d.id && d.data().CreatedBy !== targetUid) {
               docsToUpdate.set(d.id, d.ref);
             }
           });
         }
+
+        // 3. Search AuthorEmail (for shared/legacy records)
+        const qAuth = query(colRef, where("AuthorEmail", "==", term));
+        const snapAuth = await getDocs(qAuth);
+        snapAuth.docs.forEach(d => {
+          if (d.id && d.data().CreatedBy !== targetUid) {
+            docsToUpdate.set(d.id, d.ref);
+          }
+        });
       }
 
       if (docsToUpdate.size > 0) {

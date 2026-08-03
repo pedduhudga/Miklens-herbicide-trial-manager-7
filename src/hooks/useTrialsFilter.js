@@ -27,9 +27,18 @@ export function useTrialsFilter(trials, {
   filterProject,
   filterDateStart,
   filterDateEnd,
+export function useTrialsFilter(trials, {
+  activeTab,
+  deferredSearch,
+  filterFormulation,
+  filterResult,
+  filterProject,
+  filterDateStart,
+  filterDateEnd,
   sortBy,
   user,
-  filterOwner
+  filterOwner,
+  registeredUsers = []
 }) {
   return useMemo(() => {
     let list = [...trials];
@@ -48,7 +57,46 @@ export function useTrialsFilter(trials, {
       } else if (filterOwner === 'others') {
         list = list.filter(t => (t.CreatedBy && t.CreatedBy !== ownUid) || (t.AuthorID && t.AuthorID !== ownUid));
       } else {
-        list = list.filter(t => t.InvestigatorName === filterOwner || t.AuthorEmail === filterOwner || t.CreatedBy === filterOwner);
+        const targetLower = filterOwner.toLowerCase().trim();
+        const emailPrefix = targetLower.split('@')[0].split('.')[0];
+        
+        const targetUserDoc = (registeredUsers || []).find(u => {
+          const uEmail = (u.Username || u.username || u.email || '').toLowerCase().trim();
+          return uEmail === targetLower || u.id === filterOwner || u.uid === filterOwner || u.ID === filterOwner;
+        });
+
+        const userUids = new Set([filterOwner, targetLower]);
+        if (targetUserDoc) {
+          [targetUserDoc.id, targetUserDoc.uid, targetUserDoc.ID].forEach(id => id && userUids.add(id));
+          if (Array.isArray(targetUserDoc.previousUids)) {
+            targetUserDoc.previousUids.forEach(p => p && userUids.add(p));
+          }
+        }
+
+        const nameVariations = new Set([targetLower]);
+        if (targetUserDoc?.Name) nameVariations.add(targetUserDoc.Name.toLowerCase().trim());
+        if (targetUserDoc?.displayName) nameVariations.add(targetUserDoc.displayName.toLowerCase().trim());
+        if (emailPrefix) nameVariations.add(emailPrefix);
+
+        list = list.filter(t => {
+          if (t.CreatedBy && userUids.has(t.CreatedBy)) return true;
+          if (t.AuthorID && userUids.has(t.AuthorID)) return true;
+          if (t.AuthorEmail && (t.AuthorEmail.toLowerCase().trim() === targetLower || userUids.has(t.AuthorEmail))) return true;
+
+          const invLower = (t.InvestigatorName || '').toLowerCase().trim();
+          if (!invLower) return false;
+          if (invLower === targetLower) return true;
+          if (nameVariations.has(invLower)) return true;
+
+          // Partial prefix matching (e.g. "sandeep" matches "Sandeep K", "sandeep k")
+          if (emailPrefix && emailPrefix.length >= 3) {
+            const firstWord = invLower.split(/\s+/)[0];
+            if (firstWord === emailPrefix || invLower.includes(emailPrefix) || emailPrefix.includes(firstWord)) {
+              return true;
+            }
+          }
+          return false;
+        });
       }
     }
 
