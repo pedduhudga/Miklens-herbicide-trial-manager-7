@@ -15,7 +15,9 @@ export default function Alerts({ onMenuClick }) {
       <div className="flex-1 overflow-y-auto p-4 max-w-3xl mx-auto w-full">
         <SmartAlerts
           compact={false}
-          onViewTrial={(trialId) => navigate('/trials')}
+          onViewTrial={(trialId) => {
+            window.location.hash = '#/trials';
+          }}
         />
       </div>
     </div>
