@@ -708,35 +708,42 @@ For each growth/vigor indicator found:
 2. Draw a bounding box around the healthy/expanding vegetative areas showing biostimulation.`;
   } else {
     categoryInstructions = `
-SPECIAL FOCUS: Identify weed species (broadleaves, grasses, sedges).
-1. Identify the prominent broadleaf weed patch (e.g. Richardia brasiliensis or Spergula arvensis) and draw its bounding box.
-2. Identify the surrounding grass weeds (e.g. Barnyard Grass, Crabgrass, or general Grasses) and draw separate bounding boxes enclosing those grassy areas.
-3. Every single weed species you detect must have a bounding box. Do not leave any major weed area unbounded.
-4. If a species grows in a dense group or overlaps (like dense grass patches), draw a single large bounding box enclosing that entire patch/stand.`;
+SPECIAL FOCUS: Identify weed species (broadleaves, grasses, sedges), assesses phytotoxicity, and calculate Weed Control Efficiency (WCE).
+1. Identify each weed species (common & scientific names) and draw bounding boxes.
+2. Estimate individual species cover % and total plot canopy cover %.
+3. Assess physiological symptoms: Desiccation %, Chlorosis %, Necrosis %, or Regrowth status.
+4. Calculate Weed Control Efficiency (WCE %) relative to typical untreated infestation.
+5. Identify crop phytotoxicity / injury rating on 0-10 scale.`;
   }
 
-  const promptText = `Analyze this agricultural plot photo and identify ALL visible ${targetName} species or symptoms.
-You MUST search the entire image frame thoroughly. Do NOT just identify the single most prominent symptom/organism. If there are other targets surrounding the main patch, you MUST detect, identify, and draw bounding boxes around them as well.
+  const promptText = `Analyze this agricultural herbicide plot photo scientifically like a Senior Weed Scientist.
+You MUST search the entire image frame thoroughly. Detect, identify, and draw bounding boxes around all visible weeds and symptomatic crop leaves.
 ${categoryInstructions}
 
-Coordinates MUST be in normalized 0-1000 format [ymin, xmin, ymax, xmax] (where 0,0 is top-left of the image and 1000,1000 is bottom-right).
+Coordinates MUST be in normalized 0-1000 format [ymin, xmin, ymax, xmax].
 
-Return a JSON array containing the detected entities.
-Each item in the array MUST have this format:
+Return a JSON object with this exact structure:
 {
-  "name": "Scientific/Standardized name of the ${targetName}",
-  "commonName": "Common name of the ${targetName}",
-  "cover": 25, // estimated percentage cover/severity of this ${targetName} patch/species in the frame (1-100)
-  "growthStage": "Vegetative/Seedling/Flowering/Mature/Symptomatic/Stressed/etc.",
-  "box_2d": [ymin, xmin, ymax, xmax], // Bounding box coordinates enclosing the plant, lesions, or patch
-  "confidence": 0.85 // confidence level (0.0 to 1.0)
+  "totalWeedCover": 15.5, // overall estimated plot weed cover % (0.0 to 100.0)
+  "calculatedWce": 84.5, // estimated Weed Control Efficiency % (0.0 to 100.0)
+  "phytotoxicity": 0, // Crop phytotoxicity rating (0 = no damage, 10 = crop death)
+  "phytotoxicityNotes": "No visual crop injury detected",
+  "regrowthDetected": false, // true if green regrowth shoots/buds are emerging from desiccated plants
+  "overallAssessment": "High level of weed control observed with complete desiccation of broadleaf weeds.",
+  "identifications": [
+    {
+      "name": "Scientific name",
+      "commonName": "Common name",
+      "cover": 10,
+      "growthStage": "Vegetative/Desiccated/Regrowth/Flowering",
+      "status": "Dead/Desiccated" | "Regrowth" | "Suppressed" | "Healthy",
+      "wce": 90,
+      "box_2d": [ymin, xmin, ymax, xmax],
+      "confidence": 0.92
+    }
+  ]
 }
-Example output:
-[
-  {"name": "Richardia brasiliensis", "commonName": "Tropical Mexican Clover", "cover": 35, "growthStage": "Flowering", "box_2d": [250, 260, 530, 440], "confidence": 0.9},
-  {"name": "Echinochloa crus-galli", "commonName": "Barnyard Grass", "cover": 40, "growthStage": "Vegetative", "box_2d": [290, 210, 800, 520], "confidence": 0.85}
-]
-JSON ONLY. Do not write any conversational text or explanation. Only output the JSON array.`;
+JSON ONLY. Do not write any conversational text or explanation. Only output the JSON object.`;
 
   const driveId = getDriveFileId(imageDataUrl);
   let imagePart;
