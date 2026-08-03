@@ -273,7 +273,7 @@ export default function Formulations({ onMenuClick }) {
               const isShared = !!(form.CreatedBy && form.CreatedBy !== ownUid);
               const isSharedEdit = Array.isArray(form.SharedWithEdit) && form.SharedWithEdit.includes(ownUid);
               return (
-                <div key={form.ID} className="bg-white p-6 rounded-xl shadow-lg relative transition-all duration-300 hover:shadow-xl hover:-translate-y-1 border border-transparent hover:border-emerald-500/50 flex flex-col justify-between">
+                <div key={form.ID} className="cv-auto bg-white p-6 rounded-xl shadow-lg relative transition-all duration-300 hover:shadow-xl hover:-translate-y-1 border border-transparent hover:border-emerald-500/50 flex flex-col justify-between">
                   <div>
                     <div className="flex justify-between items-start gap-3 mb-3">
                       <div className="flex-1 min-w-0">

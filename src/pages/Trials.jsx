@@ -639,6 +639,16 @@ export default function Trials({ onMenuClick }) {
     registeredUsers: state.users || []
   });
 
+  const [displayLimit, setDisplayLimit] = useState(36);
+
+  useEffect(() => {
+    setDisplayLimit(36);
+  }, [activeTab, deferredSearch, filterFormulation, filterResult, filterProject, filterDateStart, filterDateEnd, sortBy, filterOwner, activeCategory]);
+
+  const visibleGridTrials = useMemo(() => {
+    return filteredTrials.slice(0, displayLimit);
+  }, [filteredTrials, displayLimit]);
+
   const groupedTimelineTrials = useMemo(() => {
     if (activeTab === 'rcbd') return [];
     
@@ -6043,41 +6053,56 @@ If none are present, write "None".`;
                 ))}
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {filteredTrials.map(t => (
-                  <TrialCard
-                    key={t.ID}
-                    trial={t}
-                    project={projectMap[t.ProjectID]}
-                    isSelected={selectedForBulk.has(t.ID)}
-                    isPendingSync={isTrialPendingSync(t)}
-                    isMenuOpen={openCardMenu === t.ID}
-                    onToggleBulk={toggleBulk}
-                    onToggleMenu={handleToggleMenu}
-                    onViewDetails={handleViewDetails}
-                    onEdit={handleOpenModal}
-                    onDuplicate={handleDuplicate}
-                    onMoveToProject={handleMoveToProject}
-                    onExportPdf={handleExportPdf}
-                    onExportSciPdf={handleExportSciPdf}
-                    onExportPpt={handleExportPpt}
-                    onExportHtml={exportHtmlSlide}
-                    onExportTxt={exportTxtReport}
-                    onExportCsv={exportCsv}
-                    onExportJson={exportJson}
-                    onShare={shareTrial}
-                    onAppSharing={handleOpenShareModal}
-                    onAiGenerate={handleAiSingleGenerate}
-                    onDelete={handleDelete}
-                    onActivateToggle={handleActivateToggle}
-                    onQuickRate={handleQuickRate}
-                    onQuickPhoto={handleQuickPhoto}
-                    onQuickGalleryUpload={handleQuickGalleryUpload}
-                    onMarkComplete={handleMarkComplete}
-                    onEditControlDays={handleEditControlDays}
-                    onRecordWeather={handleRecordWeather}
-                  />
-                ))}
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {visibleGridTrials.map(t => (
+                    <TrialCard
+                      key={t.ID}
+                      trial={t}
+                      project={projectMap[t.ProjectID]}
+                      isSelected={selectedForBulk.has(t.ID)}
+                      isPendingSync={isTrialPendingSync(t)}
+                      isMenuOpen={openCardMenu === t.ID}
+                      onToggleBulk={toggleBulk}
+                      onToggleMenu={handleToggleMenu}
+                      onViewDetails={handleViewDetails}
+                      onEdit={handleOpenModal}
+                      onDuplicate={handleDuplicate}
+                      onMoveToProject={handleMoveToProject}
+                      onExportPdf={handleExportPdf}
+                      onExportSciPdf={handleExportSciPdf}
+                      onExportPpt={handleExportPpt}
+                      onExportHtml={exportHtmlSlide}
+                      onExportTxt={exportTxtReport}
+                      onExportCsv={exportCsv}
+                      onExportJson={exportJson}
+                      onShare={shareTrial}
+                      onAppSharing={handleOpenShareModal}
+                      onAiGenerate={handleAiSingleGenerate}
+                      onDelete={handleDelete}
+                      onActivateToggle={handleActivateToggle}
+                      onQuickRate={handleQuickRate}
+                      onQuickPhoto={handleQuickPhoto}
+                      onQuickGalleryUpload={handleQuickGalleryUpload}
+                      onMarkComplete={handleMarkComplete}
+                      onEditControlDays={handleEditControlDays}
+                      onRecordWeather={handleRecordWeather}
+                    />
+                  ))}
+                </div>
+                {filteredTrials.length > displayLimit && (
+                  <div className="py-4 flex justify-center">
+                    <button
+                      onClick={() => setDisplayLimit(prev => prev + 36)}
+                      className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-sm rounded-xl shadow-md transition-all flex items-center gap-2"
+                    >
+                      <span>Show More Trials</span>
+                      <span className="bg-emerald-800 text-emerald-100 text-xs px-2 py-0.5 rounded-full font-extrabold">
+                        {filteredTrials.length - displayLimit} remaining
+                      </span>
+                    </button>
+                  </div>
+                )}
               </div>
             )
           ) : (

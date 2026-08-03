@@ -31,6 +31,12 @@
     --card-text-muted: #64748b;
 }
 
+/* High-performance content visibility & rendering optimization */
+.cv-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 260px;
+}
+
 body.dark {
     --bg-color: #0f172a;
     --text-color: #f1f5f9;
