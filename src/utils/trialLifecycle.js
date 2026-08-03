@@ -96,28 +96,35 @@ export function calculateEffectiveControlDays(trial) {
     return daaA - daaB;
   });
 
-  const category = trial.Category || 'herbicide';
+  const baselineCover = parseFloat(sortedObs[0]?.weedCover ?? 0) || 0;
   let effectiveControlDays = 0;
+  let maxDAAFound = 0;
   let breakdownOccurred = false;
 
   for (let i = 0; i < sortedObs.length; i++) {
     const obs = sortedObs[i];
     const daa = Math.max(0, parseInt(obs.daa ?? obs.day ?? obs.DAA ?? 0, 10));
+    if (daa > maxDAAFound) maxDAAFound = daa;
 
     // Calculate WCE percentage (0 to 100%)
     let wce = null;
-    if (obs.wce !== undefined && obs.wce !== null) {
+    if (obs.wce !== undefined && obs.wce !== null && obs.wce !== '') {
       wce = parseFloat(obs.wce);
-    } else if (obs.controlPct !== undefined && obs.controlPct !== null) {
+    } else if (obs.controlPct !== undefined && obs.controlPct !== null && obs.controlPct !== '') {
       wce = parseFloat(obs.controlPct);
-    } else if (obs.weedCover !== undefined && obs.weedCover !== null) {
+    } else if (obs.weedCover !== undefined && obs.weedCover !== null && obs.weedCover !== '') {
       const cover = parseFloat(obs.weedCover);
-      const baselineCover = parseFloat(sortedObs[0]?.weedCover ?? 100) || 100;
-      wce = baselineCover > 0 ? Math.max(0, 100 - (cover / baselineCover) * 100) : 100 - cover;
+      if (baselineCover > 0) {
+        wce = Math.max(0, Math.min(100, ((baselineCover - cover) / baselineCover) * 100));
+      } else {
+        wce = Math.max(0, 100 - cover);
+      }
     }
 
-    // Default to 100% if no metric recorded yet
-    if (wce === null || isNaN(wce)) wce = 100;
+    // Baseline observation (DAA 0) or unrated observation defaults to effective
+    if (wce === null || isNaN(wce) || daa === 0) {
+      wce = 100;
+    }
 
     // Scientific Threshold: Effective control requires WCE >= 70%
     if (wce >= 70) {
@@ -126,15 +133,16 @@ export function calculateEffectiveControlDays(trial) {
       }
     } else {
       // Regrowth breakdown detected (< 70% control)!
-      // Control duration is locked to the last successful DAA before breakdown
       breakdownOccurred = true;
     }
   }
 
-  // If no regrowth breakdown occurred throughout the trial, control equals max DAA or total span
-  if (!breakdownOccurred && effectiveControlDays === 0 && sortedObs.length > 0) {
-    const maxDAA = Math.max(...sortedObs.map(o => parseInt(o.daa ?? o.day ?? 0, 10) || 0));
-    effectiveControlDays = maxDAA;
+  // Fallback: If no breakdown occurred but effectiveControlDays is 0, use max DAA
+  if (effectiveControlDays === 0 && maxDAAFound > 0 && !breakdownOccurred) {
+    effectiveControlDays = maxDAAFound;
+  } else if (effectiveControlDays === 0 && sortedObs.length > 0) {
+    // If only DAA 0 or single observation exists, fall back to max DAA or total observation span
+    effectiveControlDays = maxDAAFound;
   }
 
   return effectiveControlDays;

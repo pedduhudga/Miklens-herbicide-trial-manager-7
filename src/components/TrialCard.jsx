@@ -170,10 +170,10 @@ const TrialCard = memo(function TrialCard({
 
   // Control days calculation (Scientific WCE >= 70% Effective Duration)
   const controlDays = useMemo(() => {
-    if (trial.FinalControlDuration && parseInt(trial.FinalControlDuration, 10) > 0) {
-      return parseInt(trial.FinalControlDuration, 10);
-    }
-    return calculateEffectiveControlDays(trial);
+    const calc = calculateEffectiveControlDays(trial);
+    if (calc > 0) return calc;
+    if (trial.FinalControlDuration) return parseInt(trial.FinalControlDuration, 10);
+    return calc;
   }, [trial, efficacyData]);
 
   const categoryId = project?.Category || trial?.Category || 'herbicide';
