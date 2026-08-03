@@ -6,6 +6,7 @@ import Modal from '../components/Modal.jsx';
 import { addFormulation, deleteFormulation, updateFormulation, validateCategoryDataOperation } from '../services/dataLayer.js';
 import { safeJsonParse } from '../utils/helpers.js';
 import { getCategoryConfig } from '../utils/categoryConfig.js';
+import { calculateFormulationCost } from '../utils/costUtils.js';
 import { Plus, X, Share2, Edit, Trash2, Copy } from 'lucide-react';
 import AppSharingModal from '../components/AppSharingModal.jsx';
 
@@ -119,42 +120,7 @@ export default function Formulations({ onMenuClick }) {
 
   // Estimate cost based on ingredient library
   const calculateEstimatedCost = () => {
-    let total = 0;
-    ingredients.forEach(ing => {
-      if (ing.name && ing.quantity) {
-        const libIng = state.ingredients.find(i => i.Name === ing.name);
-        if (libIng && parseFloat(libIng.Cost)) {
-          const baseCost = parseFloat(libIng.Cost);
-          const baseUnit = String(libIng.Unit || '').toLowerCase().trim();
-          let usedQuantity = parseFloat(ing.quantity) || 0;
-          const usedUnit = String(ing.unit || '').toLowerCase().trim();
-          
-          if (!isNaN(baseCost) && !isNaN(usedQuantity)) {
-            let quantityInBaseUnit = usedQuantity;
-            
-            // L <-> ml conversions
-            if ((baseUnit === 'l' || baseUnit === 'litre' || baseUnit === 'litres' || baseUnit === 'liter' || baseUnit === 'liters') && 
-                (usedUnit === 'ml' || usedUnit === 'millilitre' || usedUnit === 'millilitres' || usedUnit === 'milliliter' || usedUnit === 'milliliters')) {
-              quantityInBaseUnit /= 1000;
-            } else if ((baseUnit === 'ml' || baseUnit === 'millilitre' || baseUnit === 'millilitres' || baseUnit === 'milliliter' || baseUnit === 'milliliters') && 
-                       (usedUnit === 'l' || usedUnit === 'litre' || usedUnit === 'litres' || usedUnit === 'liter' || usedUnit === 'liters')) {
-              quantityInBaseUnit *= 1000;
-            }
-            // kg <-> g/gm conversions
-            else if ((baseUnit === 'kg' || baseUnit === 'kilogram' || baseUnit === 'kilograms') && 
-                     (usedUnit === 'gm' || usedUnit === 'g' || usedUnit === 'gram' || usedUnit === 'grams')) {
-              quantityInBaseUnit /= 1000;
-            } else if ((usedUnit === 'kg' || usedUnit === 'kilogram' || usedUnit === 'kilograms') && 
-                       (baseUnit === 'gm' || baseUnit === 'g' || baseUnit === 'gram' || baseUnit === 'grams')) {
-              quantityInBaseUnit *= 1000;
-            }
-            
-            total += baseCost * quantityInBaseUnit;
-          }
-        }
-      }
-    });
-    return total;
+    return calculateFormulationCost(ingredients, state.ingredients || []);
   };
 
   const handleSave = async (e) => {
@@ -410,7 +376,11 @@ export default function Formulations({ onMenuClick }) {
                     <div>
                       <span className="text-[10px] font-bold text-slate-400 block uppercase tracking-wider">Estimated Cost</span>
                       <p className="font-extrabold text-base text-emerald-600 leading-none mt-1">
-                        {CURRENCY_SYMBOL}{parseFloat(form.EstimatedCost || 0).toFixed(2)}
+                        {(() => {
+                          const realTimeCost = calculateFormulationCost(form, state.ingredients || []);
+                          const costToDisplay = realTimeCost > 0 ? realTimeCost : parseFloat(form.EstimatedCost || 0);
+                          return `${CURRENCY_SYMBOL}${costToDisplay.toFixed(2)}`;
+                        })()}
                       </p>
                     </div>
 
