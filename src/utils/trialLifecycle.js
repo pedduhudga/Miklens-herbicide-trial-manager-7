@@ -5,6 +5,16 @@
  */
 
 import { safeJsonParse } from './helpers.js';
+import { parseCustomDate } from './dateUtils.js';
+
+function parseDateRobust(raw) {
+  if (!raw) return null;
+  if (raw instanceof Date) return isNaN(raw.getTime()) ? null : raw;
+  const custom = parseCustomDate(raw);
+  if (custom && !isNaN(custom.getTime())) return custom;
+  const std = new Date(raw);
+  return isNaN(std.getTime()) ? null : std;
+}
 
 /**
  * Returns the Date object of the most recent observation/photo capture for a trial.
@@ -15,22 +25,18 @@ export function getTrialLastActivityDate(trial) {
 
   let latestDate = null;
   if (trial.Date) {
-    const d = new Date(trial.Date);
-    if (!isNaN(d.getTime())) {
-      latestDate = d;
-    }
+    const d = parseDateRobust(trial.Date);
+    if (d) latestDate = d;
   }
 
   const observations = safeJsonParse(trial.EfficacyDataJSON || trial.observations, []);
   if (Array.isArray(observations)) {
     for (const obs of observations) {
       const rawDate = obs.date || obs.ObservationDate || obs.timestamp;
-      if (rawDate) {
-        const obsD = new Date(rawDate);
-        if (!isNaN(obsD.getTime())) {
-          if (!latestDate || obsD > latestDate) {
-            latestDate = obsD;
-          }
+      const obsD = parseDateRobust(rawDate);
+      if (obsD) {
+        if (!latestDate || obsD > latestDate) {
+          latestDate = obsD;
         }
       }
     }
@@ -45,12 +51,10 @@ export function getTrialLastActivityDate(trial) {
     for (const photo of photos) {
       if (photo && !photo.deleted) {
         const rawDate = photo.date || photo.timestamp || photo.capturedAt || photo.createdAt;
-        if (rawDate) {
-          const photoD = new Date(rawDate);
-          if (!isNaN(photoD.getTime())) {
-            if (!latestDate || photoD > latestDate) {
-              latestDate = photoD;
-            }
+        const photoD = parseDateRobust(rawDate);
+        if (photoD) {
+          if (!latestDate || photoD > latestDate) {
+            latestDate = photoD;
           }
         }
       }
