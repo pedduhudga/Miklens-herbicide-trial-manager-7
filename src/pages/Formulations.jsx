@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppState } from '../hooks/useAppState.jsx';
 import { useAuth } from '../hooks/useAuth.js';
@@ -8,12 +8,340 @@ import { addFormulation, deleteFormulation, updateFormulation, validateCategoryD
 import { safeJsonParse } from '../utils/helpers.js';
 import { getCategoryConfig } from '../utils/categoryConfig.js';
 import { calculateFormulationCost } from '../utils/costUtils.js';
-import { Plus, X, Share2, Edit, Trash2, Copy, Sparkles, Layers, ArrowUpDown, Award, Scale, FileDown, Rocket, Wand2, CheckSquare, Square } from 'lucide-react';
+import { 
+  Plus, X, Share2, Edit, Trash2, Copy, Sparkles, Layers, 
+  ArrowUpDown, Scale, FileDown, Rocket, Wand2, MoreVertical, 
+  ChevronDown, Check 
+} from 'lucide-react';
 import AppSharingModal from '../components/AppSharingModal.jsx';
 import LinkedTrialsModal from '../components/LinkedTrialsModal.jsx';
 import FormulationComparisonModal from '../components/FormulationComparisonModal.jsx';
 import AiFormulaGeneratorModal from '../components/AiFormulaGeneratorModal.jsx';
 import { exportFormulationDossier } from '../services/formulationDossier.js';
+import { 
+  getFormulationTrialStats, 
+  getEfficacyRatingBadge 
+} from '../utils/formulationTrialUtils.js';
+
+function FormulationCard({
+  form,
+  isOwn,
+  isShared,
+  isSharedEdit,
+  isAdmin,
+  isViewer,
+  CURRENCY_SYMBOL,
+  isSelectedForCompare,
+  onToggleCompare,
+  onViewLinkedTrials,
+  onLaunchTrial,
+  onAiOptimize,
+  onExportDossier,
+  onEdit,
+  onDuplicate,
+  onShare,
+  onDelete,
+}) {
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!isMenuOpen) return;
+    const handleClickOutside = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setIsMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isMenuOpen]);
+
+  const stats = form._stats;
+  const ings = form._parsedIngs || [];
+  const visibleIngs = isExpanded ? ings : ings.slice(0, 3);
+  const ratingBadge = getEfficacyRatingBadge(stats?.avgEfficacy);
+
+  return (
+    <div
+      className={`bg-white rounded-2xl p-5 border transition-all duration-200 flex flex-col justify-between ${
+        isSelectedForCompare
+          ? 'border-indigo-400 ring-2 ring-indigo-500/20 shadow-md bg-indigo-50/10'
+          : 'border-slate-200/90 hover:border-emerald-400/80 hover:shadow-lg shadow-2xs'
+      }`}
+    >
+      <div>
+        {/* Header: Title, Code, Badges, Compare Button & 3-dot Menu */}
+        <div className="flex justify-between items-start gap-3 mb-3">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap mb-1">
+              <h3 className="font-bold text-base text-slate-900 break-words leading-tight">
+                {form.Name}
+              </h3>
+              {form.Code && (
+                <span className="font-mono text-[11px] font-bold px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded border border-slate-200/60">
+                  {form.Code}
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {/* Efficacy / Rating Badge */}
+              <span
+                className={`text-[10px] px-2 py-0.5 rounded-full font-bold border inline-flex items-center gap-1 ${ratingBadge.colorClass}`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${ratingBadge.dotColor}`} />
+                {ratingBadge.label}
+              </span>
+
+              {isShared && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 flex items-center gap-0.5">
+                  <Share2 className="w-2.5 h-2.5" /> Shared{isSharedEdit ? ' (Edit)' : ''}
+                </span>
+              )}
+
+              {!isShared && Array.isArray(form.SharedWith) && form.SharedWith.length > 0 && (
+                <span
+                  className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-teal-50 text-teal-700 border border-teal-100 flex items-center gap-0.5"
+                  title={`Shared with ${form.SharedWith.length} user(s)`}
+                >
+                  <Share2 className="w-2.5 h-2.5" /> Shared ({form.SharedWith.length})
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Top Right: Compare Pill & Clean 3-dot Menu */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => onToggleCompare(form.ID)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
+                isSelectedForCompare
+                  ? 'bg-indigo-600 text-white shadow-xs hover:bg-indigo-700 font-bold'
+                  : 'text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 border border-slate-200/80 hover:border-indigo-200'
+              }`}
+              title={isSelectedForCompare ? 'Selected for benchmark comparison' : 'Compare with other formulations'}
+            >
+              {isSelectedForCompare ? (
+                <>
+                  <Check className="w-3.5 h-3.5" /> Selected
+                </>
+              ) : (
+                <>
+                  <Scale className="w-3.5 h-3.5 text-slate-400" /> Compare
+                </>
+              )}
+            </button>
+
+            {/* 3-Dot Actions Menu */}
+            <div className="relative" ref={menuRef}>
+              <button
+                type="button"
+                onClick={() => setIsMenuOpen(!isMenuOpen)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 border border-transparent hover:border-slate-200 transition"
+                title="More actions"
+              >
+                <MoreVertical className="w-4 h-4" />
+              </button>
+
+              {isMenuOpen && (
+                <div className="absolute right-0 top-8 z-50 bg-white rounded-xl shadow-xl border border-slate-200/90 py-1 min-w-[200px] text-xs animate-in fade-in zoom-in-95">
+                  <button
+                    onClick={() => {
+                      setIsMenuOpen(false);
+                      onAiOptimize(form);
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-violet-700 hover:bg-violet-50 font-semibold text-left"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-violet-500" /> AI Recipe Optimization
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setIsMenuOpen(false);
+                      onExportDossier(form);
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-slate-700 hover:bg-slate-50 text-left"
+                  >
+                    <FileDown className="w-3.5 h-3.5 text-slate-500" /> Export Agronomic Dossier
+                  </button>
+
+                  {!isViewer && (
+                    <>
+                      <hr className="my-1 border-slate-100" />
+
+                      {isOwn && (
+                        <button
+                          onClick={() => {
+                            setIsMenuOpen(false);
+                            onDuplicate(form);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-slate-700 hover:bg-slate-50 text-left"
+                        >
+                          <Copy className="w-3.5 h-3.5 text-slate-500" /> Duplicate Recipe
+                        </button>
+                      )}
+
+                      {(isOwn || isSharedEdit) && (
+                        <button
+                          onClick={() => {
+                            setIsMenuOpen(false);
+                            onEdit(form);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-emerald-700 hover:bg-emerald-50 text-left"
+                        >
+                          <Edit className="w-3.5 h-3.5 text-emerald-600" /> Edit Formula
+                        </button>
+                      )}
+
+                      {isAdmin && (
+                        <button
+                          onClick={(e) => {
+                            setIsMenuOpen(false);
+                            onShare(e, form);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-indigo-700 hover:bg-indigo-50 text-left"
+                        >
+                          <Share2 className="w-3.5 h-3.5 text-indigo-500" /> Share Permissions
+                        </button>
+                      )}
+
+                      {isOwn && (
+                        <button
+                          onClick={() => {
+                            setIsMenuOpen(false);
+                            onDelete(form.ID);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-rose-600 hover:bg-rose-50 text-left"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-rose-500" /> Delete Formula
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Ingredients Showcase - Clean List without Scroll Trap */}
+        <div className="mt-3">
+          <div className="flex justify-between items-center mb-1.5">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              Ingredients ({ings.length})
+            </span>
+            {ings.length > 3 && (
+              <button
+                type="button"
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="text-[11px] font-semibold text-emerald-700 hover:text-emerald-800 flex items-center gap-0.5"
+              >
+                {isExpanded ? 'Show less' : `+${ings.length - 3} more`}
+                <ChevronDown className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+              </button>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            {visibleIngs.map((ing, i) => (
+              <div
+                key={i}
+                className="flex justify-between items-center bg-slate-50/90 hover:bg-slate-100/80 px-2.5 py-1.5 rounded-lg border border-slate-100 text-xs transition"
+              >
+                <span className="font-medium text-slate-700 truncate mr-2">{ing.name || 'Unnamed Ingredient'}</span>
+                <span className="text-slate-700 font-bold bg-white px-2 py-0.5 rounded border border-slate-200/70 font-mono text-[11px] shrink-0 shadow-2xs">
+                  {ing.quantity} {ing.unit}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* Dynamic Fields (if any) */}
+          {(() => {
+            const catConfig = getCategoryConfig(form.Category || 'herbicide');
+            const fields = catConfig.formulationFields?.map(f => {
+              const val = form[f.key];
+              if (!val) return null;
+              return (
+                <div className="flex justify-between text-xs py-1 border-b border-dashed border-slate-100" key={f.key}>
+                  <span className="text-slate-400">{f.label}:</span>
+                  <span className="font-semibold text-slate-700">{val}</span>
+                </div>
+              );
+            }).filter(Boolean);
+            if (!fields || fields.length === 0) return null;
+            return <div className="space-y-0.5 mt-2 border-t border-slate-100 pt-2">{fields}</div>;
+          })()}
+
+          {form.Notes && (
+            <div className="mt-2.5 bg-slate-50/60 p-2 rounded-lg border border-slate-100 text-xs">
+              <p className="italic text-slate-500 line-clamp-2">{form.Notes}</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Card Bottom: Clean Metrics + 2 Primary Action Buttons */}
+      <div className="mt-4 pt-3.5 border-t border-slate-100 space-y-3">
+        {/* KPI Strip */}
+        <div className="grid grid-cols-2 gap-2 bg-slate-50/70 p-2.5 rounded-xl border border-slate-100">
+          <div>
+            <span className="text-[10px] font-bold text-slate-400 block uppercase tracking-wider">
+              Est. Recipe Cost
+            </span>
+            <p className="font-extrabold text-sm text-emerald-700 leading-tight mt-0.5">
+              {CURRENCY_SYMBOL}{form._costVal.toFixed(2)}{' '}
+              <span className="text-[10px] text-slate-400 font-normal">/ L</span>
+            </p>
+          </div>
+
+          <div className="text-right">
+            <span className="text-[10px] font-bold text-slate-400 block uppercase tracking-wider">
+              Field Trials
+            </span>
+            <p className="font-bold text-xs text-slate-700 leading-tight mt-0.5">
+              {stats?.total > 0 ? (
+                <span>
+                  {stats.microplotCount} Plot{stats.fieldCount > 0 ? ` • ${stats.fieldCount} Field` : ''}
+                </span>
+              ) : (
+                <span className="text-slate-400 font-normal">No trials yet</span>
+              )}
+            </p>
+          </div>
+        </div>
+
+        {/* Action Buttons: ONLY TWO Prominent Actions */}
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => onViewLinkedTrials(form)}
+            className={`py-2 px-3 rounded-xl font-bold text-xs border transition flex items-center justify-center gap-1.5 active:scale-95 shadow-2xs ${
+              stats?.total > 0
+                ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200'
+                : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5 text-emerald-600" />
+            Linked Trials ({stats?.total || 0})
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onLaunchTrial(form)}
+            className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition flex items-center justify-center gap-1.5 active:scale-95 shadow-xs"
+            title="Launch new trial with this formulation"
+          >
+            <Rocket className="w-3.5 h-3.5" />
+            Launch Trial
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function Formulations({ onMenuClick }) {
   const navigate = useNavigate();
@@ -63,7 +391,7 @@ export default function Formulations({ onMenuClick }) {
   };
 
   const handleExportDossier = (form) => {
-    exportFormulationDossier(form, state.trials, state.ingredients, state.activeCategory || 'herbicide');
+    exportFormulationDossier(form, state.trials, state.ingredients, state.activeCategory || 'herbicide', state.projects);
   };
 
   const handleOpenShareModal = (e, formulation) => {
@@ -263,49 +591,27 @@ export default function Formulations({ onMenuClick }) {
 
   const activeCategory = state.activeCategory || 'herbicide';
 
-  const RESULT_SCORES = { Excellent: 4, Good: 3, Fair: 2, Poor: 1 };
-
   // Pre-calculate trial performance metrics for each formulation
   const formulationsWithStats = useMemo(() => {
     const rawForms = (state.formulations || []).filter(
       f => f.Category === activeCategory || (!f.Category && activeCategory === 'herbicide')
     );
 
-    const projectMap = new Map();
-    (state.projects || []).forEach(p => projectMap.set(String(p.ID), p));
-
     return rawForms.map(form => {
-      const formTrials = (state.trials || []).filter(
-        t => (t.Category === activeCategory || (!t.Category && activeCategory === 'herbicide')) &&
-             (t.FormulationID === form.ID || String(t.FormulationName || '').trim().toLowerCase() === String(form.Name || '').trim().toLowerCase())
-      );
-
-      let stdCount = 0;
-      let largeCount = 0;
-      formTrials.forEach(t => {
-        const proj = projectMap.get(String(t.ProjectID));
-        if (proj && proj.Design === 'LargeScale') {
-          largeCount++;
-        } else {
-          stdCount++;
-        }
-      });
-
-      const ratedTrials = formTrials.filter(t => RESULT_SCORES[t.Result]);
-      const avgScore = ratedTrials.length
-        ? ratedTrials.reduce((s, t) => s + RESULT_SCORES[t.Result], 0) / ratedTrials.length
-        : null;
-
-      const realCost = calculateFormulationCost(form, state.ingredients || []);
+      const stats = getFormulationTrialStats(form, state.trials, state.projects, activeCategory);
+      const parsedIngs = safeJsonParse(form.IngredientsJSON, []);
+      const realCost = calculateFormulationCost(parsedIngs, state.ingredients || []);
       const costVal = realCost > 0 ? realCost : parseFloat(form.EstimatedCost || 0);
 
       return {
         ...form,
-        _trialsCount: formTrials.length,
-        _stdCount: stdCount,
-        _largeCount: largeCount,
-        _avgScore: avgScore,
+        _stats: stats,
+        _trialsCount: stats.total,
+        _stdCount: stats.microplotCount,
+        _largeCount: stats.fieldCount,
+        _avgScore: stats.avgEfficacy,
         _costVal: costVal,
+        _parsedIngs: parsedIngs,
       };
     });
   }, [state.formulations, state.trials, state.projects, state.ingredients, activeCategory]);
@@ -317,8 +623,8 @@ export default function Formulations({ onMenuClick }) {
 
     list.sort((a, b) => {
       if (sortBy === 'efficacy') {
-        const scoreA = a._avgScore ?? -1;
-        const scoreB = b._avgScore ?? -1;
+        const scoreA = a._stats?.avgEfficacy ?? -1;
+        const scoreB = b._stats?.avgEfficacy ?? -1;
         if (scoreB !== scoreA) return scoreB - scoreA;
         return (b._trialsCount || 0) - (a._trialsCount || 0);
       }
@@ -409,247 +715,71 @@ export default function Formulations({ onMenuClick }) {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {sortedFormulations.length > 0 ? (
             sortedFormulations.map(form => {
-              const ings = safeJsonParse(form.IngredientsJSON, []);
-              const formTrials = (state.trials || []).filter(t => t.FormulationID === form.ID || t.FormulationName === form.Name);
-              const trialsCount = formTrials.length;
-              const RESULT_SCORES = { Excellent: 4, Good: 3, Fair: 2, Poor: 1 };
-              const ratedTrials = formTrials.filter(t => RESULT_SCORES[t.Result]);
-              const avgScore = ratedTrials.length ? ratedTrials.reduce((s, t) => s + RESULT_SCORES[t.Result], 0) / ratedTrials.length : null;
-              const avgLabel = avgScore !== null ? (avgScore >= 3.5 ? 'Excellent' : avgScore >= 2.5 ? 'Good' : avgScore >= 1.5 ? 'Fair' : 'Poor') : null;
-              const avgLabelColor = { Excellent: 'bg-emerald-100 text-emerald-700', Good: 'bg-blue-100 text-blue-700', Fair: 'bg-amber-100 text-amber-700', Poor: 'bg-red-100 text-red-700' };
               const ownUid = user?.uid || user?.ID || user?.id;
               const isOwn = isOwnData(form);
               const isShared = !!(form.CreatedBy && form.CreatedBy !== ownUid);
               const isSharedEdit = Array.isArray(form.SharedWithEdit) && form.SharedWithEdit.includes(ownUid);
+              const isSelectedForCompare = selectedForCompare.has(form.ID);
+
               return (
-                <div key={form.ID} className="cv-auto bg-white p-6 rounded-xl shadow-lg relative transition-all duration-300 hover:shadow-xl hover:-translate-y-1 border border-transparent hover:border-emerald-500/50 flex flex-col justify-between">
-                  <div>
-                    <div className="flex justify-between items-start gap-3 mb-3">
-                      <div className="flex items-start gap-2 flex-1 min-w-0">
-                        <button
-                          type="button"
-                          onClick={() => toggleCompareSelection(form.ID)}
-                          title={selectedForCompare.has(form.ID) ? "Unselect from comparison" : "Select for benchmark comparison"}
-                          className={`p-1 rounded-md transition mt-0.5 shrink-0 ${selectedForCompare.has(form.ID) ? 'text-indigo-600 bg-indigo-50 ring-1 ring-indigo-400' : 'text-slate-300 hover:text-slate-500 hover:bg-slate-50'}`}
-                        >
-                          {selectedForCompare.has(form.ID) ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
-                        </button>
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-bold text-base text-slate-800 break-words leading-tight">{form.Name}</h3>
-                          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                            {form.Code && (
-                              <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">
-                                {form.Code}
-                              </span>
-                            )}
-                            {isShared && (
-                              <span className="text-[9px] px-2 py-0.5 rounded-full font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 flex items-center gap-0.5">
-                                <Share2 className="w-2.5 h-2.5 animate-pulse" /> Shared{isSharedEdit ? ' (Edit)' : ''}
-                              </span>
-                            )}
-                            {!isShared && Array.isArray(form.SharedWith) && form.SharedWith.length > 0 && (
-                              <span className="text-[9px] px-2 py-0.5 rounded-full font-bold bg-teal-50 text-teal-700 border border-teal-100 flex items-center gap-0.5" title={`Shared with ${form.SharedWith.length} user(s)`}>
-                                <Share2 className="w-2.5 h-2.5" /> Shared ({form.SharedWith.length})
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      {!isViewer && (isOwn || isSharedEdit) && (
-                        <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-lg border border-slate-100 flex-shrink-0">
-                          {isAdmin && (
-                            <button 
-                              onClick={(e) => handleOpenShareModal(e, form)} 
-                              className="p-1.5 text-indigo-600 hover:bg-indigo-100 rounded transition" 
-                              title="Share Formulation"
-                            >
-                              <Share2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                          {isOwn && (
-                            <button 
-                              onClick={() => handleOpenModal(form, true)} 
-                              className="p-1.5 text-slate-600 hover:bg-slate-200 rounded transition" 
-                              title="Duplicate Formulation"
-                            >
-                              <Copy className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                          <button 
-                            onClick={() => handleOpenModal(form)} 
-                            className="p-1.5 text-emerald-600 hover:bg-emerald-100 rounded transition" 
-                            title="Edit"
-                          >
-                            <Edit className="w-3.5 h-3.5" />
-                          </button>
-                          {isOwn && (
-                            <button 
-                              onClick={() => handleDelete(form.ID)} 
-                              className="p-1.5 text-red-500 hover:bg-red-100 rounded transition" 
-                              title="Delete"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="mt-3 text-sm text-slate-600">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Ingredients</p>
-                      <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                        {ings.map((ing, i) => (
-                          <div key={i} className="flex justify-between items-center bg-slate-50/80 px-2.5 py-1.5 rounded-lg border border-slate-100 text-xs">
-                            <span className="font-semibold text-slate-700 truncate mr-2">{ing.name}</span>
-                            <span className="text-slate-600 font-semibold bg-white px-2 py-0.5 rounded border border-slate-200/60 font-mono flex-shrink-0">
-                              {ing.quantity} {ing.unit}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* Category-specific formulation fields */}
-                      {(() => {
-                        const catConfig = getCategoryConfig(form.Category || 'herbicide');
-                        const fields = catConfig.formulationFields?.map(f => {
-                          const val = form[f.key];
-                          if (!val) return null;
-                          return (
-                            <div className="flex justify-between text-xs py-1 border-b border-dashed border-slate-100" key={f.key}>
-                              <span className="text-slate-400">{f.label}:</span>
-                              <span className="font-semibold text-slate-700">{val}</span>
-                            </div>
-                          );
-                        }).filter(Boolean);
-                        
-                        if (!fields || fields.length === 0) return null;
-                        return <div className="space-y-0.5 mt-2 border-t border-slate-100 pt-2">{fields}</div>;
-                      })()}
-
-                      {form.Notes && (
-                        <div className="mt-3 bg-slate-50/40 p-2.5 rounded-lg border border-slate-100 text-xs">
-                          <strong className="text-slate-600 block mb-0.5 text-[10px] uppercase tracking-wider">Notes</strong>
-                          <p className="italic leading-relaxed text-slate-500 break-words">{form.Notes}</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="mt-4 pt-4 border-t border-slate-100 space-y-3">
-                    <div className="flex justify-between items-center gap-2 flex-wrap">
-                      <div>
-                        <span className="text-[10px] font-bold text-slate-400 block uppercase tracking-wider">Estimated Cost</span>
-                        <p className="font-black text-base text-emerald-600 leading-none mt-1">
-                          {CURRENCY_SYMBOL}{form._costVal.toFixed(2)}
-                        </p>
-                      </div>
-
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        {form._trialsCount > 0 ? (
-                          <span className="text-[11px] bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-full font-bold border border-slate-200">
-                            {form._stdCount} Std{form._largeCount > 0 ? ` • ${form._largeCount} Field` : ''}
-                          </span>
-                        ) : (
-                          <span className="text-[10px] bg-slate-50 text-slate-400 px-2 py-0.5 rounded-full font-medium border border-slate-100">
-                            Untested
-                          </span>
-                        )}
-
-                        {avgLabel && (
-                          <span className={`text-[11px] px-2.5 py-0.5 rounded-full font-bold border ${avgLabelColor[avgLabel]}`}>
-                            {avgLabel}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Action Row 1: Linked Trials & AI Optimize */}
-                    <div className="grid grid-cols-2 gap-2 pt-1">
-                      <button
-                        onClick={() => setViewingLinkedTrialsForm(form)}
-                        className="py-2 px-2.5 rounded-xl bg-slate-100 hover:bg-emerald-50 hover:text-emerald-800 text-slate-700 font-bold text-xs border border-slate-200 transition flex items-center justify-center gap-1.5 shadow-2xs active:scale-95"
-                      >
-                        <Layers className="w-3.5 h-3.5 text-emerald-600" /> Linked Trials ({form._trialsCount})
-                      </button>
-
-                      <button
-                        onClick={() => handleAskAIForFormulation(form)}
-                        className="py-2 px-2.5 rounded-xl bg-violet-50 hover:bg-violet-100 text-violet-700 font-bold text-xs border border-violet-200 transition flex items-center justify-center gap-1 shadow-2xs active:scale-95"
-                        title="Ask AI to optimize or benchmark this formulation"
-                      >
-                        <Sparkles className="w-3.5 h-3.5 text-violet-600" /> AI Optimize
-                      </button>
-                    </div>
-
-                    {/* Action Row 2: Launch Trial, Compare, Dossier */}
-                    <div className="grid grid-cols-3 gap-1.5 pt-0.5">
-                      <button
-                        onClick={() => handleLaunchTrial(form)}
-                        className="py-1.5 px-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] transition flex items-center justify-center gap-1 shadow-2xs active:scale-95"
-                        title="Launch new trial using this formulation"
-                      >
-                        <Rocket className="w-3 h-3" /> Launch Trial
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          toggleCompareSelection(form.ID);
-                          if (!selectedForCompare.has(form.ID) && selectedForCompare.size >= 1) {
-                            setIsCompareModalOpen(true);
-                          }
-                        }}
-                        className={`py-1.5 px-2 rounded-lg font-bold text-[11px] border transition flex items-center justify-center gap-1 shadow-2xs active:scale-95 ${
-                          selectedForCompare.has(form.ID)
-                            ? 'bg-indigo-600 text-white border-indigo-600'
-                            : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
-                        }`}
-                        title="Benchmark against other formulations"
-                      >
-                        <Scale className="w-3 h-3 text-indigo-500" /> Compare
-                      </button>
-
-                      <button
-                        onClick={() => handleExportDossier(form)}
-                        className="py-1.5 px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] border border-slate-200 transition flex items-center justify-center gap-1 shadow-2xs active:scale-95"
-                        title="Export Printable Agronomic Dossier"
-                      >
-                        <FileDown className="w-3 h-3 text-slate-600" /> Dossier
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                <FormulationCard
+                  key={form.ID}
+                  form={form}
+                  isOwn={isOwn}
+                  isShared={isShared}
+                  isSharedEdit={isSharedEdit}
+                  isAdmin={isAdmin}
+                  isViewer={isViewer}
+                  CURRENCY_SYMBOL={CURRENCY_SYMBOL}
+                  isSelectedForCompare={isSelectedForCompare}
+                  onToggleCompare={toggleCompareSelection}
+                  onViewLinkedTrials={setViewingLinkedTrialsForm}
+                  onLaunchTrial={handleLaunchTrial}
+                  onAiOptimize={handleAskAIForFormulation}
+                  onExportDossier={handleExportDossier}
+                  onEdit={handleOpenModal}
+                  onDuplicate={(f) => handleOpenModal(f, true)}
+                  onShare={handleOpenShareModal}
+                  onDelete={handleDelete}
+                />
               );
             })
           ) : (
-            <div className="col-span-full p-12 text-center text-slate-500 bg-white rounded-xl shadow-md">
-              {searchTerm ? `No formulations matching "${searchTerm}".` : 'No formulations found. Create your first mixture.'}
+            <div className="col-span-full p-12 text-center text-slate-500 bg-white rounded-2xl shadow-xs border border-slate-200">
+              <p className="text-sm font-semibold text-slate-700">
+                {searchTerm ? `No formulations matching "${searchTerm}".` : 'No formulations found in this category.'}
+              </p>
+              <p className="text-xs text-slate-400 mt-1">
+                Create a new formulation or use the AI Recipe Wizard to generate one.
+              </p>
             </div>
           )}
         </div>
 
         {/* Floating Bottom Comparison Dock */}
-        {selectedForCompare.size >= 2 && (
-          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 backdrop-blur-md text-white px-5 py-3 rounded-2xl shadow-2xl border border-slate-700 flex items-center gap-4 animate-slide-up">
+        {selectedForCompare.size >= 1 && (
+          <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 backdrop-blur-md text-white px-5 py-3 rounded-2xl shadow-2xl border border-slate-700 flex items-center gap-4 animate-in slide-in-from-bottom-5">
             <div className="flex items-center gap-2">
-              <Scale className="w-5 h-5 text-emerald-400" />
-              <span className="text-xs font-bold">
-                {selectedForCompare.size} formulations selected for benchmark
+              <Scale className="w-4 h-4 text-emerald-400" />
+              <span className="text-xs font-bold tracking-wide">
+                {selectedForCompare.size} of 4 Formulations Selected
               </span>
             </div>
             <div className="flex items-center gap-2">
               <button
+                type="button"
                 onClick={() => setIsCompareModalOpen(true)}
-                className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-sm"
+                className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5 active:scale-95"
               >
-                Compare Now ⚖️
+                <Scale className="w-3.5 h-3.5" /> Compare Side-by-Side
               </button>
               <button
+                type="button"
                 onClick={() => setSelectedForCompare(new Set())}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white transition"
+                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition"
                 title="Clear selection"
               >
-                <X className="w-4 h-4" />
+                Clear
               </button>
             </div>
           </div>
@@ -824,6 +954,7 @@ export default function Formulations({ onMenuClick }) {
         onClose={() => setIsCompareModalOpen(false)}
         formulations={formulationsToCompare}
         allTrials={state.trials}
+        allProjects={state.projects}
         ingredientsList={state.ingredients}
         activeCategory={activeCategory}
         onLaunchTrial={handleLaunchTrial}

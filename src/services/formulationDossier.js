@@ -1,11 +1,16 @@
 import { safeJsonParse } from '../utils/helpers.js';
 import { calculateFormulationCost } from '../utils/costUtils.js';
 import { getCategoryConfig } from '../utils/categoryConfig.js';
+import { 
+  getFormulationTrialStats, 
+  getTrialCalculatedEfficacy, 
+  getTrialTargetSpecies 
+} from '../utils/formulationTrialUtils.js';
 
 /**
  * Generates and triggers a formatted, printable R&D Agronomic Dossier for a formulation
  */
-export function exportFormulationDossier(formulation, allTrials = [], libraryIngredients = [], activeCategory = 'herbicide') {
+export function exportFormulationDossier(formulation, allTrials = [], libraryIngredients = [], activeCategory = 'herbicide', allProjects = []) {
   if (!formulation) return;
 
   const config = getCategoryConfig(activeCategory);
@@ -14,66 +19,20 @@ export function exportFormulationDossier(formulation, allTrials = [], libraryIng
   const rawIngs = safeJsonParse(formulation.IngredientsJSON, []);
   const calculatedCost = calculateFormulationCost(rawIngs, libraryIngredients);
 
-  // Filter linked trials
-  const linkedTrials = (allTrials || []).filter(t => {
-    const trialForm = String(t.FormulationID || t.FormulationName || '').trim().toLowerCase();
-    const fId = String(formulation.ID || '').toLowerCase();
-    const fName = String(formulation.Name || '').toLowerCase();
-    const fCode = String(formulation.Code || '').toLowerCase();
-    return trialForm && (trialForm === fId || trialForm === fName || trialForm === fCode);
-  });
+  const stats = getFormulationTrialStats(formulation, allTrials, allProjects, activeCategory);
+  const linkedTrials = stats.linkedTrials || [];
 
-  const microplotTrials = linkedTrials.filter(t => !t.ProjectDesign || t.ProjectDesign !== 'LargeScale');
-  const fieldTrials = linkedTrials.filter(t => t.ProjectDesign === 'LargeScale');
-  const finalizedTrials = linkedTrials.filter(t => t.ControlFinalized || t.Result || t.IsCompleted);
+  const microplotCount = stats.microplotCount;
+  const fieldCount = stats.fieldCount;
+  const totalTrials = stats.total;
+  const finalizedCount = stats.finalizedCount;
+  const winRate = stats.winRate;
+  const avgEff = stats.avgEfficacy !== null ? `${stats.avgEfficacy}%` : 'N/A';
+  const maxEff = stats.peakEfficacy !== null ? `${stats.peakEfficacy}%` : 'N/A';
 
-  const totalTrials = linkedTrials.length;
-  const finalizedCount = finalizedTrials.length;
+  const targetMap = stats.targetMap || {};
+  const dosageMap = stats.dosageMap || {};
 
-  // Win rate
-  const winCount = linkedTrials.filter(t => {
-    const r = (t.Result || '').toLowerCase();
-    return r === 'excellent' || r === 'good';
-  }).length;
-  const winRate = totalTrials > 0 ? Math.round((winCount / totalTrials) * 100) : 0;
-
-  // Efficacies
-  const effs = linkedTrials
-    .map(t => Number(t.FinalEfficacy ?? t.Efficacy ?? t.AverageEfficacy))
-    .filter(v => !isNaN(v) && v > 0);
-  const avgEff = effs.length > 0 ? (effs.reduce((a, b) => a + b, 0) / effs.length).toFixed(1) : 'N/A';
-  const maxEff = effs.length > 0 ? Math.max(...effs).toFixed(1) : 'N/A';
-
-  // Target Spectrum
-  const targetMap = {};
-  linkedTrials.forEach(t => {
-    const tgt = (t.TargetWeed || t.TargetWeeds || t.TargetDisease || t.TargetPest || t.Crop || 'Broad Spectrum').trim();
-    if (!targetMap[tgt]) {
-      targetMap[tgt] = { count: 0, sumEff: 0, validEffCount: 0, results: [] };
-    }
-    targetMap[tgt].count++;
-    const e = Number(t.FinalEfficacy ?? t.Efficacy ?? t.AverageEfficacy);
-    if (!isNaN(e) && e > 0) {
-      targetMap[tgt].sumEff += e;
-      targetMap[tgt].validEffCount++;
-    }
-    if (t.Result) targetMap[tgt].results.push(t.Result);
-  });
-
-  // Dosage Response
-  const dosageMap = {};
-  linkedTrials.forEach(t => {
-    const dose = (t.Dosage || t.DosageRate || 'Standard Rate').trim();
-    if (!dosageMap[dose]) {
-      dosageMap[dose] = { count: 0, sumEff: 0, validEffCount: 0 };
-    }
-    dosageMap[dose].count++;
-    const e = Number(t.FinalEfficacy ?? t.Efficacy ?? t.AverageEfficacy);
-    if (!isNaN(e) && e > 0) {
-      dosageMap[dose].sumEff += e;
-      dosageMap[dose].validEffCount++;
-    }
-  });
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -220,9 +179,9 @@ export function exportFormulationDossier(formulation, allTrials = [], libraryIng
     </thead>
     <tbody>
       ${Object.keys(targetMap).length > 0 ? Object.entries(targetMap).map(([tgt, data]) => {
-        const avg = data.validEffCount > 0 ? `${(data.sumEff / data.validEffCount).toFixed(1)}%` : 'N/A';
-        const numAvg = data.validEffCount > 0 ? data.sumEff / data.validEffCount : 0;
-        const rating = numAvg >= 85 ? 'Excellent' : numAvg >= 70 ? 'Good' : numAvg >= 50 ? 'Fair' : 'Poor';
+        const avg = data.avgEff !== null ? `${data.avgEff}%` : (data.winRate > 0 ? `${data.winRate}% win` : 'N/A');
+        const numAvg = data.avgEff ?? data.winRate ?? 0;
+        const rating = numAvg >= 80 ? 'Excellent' : numAvg >= 65 ? 'Good' : numAvg >= 45 ? 'Fair' : 'Poor';
         return `
           <tr>
             <td><strong>${tgt}</strong></td>
@@ -252,7 +211,7 @@ export function exportFormulationDossier(formulation, allTrials = [], libraryIng
     </thead>
     <tbody>
       ${Object.keys(dosageMap).length > 0 ? Object.entries(dosageMap).map(([rate, data]) => {
-        const avg = data.validEffCount > 0 ? `${(data.sumEff / data.validEffCount).toFixed(1)}%` : 'N/A';
+        const avg = data.avgEff !== null ? `${data.avgEff}%` : (data.winRate > 0 ? `${data.winRate}% win` : 'N/A');
         return `
           <tr>
             <td><strong>${rate}</strong></td>
@@ -284,9 +243,10 @@ export function exportFormulationDossier(formulation, allTrials = [], libraryIng
     </thead>
     <tbody>
       ${linkedTrials.length > 0 ? linkedTrials.map(t => {
-        const isField = t.ProjectDesign === 'LargeScale';
-        const eff = t.FinalEfficacy ?? t.Efficacy ?? t.AverageEfficacy;
-        const res = t.Result || 'Unrated';
+        const isField = t.ProjectDesign === 'LargeScale' || t.Design === 'LargeScale';
+        const eff = getTrialCalculatedEfficacy(t, activeCategory);
+        const tgt = getTrialTargetSpecies(t, activeCategory);
+        const res = t.Result || (eff !== null ? (eff >= 80 ? 'Excellent' : eff >= 65 ? 'Good' : eff >= 45 ? 'Fair' : 'Poor') : 'Unrated');
         return `
           <tr>
             <td>
@@ -297,9 +257,9 @@ export function exportFormulationDossier(formulation, allTrials = [], libraryIng
             <td><strong>${t.TrialName || t.ID}</strong></td>
             <td>${t.Date ? new Date(t.Date).toLocaleDateString() : 'N/A'}</td>
             <td>${t.Location || '—'}</td>
-            <td>${t.TargetWeed || t.TargetWeeds || t.TargetDisease || t.TargetPest || t.Crop || '—'}</td>
+            <td>${tgt}</td>
             <td>${t.Dosage || t.DosageRate || '—'}</td>
-            <td style="text-align: center; font-weight: bold;">${eff !== undefined && eff !== null ? `${eff}%` : '—'}</td>
+            <td style="text-align: center; font-weight: bold; color: ${eff !== null && eff >= 75 ? '#059669' : '#334155'};">${eff !== null ? `${eff}%` : '—'}</td>
             <td style="text-align: center;">
               <span class="rating-pill rating-${res.toLowerCase()}">${res}</span>
             </td>

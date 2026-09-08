@@ -405,8 +405,10 @@ export default function Trials({ onMenuClick }) {
   // --- Formulation Quick-Peek Modal ---
   const [quickPeekForm, setQuickPeekForm] = useState(null);
 
-  const handleQuickPeekFormulation = useCallback((formId, formName) => {
-    if (!formId && !formName) return;
+  const handleQuickPeekFormulation = useCallback((arg1, arg2) => {
+    if (!arg1 && !arg2) return;
+    const formId = (typeof arg1 === 'object' && arg1 !== null) ? (arg1.ID || arg1.id) : (typeof arg1 === 'string' ? arg1 : null);
+    const formName = (typeof arg1 === 'object' && arg1 !== null) ? (arg1.Name || arg1.name) : (typeof arg2 === 'string' ? arg2 : (typeof arg1 === 'string' ? arg1 : null));
     const cleanId = String(formId || '').toLowerCase().trim();
     const cleanName = String(formName || '').toLowerCase().trim();
     const found = (state.formulations || []).find(f => {

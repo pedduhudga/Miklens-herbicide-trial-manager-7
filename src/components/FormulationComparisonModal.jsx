@@ -9,11 +9,14 @@ import { DEFAULT_GEMINI_MODEL } from '../utils/aiConstants.js';
 import { exportFormulationDossier } from '../services/formulationDossier.js';
 import { useAppState } from '../hooks/useAppState.jsx';
 
+import { getFormulationTrialStats } from '../utils/formulationTrialUtils.js';
+
 export default function FormulationComparisonModal({
   isOpen,
   onClose,
   formulations = [],
   allTrials = [],
+  allProjects = [],
   ingredientsList = [],
   activeCategory = 'herbicide',
   onLaunchTrial,
@@ -28,68 +31,27 @@ export default function FormulationComparisonModal({
   // Compute stats for each compared formulation
   const comparedData = useMemo(() => {
     return formulations.map(f => {
-      const fId = String(f.ID || '').toLowerCase();
-      const fName = String(f.Name || '').toLowerCase();
-      const fCode = String(f.Code || '').toLowerCase();
-
-      const linked = (allTrials || []).filter(t => {
-        const tf = String(t.FormulationID || t.FormulationName || '').trim().toLowerCase();
-        return tf && (tf === fId || tf === fName || tf === fCode);
-      });
-
-      const microplotCount = linked.filter(t => !t.ProjectDesign || t.ProjectDesign !== 'LargeScale').length;
-      const fieldCount = linked.filter(t => t.ProjectDesign === 'LargeScale').length;
-      const finalized = linked.filter(t => t.ControlFinalized || t.Result || t.IsCompleted);
-
-      const winCount = linked.filter(t => {
-        const r = (t.Result || '').toLowerCase();
-        return r === 'excellent' || r === 'good';
-      }).length;
-      const winRate = linked.length > 0 ? Math.round((winCount / linked.length) * 100) : 0;
-
-      const effs = linked
-        .map(t => Number(t.FinalEfficacy ?? t.Efficacy ?? t.AverageEfficacy))
-        .filter(v => !isNaN(v) && v > 0);
-      const avgEff = effs.length > 0 ? Math.round(effs.reduce((a, b) => a + b, 0) / effs.length) : null;
-      const peakEff = effs.length > 0 ? Math.max(...effs) : null;
-
-      const ctrlDays = finalized
-        .map(t => Number(t.FinalControlDuration ?? t.EffectiveControlDays ?? t.ControlDays))
-        .filter(v => !isNaN(v) && v > 0);
-      const avgCtrlDays = ctrlDays.length > 0 ? Math.round(ctrlDays.reduce((a, b) => a + b, 0) / ctrlDays.length) : null;
-
+      const stats = getFormulationTrialStats(f, allTrials, allProjects, activeCategory);
       const parsedIngs = safeJsonParse(f.IngredientsJSON, []);
-      const cost = calculateFormulationCost(parsedIngs, ingredientsList);
-
-      // Target breakdown
-      const targetMap = {};
-      linked.forEach(t => {
-        const tgt = (t.TargetWeed || t.TargetWeeds || t.TargetDisease || t.TargetPest || t.Crop || 'General').trim();
-        if (!targetMap[tgt]) targetMap[tgt] = { count: 0, sumEff: 0, validCount: 0 };
-        targetMap[tgt].count++;
-        const e = Number(t.FinalEfficacy ?? t.Efficacy ?? t.AverageEfficacy);
-        if (!isNaN(e) && e > 0) {
-          targetMap[tgt].sumEff += e;
-          targetMap[tgt].validCount++;
-        }
-      });
+      const realCost = calculateFormulationCost(parsedIngs, ingredientsList);
+      const cost = realCost > 0 ? realCost : parseFloat(f.EstimatedCost || 0);
 
       return {
         ...f,
         ingredients: parsedIngs,
         cost,
-        linkedTrials: linked,
-        totalTrials: linked.length,
-        microplotCount,
-        fieldCount,
-        winRate,
-        avgEff,
-        peakEff,
-        avgCtrlDays,
-        targetMap
+        linkedTrials: stats.linkedTrials,
+        totalTrials: stats.total,
+        microplotCount: stats.microplotCount,
+        fieldCount: stats.fieldCount,
+        winRate: stats.winRate,
+        avgEff: stats.avgEfficacy,
+        peakEff: stats.peakEfficacy,
+        avgCtrlDays: stats.avgCtrlDays,
+        targetMap: stats.targetMap
       };
     });
-  }, [formulations, allTrials, ingredientsList]);
+  }, [formulations, allTrials, allProjects, ingredientsList, activeCategory]);
 
   // Extract all unique ingredient names across compared formulations
   const allUniqueIngNames = useMemo(() => {

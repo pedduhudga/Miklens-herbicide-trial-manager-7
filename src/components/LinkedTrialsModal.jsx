@@ -9,6 +9,11 @@ import { calculateDAA } from '../utils/dateUtils.js';
 import { calculateFormulationCost } from '../utils/costUtils.js';
 import { getCategoryConfig, getPrimaryObservationField } from '../utils/categoryConfig.js';
 import { exportFormulationDossier } from '../services/formulationDossier.js';
+import { 
+  getFormulationTrialStats, 
+  getTrialCalculatedEfficacy, 
+  getTrialTargetSpecies 
+} from '../utils/formulationTrialUtils.js';
 
 export default function LinkedTrialsModal({ isOpen, onClose, formulation, allTrials = [], allProjects = [], allIngredients = [], activeCategory = 'herbicide' }) {
   const navigate = useNavigate();
@@ -16,139 +21,36 @@ export default function LinkedTrialsModal({ isOpen, onClose, formulation, allTri
   const config = getCategoryConfig(activeCategory);
   const primaryField = getPrimaryObservationField(activeCategory);
 
-  // Filter linked trials matching this formulation
-  const linkedTrials = useMemo(() => {
-    if (!formulation) return [];
-    const formId = String(formulation.ID || '');
-    const formName = String(formulation.Name || '').trim().toLowerCase();
+  // Compute accurate trial performance metrics for this formulation
+  const stats = useMemo(() => {
+    return getFormulationTrialStats(formulation, allTrials, allProjects, activeCategory);
+  }, [formulation, allTrials, allProjects, activeCategory]);
 
-    return (allTrials || []).filter(t => {
-      // Must match category
-      const trialCat = t.Category || 'herbicide';
-      if (trialCat !== activeCategory) return false;
+  const linkedTrials = stats.linkedTrials || [];
 
-      const tFormId = String(t.FormulationID || '');
-      const tFormName = String(t.FormulationName || '').trim().toLowerCase();
-      return (formId && tFormId === formId) || (formName && tFormName === formName);
-    });
-  }, [formulation, allTrials, activeCategory]);
-
-  // Distinguish between Standard Trials and Large Field Trials
+  // Distinguish between Standard Trials (Microplot) and Large Field Trials
   const { standardTrials, largeScaleTrials } = useMemo(() => {
     const std = [];
     const large = [];
 
     const projectMap = new Map();
-    (allProjects || []).forEach(p => projectMap.set(String(p.ID), p));
+    (allProjects || []).forEach(p => projectMap.set(String(p.ID || p.id), p));
 
     linkedTrials.forEach(t => {
       const proj = projectMap.get(String(t.ProjectID));
-      if (proj && proj.Design === 'LargeScale') {
-        large.push({ ...t, _projectName: proj.Name, _isLargeScale: true });
+      const isField = (proj && proj.Design === 'LargeScale') || t.Design === 'LargeScale' || t.ProjectDesign === 'LargeScale';
+      if (isField) {
+        large.push({ ...t, _projectName: proj?.Name || '', _isLargeScale: true });
       } else {
-        std.push({ ...t, _projectName: proj ? proj.Name : '', _isLargeScale: false });
+        std.push({ ...t, _projectName: proj?.Name || '', _isLargeScale: false });
       }
     });
 
     return { standardTrials: std, largeScaleTrials: large };
   }, [linkedTrials, allProjects]);
 
-  // Aggregate Performance Metrics
-  const stats = useMemo(() => {
-    const total = linkedTrials.length;
-    if (total === 0) {
-      return { total: 0, finalized: 0, active: 0, winRate: 0, avgEfficacy: null, maxEfficacy: null, avgCtrlDays: null, dosages: [], targets: [] };
-    }
-
-    let finalizedCount = 0;
-    let winCount = 0;
-    const efficacies = [];
-    const ctrlDaysList = [];
-    const dosageMap = new Map();
-    const targetMap = new Map();
-
-    linkedTrials.forEach(t => {
-      const isCompleted = t.IsCompleted === true || t.IsCompleted === 'true';
-      if (isCompleted) finalizedCount++;
-
-      // Win rate: Result = Excellent or Good
-      if (t.Result === 'Excellent' || t.Result === 'Good') {
-        winCount++;
-      }
-
-      // Efficacy from EfficacyDataJSON
-      const effData = safeJsonParse(t.EfficacyDataJSON, []);
-      if (Array.isArray(effData) && effData.length > 0) {
-        const sorted = [...effData].sort((a, b) => Number(a.daa ?? 0) - Number(b.daa ?? 0));
-        const latest = sorted[sorted.length - 1];
-        const effVal = latest.controlPct ?? latest.control ?? latest.efficacy ?? null;
-        if (effVal !== null && !isNaN(effVal)) {
-          efficacies.push(Number(effVal));
-        }
-      }
-
-      // Control Duration (Finalized only)
-      if (isCompleted) {
-        if (t.FinalControlDuration) {
-          const days = parseInt(t.FinalControlDuration, 10);
-          if (!isNaN(days) && days > 0) ctrlDaysList.push(days);
-        } else if (t.Date && t.FinalizationDate) {
-          const days = Math.max(0, Math.round((new Date(t.FinalizationDate) - new Date(t.Date)) / 86400000));
-          if (days > 0) ctrlDaysList.push(days);
-        }
-      }
-
-      // Dosage breakdown
-      const dosageKey = String(t.Dosage || 'Unspecified').trim();
-      if (!dosageMap.has(dosageKey)) {
-        dosageMap.set(dosageKey, { dosage: dosageKey, count: 0, wins: 0, effs: [] });
-      }
-      const dEntry = dosageMap.get(dosageKey);
-      dEntry.count++;
-      if (t.Result === 'Excellent' || t.Result === 'Good') dEntry.wins++;
-      if (efficacies.length > 0) dEntry.effs.push(efficacies[efficacies.length - 1]);
-
-      // Target breakdown
-      const targetVal = String(t.WeedSpecies || t.DiseaseTarget || t.PestTarget || t.CropTarget || 'General').trim();
-      if (!targetMap.has(targetVal)) {
-        targetMap.set(targetVal, { target: targetVal, count: 0, wins: 0 });
-      }
-      const tgEntry = targetMap.get(targetVal);
-      tgEntry.count++;
-      if (t.Result === 'Excellent' || t.Result === 'Good') tgEntry.wins++;
-    });
-
-    const avgEff = efficacies.length > 0
-      ? Math.round(efficacies.reduce((s, e) => s + e, 0) / efficacies.length)
-      : null;
-    const maxEff = efficacies.length > 0 ? Math.max(...efficacies) : null;
-    const avgCtrl = ctrlDaysList.length > 0
-      ? Math.round(ctrlDaysList.reduce((s, d) => s + d, 0) / ctrlDaysList.length)
-      : null;
-
-    const dosageList = Array.from(dosageMap.values()).map(d => ({
-      ...d,
-      winRate: Math.round((d.wins / d.count) * 100),
-      avgEff: d.effs.length > 0 ? Math.round(d.effs.reduce((a, b) => a + b, 0) / d.effs.length) : null
-    }));
-
-    const targetList = Array.from(targetMap.values()).map(tg => ({
-      ...tg,
-      winRate: Math.round((tg.wins / tg.count) * 100)
-    }));
-
-    return {
-      total,
-      finalized: finalizedCount,
-      active: total - finalizedCount,
-      winRate: Math.round((winCount / total) * 100),
-      avgEfficacy: avgEff,
-      maxEfficacy: maxEff,
-      avgCtrlDays: avgCtrl,
-      dosages: dosageList,
-      targets: targetList
-    };
-  }, [linkedTrials]);
+  const dosageList = useMemo(() => Object.values(stats.dosageMap || {}), [stats.dosageMap]);
+  const targetList = useMemo(() => Object.values(stats.targetMap || {}), [stats.targetMap]);
 
   if (!isOpen || !formulation) return null;
 
@@ -300,9 +202,9 @@ export default function LinkedTrialsModal({ isOpen, onClose, formulation, allTri
               <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
                 <BarChart2 className="w-4 h-4 text-emerald-600" /> Dosage Performance
               </h4>
-              {stats.dosages.length > 0 ? (
+              {dosageList.length > 0 ? (
                 <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
-                  {stats.dosages.map((d, i) => (
+                  {dosageList.map((d, i) => (
                     <div key={i} className="flex justify-between items-center text-xs p-2 rounded-xl bg-slate-50 border border-slate-100">
                       <span className="font-bold text-slate-800">{d.dosage}</span>
                       <div className="flex items-center gap-3">
@@ -324,14 +226,17 @@ export default function LinkedTrialsModal({ isOpen, onClose, formulation, allTri
               <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
                 <TrendingUp className="w-4 h-4 text-blue-600" /> Target Spectrum & Control
               </h4>
-              {stats.targets.length > 0 ? (
+              {targetList.length > 0 ? (
                 <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
-                  {stats.targets.map((tg, i) => (
+                  {targetList.map((tg, i) => (
                     <div key={i} className="flex justify-between items-center text-xs p-2 rounded-xl bg-slate-50 border border-slate-100">
                       <span className="font-bold text-slate-800 truncate mr-2">{tg.target}</span>
-                      <span className="font-semibold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full shrink-0">
-                        {tg.winRate}% win ({tg.count})
-                      </span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-slate-500">{tg.count} trial{tg.count > 1 ? 's' : ''}</span>
+                        <span className="font-semibold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">
+                          {tg.avgEff !== null ? `${tg.avgEff}% eff` : `${tg.winRate}% win`}
+                        </span>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -377,6 +282,8 @@ export default function LinkedTrialsModal({ isOpen, onClose, formulation, allTri
                 {displayedTrials.map((t) => {
                   const isLarge = t._isLargeScale;
                   const isCompleted = t.IsCompleted === true || t.IsCompleted === 'true';
+                  const eff = getTrialCalculatedEfficacy(t, activeCategory);
+                  const targetSpecies = getTrialTargetSpecies(t, activeCategory);
 
                   return (
                     <div 
@@ -384,23 +291,37 @@ export default function LinkedTrialsModal({ isOpen, onClose, formulation, allTri
                       className="p-3.5 rounded-2xl bg-white border border-slate-200 hover:border-emerald-400 hover:shadow-md transition-all flex flex-col sm:flex-row justify-between sm:items-center gap-3"
                     >
                       <div className="space-y-1 min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider border ${
                             isLarge 
                               ? 'bg-indigo-50 text-indigo-700 border-indigo-200' 
                               : 'bg-emerald-50 text-emerald-700 border-emerald-200'
                           }`}>
-                            {isLarge ? '🚜 Large Field Trial' : '🌿 Standard Trial'}
+                            {isLarge ? '🚜 Large Field' : '🌿 Microplot'}
                           </span>
 
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
-                            t.Result === 'Excellent' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' :
-                            t.Result === 'Good' ? 'bg-blue-100 text-blue-800 border-blue-300' :
-                            t.Result === 'Fair' ? 'bg-amber-100 text-amber-800 border-amber-300' :
-                            'bg-slate-100 text-slate-700 border-slate-300'
-                          }`}>
-                            {t.Result || 'Pending'}
-                          </span>
+                          {eff !== null && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                              ⭐ {eff}% Efficacy
+                            </span>
+                          )}
+
+                          {t.Result && (
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
+                              t.Result === 'Excellent' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                              t.Result === 'Good' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                              t.Result === 'Fair' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                              'bg-slate-100 text-slate-700 border-slate-300'
+                            }`}>
+                              {t.Result}
+                            </span>
+                          )}
+
+                          {targetSpecies && targetSpecies !== 'General' && (
+                            <span className="text-[10px] text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                              🎯 {targetSpecies}
+                            </span>
+                          )}
 
                           {isCompleted && (
                             <span className="text-[10px] text-purple-700 font-bold bg-purple-50 px-2 py-0.5 rounded-full border border-purple-200">

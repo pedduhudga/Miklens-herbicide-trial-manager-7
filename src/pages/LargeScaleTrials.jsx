@@ -344,15 +344,29 @@ export default function LargeScaleTrials({ onMenuClick }) {
     }
   }, [location.state, navigate, location.pathname, state.auth?.user?.name]);
 
-  const handleQuickPeekFormulation = useCallback((formulation) => {
-    if (!formulation) return;
+  const handleQuickPeekFormulation = useCallback((arg1, arg2) => {
+    if (!arg1 && !arg2) return;
+    const formId = (typeof arg1 === 'object' && arg1 !== null) ? (arg1.ID || arg1.id) : (typeof arg1 === 'string' ? arg1 : null);
+    const formName = (typeof arg1 === 'object' && arg1 !== null) ? (arg1.Name || arg1.name) : (typeof arg2 === 'string' ? arg2 : (typeof arg1 === 'string' ? arg1 : null));
+
+    const cleanId = String(formId || '').toLowerCase().trim();
+    const cleanName = String(formName || '').toLowerCase().trim();
+
     const allFormulations = state.formulations || [];
-    const found = allFormulations.find(f => 
-      String(f.ID || f.id) === String(formulation.ID || formulation.id) ||
-      (f.Name && formulation.Name && f.Name.trim().toLowerCase() === formulation.Name.trim().toLowerCase())
-    );
-    setQuickPeekForm(found || formulation);
-  }, [state.formulations]);
+    const found = allFormulations.find(f => {
+      const fId = String(f.ID || f.id || '').toLowerCase().trim();
+      const fCode = String(f.Code || f.code || '').toLowerCase().trim();
+      const fName = String(f.Name || f.name || '').toLowerCase().trim();
+      return (cleanId && (fId === cleanId || fCode === cleanId)) || (cleanName && fName === cleanName);
+    });
+
+    setQuickPeekForm(found || (typeof arg1 === 'object' && arg1 !== null ? arg1 : {
+      ID: formId || 'N/A',
+      Name: formName || formId || 'Custom Formulation',
+      IngredientsJSON: '[]',
+      Category: activeCategory
+    }));
+  }, [state.formulations, activeCategory]);
 
   // UI state
   const [dashboardTab, setDashboardTab] = useState('map'); // 'map' | 'charts' | 'ai'
