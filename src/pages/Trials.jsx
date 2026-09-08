@@ -31,6 +31,11 @@ import CategoryValidationAlert, { showCategoryValidationToast } from '../compone
 import PhotoAnalyzerView from '../components/PhotoAnalyzerView.jsx';
 import { analyzePhoto, analyzePhotosBatch, identifyWeedFromPhoto as identifyWeedFromPhotoService, getAPIKeys, generateTextWithAI, parseHarvestTextLog } from '../services/multiProviderAI.js';
 import TrialCard from '../components/TrialCard.jsx';
+import FormulationQuickPeekModal from '../components/FormulationQuickPeekModal.jsx';
+import TrialFiltersBar from '../components/trials/TrialFiltersBar.jsx';
+import TrialTimelineView from '../components/trials/TrialTimelineView.jsx';
+import TrialKanbanBoard from '../components/trials/TrialKanbanBoard.jsx';
+import { GEMINI_FALLBACK_MODELS } from '../utils/aiConstants.js';
 import {
   generateComprehensivePdf,
   generateScientificReport,
@@ -44,7 +49,6 @@ import {
   exportTrialDocx,
   shareTrial as shareTrialFn,
 } from '../services/trialReports.js';
-import { AdvancedReportGenerator } from '../services/advancedReportGenerator.js';
 import { fetchWeather, fetchSoilData } from '../services/weather.js';
 import { EPPO_CODES, BBCH_STAGES, lookupEPPO } from '../utils/eppoBBCHData.js';
 import { exportToARM, importARMCSV } from '../services/armExporter.js';
@@ -200,6 +204,12 @@ export default function Trials({ onMenuClick }) {
     const saved = localStorage.getItem('isTimelineView');
     return saved !== null ? saved === 'true' : true;
   });
+  const [viewMode, setViewMode] = useState(() => {
+    const saved = localStorage.getItem('trialViewMode');
+    if (saved === 'grid' || saved === 'timeline' || saved === 'kanban') return saved;
+    const savedTL = localStorage.getItem('isTimelineView');
+    return savedTL === 'false' ? 'grid' : 'timeline';
+  });
   const [selectedForBulk, setSelectedForBulk] = useState(new Set());
   const [collapsedSections, setCollapsedSections] = useState({});
   const [projectSearchQuery, setProjectSearchQuery] = useState('');
@@ -297,7 +307,7 @@ export default function Trials({ onMenuClick }) {
     });
     if (hasBrokenPhotos && !syncingAllPhotos) {
       console.log('[AutoHeal] Detected broken photo links. Initiating silent background Drive healing...');
-      handleSyncAllPhotosFromDrive(true).catch(err => console.error('[AutoHeal] Background heal error:', err));
+      handleSyncAllPhotosFromDrive(true, true).catch(err => console.error('[AutoHeal] Background heal error:', err));
     }
   }, [state.trials]);
 
@@ -391,6 +401,49 @@ export default function Trials({ onMenuClick }) {
     window.addEventListener('app:navigate_to_trial', handleNavigateToTrial);
     return () => window.removeEventListener('app:navigate_to_trial', handleNavigateToTrial);
   }, [updateState]);
+
+  // --- Formulation Quick-Peek Modal ---
+  const [quickPeekForm, setQuickPeekForm] = useState(null);
+
+  const handleQuickPeekFormulation = useCallback((formId, formName) => {
+    if (!formId && !formName) return;
+    const cleanId = String(formId || '').toLowerCase().trim();
+    const cleanName = String(formName || '').toLowerCase().trim();
+    const found = (state.formulations || []).find(f => {
+      const fId = String(f.ID || '').toLowerCase().trim();
+      const fName = String(f.Name || '').toLowerCase().trim();
+      const fCode = String(f.Code || '').toLowerCase().trim();
+      return (cleanId && (fId === cleanId || fCode === cleanId)) || (cleanName && fName === cleanName);
+    });
+
+    if (found) {
+      setQuickPeekForm(found);
+    } else {
+      setQuickPeekForm({
+        ID: formId || 'N/A',
+        Name: formName || formId || 'Custom Formulation',
+        IngredientsJSON: '[]',
+        Category: activeCategory
+      });
+    }
+  }, [state.formulations, activeCategory]);
+
+  // Handle incoming request to create a new trial with a formulation pre-selected
+  useEffect(() => {
+    if (location.state?.newTrialWithFormulation) {
+      const { id, name, code } = location.state.newTrialWithFormulation;
+      const initial = emptyForm(activeCategory);
+      setFormData({
+        ...initial,
+        FormulationID: id || '',
+        FormulationName: name || code || '',
+        TrialName: `${name || code || 'New'} Trial`
+      });
+      setEditingTrial(null);
+      setIsModalOpen(true);
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.state, activeCategory, navigate, location.pathname]);
 
   // --- Card 3-dot menus ---
   const [openCardMenu, setOpenCardMenu] = useState(null);
@@ -621,6 +674,11 @@ export default function Trials({ onMenuClick }) {
         setActiveTrial(trialToFocus);
         setDetailTab('info');
       }
+    }
+
+    const formFilter = searchParams.get('formulation');
+    if (formFilter) {
+      setFilterFormulation(formFilter);
     }
 
     const addNew = searchParams.get('addNew');
@@ -1271,7 +1329,7 @@ export default function Trials({ onMenuClick }) {
           return null;
         }
         const fileUri = `https://drive.google.com/uc?export=download&id=${driveFileId}`;
-        const models = ['gemini-2.5-flash-lite', 'gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-1.5-flash-latest'];
+        const models = GEMINI_FALLBACK_MODELS;
         let successResult = null;
         for (const model of models) {
           for (const key of geminiKeys) {
@@ -1322,7 +1380,7 @@ export default function Trials({ onMenuClick }) {
           const mimeType = dataUrl.split(';')[0].split(':')[1] || 'image/jpeg';
           const base64 = dataUrl.split(',')[1];
           if (base64) {
-            const models = ['gemini-2.5-flash-lite', 'gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-1.5-flash-latest'];
+            const models = GEMINI_FALLBACK_MODELS;
             let successResult = null;
             for (const model of models) {
               for (const key of geminiKeys) {
@@ -3470,7 +3528,7 @@ Rules:
     }
   };
 
-  const handleSyncAllPhotosFromDrive = async (healOnly = syncHealOnly) => {
+  const handleSyncAllPhotosFromDrive = async (healOnly = syncHealOnly, isSilent = false) => {
     const trialsToScan = healOnly
       ? (state.trials || []).filter(t => {
           const photos = safeJsonParse(t.PhotoURLs, []);
@@ -3479,13 +3537,17 @@ Rules:
       : (state.trials || []);
 
     if (trialsToScan.length === 0) {
-      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: healOnly ? 'All trial photos are already synchronized and healthy!' : 'No trials found to synchronize.', type: 'info' } }));
+      if (!isSilent) {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: healOnly ? 'All trial photos are already synchronized and healthy!' : 'No trials found to synchronize.', type: 'info' } }));
+      }
       return;
     }
 
     try {
       setSyncingAllPhotos(true);
-      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Starting batch sync for ${trialsToScan.length} trial(s)...`, type: 'info' } }));
+      if (!isSilent) {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { toastId: 'batch-photo-sync', msg: `Starting batch sync for ${trialsToScan.length} trial(s)...`, type: 'info' } }));
+      }
 
       let totalHealed = 0;
       let totalAdded = 0;
@@ -3493,12 +3555,15 @@ Rules:
 
       for (const trial of trialsToScan) {
         processedCount++;
-        window.dispatchEvent(new CustomEvent('app:toast', { 
-          detail: { 
-            msg: `Syncing photos for "${trial.FormulationName || 'Trial'}" (${processedCount}/${trialsToScan.length})...`, 
-            type: 'info' 
-          } 
-        }));
+        if (!isSilent) {
+          window.dispatchEvent(new CustomEvent('app:toast', { 
+            detail: { 
+              toastId: 'batch-photo-sync',
+              msg: `Syncing photos for "${trial.FormulationName || 'Trial'}" (${processedCount}/${trialsToScan.length})...`, 
+              type: 'info' 
+            } 
+          }));
+        }
 
         const photoURLs = safeJsonParse(trial.PhotoURLs, []);
         const brokenPhotos = photoURLs.filter(p => isPhotoBroken(p) && !p.deleted).map(p => ({
@@ -3663,18 +3728,27 @@ Rules:
       }
 
       if (totalHealed > 0 || totalAdded > 0) {
-        window.dispatchEvent(new CustomEvent('app:toast', { 
-          detail: { 
-            msg: `Batch sync complete! Restored ${totalHealed} photo(s) and added ${totalAdded} photo(s) across trials!`, 
-            type: 'success' 
-          } 
-        }));
+        if (!isSilent) {
+          window.dispatchEvent(new CustomEvent('app:toast', { 
+            detail: { 
+              toastId: 'batch-photo-sync',
+              msg: `Batch sync complete! Restored ${totalHealed} photo(s) and added ${totalAdded} photo(s) across trials!`, 
+              type: 'success' 
+            } 
+          }));
+        } else {
+          console.log(`[AutoHeal] Silent sync healed ${totalHealed} photo(s), added ${totalAdded} photo(s).`);
+        }
       } else {
-        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Batch sync complete. All photo URLs are up to date.', type: 'info' } }));
+        if (!isSilent) {
+          window.dispatchEvent(new CustomEvent('app:toast', { detail: { toastId: 'batch-photo-sync', msg: 'Batch sync complete. All photo URLs are up to date.', type: 'info' } }));
+        }
       }
     } catch (err) {
       console.error('Batch sync photos error:', err);
-      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Batch sync failed: ${err.message}`, type: 'error' } }));
+      if (!isSilent) {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { toastId: 'batch-photo-sync', msg: `Batch sync failed: ${err.message}`, type: 'error' } }));
+      }
     } finally {
       setSyncingAllPhotos(false);
     }
@@ -4570,6 +4644,35 @@ Rules:
     } catch(e) {}
   }, [trials, activeTrial, getAppState, updateState, syncTrialToQrScript]);
 
+  const handleKanbanStageChange = useCallback(async (trial, newStage) => {
+    let patch = {};
+    if (newStage === 'completed') {
+      const finDate = toDatetimeLocal(new Date());
+      const start = trial.Date ? new Date(trial.Date) : new Date();
+      const days = Math.max(0, Math.round((new Date() - start) / 86400000));
+      const finalDuration = trial.FinalControlDuration || String(days);
+      patch = { IsCompleted: true, IsLive: false, Status: 'Completed', FinalizationDate: finDate, FinalControlDuration: finalDuration };
+    } else if (newStage === 'archived') {
+      patch = { Status: 'Archived', IsArchived: true, IsLive: false };
+    } else if (newStage === 'ongoing') {
+      patch = { IsLive: true, IsCompleted: false, Status: 'Ongoing', IsArchived: false };
+    } else if (newStage === 'planned') {
+      patch = { IsLive: false, IsCompleted: false, Status: 'Planned', IsArchived: false };
+    } else if (newStage === 'evaluated') {
+      patch = { Status: 'Evaluated' };
+    }
+
+    const updated = { ...trial, ...patch };
+    updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
+    if (activeTrial?.ID === updated.ID) setActiveTrial(updated);
+    try {
+      await updateTrial({ ID: updated.ID, ...patch }, getAppState);
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Trial moved to ${newStage}`, type: 'success' } }));
+    } catch(e) {
+      console.error('Failed to update trial stage:', e);
+    }
+  }, [trials, activeTrial, getAppState, updateState]);
+
   const handleRecordWeather = useCallback(async (trial) => {
     if (!window.confirm(`Do you want to fetch and record the current real-time weather data for "${trial.FormulationName || 'this trial'}"?`)) {
       return;
@@ -5274,6 +5377,7 @@ If none are present, write "None".`;
   const handleExportAdvancedExcel = useCallback(async (trial) => {
     window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Generating Advanced Excel Report...', type: 'info' } }));
     try {
+      const { AdvancedReportGenerator } = await import('../services/advancedReportGenerator.js');
       const trialProj = (state.projects || []).find(p => String(p.ID) === String(trial.ProjectID));
       const generator = new AdvancedReportGenerator(trial, activeCategory, trialProj);
       await generator.generateCompleteReport();
@@ -5570,135 +5674,57 @@ If none are present, write "None".`;
       )}
 
       <div className="flex-1 overflow-y-auto">
-        {/* ── TOOLBAR ── */}
-        <div className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-slate-100 px-4 py-3 space-y-3">
-          <div className="flex gap-2 items-center">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input
-                value={search} onChange={e => setSearch(e.target.value)}
-                placeholder="Search trials..."
-                className="w-full pl-9 pr-4 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
-              />
-              {search && <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"><X className="w-4 h-4" /></button>}
-            </div>
-            <div className="w-44 md:w-56">
-              <select
-                value={filterOwner}
-                onChange={e => setFilterOwner(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white font-medium text-slate-700 cursor-pointer shadow-sm"
-              >
-                <option value="all">All Trials</option>
-                <option value="mine">My Trials Only</option>
-                <option value="others">Shared / Employee Trials</option>
-                {ownerOptions.length > 0 && (
-                  <optgroup label="Filter by Scientist">
-                    {ownerOptions.map(owner => (
-                      <option key={owner} value={owner}>
-                        {owner}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-              </select>
-            </div>
-            <button onClick={() => setShowFilters(v => !v)} className={`p-2 rounded-lg border transition ${showFilters ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'border-slate-200 text-slate-500'}`}>
-              <SlidersHorizontal className="w-4 h-4" />
-            </button>
-            <button 
-              onClick={() => {
-                const newVal = !isTimelineView;
-                setIsTimelineView(newVal);
-                localStorage.setItem('isTimelineView', String(newVal));
-              }}
-              title={isTimelineView ? "Switch to Grid View" : "Switch to Timeline View"}
-              className={`p-2 rounded-lg border transition ${isTimelineView ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'border-slate-200 text-slate-500'}`}
-            >
-              {isTimelineView ? <Grid className="w-4 h-4" /> : <Calendar className="w-4 h-4" />}
-            </button>
-            {!isViewer && (
-              <>
-                <button onClick={exportAllCsv} title="Export all trials to CSV" className="p-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 transition">
-                  <FileDown className="w-4 h-4" />
-                </button>
-                <button 
-                  onClick={() => handleSyncAllPhotosFromDrive()} 
-                  disabled={syncingAllPhotos}
-                  title="Sync all broken/unavailable photos from Google Drive for all trials" 
-                  className={`p-2 rounded-lg border transition ${syncingAllPhotos ? 'bg-slate-100 border-slate-300 text-slate-400 cursor-not-allowed' : 'border-slate-200 text-slate-500 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300'}`}
-                >
-                  <RefreshCw className={`w-4 h-4 ${syncingAllPhotos ? 'animate-spin' : ''}`} />
-                </button>
-                <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg border border-slate-200 text-slate-500 bg-white" title="Heal existing only: Only restore broken/unavailable photos already in the list; do not import new/deleted photos.">
-                  <input 
-                    type="checkbox" 
-                    id="syncHealOnly"
-                    checked={syncHealOnly} 
-                    onChange={e => setSyncHealOnly(e.target.checked)} 
-                    className="w-3.5 h-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
-                  />
-                  <label htmlFor="syncHealOnly" className="text-xs select-none cursor-pointer">Heal only</label>
-                </div>
-                <input 
-                  type="file" 
-                  ref={armFileInputRef} 
-                  onChange={handleARMImportChange} 
-                  accept=".csv" 
-                  className="hidden" 
-                />
-                <button onClick={handleARMImportClick} title="Import trials from ARM CSV" className="p-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 transition">
-                  <FolderPlus className="w-4 h-4" />
-                </button>
-                <button onClick={() => handleOpenModal()} className="btn-primary text-white px-4 py-2 rounded-lg flex items-center gap-1.5 text-sm font-semibold whitespace-nowrap">
-                  <Plus className="w-4 h-4" /> New Trial
-                </button>
-              </>
-            )}
-          </div>
-
-          {showFilters && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pb-1">
-              <select value={filterFormulation} onChange={e => setFilterFormulation(e.target.value)} className="text-sm border rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
-                <option value="">All Formulations</option>
-                {formulations.map(f => <option key={f.ID} value={f.Name}>{f.Name}</option>)}
-              </select>
-              <select value={filterProject} onChange={e => setFilterProject(e.target.value)} className="text-sm border rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
-                <option value="">All Projects</option>
-                {projects.map(p => <option key={p.ID} value={p.ID}>{p.Name}</option>)}
-              </select>
-              <select value={filterResult} onChange={e => setFilterResult(e.target.value)} className="text-sm border rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
-                <option value="">All Results</option>
-                {['Excellent', 'Good', 'Fair', 'Poor', 'Control'].map(r => <option key={r} value={r}>{r}</option>)}
-              </select>
-              <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="text-sm border rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
-                <option value="date-desc">Newest First</option>
-                <option value="date-asc">Oldest First</option>
-                <option value="name">By Formulation</option>
-                <option value="obs">Most Observations</option>
-                <option value="shared">Shared Status</option>
-              </select>
-              <div className="col-span-2 flex gap-2 items-center">
-                <span className="text-xs font-semibold text-slate-500 shrink-0">From</span>
-                <input type="date" value={filterDateStart} onChange={e => setFilterDateStart(e.target.value)} className="flex-1 text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-400" />
-                <span className="text-xs font-semibold text-slate-500 shrink-0">To</span>
-                <input type="date" value={filterDateEnd} onChange={e => setFilterDateEnd(e.target.value)} className="flex-1 text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-400" />
-              </div>
-              <button onClick={() => { setSearch(''); setFilterFormulation(''); setFilterResult(''); setFilterProject(''); setFilterDateStart(''); setFilterDateEnd(''); setSortBy('date-desc'); setFilterOwner('all'); }}
-                className="text-xs text-red-600 font-semibold bg-red-50 rounded-lg px-3 py-1.5 hover:bg-red-100">Reset Filters</button>
-            </div>
-          )}
-
-          {/* Tabs */}
-          <div className="flex gap-1 overflow-x-auto pb-0.5">
-            {[['all','All'],['standard','Standard'],['rcbd','Project-Grouped'],['control','Control'],['finalized','Finalized']].map(([k,label]) => (
-              <button key={k} onClick={() => setActiveTab(k)}
-                className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition
-                  ${activeTab === k ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
-                {label} <span className="ml-1 opacity-70">({tabCounts[k]})</span>
-              </button>
-            ))}
-          </div>
-        </div>
+        {/* ── TOOLBAR (Modularized) ── */}
+        <TrialFiltersBar
+          search={search}
+          setSearch={setSearch}
+          filterOwner={filterOwner}
+          setFilterOwner={setFilterOwner}
+          ownerOptions={ownerOptions}
+          showFilters={showFilters}
+          setShowFilters={setShowFilters}
+          isTimelineView={isTimelineView}
+          setIsTimelineView={setIsTimelineView}
+          viewMode={viewMode}
+          setViewMode={setViewMode}
+          isViewer={isViewer}
+          exportAllCsv={exportAllCsv}
+          handleSyncAllPhotosFromDrive={handleSyncAllPhotosFromDrive}
+          syncingAllPhotos={syncingAllPhotos}
+          syncHealOnly={syncHealOnly}
+          setSyncHealOnly={setSyncHealOnly}
+          armFileInputRef={armFileInputRef}
+          handleARMImportChange={handleARMImportChange}
+          handleARMImportClick={handleARMImportClick}
+          handleOpenModal={handleOpenModal}
+          filterFormulation={filterFormulation}
+          setFilterFormulation={setFilterFormulation}
+          formulations={formulations}
+          filterProject={filterProject}
+          setFilterProject={setFilterProject}
+          projects={projects}
+          filterResult={filterResult}
+          setFilterResult={setFilterResult}
+          sortBy={sortBy}
+          setSortBy={setSortBy}
+          filterDateStart={filterDateStart}
+          setFilterDateStart={setFilterDateStart}
+          filterDateEnd={filterDateEnd}
+          setFilterDateEnd={setFilterDateEnd}
+          onResetFilters={() => {
+            setSearch('');
+            setFilterFormulation('');
+            setFilterResult('');
+            setFilterProject('');
+            setFilterDateStart('');
+            setFilterDateEnd('');
+            setSortBy('date-desc');
+            setFilterOwner('all');
+          }}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          tabCounts={tabCounts}
+        />
 
         {/* ── GRID ── */}
         <div className="p-4">
@@ -5895,6 +5921,7 @@ If none are present, write "None".`;
                             onClick={() => triggerExportWithCustomisation(async () => {
                               window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Generating Project-wide Advanced Excel Report...', type: 'info' } }));
                               try {
+                                const { AdvancedReportGenerator } = await import('../services/advancedReportGenerator.js');
                                 const representative = trialsList[0] || {};
                                 const trialProj = (state.projects || []).find(p => String(p.ID) === String(representative.ProjectID));
                                 const generator = new AdvancedReportGenerator(trialsList, activeCategory, trialProj);
@@ -5969,6 +5996,7 @@ If none are present, write "None".`;
                                 onMarkComplete={handleMarkComplete}
                                 onEditControlDays={handleEditControlDays}
                                 onRecordWeather={handleRecordWeather}
+                                onQuickPeekFormulation={handleQuickPeekFormulation}
                               />
                             ))}
                           </div>
@@ -6044,6 +6072,7 @@ If none are present, write "None".`;
                                 onMarkComplete={handleMarkComplete}
                                 onEditControlDays={handleEditControlDays}
                                 onRecordWeather={handleRecordWeather}
+                                onQuickPeekFormulation={handleQuickPeekFormulation}
                               />
                             ))}
                           </div>
@@ -6053,72 +6082,51 @@ If none are present, write "None".`;
                   );
                 })()}
               </div>
-            ) : isTimelineView ? (
-              <div className="space-y-8">
-                {groupedTimelineTrials.map(group => (
-                  <div key={group.key} className="space-y-4">
-                    {/* Sticky Date Header with premium glassmorphism & shadow */}
-                    <div 
-                      onClick={() => toggleSection(group.key)}
-                      className="flex items-center justify-between sticky top-[108px] z-10 bg-white/95 dark:bg-slate-900/95 py-3 px-4 backdrop-blur-md border-l-4 border-l-emerald-500 border border-slate-200/80 rounded-xl cursor-pointer hover:bg-emerald-50/40 transition-all select-none shadow-sm"
-                    >
-                      <div className="flex items-center gap-3">
-                        <ChevronRight className={`w-4 h-4 text-emerald-600 transition-transform duration-200 ${!collapsedSections[group.key] ? 'rotate-90' : ''}`} />
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-7 h-7 rounded-lg bg-emerald-500 text-white flex items-center justify-center shadow-sm shrink-0">
-                            <Calendar className="w-4 h-4" />
-                          </div>
-                          <h3 className="font-extrabold text-emerald-950 dark:text-emerald-100 text-sm md:text-base tracking-tight">
-                            {group.key}
-                          </h3>
-                        </div>
-                        <span className="bg-emerald-100 text-emerald-800 text-xs font-extrabold px-2.5 py-0.5 rounded-full border border-emerald-200">
-                          {group.trials.length} {group.trials.length === 1 ? 'trial' : 'trials'}
-                        </span>
-                      </div>
-                    </div>
-                    {/* Trial Cards Grid */}
-                    {!collapsedSections[group.key] && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pt-2">
-                        {group.trials.map(t => (
-                          <TrialCard
-                            key={t.ID}
-                            trial={t}
-                            project={projectMap[t.ProjectID]}
-                            isSelected={selectedForBulk.has(t.ID)}
-                            isPendingSync={isTrialPendingSync(t)}
-                            isMenuOpen={openCardMenu === t.ID}
-                            onToggleBulk={toggleBulk}
-                            onToggleMenu={handleToggleMenu}
-                            onViewDetails={handleViewDetails}
-                            onEdit={handleOpenModal}
-                            onDuplicate={handleDuplicate}
-                            onMoveToProject={handleMoveToProject}
-                            onExportPdf={handleExportPdf}
-                            onExportSciPdf={handleExportSciPdf}
-                            onExportPpt={handleExportPpt}
-                            onExportHtml={exportHtmlSlide}
-                            onExportTxt={exportTxtReport}
-                            onExportCsv={exportCsv}
-                            onExportJson={exportJson}
-                            onShare={shareTrial}
-                            onAppSharing={handleOpenShareModal}
-                            onAiGenerate={handleAiSingleGenerate}
-                            onDelete={handleDelete}
-                            onActivateToggle={handleActivateToggle}
-                            onQuickRate={handleQuickRate}
-                            onQuickPhoto={handleQuickPhoto}
-                            onQuickGalleryUpload={handleQuickGalleryUpload}
-                            onMarkComplete={handleMarkComplete}
-                            onEditControlDays={handleEditControlDays}
-                            onRecordWeather={handleRecordWeather}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
+            ) : viewMode === 'kanban' ? (
+              <TrialKanbanBoard
+                trials={filteredTrials}
+                projectMap={projectMap}
+                onViewDetails={handleViewDetails}
+                onEdit={handleOpenModal}
+                onQuickPhoto={handleQuickPhoto}
+                onQuickRate={handleQuickRate}
+                onStageChange={handleKanbanStageChange}
+              />
+            ) : (viewMode === 'timeline' || (viewMode !== 'grid' && isTimelineView)) ? (
+              <TrialTimelineView
+                groupedTimelineTrials={groupedTimelineTrials}
+                collapsedSections={collapsedSections}
+                toggleSection={toggleSection}
+                projectMap={projectMap}
+                selectedForBulk={selectedForBulk}
+                isTrialPendingSync={isTrialPendingSync}
+                openCardMenu={openCardMenu}
+                onToggleBulk={toggleBulk}
+                onToggleMenu={handleToggleMenu}
+                onViewDetails={handleViewDetails}
+                onEdit={handleOpenModal}
+                onDuplicate={handleDuplicate}
+                onMoveToProject={handleMoveToProject}
+                onExportPdf={handleExportPdf}
+                onExportSciPdf={handleExportSciPdf}
+                onExportPpt={handleExportPpt}
+                onExportHtml={exportHtmlSlide}
+                onExportTxt={exportTxtReport}
+                onExportCsv={exportCsv}
+                onExportJson={exportJson}
+                onShare={shareTrial}
+                onAppSharing={handleOpenShareModal}
+                onAiGenerate={handleAiSingleGenerate}
+                onDelete={handleDelete}
+                onActivateToggle={handleActivateToggle}
+                onQuickRate={handleQuickRate}
+                onQuickPhoto={handleQuickPhoto}
+                onQuickGalleryUpload={handleQuickGalleryUpload}
+                onMarkComplete={handleMarkComplete}
+                onEditControlDays={handleEditControlDays}
+                onRecordWeather={handleRecordWeather}
+                onQuickPeekFormulation={handleQuickPeekFormulation}
+              />
             ) : (
               <div className="space-y-6">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -6154,6 +6162,7 @@ If none are present, write "None".`;
                       onMarkComplete={handleMarkComplete}
                       onEditControlDays={handleEditControlDays}
                       onRecordWeather={handleRecordWeather}
+                      onQuickPeekFormulation={handleQuickPeekFormulation}
                     />
                   ))}
                 </div>
@@ -10356,6 +10365,18 @@ If none are present, write "None".`;
             </div>
           </div>
         </Modal>
+      )}
+
+      {quickPeekForm && (
+        <FormulationQuickPeekModal
+          isOpen={!!quickPeekForm}
+          onClose={() => setQuickPeekForm(null)}
+          formulation={quickPeekForm}
+          allTrials={state.trials}
+          ingredientsList={state.ingredients}
+          activeCategory={activeCategory}
+          onApplyTrialFilter={(filterVal) => setFilterFormulation(filterVal)}
+        />
       )}
 
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />

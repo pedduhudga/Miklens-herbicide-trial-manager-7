@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppState } from '../hooks/useAppState.jsx';
 import { useAuth } from '../hooks/useAuth.js';
 import TopBar from '../components/TopBar.jsx';
@@ -6,6 +7,7 @@ import Modal from '../components/Modal.jsx';
 import CameraCapture from '../components/CameraCapture.jsx';
 import CropperModal from '../components/CropperModal.jsx';
 import TrialCard from '../components/TrialCard.jsx';
+import FormulationQuickPeekModal from '../components/FormulationQuickPeekModal.jsx';
 import {
   addProject,
   deleteProject,
@@ -31,6 +33,7 @@ import { EPPO_CODES, BBCH_STAGES, lookupEPPO } from '../utils/eppoBBCHData.js';
 import { exportToARM, importARMCSV } from '../services/armExporter.js';
 import { fetchWeather as fetchWeatherService, fetchSoilData } from '../services/weather.js';
 import { fbGetLargeScaleData } from '../services/largeScaleService.js';
+import { GEMINI_FALLBACK_MODELS } from '../utils/aiConstants.js';
 
 function computeSummaryStats(values) {
   const n = values.length;
@@ -275,13 +278,43 @@ export default function LargeScaleTrials({ onMenuClick }) {
     return (state.projects || []).filter(p => p.Design === 'LargeScale' && (p.Category === activeCategory || (!p.Category && activeCategory === 'herbicide')));
   }, [state.projects, activeCategory]);
 
+  const location = useLocation();
+  const navigate = useNavigate();
+
   const [activeProjectId, setActiveProjectId] = useState('');
   const [selectedSubTrialId, setSelectedSubTrialId] = useState('');
+
+  // ── Deep Linking from Formulations or direct URL params ──────────────
+  useEffect(() => {
+    if (!location.search) return;
+    const params = new URLSearchParams(location.search);
+    const pId = params.get('projectId');
+    const stId = params.get('subTrialId') || params.get('focus');
+    const formName = params.get('formulation');
+
+    if (pId) {
+      setActiveProjectId(pId);
+    }
+    if (stId) {
+      if (!pId) {
+        const found = (state.trials || []).find(t => String(t.ID) === String(stId));
+        if (found && found.ProjectID) {
+          setActiveProjectId(found.ProjectID);
+        }
+      }
+      setSelectedSubTrialId(stId);
+    }
+    if (formName) {
+      setSearch(formName);
+    }
+  }, [location.search, state.trials]);
+
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [isSubTrialModalOpen, setIsSubTrialModalOpen] = useState(false);
   const [isVisitModalOpen, setIsVisitModalOpen] = useState(false);
   const [editingSubTrial, setEditingSubTrial] = useState(null);
   const [editingVisitIdx, setEditingVisitIdx] = useState(null);
+  const [quickPeekForm, setQuickPeekForm] = useState(null);
 
   // Professional Report state
   const [proReportModalOpen, setProReportModalOpen] = useState(false);
@@ -293,6 +326,33 @@ export default function LargeScaleTrials({ onMenuClick }) {
   const [projectForm, setProjectForm] = useState({ Name: '', Crop: '', Location: '', Investigator: '', TargetWeed: '', GPSBounds: '' });
   const [subTrialForm, setSubTrialForm] = useState(emptySubTrialForm());
   const [visitForm, setVisitForm] = useState(emptyVisitForm());
+
+  // Open and prefill new field study modal if launched from Formulations, LinkedTrials, or AI Simulator
+  useEffect(() => {
+    if (location.state?.newTrialWithFormulation) {
+      const { formName, target, crop } = location.state.newTrialWithFormulation;
+      setProjectForm({
+        Name: `${formName || 'New'} Field Study`,
+        Crop: crop || '',
+        Location: '',
+        Investigator: state.auth?.user?.name || '',
+        TargetWeed: target || '',
+        GPSBounds: ''
+      });
+      setIsProjectModalOpen(true);
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.state, navigate, location.pathname, state.auth?.user?.name]);
+
+  const handleQuickPeekFormulation = useCallback((formulation) => {
+    if (!formulation) return;
+    const allFormulations = state.formulations || [];
+    const found = allFormulations.find(f => 
+      String(f.ID || f.id) === String(formulation.ID || formulation.id) ||
+      (f.Name && formulation.Name && f.Name.trim().toLowerCase() === formulation.Name.trim().toLowerCase())
+    );
+    setQuickPeekForm(found || formulation);
+  }, [state.formulations]);
 
   // UI state
   const [dashboardTab, setDashboardTab] = useState('map'); // 'map' | 'charts' | 'ai'
@@ -944,7 +1004,7 @@ export default function LargeScaleTrials({ onMenuClick }) {
       const daa = calculateDAA(photoDate, targetTrial.Date);
 
       // AI Analysis
-      const keys = getAPIKeys('gemini-3-flash');
+      const keys = getAPIKeys('gemini');
       if (keys.length) {
         const result = await analyzePhoto(dataUrl, {
           treatment: targetTrial.FormulationName,
@@ -1402,7 +1462,7 @@ Rules:
           const mimeType = dataUrl.split(';')[0].split(':')[1] || 'image/jpeg';
           const base64 = dataUrl.split(',')[1];
           if (base64) {
-            const models = ['gemini-2.5-flash-lite', 'gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-1.5-flash-latest'];
+            const models = GEMINI_FALLBACK_MODELS;
             let successResult = null;
             for (const model of models) {
               for (const key of geminiKeys) {
@@ -2261,7 +2321,7 @@ Rules:
     setLoading(true);
     try {
       // Find Gemini API Key
-      const keys = getAPIKeys('gemini-3-flash');
+      const keys = getAPIKeys('gemini');
       if (!keys.length) {
         window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Please configure Gemini API key in Settings.', type: 'error' } }));
         setLoading(false);
@@ -2273,7 +2333,7 @@ Rules:
       const targetLabel = config.targetLabel;
       const promptText = `${config.aiPhotoPrompt}\n\nOutput a JSON array only containing observations for each target detected. Each object in the array should have: 1) species (the name of the target/species detected), 2) cover (numeric value for severity/cover/count 0-100), 3) status (response description, e.g. Controlled, Symptomatic, Deficient, Healthy). Output format: [{"species":"Target Name","cover":20,"status":"Symptomatic"}]`;
       
-      const models = ['gemini-2.5-flash-lite', 'gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-1.5-flash-latest'];
+      const models = GEMINI_FALLBACK_MODELS;
       let successResultText = null;
       let matchedModel = '';
       for (const model of models) {
@@ -2516,7 +2576,7 @@ Rules:
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Please add sub-trials to synthesize a report.', type: 'error' } }));
       return;
     }
-    const keys = getAPIKeys('gemini-3-flash');
+    const keys = getAPIKeys('gemini');
     if (!keys.length) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Configure Gemini API key in Settings.', type: 'error' } }));
       return;
@@ -4303,6 +4363,7 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
                             onQuickPhoto={onQuickPhoto}
                             onQuickGalleryUpload={onQuickGalleryUpload}
                             onMarkComplete={onMarkComplete}
+                            onQuickPeekFormulation={handleQuickPeekFormulation}
                           />
                         )})}
                       </div>
@@ -4325,6 +4386,15 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
           </div>
         )}
       </div>
+
+      {/* Formulation Quick-Peek Modal */}
+      <FormulationQuickPeekModal
+        isOpen={!!quickPeekForm}
+        onClose={() => setQuickPeekForm(null)}
+        formulation={quickPeekForm}
+        allTrials={state.trials || []}
+        allProjects={state.projects || []}
+      />
 
       {/* Modal: Create/Edit Project Workspace */}
       <Modal isOpen={isProjectModalOpen} onClose={() => setIsProjectModalOpen(false)} title={projectForm.ID ? "Edit Master Field Study" : "New Master Field Study"}>

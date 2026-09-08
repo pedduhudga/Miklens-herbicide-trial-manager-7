@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAppState } from '../hooks/useAppState.jsx';
 import { useAuth } from '../hooks/useAuth.js';
 import TopBar from '../components/TopBar.jsx';
@@ -7,10 +8,15 @@ import { addFormulation, deleteFormulation, updateFormulation, validateCategoryD
 import { safeJsonParse } from '../utils/helpers.js';
 import { getCategoryConfig } from '../utils/categoryConfig.js';
 import { calculateFormulationCost } from '../utils/costUtils.js';
-import { Plus, X, Share2, Edit, Trash2, Copy } from 'lucide-react';
+import { Plus, X, Share2, Edit, Trash2, Copy, Sparkles, Layers, ArrowUpDown, Award, Scale, FileDown, Rocket, Wand2, CheckSquare, Square } from 'lucide-react';
 import AppSharingModal from '../components/AppSharingModal.jsx';
+import LinkedTrialsModal from '../components/LinkedTrialsModal.jsx';
+import FormulationComparisonModal from '../components/FormulationComparisonModal.jsx';
+import AiFormulaGeneratorModal from '../components/AiFormulaGeneratorModal.jsx';
+import { exportFormulationDossier } from '../services/formulationDossier.js';
 
 export default function Formulations({ onMenuClick }) {
+  const navigate = useNavigate();
   const { state, updateState, getAppState } = useAppState();
   const { isViewer, user, isAdmin } = useAuth();
   const isOwnData = (record) => {
@@ -22,6 +28,43 @@ export default function Formulations({ onMenuClick }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [sharingFormulation, setSharingFormulation] = useState(null);
+  const [viewingLinkedTrialsForm, setViewingLinkedTrialsForm] = useState(null);
+  const [sortBy, setSortBy] = useState('newest'); // 'newest' | 'efficacy' | 'trials' | 'cost'
+  const [selectedForCompare, setSelectedForCompare] = useState(new Set());
+  const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
+  const [isGeneratorModalOpen, setIsGeneratorModalOpen] = useState(false);
+
+  const toggleCompareSelection = (formId) => {
+    setSelectedForCompare(prev => {
+      const next = new Set(prev);
+      if (next.has(formId)) {
+        next.delete(formId);
+      } else {
+        if (next.size >= 4) {
+          window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Maximum 4 formulations can be compared simultaneously.', type: 'error' } }));
+          return prev;
+        }
+        next.add(formId);
+      }
+      return next;
+    });
+  };
+
+  const handleLaunchTrial = (form) => {
+    navigate('/trials', {
+      state: {
+        newTrialWithFormulation: {
+          id: form.ID,
+          name: form.Name,
+          code: form.Code
+        }
+      }
+    });
+  };
+
+  const handleExportDossier = (form) => {
+    exportFormulationDossier(form, state.trials, state.ingredients, state.activeCategory || 'herbicide');
+  };
 
   const handleOpenShareModal = (e, formulation) => {
     e.stopPropagation();
@@ -220,41 +263,147 @@ export default function Formulations({ onMenuClick }) {
 
   const activeCategory = state.activeCategory || 'herbicide';
 
-  const sortedFormulations = [...(state.formulations || [])]
-    .filter(f => f.Category === activeCategory || (!f.Category && activeCategory === 'herbicide'))
-    .filter(f => !searchTerm || f.Name.toLowerCase().includes(searchTerm.toLowerCase()))
-    // ✅ Newest first — highest timestamp at index 0
-    .sort((a, b) => {
+  const RESULT_SCORES = { Excellent: 4, Good: 3, Fair: 2, Poor: 1 };
+
+  // Pre-calculate trial performance metrics for each formulation
+  const formulationsWithStats = useMemo(() => {
+    const rawForms = (state.formulations || []).filter(
+      f => f.Category === activeCategory || (!f.Category && activeCategory === 'herbicide')
+    );
+
+    const projectMap = new Map();
+    (state.projects || []).forEach(p => projectMap.set(String(p.ID), p));
+
+    return rawForms.map(form => {
+      const formTrials = (state.trials || []).filter(
+        t => (t.Category === activeCategory || (!t.Category && activeCategory === 'herbicide')) &&
+             (t.FormulationID === form.ID || String(t.FormulationName || '').trim().toLowerCase() === String(form.Name || '').trim().toLowerCase())
+      );
+
+      let stdCount = 0;
+      let largeCount = 0;
+      formTrials.forEach(t => {
+        const proj = projectMap.get(String(t.ProjectID));
+        if (proj && proj.Design === 'LargeScale') {
+          largeCount++;
+        } else {
+          stdCount++;
+        }
+      });
+
+      const ratedTrials = formTrials.filter(t => RESULT_SCORES[t.Result]);
+      const avgScore = ratedTrials.length
+        ? ratedTrials.reduce((s, t) => s + RESULT_SCORES[t.Result], 0) / ratedTrials.length
+        : null;
+
+      const realCost = calculateFormulationCost(form, state.ingredients || []);
+      const costVal = realCost > 0 ? realCost : parseFloat(form.EstimatedCost || 0);
+
+      return {
+        ...form,
+        _trialsCount: formTrials.length,
+        _stdCount: stdCount,
+        _largeCount: largeCount,
+        _avgScore: avgScore,
+        _costVal: costVal,
+      };
+    });
+  }, [state.formulations, state.trials, state.projects, state.ingredients, activeCategory]);
+
+  const sortedFormulations = useMemo(() => {
+    let list = formulationsWithStats.filter(
+      f => !searchTerm || f.Name.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
+    list.sort((a, b) => {
+      if (sortBy === 'efficacy') {
+        const scoreA = a._avgScore ?? -1;
+        const scoreB = b._avgScore ?? -1;
+        if (scoreB !== scoreA) return scoreB - scoreA;
+        return (b._trialsCount || 0) - (a._trialsCount || 0);
+      }
+      if (sortBy === 'trials') {
+        return (b._trialsCount || 0) - (a._trialsCount || 0);
+      }
+      if (sortBy === 'cost') {
+        return (a._costVal || 0) - (b._costVal || 0);
+      }
+      // 'newest' default
       const aTs = getTimestamp(a.CreatedAt || a._createdAt);
       const bTs = getTimestamp(b.CreatedAt || b._createdAt);
-      return bTs - aTs; // descending: newest on top
+      return bTs - aTs;
     });
+
+    return list;
+  }, [formulationsWithStats, searchTerm, sortBy]);
+
+  const formulationsToCompare = useMemo(() => {
+    return (state.formulations || []).filter(f => selectedForCompare.has(f.ID));
+  }, [state.formulations, selectedForCompare]);
+
+  const handleAskAIForFormulation = (form) => {
+    const prompt = `Please evaluate the agronomic performance and recipe of formula "${form.Name}" in the ${activeCategory} category. How does it compare against other formulas in our trials, what is its optimal dosage, and how can we upgrade its ingredients for superior efficacy?`;
+    navigate('/ai-assistant', { state: { prefilledPrompt: prompt } });
+  };
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
       <TopBar title="Formulations" onMenuClick={onMenuClick} />
 
-      <div className="flex-1 overflow-y-auto p-6">
-        <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
-          <div className="flex-grow w-full md:w-auto">
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
+        <div className="flex flex-col sm:flex-row justify-between items-center gap-3">
+          <div className="flex-grow w-full sm:w-auto flex items-center gap-2">
             <input
               type="search"
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
               placeholder="Search formulations by name..."
-              className="w-full form-input px-4 py-2 border rounded-lg"
+              className="w-full form-input px-4 py-2 border rounded-xl bg-white shadow-sm text-sm"
             />
           </div>
-          {!isViewer && (
-            <div>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto justify-end flex-wrap">
+            <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 shadow-sm text-xs font-semibold text-slate-700">
+              <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+              <select
+                value={sortBy}
+                onChange={e => setSortBy(e.target.value)}
+                className="bg-transparent font-semibold outline-none cursor-pointer text-slate-800"
+              >
+                <option value="newest">Sort: Newest First</option>
+                <option value="efficacy">Sort: Highest Efficacy ⭐</option>
+                <option value="trials">Sort: Most Tested 🔬</option>
+                <option value="cost">Sort: Cost (Low to High) ₹</option>
+              </select>
+            </div>
+
+            {selectedForCompare.size > 0 && (
+              <button
+                onClick={() => setIsCompareModalOpen(true)}
+                className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-md flex items-center gap-1.5 text-xs font-bold shrink-0 transition active:scale-95"
+              >
+                <Scale className="w-3.5 h-3.5" /> Compare ({selectedForCompare.size})
+              </button>
+            )}
+
+            {!isViewer && (
+              <button
+                onClick={() => setIsGeneratorModalOpen(true)}
+                className="px-3 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-md flex items-center gap-1.5 text-xs font-bold shrink-0 transition active:scale-95"
+              >
+                <Wand2 className="w-3.5 h-3.5" /> AI Recipe Generator
+              </button>
+            )}
+
+            {!isViewer && (
               <button
                 onClick={() => handleOpenModal()}
-                className="btn-primary px-4 py-2 rounded-lg shadow w-full md:w-auto flex items-center gap-2"
+                className="btn-primary px-3.5 py-2 rounded-xl shadow-md flex items-center gap-1.5 text-xs font-bold shrink-0"
               >
-                <Plus className="w-4 h-4" /> New Formulation
+                <Plus className="w-4 h-4" /> New Formula
               </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -276,19 +425,34 @@ export default function Formulations({ onMenuClick }) {
                 <div key={form.ID} className="cv-auto bg-white p-6 rounded-xl shadow-lg relative transition-all duration-300 hover:shadow-xl hover:-translate-y-1 border border-transparent hover:border-emerald-500/50 flex flex-col justify-between">
                   <div>
                     <div className="flex justify-between items-start gap-3 mb-3">
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-bold text-base text-slate-800 break-words leading-tight">{form.Name}</h3>
-                        <div className="flex flex-wrap gap-1 mt-1.5">
-                          {isShared && (
-                            <span className="text-[9px] px-2 py-0.5 rounded-full font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 flex items-center gap-0.5">
-                              <Share2 className="w-2.5 h-2.5 animate-pulse" /> Shared{isSharedEdit ? ' (Edit)' : ''}
-                            </span>
-                          )}
-                          {!isShared && Array.isArray(form.SharedWith) && form.SharedWith.length > 0 && (
-                            <span className="text-[9px] px-2 py-0.5 rounded-full font-bold bg-teal-50 text-teal-700 border border-teal-100 flex items-center gap-0.5" title={`Shared with ${form.SharedWith.length} user(s)`}>
-                              <Share2 className="w-2.5 h-2.5" /> Shared ({form.SharedWith.length})
-                            </span>
-                          )}
+                      <div className="flex items-start gap-2 flex-1 min-w-0">
+                        <button
+                          type="button"
+                          onClick={() => toggleCompareSelection(form.ID)}
+                          title={selectedForCompare.has(form.ID) ? "Unselect from comparison" : "Select for benchmark comparison"}
+                          className={`p-1 rounded-md transition mt-0.5 shrink-0 ${selectedForCompare.has(form.ID) ? 'text-indigo-600 bg-indigo-50 ring-1 ring-indigo-400' : 'text-slate-300 hover:text-slate-500 hover:bg-slate-50'}`}
+                        >
+                          {selectedForCompare.has(form.ID) ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
+                        </button>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-bold text-base text-slate-800 break-words leading-tight">{form.Name}</h3>
+                          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                            {form.Code && (
+                              <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">
+                                {form.Code}
+                              </span>
+                            )}
+                            {isShared && (
+                              <span className="text-[9px] px-2 py-0.5 rounded-full font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 flex items-center gap-0.5">
+                                <Share2 className="w-2.5 h-2.5 animate-pulse" /> Shared{isSharedEdit ? ' (Edit)' : ''}
+                              </span>
+                            )}
+                            {!isShared && Array.isArray(form.SharedWith) && form.SharedWith.length > 0 && (
+                              <span className="text-[9px] px-2 py-0.5 rounded-full font-bold bg-teal-50 text-teal-700 border border-teal-100 flex items-center gap-0.5" title={`Shared with ${form.SharedWith.length} user(s)`}>
+                                <Share2 className="w-2.5 h-2.5" /> Shared ({form.SharedWith.length})
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
 
@@ -372,34 +536,86 @@ export default function Formulations({ onMenuClick }) {
                     </div>
                   </div>
 
-                  <div className="mt-4 pt-4 border-t border-slate-100 flex justify-between items-center gap-2 flex-wrap">
-                    <div>
-                      <span className="text-[10px] font-bold text-slate-400 block uppercase tracking-wider">Estimated Cost</span>
-                      <p className="font-extrabold text-base text-emerald-600 leading-none mt-1">
-                        {(() => {
-                          const realTimeCost = calculateFormulationCost(form, state.ingredients || []);
-                          const costToDisplay = realTimeCost > 0 ? realTimeCost : parseFloat(form.EstimatedCost || 0);
-                          return `${CURRENCY_SYMBOL}${costToDisplay.toFixed(2)}`;
-                        })()}
-                      </p>
+                  <div className="mt-4 pt-4 border-t border-slate-100 space-y-3">
+                    <div className="flex justify-between items-center gap-2 flex-wrap">
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-400 block uppercase tracking-wider">Estimated Cost</span>
+                        <p className="font-black text-base text-emerald-600 leading-none mt-1">
+                          {CURRENCY_SYMBOL}{form._costVal.toFixed(2)}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {form._trialsCount > 0 ? (
+                          <span className="text-[11px] bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-full font-bold border border-slate-200">
+                            {form._stdCount} Std{form._largeCount > 0 ? ` • ${form._largeCount} Field` : ''}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] bg-slate-50 text-slate-400 px-2 py-0.5 rounded-full font-medium border border-slate-100">
+                            Untested
+                          </span>
+                        )}
+
+                        {avgLabel && (
+                          <span className={`text-[11px] px-2.5 py-0.5 rounded-full font-bold border ${avgLabelColor[avgLabel]}`}>
+                            {avgLabel}
+                          </span>
+                        )}
+                      </div>
                     </div>
 
-                    <div className="flex items-center gap-1 flex-wrap">
-                      {trialsCount > 0 && (
-                        <span className="text-[11px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-semibold border border-slate-200/40">
-                          {trialsCount} trial{trialsCount !== 1 ? 's' : ''}
-                        </span>
-                      )}
-                      {avgLabel && (
-                        <span className={`text-[11px] px-2 py-0.5 rounded-full font-bold border ${
-                          avgLabel === 'Excellent' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                          avgLabel === 'Good' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                          avgLabel === 'Fair' ? 'bg-amber-50 text-amber-700 border-amber-200' :
-                          'bg-red-50 text-red-700 border-red-200'
-                        }`}>
-                          Avg: {avgLabel}
-                        </span>
-                      )}
+                    {/* Action Row 1: Linked Trials & AI Optimize */}
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      <button
+                        onClick={() => setViewingLinkedTrialsForm(form)}
+                        className="py-2 px-2.5 rounded-xl bg-slate-100 hover:bg-emerald-50 hover:text-emerald-800 text-slate-700 font-bold text-xs border border-slate-200 transition flex items-center justify-center gap-1.5 shadow-2xs active:scale-95"
+                      >
+                        <Layers className="w-3.5 h-3.5 text-emerald-600" /> Linked Trials ({form._trialsCount})
+                      </button>
+
+                      <button
+                        onClick={() => handleAskAIForFormulation(form)}
+                        className="py-2 px-2.5 rounded-xl bg-violet-50 hover:bg-violet-100 text-violet-700 font-bold text-xs border border-violet-200 transition flex items-center justify-center gap-1 shadow-2xs active:scale-95"
+                        title="Ask AI to optimize or benchmark this formulation"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-violet-600" /> AI Optimize
+                      </button>
+                    </div>
+
+                    {/* Action Row 2: Launch Trial, Compare, Dossier */}
+                    <div className="grid grid-cols-3 gap-1.5 pt-0.5">
+                      <button
+                        onClick={() => handleLaunchTrial(form)}
+                        className="py-1.5 px-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] transition flex items-center justify-center gap-1 shadow-2xs active:scale-95"
+                        title="Launch new trial using this formulation"
+                      >
+                        <Rocket className="w-3 h-3" /> Launch Trial
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          toggleCompareSelection(form.ID);
+                          if (!selectedForCompare.has(form.ID) && selectedForCompare.size >= 1) {
+                            setIsCompareModalOpen(true);
+                          }
+                        }}
+                        className={`py-1.5 px-2 rounded-lg font-bold text-[11px] border transition flex items-center justify-center gap-1 shadow-2xs active:scale-95 ${
+                          selectedForCompare.has(form.ID)
+                            ? 'bg-indigo-600 text-white border-indigo-600'
+                            : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
+                        }`}
+                        title="Benchmark against other formulations"
+                      >
+                        <Scale className="w-3 h-3 text-indigo-500" /> Compare
+                      </button>
+
+                      <button
+                        onClick={() => handleExportDossier(form)}
+                        className="py-1.5 px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] border border-slate-200 transition flex items-center justify-center gap-1 shadow-2xs active:scale-95"
+                        title="Export Printable Agronomic Dossier"
+                      >
+                        <FileDown className="w-3 h-3 text-slate-600" /> Dossier
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -411,6 +627,33 @@ export default function Formulations({ onMenuClick }) {
             </div>
           )}
         </div>
+
+        {/* Floating Bottom Comparison Dock */}
+        {selectedForCompare.size >= 2 && (
+          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 backdrop-blur-md text-white px-5 py-3 rounded-2xl shadow-2xl border border-slate-700 flex items-center gap-4 animate-slide-up">
+            <div className="flex items-center gap-2">
+              <Scale className="w-5 h-5 text-emerald-400" />
+              <span className="text-xs font-bold">
+                {selectedForCompare.size} formulations selected for benchmark
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsCompareModalOpen(true)}
+                className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-sm"
+              >
+                Compare Now ⚖️
+              </button>
+              <button
+                onClick={() => setSelectedForCompare(new Set())}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white transition"
+                title="Clear selection"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <Modal
@@ -561,6 +804,38 @@ export default function Formulations({ onMenuClick }) {
         initialSharedWith={sharingFormulation?.SharedWith || []}
         initialSharedWithEdit={sharingFormulation?.SharedWithEdit || []}
         onSave={handleSaveSharing}
+      />
+
+      {viewingLinkedTrialsForm && (
+        <LinkedTrialsModal
+          isOpen={!!viewingLinkedTrialsForm}
+          onClose={() => setViewingLinkedTrialsForm(null)}
+          formulation={viewingLinkedTrialsForm}
+          allTrials={state.trials}
+          allProjects={state.projects}
+          allIngredients={state.ingredients}
+          activeCategory={activeCategory}
+        />
+      )}
+
+      {/* Head-to-Head Formulation Benchmark Comparison Modal */}
+      <FormulationComparisonModal
+        isOpen={isCompareModalOpen}
+        onClose={() => setIsCompareModalOpen(false)}
+        formulations={formulationsToCompare}
+        allTrials={state.trials}
+        ingredientsList={state.ingredients}
+        activeCategory={activeCategory}
+        onLaunchTrial={handleLaunchTrial}
+      />
+
+      {/* In-Tab AI Recipe Generator Wizard Modal */}
+      <AiFormulaGeneratorModal
+        isOpen={isGeneratorModalOpen}
+        onClose={() => setIsGeneratorModalOpen(false)}
+        activeCategory={activeCategory}
+        libraryIngredients={state.ingredients}
+        allTrials={state.trials}
       />
     </div>
   );

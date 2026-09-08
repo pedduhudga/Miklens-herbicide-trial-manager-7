@@ -22,7 +22,6 @@ import { formatDate, formatDateTime, toDatetimeLocal, calculateDAA } from '../ut
 import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryValue, calculateEfficacy } from '../utils/categoryConfig.js';
 import TrialDesignGuideModal from '../components/TrialDesignGuideModal.jsx';
 import { Info } from 'lucide-react';
-import { AdvancedReportGenerator } from '../services/advancedReportGenerator.js';
 import { generateTextWithAI } from '../services/multiProviderAI.js';
 import AppSharingModal from '../components/AppSharingModal.jsx';
 import CategoryValidationAlert, { showCategoryValidationToast } from '../components/CategoryValidationAlert.jsx';
@@ -4281,6 +4280,7 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
     const projectCategory = activeProject?.Category || activeCategory;
     toast('Generating Project-wide Advanced Excel Report...', 'info');
     try {
+      const { AdvancedReportGenerator } = await import('../services/advancedReportGenerator.js');
       const generator = new AdvancedReportGenerator(pTrials, projectCategory, activeProject);
       await generator.generateCompleteReport();
       toast('Project report generated successfully!', 'success');

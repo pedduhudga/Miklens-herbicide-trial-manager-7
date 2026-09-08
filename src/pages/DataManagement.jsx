@@ -11,15 +11,12 @@ import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryVal
 import { fbReclaimOrphanedUserData } from '../services/firebaseAuth.js';
 
 
-// Initialize global states if not existing (Module scope)
-if (typeof window !== 'undefined') {
-  if (!window.globalRepairState) {
-    window.globalRepairState = { isRunning: false, taskName: '', progress: 0, total: 0, currentTrialName: '' };
-  }
-  if (!window.globalBulkAnalysisState) {
-    window.globalBulkAnalysisState = { isRunning: false, isPaused: false, lastProcessedIndex: -1, trialsToProcess: [], totalToProcess: 0, successCount: 0, errorCount: 0, currentTrialName: '' };
-  }
-}
+// Module-scoped state for persistence across tab switches without polluting global window
+const _moduleRepairState = { isRunning: false, taskName: '', progress: 0, total: 0, currentTrialName: '' };
+let _moduleRepairProgress = '';
+let _moduleScanSummary = '';
+let _moduleBulkAiProgress = '';
+let _moduleBulkAnalysisState = { isRunning: false, isPaused: false, lastProcessedIndex: -1, trialsToProcess: [], totalToProcess: 0, successCount: 0, errorCount: 0, currentTrialName: '' };
 
 import { useAuth } from '../hooks/useAuth.js';
 
@@ -36,15 +33,14 @@ export default function DataManagement({ onMenuClick }) {
   const importRef = useRef(null);
   const csvImportRef = useRef(null);
   const [csvImportEntity, setCsvImportEntity] = useState('');
-  const [localRepairProgress, setLocalRepairProgress] = useState(typeof window !== 'undefined' ? window.globalRepairProgress || '' : '');
+  const [localRepairProgress, setLocalRepairProgress] = useState(_moduleRepairProgress);
   const [showCloudBackup, setShowCloudBackup] = useState(false);
-  const [localScanSummary, setLocalScanSummary] = useState(typeof window !== 'undefined' ? window.globalScanSummary || '' : '');
-  const [localBulkAiProgress, setLocalBulkAiProgress] = useState(typeof window !== 'undefined' ? window.globalBulkAiProgress || '' : '');
+  const [localScanSummary, setLocalScanSummary] = useState(_moduleScanSummary);
+  const [localBulkAiProgress, setLocalBulkAiProgress] = useState(_moduleBulkAiProgress);
 
   // ── Enhanced Bulk AI Analysis State ───────────────────────────────────────
-  const [localBulkAnalysisState, setLocalBulkAnalysisState] = useState(typeof window !== 'undefined' ? window.globalBulkAnalysisState : null);
-
-  const [localRepairState, setLocalRepairState] = useState(window.globalRepairState);
+  const [localBulkAnalysisState, setLocalBulkAnalysisState] = useState(_moduleBulkAnalysisState);
+  const [localRepairState, setLocalRepairState] = useState(_moduleRepairState);
 
   // Track mounted status to avoid setState on unmounted component
   const isMounted = useRef(true);
@@ -57,39 +53,39 @@ export default function DataManagement({ onMenuClick }) {
 
   // Wrapper functions matching the original state setter names
   const setRepairState = (updater) => {
-    const next = typeof updater === 'function' ? updater(window.globalRepairState) : updater;
-    window.globalRepairState = { ...window.globalRepairState, ...next };
+    const next = typeof updater === 'function' ? updater(_moduleRepairState) : updater;
+    Object.assign(_moduleRepairState, next);
     if (isMounted.current) {
-      setLocalRepairState(window.globalRepairState);
+      setLocalRepairState({ ..._moduleRepairState });
     }
   };
 
   const setRepairProgress = (val) => {
-    window.globalRepairProgress = val;
+    _moduleRepairProgress = val;
     if (isMounted.current) {
       setLocalRepairProgress(val);
     }
   };
 
   const setScanSummary = (val) => {
-    window.globalScanSummary = val;
+    _moduleScanSummary = val;
     if (isMounted.current) {
       setLocalScanSummary(val);
     }
   };
 
   const setBulkAiProgress = (val) => {
-    window.globalBulkAiProgress = val;
+    _moduleBulkAiProgress = val;
     if (isMounted.current) {
       setLocalBulkAiProgress(val);
     }
   };
 
   const setBulkAnalysisState = (updater) => {
-    const next = typeof updater === 'function' ? updater(window.globalBulkAnalysisState) : updater;
-    window.globalBulkAnalysisState = { ...window.globalBulkAnalysisState, ...next };
+    const next = typeof updater === 'function' ? updater(_moduleBulkAnalysisState) : updater;
+    _moduleBulkAnalysisState = { ..._moduleBulkAnalysisState, ...next };
     if (isMounted.current) {
-      setLocalBulkAnalysisState(window.globalBulkAnalysisState);
+      setLocalBulkAnalysisState(_moduleBulkAnalysisState);
     }
   };
 

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * aiMemory.js
  * Super-Memory Engine for the AI Assistant.
  * Builds a rich, pre-aggregated knowledge base from ALL in-memory data.
@@ -308,6 +308,52 @@ function buildTrialIndex(parsedTrials, projectMap) {
   }).join('\n');
 }
 
+function buildIngredientSynergySummary(parsedTrials, catFormulations, catIngredients) {
+  if (!catIngredients || catIngredients.length === 0) return 'No ingredients recorded.';
+
+  const formMap = new Map();
+  catFormulations.forEach(f => {
+    const ings = safeJsonParse(f.IngredientsJSON || f.Ingredients || f.ingredients, []);
+    formMap.set(String(f.Name || '').toLowerCase().trim(), Array.isArray(ings) ? ings : []);
+  });
+
+  const ingStats = catIngredients.map(ing => {
+    const name = (ing.Name || ing.name || '').trim();
+    const cleanName = name.toLowerCase();
+    const cost = ing.Cost || ing.pricePerUnit || ing.PricePerUnit || 'N/A';
+    const unit = ing.Unit || ing.unit || 'ml';
+
+    const matchedFormNames = [];
+    formMap.forEach((ingList, fName) => {
+      if (ingList.some(item => String(item.name || '').toLowerCase().trim() === cleanName)) {
+        matchedFormNames.push(fName);
+      }
+    });
+
+    const trials = parsedTrials.filter(t => matchedFormNames.includes(String(t.formulation || '').toLowerCase().trim()));
+    const effs = trials.map(t => t.finalEfficacy).filter(e => e !== null);
+    const winCount = trials.filter(t => t.result === 'Excellent' || t.result === 'Good').length;
+
+    return {
+      name,
+      cost,
+      unit,
+      formulaCount: matchedFormNames.length,
+      trialCount: trials.length,
+      winRate: trials.length > 0 ? Math.round((winCount / trials.length) * 100) : null,
+      avgEff: avg(effs),
+      targets: [...new Set(trials.map(t => t.target).filter(Boolean))]
+    };
+  });
+
+  return ingStats.map(s => {
+    const perf = s.trialCount > 0 
+      ? ` | tested in ${s.trialCount} trial(s) across ${s.formulaCount} formula(s) -> avgEff: ${s.avgEff ?? '?'}% (winRate: ${s.winRate}%) | targets:[${s.targets.slice(0, 4).join(', ')}]`
+      : ' | in-stock in inventory (untested in recorded trials)';
+    return `* ${s.name} (Cost: Rs.${s.cost}/${s.unit})${perf}`;
+  }).join('\n');
+}
+
 /**
  * buildAIMemoryContext - Main export
  * Returns { contextString, stats }
@@ -320,7 +366,13 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
   const catIngredients = (ingredients || []).filter(i => (i.Category || 'herbicide') === categoryId);
 
   const projectMap = {};
-  catProjects.forEach(p => { projectMap[p.ID] = p.Name; });
+  const largeScaleProjectIds = new Set();
+  catProjects.forEach(p => { 
+    projectMap[p.ID] = p.Name; 
+    if (p.Design === 'LargeScale') {
+      largeScaleProjectIds.add(String(p.ID));
+    }
+  });
 
   const targetFieldMap = {
     herbicide: 'WeedSpecies', fungicide: 'DiseaseTarget',
@@ -332,6 +384,7 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
     const parsed = parseTrial(t, primaryObsField, categoryId);
     parsed.target = canonicalTarget(t, targetField);
     parsed.projectName = projectMap[t.ProjectID] || '';
+    parsed.isLargeScale = largeScaleProjectIds.has(String(t.ProjectID));
     return parsed;
   });
 
@@ -340,21 +393,18 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
   const investigatorSums = buildInvestigatorSummary(parsedTrials);
   const formulaSums = buildFormulaSummary(parsedTrials);
   const trialIndex = buildTrialIndex(parsedTrials, projectMap);
+  const ingredientSynergy = buildIngredientSynergySummary(parsedTrials, catFormulations, catIngredients);
 
   const finalizedTrials = parsedTrials.filter(t => t.isCompleted);
   const activeTrials = parsedTrials.filter(t => !t.isCompleted);
-
-  const ingredientsCtx = catIngredients.length > 0
-    ? catIngredients.map(i =>
-        (i.name || i.Name) + ' | ' + (i.quantity || i.Quantity) + (i.unit || i.Unit) + ' @ Rs.' + (i.pricePerUnit || i.PricePerUnit) + '/' + (i.unit || i.Unit)
-      ).join('\n')
-    : 'No ingredients recorded.';
+  const largeFieldTrials = parsedTrials.filter(t => t.isLargeScale);
+  const standardTrials = parsedTrials.filter(t => !t.isLargeScale);
 
   const formulationsCtx = catFormulations.length > 0
     ? catFormulations.map(f => {
-        const ings = safeJsonParse(f.Ingredients || f.ingredients, []);
-        const ingStr = Array.isArray(ings) ? ings.map(i => i.name + ' ' + i.quantity + i.unit).join('+') : '';
-        return f.Name + ' | MoA:' + (f.ModeOfAction || '?') + ' | targets:' + (f.TargetWeeds || f.targetWeeds || '?') + ' | ingredients:[' + ingStr + ']';
+        const ings = safeJsonParse(f.IngredientsJSON || f.Ingredients || f.ingredients, []);
+        const ingStr = Array.isArray(ings) ? ings.map(i => i.name + ' ' + i.quantity + (i.unit || 'ml')).join(' + ') : '';
+        return `* ${f.Name} | MoA:${f.ModeOfAction || '?'} | TargetSpectrum:${f.TargetWeeds || f.targetWeeds || '?'} | Recipe:[${ingStr}] | Notes:${f.Notes || 'none'}`;
       }).join('\n')
     : 'No formulations recorded.';
 
@@ -362,6 +412,8 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
     totalTrials: catTrials.length,
     completedTrials: finalizedTrials.length,
     activeTrials: activeTrials.length,
+    standardTrials: standardTrials.length,
+    largeFieldTrials: largeFieldTrials.length,
     uniqueTargets: [...new Set(parsedTrials.map(t => t.target))].length,
     uniqueFormulas: [...new Set(parsedTrials.map(t => t.formulation))].length,
     uniqueLocations: [...new Set(parsedTrials.map(t => t.location).filter(Boolean))].length,
@@ -412,24 +464,22 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
   const contextString = [
     '=== DATABASE OVERVIEW ===',
     'Category: ' + categoryId.toUpperCase(),
-    'Total Trials: ' + stats.totalTrials,
-    'Finalized Trials: ' + stats.completedTrials + ' (these have real control day measurements)',
-    'Active Trials: ' + stats.activeTrials + ' (still running — elapsed time is NOT control duration)',
+    'Total Trials: ' + stats.totalTrials + ' (' + stats.standardTrials + ' Standard/Plot Trials, ' + stats.largeFieldTrials + ' Large-Scale Field Studies)',
+    'Finalized Trials: ' + stats.completedTrials + ' (real measured control duration)',
+    'Active Trials: ' + stats.activeTrials + ' (still running — elapsed days is NOT control duration)',
     'Unique Targets: ' + stats.uniqueTargets + ' | Unique Formulas: ' + stats.uniqueFormulas,
     'Locations: ' + stats.uniqueLocations + ' | Investigators: ' + stats.uniqueInvestigators,
     'Date Range: ' + (stats.dateRange.earliest || '?') + ' to ' + (stats.dateRange.latest || '?'),
     '',
-    '=== IMPORTANT: HOW TO INTERPRET CONTROL DAYS ===',
-    'FINALIZED trials: FinalControlDuration is the REAL, measured control period. Use this for comparisons.',
-    'ACTIVE trials: elapsedDays is just days since the trial started — it is NOT the control duration.',
-    'Never report Active trial elapsed days as "control days achieved" — the trial is still ongoing.',
-    'In the trial index below, FINALIZED control shows as "Xd-FINALIZED" and Active shows as "Xd-ELAPSED(active,not-final)".',
+    '=== TRIAL TYPES & FIELD-SCALE VALIDATION ===',
+    'Standard Trials: Microplot/pot trials for initial screening.',
+    'Large Field Trials: Real-world farm studies with multiple monitoring spots. Formulations validated in Large Field Trials carry the highest scientific confidence.',
+    '',
+    '=== INGREDIENT INVENTORY & FIELD SYNERGY MATRIX ===',
+    ingredientSynergy,
     '',
     '=== FORMULATION KNOWLEDGE BASE ===',
     formulationsCtx,
-    '',
-    '=== INGREDIENT INVENTORY ===',
-    ingredientsCtx,
     '',
     '=== FORMULA PERFORMANCE OVERVIEW (ALL TRIALS, ctrl days from Finalized only) ===',
     forSumStr || 'No performance data available.',
@@ -446,6 +496,28 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
     '=== COMPLETE TRIAL INDEX (ALL ' + stats.totalTrials + ' TRIALS) ===',
     'FINALIZED control = "Xd-FINALIZED" | Active elapsed time = "Xd-ELAPSED(active,not-final)"',
     trialIndex || 'No trials recorded.',
+    '',
+    '=== GUIDELINES FOR NOVEL FORMULATION RECOMMENDATIONS ===',
+    'When asked to suggest new, improved, or novel formulations:',
+    '1. Cross-reference the INGREDIENT INVENTORY above to select realistic, available ingredients.',
+    '2. Combine complementary modes of action (e.g. fast contact knockdown + systemic residual control, or active + penetration enhancer / surfactant).',
+    '3. Cite expected synergy and compare predicted efficacy against the existing trial benchmarks.',
+    '4. CRITICAL: Whenever you recommend a new candidate formulation, ALWAYS enclose its exact recipe in a ```formula code block formatted like this so the user can save it in 1 click:',
+    '```formula',
+    '{',
+    '  "name": "Suggested Formula Name",',
+    '  "category": "' + categoryId + '",',
+    '  "notes": "Brief description of agronomic positioning and mode of action.",',
+    '  "dosage": "Suggested application rate (e.g. 40 ml/L or 2 L/ha)",',
+    '  "target": "Target species or pathogens",',
+    '  "ingredients": [',
+    '    { "name": "Ingredient A", "quantity": 400, "unit": "ml" },',
+    '    { "name": "Ingredient B", "quantity": 100, "unit": "ml" }',
+    '  ],',
+    '  "predictedEfficacy": 94,',
+    '  "synergyRationale": "Explanation of biochemical synergy and why this formula will perform well."',
+    '}',
+    '```'
   ].join('\n');
 
   return { contextString, stats };

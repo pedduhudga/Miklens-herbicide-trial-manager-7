@@ -4,6 +4,7 @@ import TopBar from '../components/TopBar.jsx';
 import { useNavigate } from 'react-router-dom';
 import { Search, X, Activity, FolderOpen, FlaskConical, Leaf, Building2, Clock } from 'lucide-react';
 import { safeJsonParse } from '../utils/helpers.js';
+import { getCategoryConfig } from '../utils/categoryConfig.js';
 
 const TYPE_CONFIG = {
   trial:        { label: 'Trial',        icon: Activity,    color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
@@ -44,13 +45,14 @@ function buildIndex(state, activeCategory) {
     const tCat = t.Category || 'herbicide';
     if (tCat !== cat) return;
     const obs = safeJsonParse(t.EfficacyDataJSON, []);
-    const weedDetails = obs.flatMap(o => (o.weedDetails || []).map(w => w.species)).filter(Boolean);
+    const targetDetails = obs.flatMap(o => (o.weedDetails || o.targetDetails || []).map(w => w.species || w.name || w.target)).filter(Boolean);
+    const targetVal = t.WeedSpecies || t.DiseaseTarget || t.PestTarget || t.NutrientTarget || t.BiostimulantTarget || t.Target || '';
     items.push({
       type: 'trial', id: t.ID,
       title: t.FormulationName || 'Unknown Trial',
       sub: [t.Location, t.Date ? new Date(t.Date).toLocaleDateString() : null, t.Result].filter(Boolean).join(' · '),
-      tags: [t.FormulationName, t.Location, t.WeedSpecies, t.InvestigatorName, t.Result, t.ID, ...weedDetails,
-             ...(t.WeedSpecies || '').split(',').map(s => s.trim())].filter(Boolean),
+      tags: [t.FormulationName, t.Location, targetVal, t.Crop, t.InvestigatorName, t.Result, t.ID, ...targetDetails,
+             ...targetVal.split(',').map(s => s.trim())].filter(Boolean),
       raw: t,
     });
   });
@@ -58,11 +60,12 @@ function buildIndex(state, activeCategory) {
   (state.projects || []).forEach(p => {
     const pCat = p.Category || 'herbicide';
     if (pCat !== cat) return;
+    const pTarget = p.TargetWeed || p.TargetDisease || p.TargetPest || p.TargetNutrient || p.TargetStress || p.Target || '';
     items.push({
       type: 'project', id: p.ID,
       title: p.Name || 'Unknown Project',
-      sub: [p.Metric, p.TargetWeed, p.Crop, p.Location].filter(Boolean).join(' · '),
-      tags: [p.Name, p.TargetWeed, p.Crop, p.Location, p.Metric].filter(Boolean),
+      sub: [p.Metric, pTarget, p.Crop, p.Location].filter(Boolean).join(' · '),
+      tags: [p.Name, pTarget, p.Crop, p.Location, p.Metric].filter(Boolean),
       raw: p,
     });
   });
@@ -122,6 +125,7 @@ export default function SmartSearch({ onMenuClick }) {
   const inputRef = useRef(null);
 
   const activeCategory = state.activeCategory || 'herbicide';
+  const catConfig = useMemo(() => getCategoryConfig(activeCategory), [activeCategory]);
 
   const index = useMemo(() => buildIndex(state, activeCategory), [state.trials, state.projects, state.formulations, state.ingredients, state.organisations, activeCategory]);
 
@@ -234,7 +238,7 @@ export default function SmartSearch({ onMenuClick }) {
                 type="text"
                 value={query}
                 onChange={e => handleSearch(e.target.value)}
-                placeholder={`Search ${activeCategory} trials, projects, formulations, active ingredients…`}
+                placeholder={`Search ${catConfig.name} trials, projects, formulations, ${catConfig.targetLabel?.toLowerCase() || 'targets'}, active ingredients…`}
                 className="w-full pl-11 pr-10 py-3 text-sm border rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-slate-50"
               />
               {query && (

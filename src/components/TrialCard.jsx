@@ -71,6 +71,7 @@ const TrialCard = memo(function TrialCard({
   onMarkComplete,
   onEditControlDays,
   onRecordWeather,
+  onQuickPeekFormulation,
   isPendingSync,
 }) {
   const handleRecordWeather = useCallback((e) => {
@@ -395,9 +396,23 @@ const TrialCard = memo(function TrialCard({
               )}
               <span className="align-middle">{trial.TrialName || trial.FormulationName || 'Untitled'}</span>
             </h3>
-            {trial.TrialName && trial.FormulationName && trial.TrialName.trim().toLowerCase() !== trial.FormulationName.trim().toLowerCase() && (
-              <p className="text-[11px] font-semibold text-slate-500 truncate">
-                Product: <span className="text-emerald-700 dark:text-emerald-400 font-bold">{trial.FormulationName}</span>
+            {trial.FormulationName && (
+              <p className="text-[11px] font-semibold text-slate-500 truncate flex items-center gap-1 mt-0.5">
+                Product:
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onQuickPeekFormulation) {
+                      onQuickPeekFormulation(trial.FormulationID, trial.FormulationName);
+                    }
+                  }}
+                  className="text-emerald-700 dark:text-emerald-400 font-bold hover:underline inline-flex items-center gap-0.5 group cursor-pointer"
+                  title="Quick peek formulation recipe and performance"
+                >
+                  <span>{trial.FormulationName}</span>
+                  <Eye className="w-3 h-3 text-emerald-500 opacity-60 group-hover:opacity-100 transition" />
+                </button>
               </p>
             )}
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">

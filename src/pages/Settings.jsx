@@ -8,6 +8,7 @@ import {
   fbSaveUserSettings,
   fbSaveGlobalQRSettings,
 } from "../services/firebaseDB.js";
+import { DEFAULT_GEMINI_MODEL } from "../utils/aiConstants.js";
 
 import {
   Link,
@@ -269,7 +270,7 @@ export default function Settings({ onMenuClick }) {
     setTestingKey(index);
     setKeyTestResult((prev) => ({ ...prev, [index]: null }));
     try {
-      const model = s.selectedModel || "gemini-2.5-flash";
+      const model = s.selectedModel || DEFAULT_GEMINI_MODEL;
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${rawKey}`,
         {
@@ -614,41 +615,33 @@ export default function Settings({ onMenuClick }) {
                 <Cpu className="w-4 h-4 text-indigo-500" /> Gemini API Model
               </label>
               <select
-                value={s.selectedModel || "gemini-3.5-flash"}
+                value={s.selectedModel || DEFAULT_GEMINI_MODEL}
                 onChange={(e) =>
                   updateSettings({ selectedModel: e.target.value })
                 }
-                className="w-full border rounded-md shadow-sm p-2 bg-white text-sm"
+                className="w-full border rounded-md shadow-sm p-2 bg-white text-sm font-medium"
               >
-                <optgroup label="Gemini 3.x — Newest (Recommended)">
-                  <option value="gemini-3.1-flash-lite">
-                    Gemini 3.1 Flash-Lite ⚡ Fastest, 1500 RPD
+                <optgroup label="Gemini 3 Generation — September 2026 (100% Free Tier)">
+                  <option value="gemini-3.8-flash">
+                    Gemini 3.8 Flash 🚀 Frontier GA (Sept 2026) · Best Vision · 1500 RPD
+                  </option>
+                  <option value="gemini-3.7-flash">
+                    Gemini 3.7 Flash ⚡ High-Efficiency Workhorse · 1500 RPD
                   </option>
                   <option value="gemini-3.5-flash">
-                    Gemini 3.5 Flash 🌟 Best overall, ~500 RPD
+                    Gemini 3.5 Flash 🌟 Production Stable · 1500 RPD
                   </option>
-                  <option value="gemini-3-flash-preview">
-                    Gemini 3 Flash Preview 🔵 ~100 RPD
+                  <option value="gemini-3.5-flash-lite">
+                    Gemini 3.5 Flash-Lite 💨 Ultra-Fast Batch Scanning · 1500 RPD (30 RPM)
                   </option>
                   <option value="gemini-3.1-pro-preview">
-                    Gemini 3.1 Pro Preview 🧠 Deepest reasoning, 25 RPD
-                  </option>
-                </optgroup>
-                <optgroup label="Gemini 2.5 — Stable Fallback">
-                  <option value="gemini-2.5-flash-lite">
-                    Gemini 2.5 Flash-Lite ⚡ 1500 RPD
-                  </option>
-                  <option value="gemini-2.5-flash">
-                    Gemini 2.5 Flash ✅ 250 RPD
-                  </option>
-                  <option value="gemini-2.5-pro">
-                    Gemini 2.5 Pro 🔬 25 RPD
+                    Gemini 3.1 Pro Preview 🧠 Deep Scientific Reasoning · 50 RPD
                   </option>
                 </optgroup>
               </select>
               <p className="text-xs text-gray-500 mt-1">
-                Recommended: <b>Gemini 3.5 Flash</b> (best) or{" "}
-                <b>3.1 Flash-Lite</b> (fastest/most quota).
+                Recommended: <b>Gemini 3.8 Flash</b> (newest GA frontier) or{" "}
+                <b>Gemini 3.5 Flash-Lite</b> (fastest throughput, 30 RPM). 100% Free Tier.
               </p>
             </div>
             <div>

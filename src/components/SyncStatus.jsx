@@ -20,6 +20,7 @@ import {
   RefreshCw, Cloud, CloudOff, GitMerge,
   ChevronRight, X, FileJson, Download, Upload
 } from 'lucide-react';
+import { useAppState } from '../hooks/useAppState.jsx';
 
 export default function SyncStatus() {
   const [status, setStatus] = useState(SYNC_STATUS.ONLINE);
@@ -27,6 +28,30 @@ export default function SyncStatus() {
   const [showConflicts, setShowConflicts] = useState(false);
   const [conflicts, setConflicts] = useState([]);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [browserOnline, setBrowserOnline] = useState(() => typeof navigator !== 'undefined' ? navigator.onLine : true);
+
+  let appSyncQueue = [];
+  try {
+    const { state } = useAppState();
+    appSyncQueue = state?.syncQueue || [];
+  } catch {
+    // Graceful fallback if rendered outside AppStateProvider in unit tests
+  }
+
+  const appPendingCount = (appSyncQueue || []).filter(s => s.status === 'pending' || s.status === 'failed' || !s.status).length;
+  const effectivePendingCount = Math.max(details?.pendingCount || 0, appPendingCount);
+
+  // Monitor browser online/offline events
+  useEffect(() => {
+    const handleOnline = () => setBrowserOnline(true);
+    const handleOffline = () => setBrowserOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   // Initialize and listen for status changes
   useEffect(() => {
@@ -57,6 +82,13 @@ export default function SyncStatus() {
   // Force sync
   const handleForceSync = useCallback(async () => {
     await forceSync();
+    if (typeof window !== 'undefined' && typeof window.processSyncQueue === 'function') {
+      try {
+        await window.processSyncQueue();
+      } catch (e) {
+        console.error('Failed to process application sync queue:', e);
+      }
+    }
   }, []);
 
   // Resolve conflict
@@ -74,59 +106,69 @@ export default function SyncStatus() {
     await loadConflicts();
   }, [conflicts]);
 
+  const currentlyOnline = browserOnline && isOnline();
+
   // Get status display config
   const getStatusConfig = () => {
-    switch (status) {
-      case SYNC_STATUS.ONLINE:
-        return {
-          icon: <Wifi className="w-4 h-4" />,
-          label: 'Online',
-          color: 'text-emerald-600 bg-emerald-50 border-emerald-200',
-          pulse: false
-        };
-      case SYNC_STATUS.OFFLINE:
-        return {
-          icon: <WifiOff className="w-4 h-4" />,
-          label: 'Offline',
-          color: 'text-amber-600 bg-amber-50 border-amber-200',
-          pulse: false
-        };
-      case SYNC_STATUS.SYNCING:
-        return {
-          icon: <RefreshCw className="w-4 h-4 animate-spin" />,
-          label: 'Syncing...',
-          color: 'text-blue-600 bg-blue-50 border-blue-200',
-          pulse: true
-        };
-      case SYNC_STATUS.SYNCED:
-        return {
-          icon: <CheckCircle className="w-4 h-4" />,
-          label: 'Synced',
-          color: 'text-emerald-600 bg-emerald-50 border-emerald-200',
-          pulse: false
-        };
-      case SYNC_STATUS.ERROR:
+    if (!currentlyOnline || status === SYNC_STATUS.OFFLINE) {
+      if (effectivePendingCount > 0) {
         return {
           icon: <CloudOff className="w-4 h-4" />,
-          label: 'Sync Error',
-          color: 'text-red-600 bg-red-50 border-red-200',
+          label: `${effectivePendingCount} Queued`,
+          color: 'text-amber-700 bg-amber-50 border-amber-300',
           pulse: false
         };
-      case SYNC_STATUS.CONFLICTS:
-        return {
-          icon: <GitMerge className="w-4 h-4" />,
-          label: `${details?.conflictCount || conflicts.length} Conflicts`,
-          color: 'text-orange-600 bg-orange-50 border-orange-200',
-          pulse: true
-        };
-      default:
-        return {
-          icon: <Cloud className="w-4 h-4" />,
-          label: 'Unknown',
-          color: 'text-slate-600 bg-slate-50 border-slate-200',
-          pulse: false
-        };
+      }
+      return {
+        icon: <WifiOff className="w-4 h-4" />,
+        label: 'Offline Mode',
+        color: 'text-slate-600 bg-slate-100 border-slate-300',
+        pulse: false
+      };
     }
+
+    if (status === SYNC_STATUS.SYNCING) {
+      return {
+        icon: <RefreshCw className="w-4 h-4 animate-spin" />,
+        label: 'Syncing...',
+        color: 'text-blue-600 bg-blue-50 border-blue-200',
+        pulse: true
+      };
+    }
+
+    if (status === SYNC_STATUS.CONFLICTS || conflicts.length > 0) {
+      return {
+        icon: <GitMerge className="w-4 h-4" />,
+        label: `${details?.conflictCount || conflicts.length} Conflicts`,
+        color: 'text-orange-600 bg-orange-50 border-orange-200',
+        pulse: true
+      };
+    }
+
+    if (status === SYNC_STATUS.ERROR) {
+      return {
+        icon: <CloudOff className="w-4 h-4" />,
+        label: 'Sync Error',
+        color: 'text-red-600 bg-red-50 border-red-200',
+        pulse: false
+      };
+    }
+
+    if (effectivePendingCount > 0) {
+      return {
+        icon: <Upload className="w-4 h-4 text-amber-600" />,
+        label: `${effectivePendingCount} Pending Sync`,
+        color: 'text-amber-700 bg-amber-50 border-amber-300',
+        pulse: true
+      };
+    }
+
+    return {
+      icon: <CheckCircle className="w-4 h-4 text-emerald-600" />,
+      label: 'Cloud Synced',
+      color: 'text-emerald-700 bg-emerald-50 border-emerald-200',
+      pulse: false
+    };
   };
 
   const config = getStatusConfig();
@@ -145,7 +187,7 @@ export default function SyncStatus() {
         <span className="hidden md:inline">{config.label}</span>
         {/* Mobile: show dot indicator instead of label */}
         <span className="md:hidden w-1.5 h-1.5 rounded-full bg-current" />
-        {(status === SYNC_STATUS.CONFLICTS || (details?.pendingCount > 0)) && (
+        {(status === SYNC_STATUS.CONFLICTS || (effectivePendingCount > 0)) && (
           <ChevronRight className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
         )}
       </button>
@@ -167,8 +209,8 @@ export default function SyncStatus() {
             <div className="mt-3 space-y-2">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-slate-500">Connection</span>
-                <span className={isOnline() ? 'text-emerald-600 font-medium' : 'text-amber-600 font-medium'}>
-                  {isOnline() ? 'Online' : 'Offline'}
+                <span className={currentlyOnline ? 'text-emerald-600 font-medium' : 'text-amber-600 font-medium'}>
+                  {currentlyOnline ? 'Online' : 'Offline'}
                 </span>
               </div>
               
@@ -177,10 +219,10 @@ export default function SyncStatus() {
                 <span className="font-medium text-slate-700 capitalize">{status}</span>
               </div>
               
-              {details?.pendingCount > 0 && (
+              {effectivePendingCount > 0 && (
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-slate-500">Pending</span>
-                  <span className="font-medium text-amber-600">{details.pendingCount} items</span>
+                  <span className="font-medium text-amber-600">{effectivePendingCount} items</span>
                 </div>
               )}
               
@@ -192,7 +234,7 @@ export default function SyncStatus() {
               )}
             </div>
             
-            {isOnline() && status !== SYNC_STATUS.SYNCING && (
+            {currentlyOnline && status !== SYNC_STATUS.SYNCING && (
               <button
                 onClick={handleForceSync}
                 className="mt-3 w-full flex items-center justify-center gap-2 px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition"

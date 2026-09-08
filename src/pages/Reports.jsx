@@ -5,16 +5,11 @@ import TopBar from '../components/TopBar.jsx';
 import { FileBox, Download, LayoutTemplate, GripVertical, Plus, Trash2, ChevronRight, ShieldAlert, ChevronDown, ChevronUp, BarChart2 } from 'lucide-react';
 import { exportScientificReportAsDOC, exportTrialCardsPDF } from '../utils/exportUtils.js';
 import { getCategoryConfig } from '../utils/categoryConfig.js';
-import { AdvancedReportGenerator } from '../services/advancedReportGenerator.js';
 import { exportToARM } from '../services/armExporter.js';
 import ReportConfigPanel from '../components/ReportConfigPanel.jsx';
 import ReportProgressModal from '../components/ReportProgressModal.jsx';
 import { buildReportData } from '../services/reportDataBuilder.js';
 import { exportTidyCSV } from '../services/reportDataBuilder.js';
-import { generateProjectPDF } from '../services/pdfReportRenderer.js';
-import { generateProjectExcel } from '../services/excelReportRenderer.js';
-import { generateProjectDocx } from '../services/docxReportRenderer.js';
-import { generateProjectPPTX } from '../services/pptxReportRenderer.js';
 
 export default function Reports({ onMenuClick }) {
   const { state } = useAppState();
@@ -251,6 +246,7 @@ export default function Reports({ onMenuClick }) {
     
     window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Generating Advanced Excel Report...', type: 'info' } }));
     try {
+      const { AdvancedReportGenerator } = await import('../services/advancedReportGenerator.js');
       const trialProj = (state.projects || []).find(p => String(p.ID) === String(trial.ProjectID));
       const generator = new AdvancedReportGenerator(trial, activeCategory, trialProj);
       await generator.generateCompleteReport();
@@ -446,12 +442,16 @@ export default function Reports({ onMenuClick }) {
       setProgressSteps(prev => prev.map((s, i) => i === 2 ? { ...s, status: 'active' } : s));
       setProgressPercent(60);
       if (reportOptions.format === 'pdf') {
+        const { generateProjectPDF } = await import('../services/pdfReportRenderer.js');
         await generateProjectPDF(reportData, reportOptions);
       } else if (reportOptions.format === 'excel') {
+        const { generateProjectExcel } = await import('../services/excelReportRenderer.js');
         await generateProjectExcel(reportData, reportOptions);
       } else if (reportOptions.format === 'pptx') {
+        const { generateProjectPPTX } = await import('../services/pptxReportRenderer.js');
         await generateProjectPPTX(reportData, reportOptions);
       } else {
+        const { generateProjectDocx } = await import('../services/docxReportRenderer.js');
         await generateProjectDocx(reportData, reportOptions);
       }
       setProgressSteps(prev => prev.map((s, i) => i === 2 ? { ...s, status: 'done' } : s));

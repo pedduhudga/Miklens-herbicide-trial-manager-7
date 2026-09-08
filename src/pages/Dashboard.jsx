@@ -44,7 +44,7 @@ function MiniBar({ value, max, color = 'bg-emerald-500' }) {
 }
 
 export default function Dashboard({ onMenuClick }) {
-  const { state } = useAppState();
+  const { state, getAppState } = useAppState();
   const { user } = useAuth();
   const navigate = useNavigate();
   const activeCategory = state.activeCategory || 'herbicide';
@@ -56,9 +56,9 @@ export default function Dashboard({ onMenuClick }) {
   const ingredients = useMemo(() => (state.ingredients || []).filter(i => i.Category === activeCategory || (!i.Category && activeCategory === 'herbicide')), [state.ingredients, activeCategory]);
 
   // ── Target-finder state
-  const [weedQuery, setWeedQuery] = useState('');
+  const [targetQuery, setTargetQuery] = useState('');
   const [minEfficacy, setMinEfficacy] = useState(70);
-  const [weedResults, setWeedResults] = useState(null);
+  const [targetResults, setTargetResults] = useState(null);
 
   // ── Location for Spray Advisor (from most recent trial with coordinates)
   const trialLocation = useMemo(() => {
@@ -75,7 +75,7 @@ export default function Dashboard({ onMenuClick }) {
 
   // ── Top-Formulations season filter state
   const [fYear, setFYear] = useState('');
-  const [fWeed, setFWeed] = useState('');
+  const [fTarget, setFTarget] = useState('');
   const [fLocation, setFLocation] = useState('');
 
   // ── Core stats & Lifecycle partitioning
@@ -177,8 +177,8 @@ export default function Dashboard({ onMenuClick }) {
     return Array.from(years).sort((a, b) => b - a);
   }, [trials]);
 
-  // ── All weed species/targets for datalist
-  const allWeedSpecies = useMemo(() => {
+  // ── All targets for datalist
+  const allTargets = useMemo(() => {
     const s = new Set();
     const tField = catConfig.targetField || 'WeedSpecies';
     trials.forEach(t => {
@@ -187,7 +187,7 @@ export default function Dashboard({ onMenuClick }) {
     return Array.from(s).sort();
   }, [trials, catConfig.targetField]);
 
-  // ── Top Formulations (filtered by year/weed/location)
+  // ── Top Formulations (filtered by year/target/location)
   const topFormulationsFiltered = useMemo(() => {
     let filtered = trials;
     const tField = catConfig.targetField || 'WeedSpecies';
@@ -196,7 +196,7 @@ export default function Dashboard({ onMenuClick }) {
       const d = new Date(t.Date || t.CreatedAt || '');
       return !isNaN(d) && String(d.getFullYear()) === fYear;
     });
-    if (fWeed) filtered = filtered.filter(t => String(t[tField] || '').toLowerCase().includes(fWeed.toLowerCase()));
+    if (fTarget) filtered = filtered.filter(t => String(t[tField] || '').toLowerCase().includes(fTarget.toLowerCase()));
     if (fLocation) filtered = filtered.filter(t => String(t.Location || '').toLowerCase().includes(fLocation.toLowerCase()));
 
     const counts = {};
@@ -219,7 +219,7 @@ export default function Dashboard({ onMenuClick }) {
         const avgEff = effs.length ? Math.round(effs.reduce((a, b) => a + b, 0) / effs.length) : null;
         return { name, count, avgEff };
       });
-  }, [trials, fYear, fWeed, fLocation, catConfig.targetField, catConfig.primaryMetric.key]);
+  }, [trials, fYear, fTarget, fLocation, catConfig.targetField, catConfig.primaryMetric.key]);
 
   // ── Recent Trials
   const recentTrials = useMemo(() =>
@@ -231,9 +231,9 @@ export default function Dashboard({ onMenuClick }) {
     [...projects].sort((a, b) => new Date(b.CreatedAt || 0) - new Date(a.CreatedAt || 0)).slice(0, 3)
   , [projects]);
 
-  // ── Find top formulations by weed
-  const handleFindByWeed = () => {
-    const q = weedQuery.trim().toLowerCase();
+  // ── Find top formulations by target
+  const handleFindByTarget = () => {
+    const q = targetQuery.trim().toLowerCase();
     if (!q) return;
     const tField = catConfig.targetField || 'WeedSpecies';
     const mKey = catConfig.primaryMetric.key;
@@ -256,7 +256,7 @@ export default function Dashboard({ onMenuClick }) {
       .filter(g => g.avgEfficacy >= minEfficacy || g.efficacies.length === 0)
       .sort((a, b) => b.avgEfficacy - a.avgEfficacy)
       .slice(0, 10);
-    setWeedResults({ query: q, results: ranked, total: matched.length });
+    setTargetResults({ query: q, results: ranked, total: matched.length });
   };
 
   const rawName = user?.Name || user?.Username || user?.username || 'Researcher';
@@ -391,15 +391,15 @@ export default function Dashboard({ onMenuClick }) {
                   <option value="">All Years</option>
                   {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
                 </select>
-                <input value={fWeed} onChange={e => setFWeed(e.target.value)}
-                  placeholder={`Filter by ${catConfig.targetLabel}`} list="dash-fweed-list"
+                <input value={fTarget} onChange={e => setFTarget(e.target.value)}
+                  placeholder={`Filter by ${catConfig.targetLabel}`} list="dash-ftarget-list"
                   className="text-xs border rounded-lg px-2 py-1.5 w-36 focus:outline-none focus:ring-2 focus:ring-emerald-400" />
-                <datalist id="dash-fweed-list">{allWeedSpecies.map(w => <option key={w} value={w} />)}</datalist>
+                <datalist id="dash-ftarget-list">{allTargets.map(w => <option key={w} value={w} />)}</datalist>
                 <input value={fLocation} onChange={e => setFLocation(e.target.value)}
                   placeholder="Filter by Location"
                   className="text-xs border rounded-lg px-2 py-1.5 w-36 focus:outline-none focus:ring-2 focus:ring-emerald-400" />
-                {(fYear || fWeed || fLocation) && (
-                  <button onClick={() => { setFYear(''); setFWeed(''); setFLocation(''); }}
+                {(fYear || fTarget || fLocation) && (
+                  <button onClick={() => { setFYear(''); setFTarget(''); setFLocation(''); }}
                     className="text-xs text-red-500 hover:underline">Clear</button>
                 )}
               </div>
@@ -422,7 +422,7 @@ export default function Dashboard({ onMenuClick }) {
                 ))}
               </div>
             ) : (
-              <div className="py-6 text-center text-slate-400 text-sm">No formulation data{fYear || fWeed || fLocation ? ' for these filters' : ''}</div>
+              <div className="py-6 text-center text-slate-400 text-sm">No formulation data{fYear || fTarget || fLocation ? ' for these filters' : ''}</div>
             )}
           </div>
 
@@ -449,7 +449,7 @@ export default function Dashboard({ onMenuClick }) {
             />
           </div>
 
-          {/* ── Top Performing Formulations by Weed ───────────────── */}
+          {/* ── Top Performing Formulations by Target ───────────────── */}
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
             <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-4">
               <div>
@@ -459,12 +459,12 @@ export default function Dashboard({ onMenuClick }) {
               <div className="flex flex-wrap gap-2 items-end">
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase mb-1">{catConfig.targetLabel}</label>
-                  <input value={weedQuery} onChange={e => setWeedQuery(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleFindByWeed()}
-                    list="dash-weed-datalist"
+                  <input value={targetQuery} onChange={e => setTargetQuery(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleFindByTarget()}
+                    list="dash-target-datalist"
                     placeholder={`Select ${catConfig.targetLabel.toLowerCase()}...`}
                     className="border rounded-lg px-3 py-1.5 text-sm w-52 focus:outline-none focus:ring-2 focus:ring-emerald-400" />
-                  <datalist id="dash-weed-datalist">{allWeedSpecies.map(w => <option key={w} value={w} />)}</datalist>
+                  <datalist id="dash-target-datalist">{allTargets.map(w => <option key={w} value={w} />)}</datalist>
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Min efficacy (%)</label>
@@ -472,22 +472,22 @@ export default function Dashboard({ onMenuClick }) {
                     min="0" max="100"
                     className="border rounded-lg px-3 py-1.5 text-sm w-24 focus:outline-none focus:ring-2 focus:ring-emerald-400" />
                 </div>
-                <button onClick={handleFindByWeed}
+                <button onClick={handleFindByTarget}
                   className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 rounded-lg text-sm font-bold flex items-center gap-2 transition">
                   <Search className="w-4 h-4" /> Find
                 </button>
               </div>
             </div>
 
-            {weedResults === null ? (
+            {targetResults === null ? (
               <p className="text-sm text-slate-400 text-center py-4">Enter a {catConfig.targetLabel.toLowerCase()} name and click Find to see results.</p>
-            ) : weedResults.results.length === 0 ? (
-              <p className="text-sm text-slate-500 py-4">No trials found for "{weedResults.query}" with ≥{minEfficacy}% efficacy.</p>
+            ) : targetResults.results.length === 0 ? (
+              <p className="text-sm text-slate-500 py-4">No trials found for "{targetResults.query}" with ≥{minEfficacy}% efficacy.</p>
             ) : (
               <div>
-                <p className="text-xs text-slate-400 mb-3">{weedResults.total} trial{weedResults.total !== 1 ? 's' : ''} matched "{weedResults.query}" — top {weedResults.results.length} formulation{weedResults.results.length !== 1 ? 's' : ''}</p>
+                <p className="text-xs text-slate-400 mb-3">{targetResults.total} trial{targetResults.total !== 1 ? 's' : ''} matched "{targetResults.query}" — top {targetResults.results.length} formulation{targetResults.results.length !== 1 ? 's' : ''}</p>
                 <div className="space-y-2">
-                  {weedResults.results.map((g, i) => (
+                  {targetResults.results.map((g, i) => (
                     <div key={g.name} className="flex items-center gap-3 p-3 rounded-lg border border-slate-100 hover:bg-slate-50 transition">
                       <span className="text-xs font-bold text-slate-400 w-5 text-center">#{i + 1}</span>
                       <div className="flex-1 min-w-0">

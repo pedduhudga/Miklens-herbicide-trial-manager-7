@@ -2,6 +2,7 @@ import React, { createContext, useContext, useReducer, useEffect, useCallback, u
 import { initFirebase } from '../services/firebase.js';
 import { saveOfflineData, loadOfflineData, saveOfflinePhoto, loadOfflinePhoto, saveSyncQueueOffline, loadSyncQueueOffline } from '../services/offlineStorage.js';
 import { fbGetUserSettings } from '../services/firebaseDB.js';
+import { DEFAULT_GEMINI_MODEL } from '../utils/aiConstants.js';
 
 function safeJsonParse(val, fallback = []) {
   if (!val) return fallback;
@@ -35,6 +36,7 @@ const initialState = {
   settings: {
     apiKeys: [],
     currentApiKeyIndex: 0,
+    selectedModel: DEFAULT_GEMINI_MODEL,
     scriptUrl: '',
     sheetId: '',
     folderId: '',
@@ -111,18 +113,29 @@ const CategoryContext = createContext();
 const PageContext = createContext();
 const LoadedContext = createContext();
 
+function safeLocalStorageSet(key, value) {
+  try {
+    const stringVal = typeof value === 'string' ? value : JSON.stringify(value);
+    localStorage.setItem(key, stringVal);
+  } catch (err) {
+    console.warn(`[Storage] Failed to persist ${key} to localStorage (quota exceeded or restricted):`, err.message);
+  }
+}
+
 function appReducer(state, action) {
   switch (action.type) {
     case 'SET_STATE':
       return { ...state, ...action.payload };
     case 'UPDATE_SETTINGS': {
       const newSettings = { ...state.settings, ...action.payload };
-      localStorage.setItem('appSettings', JSON.stringify(newSettings));
+      safeLocalStorageSet('appSettings', newSettings);
       return { ...state, settings: newSettings };
     }
     case 'RESET_SETTINGS': {
-      localStorage.removeItem('appSettings');
-      localStorage.removeItem('appAuth');
+      try {
+        localStorage.removeItem('appSettings');
+        localStorage.removeItem('appAuth');
+      } catch (e) {}
       const emptySettings = {
         scriptUrl: '',
         sheetId: '',
@@ -147,24 +160,24 @@ function appReducer(state, action) {
     }
     case 'SET_AUTH': {
       const authState = { ...state.auth, ...action.payload };
-      localStorage.setItem('appAuth', JSON.stringify(authState));
+      safeLocalStorageSet('appAuth', authState);
       return { ...state, auth: authState };
     }
     case 'LOGOUT':
-      localStorage.removeItem('appAuth');
+      try { localStorage.removeItem('appAuth'); } catch (e) {}
       return { ...state, auth: { user: null, token: null }, hasLoadedInitialData: false };
     case 'SET_CATEGORY': {
-      localStorage.setItem('activeCategory', action.payload);
+      safeLocalStorageSet('activeCategory', action.payload);
       return { ...state, activeCategory: action.payload };
     }
     case 'SET_SYNC_QUEUE':
       saveSyncQueueOffline(action.payload);
-      localStorage.setItem('syncQueue', JSON.stringify(action.payload));
+      safeLocalStorageSet('syncQueue', action.payload);
       return { ...state, syncQueue: action.payload };
     case 'ADD_SYNC_ITEM': {
       const newQueue = [...state.syncQueue, action.payload];
       saveSyncQueueOffline(newQueue);
-      localStorage.setItem('syncQueue', JSON.stringify(newQueue));
+      safeLocalStorageSet('syncQueue', newQueue);
       return { ...state, syncQueue: newQueue };
     }
     default:

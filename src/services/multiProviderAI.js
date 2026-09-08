@@ -1,60 +1,46 @@
 import { getCategoryConfig } from '../utils/categoryConfig.js';
 import { resolvePhotoSrc } from '../utils/photoUtils.js';
+import { DEFAULT_GEMINI_MODEL, GEMINI_FALLBACK_MODELS } from '../utils/aiConstants.js';
 
 // Provider order = fallback priority (first = tried first).
 // Free tier limits per Google AI Studio / Groq free plan.
 // All Gemini models support: Text + Image + Video + Audio + PDF inputs.
 const PROVIDERS = [
-  // ── Gemini 3.x (newest generation, best vision quality) ──────────────────
+  // ── Gemini 3 Generation (September 2026 GA — 100% Free Tier) ─────────────
   {
-    // Stable | Free: ~1500 RPD, 30 RPM | Frontier-class, best for high-volume weed analysis
-    id: 'gemini-3-flash-lite',
-    name: 'Gemini 3.1 Flash-Lite',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent',
+    // GA Sept 2026 | Free: 1500 RPD, 15 RPM | Frontier multimodal reasoning & vision
+    id: 'gemini-3.8-flash',
+    name: 'Gemini 3.8 Flash',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent',
     dailyLimit: 1500,
   },
   {
-    // Stable | Free: ~500 RPD, 15 RPM | Most intelligent Gemini 3, best for agentic weed ID
-    id: 'gemini-3-flash',
+    // GA Aug 2026 | Free: 1500 RPD, 15 RPM | Workhorse model, compute efficient
+    id: 'gemini-3.7-flash',
+    name: 'Gemini 3.7 Flash',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent',
+    dailyLimit: 1500,
+  },
+  {
+    // Production | Free: 1500 RPD, 15 RPM | Stable vision & crop diagnosis
+    id: 'gemini-3.5-flash',
     name: 'Gemini 3.5 Flash',
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent',
-    dailyLimit: 500,
-  },
-  {
-    // Preview | Free: ~100 RPD, 5 RPM | Frontier preview, deeper reasoning for complex plots
-    id: 'gemini-3-flash-preview',
-    name: 'Gemini 3 Flash Preview',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent',
-    dailyLimit: 100,
-  },
-  {
-    // Preview | Free: ~25 RPD, 5 RPM | Most advanced reasoning — use for AI Summary/Reports
-    id: 'gemini-3-pro',
-    name: 'Gemini 3.1 Pro Preview',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent',
-    dailyLimit: 25,
-  },
-  // ── Gemini 2.5 (stable fallback series) ─────────────────────────────────
-  {
-    // Stable | Free: 1500 RPD, 30 RPM | Fast & cheap fallback
-    id: 'gemini-flash-lite',
-    name: 'Gemini 2.5 Flash-Lite',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent',
     dailyLimit: 1500,
   },
   {
-    // Stable | Free: 250 RPD, 10 RPM | Reliable vision + thinking
-    id: 'gemini-flash',
-    name: 'Gemini 2.5 Flash',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
-    dailyLimit: 250,
+    // GA July 2026 | Free: 1500 RPD, 30 RPM | Ultra-fast high-volume batch scanning
+    id: 'gemini-3.5-flash-lite',
+    name: 'Gemini 3.5 Flash-Lite',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent',
+    dailyLimit: 1500,
   },
   {
-    // Stable | Free: 25 RPD, 5 RPM | Deep reasoning fallback
-    id: 'gemini',
-    name: 'Gemini 2.5 Pro',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent',
-    dailyLimit: 25,
+    // Preview | Free: 50 RPD, 5 RPM | Deep reasoning for trial reports
+    id: 'gemini-3.1-pro-preview',
+    name: 'Gemini 3.1 Pro Preview',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent',
+    dailyLimit: 50,
   },
   // ── Groq (ultra-fast inference, vision support) ──────────────────────────
   {
@@ -666,7 +652,7 @@ export function getAIKey(providerId) {
 }
 
 export async function identifyWeedFromPhoto(imageDataUrl, category = 'herbicide') {
-  const geminiKeys = getAPIKeys('gemini-3.5-flash');
+  const geminiKeys = getAPIKeys('gemini');
   if (!geminiKeys.length) {
     throw new Error('No Gemini API key available in Settings');
   }
@@ -754,7 +740,7 @@ JSON ONLY. Do not write any conversational text or explanation. Only output the 
     imagePart = { inlineData: { mimeType: 'image/jpeg', data: base64 } };
   }
 
-  const models = ['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-1.5-flash-latest'];
+  const models = GEMINI_FALLBACK_MODELS;
   let lastError = null;
 
   for (const model of models) {

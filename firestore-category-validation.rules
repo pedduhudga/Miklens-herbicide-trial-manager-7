@@ -1,6 +1,7 @@
 // Firestore Security Rules for Category Isolation Enforcement
-// This file contains database-level constraints to prevent cross-category data violations
-// Deploy these rules to Firebase to enforce category boundaries at the database level
+// Aligned with src/services/firebase.js:
+// - Herbicide uses base collection names (trials, projects, formulations, blocks)
+// - Other categories use ${category}_${collectionType} (e.g. fungicide_trials)
 
 rules_version = '2';
 service cloud.firestore {
@@ -24,39 +25,46 @@ service cloud.firestore {
       return 'Category' in data ? data.Category : ('category' in data ? data.category : 'herbicide');
     }
     
-    // Check if user has access to specific category
-    function hasCategoryAccess(category) {
-      // Get user document to check permissions
-      let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid));
-      let user = userDoc.data;
-      
-      // Admin users have access to all categories
-      if ('Role' in user && user.Role == 'admin') {
-        return true;
-      }
-      
-      // Check category access list
-      if ('categoryAccess' in user && category in user.categoryAccess) {
-        return true;
-      }
-      
-      if ('CategoryAccess' in user && category in user.CategoryAccess) {
-        return true;
-      }
-      
-      // Default: allow access (for backward compatibility)
-      return true;
+    // Check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
     }
     
     // Check if user is admin
     function isAdmin() {
       let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid));
-      return 'Role' in userDoc.data && userDoc.data.Role == 'admin';
+      return userDoc != null && 'Role' in userDoc.data && 
+             (userDoc.data.Role == 'Admin' || userDoc.data.Role == 'admin');
+    }
+    
+    // Check if user has access to specific category
+    function hasCategoryAccess(category) {
+      if (!isAuthenticated()) return false;
+      let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid));
+      if (userDoc == null) return true; // Fallback during initial provisioning
+      let user = userDoc.data;
+      
+      // Admin users have access to all categories
+      if ('Role' in user && (user.Role == 'Admin' || user.Role == 'admin')) {
+        return true;
+      }
+      
+      // Check category access list
+      if ('categoryAccess' in user && user.categoryAccess[category] != null) {
+        return user.categoryAccess[category].read != false;
+      }
+      
+      if ('CategoryAccess' in user && user.CategoryAccess[category] != null) {
+        return true;
+      }
+      
+      // Default: allow access
+      return true;
     }
     
     // Check if user owns the document
     function isOwner(docData) {
-      return request.auth != null && 
+      return isAuthenticated() && 
              ('CreatedBy' in docData ? docData.CreatedBy == request.auth.uid : true);
     }
     
@@ -69,271 +77,207 @@ service cloud.firestore {
     
     // Check if trial category matches project category
     function trialProjectCategoryMatch(trialData) {
-      // If no project reference, allow
-      if (!('ProjectId' in trialData)) {
+      let pid = 'ProjectId' in trialData ? trialData.ProjectId : ('ProjectID' in trialData ? trialData.ProjectID : null);
+      if (pid == null || pid == '') {
         return true;
       }
-      
-      // Get project document
       let trialCategory = getCategory(trialData);
-      let projectPath = /databases/$(database)/documents/projects-$(trialCategory)/$(trialData.ProjectId);
-      
-      // Check if project exists and has matching category
-      return exists(projectPath) && 
-             getCategory(get(projectPath).data) == trialCategory;
+      let coll = trialCategory == 'herbicide' ? 'projects' : (trialCategory + '_projects');
+      let projectPath = /databases/$(database)/documents/$(coll)/$(pid);
+      return exists(projectPath);
     }
     
     // Check if formulation ingredients are category-compatible
     function formulationIngredientCategoryMatch(formulationData) {
-      // If no ingredients specified, allow
-      if (!('ingredients' in formulationData)) {
-        return true;
-      }
-      
-      let formulationCategory = getCategory(formulationData);
-      
-      // For now, we'll allow ingredient mixing for backward compatibility
-      // In a stricter implementation, you could validate each ingredient category
-      return true;
+      return true; // Backward compatibility
     }
     
     // Comprehensive category isolation check
-    function enforcesCategoryIsolation(data) {
-      return hasValidCategory(data) && 
-             hasCategoryAccess(getCategory(data)) &&
+    function enforcesCategoryIsolation(data, targetCategory) {
+      let docCategory = getCategory(data);
+      return docCategory == targetCategory && 
+             hasCategoryAccess(docCategory) &&
              trialProjectCategoryMatch(data) &&
              formulationIngredientCategoryMatch(data);
     }
     
-    // ═══ USER MANAGEMENT ════════════════════════════════════════════════════════
+    // ═══ USER MANAGEMENT & SETTINGS ═════════════════════════════════════════════
     
     match /users/{userId} {
-      allow read: if request.auth != null && 
-                     (request.auth.uid == userId || isAdmin());
-      
-      allow write: if request.auth != null && 
-                      (request.auth.uid == userId || isAdmin());
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+    }
+
+    match /settings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
     }
     
-    // ═══ CATEGORY-SPECIFIC COLLECTIONS ═════════════════════════════════════════
+    // ═══ SHARED COLLECTIONS ═════════════════════════════════════════════════════
     
-    // Trials collections (category-specific)
-    match /trials-{category}/{trialId} {
-      allow read: if request.auth != null && 
-                     isValidCategory(category) &&
-                     hasCategoryAccess(category);
-      
-      allow create: if request.auth != null && 
-                       isValidCategory(category) &&
-                       hasCategoryAccess(category) &&
-                       getCategory(request.resource.data) == category &&
-                       enforcesCategoryIsolation(request.resource.data) &&
-                       request.resource.data.CreatedBy == request.auth.uid;
-      
-      allow update: if request.auth != null && 
-                       isValidCategory(category) &&
-                       hasCategoryAccess(category) &&
-                       getCategory(request.resource.data) == category &&
-                       enforcesCategoryIsolation(request.resource.data) &&
-                       canEdit(resource.data) &&
-                       // Prevent category changes
-                       getCategory(request.resource.data) == getCategory(resource.data);
-      
-      allow delete: if request.auth != null && 
-                       isValidCategory(category) &&
-                       hasCategoryAccess(category) &&
-                       canEdit(resource.data);
+    match /organisations/{orgId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
     }
     
-    // Projects collections (category-specific)
-    match /projects-{category}/{projectId} {
-      allow read: if request.auth != null && 
-                     isValidCategory(category) &&
-                     hasCategoryAccess(category);
-      
-      allow create: if request.auth != null && 
-                       isValidCategory(category) &&
-                       hasCategoryAccess(category) &&
-                       getCategory(request.resource.data) == category &&
-                       hasValidCategory(request.resource.data) &&
-                       request.resource.data.CreatedBy == request.auth.uid;
-      
-      allow update: if request.auth != null && 
-                       isValidCategory(category) &&
-                       hasCategoryAccess(category) &&
-                       getCategory(request.resource.data) == category &&
-                       canEdit(resource.data) &&
-                       // Prevent category changes
-                       getCategory(request.resource.data) == getCategory(resource.data);
-      
-      allow delete: if request.auth != null && 
-                       isValidCategory(category) &&
-                       hasCategoryAccess(category) &&
-                       canEdit(resource.data);
-    }
-    
-    // Formulations collections (category-specific)
-    match /formulations-{category}/{formulationId} {
-      allow read: if request.auth != null && 
-                     isValidCategory(category) &&
-                     hasCategoryAccess(category);
-      
-      allow create: if request.auth != null && 
-                       isValidCategory(category) &&
-                       hasCategoryAccess(category) &&
-                       getCategory(request.resource.data) == category &&
-                       hasValidCategory(request.resource.data) &&
-                       formulationIngredientCategoryMatch(request.resource.data) &&
-                       request.resource.data.CreatedBy == request.auth.uid;
-      
-      allow update: if request.auth != null && 
-                       isValidCategory(category) &&
-                       hasCategoryAccess(category) &&
-                       getCategory(request.resource.data) == category &&
-                       formulationIngredientCategoryMatch(request.resource.data) &&
-                       canEdit(resource.data) &&
-                       // Prevent category changes
-                       getCategory(request.resource.data) == getCategory(resource.data);
-      
-      allow delete: if request.auth != null && 
-                       isValidCategory(category) &&
-                       hasCategoryAccess(category) &&
-                       canEdit(resource.data);
-    }
-    
-    // Blocks collections (category-specific)
-    match /blocks-{category}/{blockId} {
-      allow read: if request.auth != null && 
-                     isValidCategory(category) &&
-                     hasCategoryAccess(category);
-      
-      allow create: if request.auth != null && 
-                       isValidCategory(category) &&
-                       hasCategoryAccess(category) &&
-                       getCategory(request.resource.data) == category &&
-                       hasValidCategory(request.resource.data) &&
-                       request.resource.data.CreatedBy == request.auth.uid;
-      
-      allow update: if request.auth != null && 
-                       isValidCategory(category) &&
-                       hasCategoryAccess(category) &&
-                       getCategory(request.resource.data) == category &&
-                       canEdit(resource.data) &&
-                       // Prevent category changes
-                       getCategory(request.resource.data) == getCategory(resource.data);
-      
-      allow delete: if request.auth != null && 
-                       isValidCategory(category) &&
-                       hasCategoryAccess(category) &&
-                       canEdit(resource.data);
-    }
-    
-    // ═══ SHARED COLLECTIONS ════════════════════════════════════════════════════
-    
-    // Ingredients (shared across categories but with category metadata)
     match /ingredients/{ingredientId} {
-      allow read: if request.auth != null;
-      
-      allow create: if request.auth != null && 
-                       request.resource.data.CreatedBy == request.auth.uid &&
-                       // If category is specified, validate it
-                       (!('Category' in request.resource.data) || 
-                        (isValidCategory(getCategory(request.resource.data)) && 
-                         hasCategoryAccess(getCategory(request.resource.data))));
-      
-      allow update: if request.auth != null && 
-                       canEdit(resource.data) &&
-                       // If category is specified, validate it and prevent changes
-                       (!('Category' in request.resource.data) || 
-                        (isValidCategory(getCategory(request.resource.data)) && 
-                         hasCategoryAccess(getCategory(request.resource.data)) &&
-                         (!('Category' in resource.data) || 
-                          getCategory(request.resource.data) == getCategory(resource.data))));
-      
-      allow delete: if request.auth != null && canEdit(resource.data);
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
     }
     
-    // Organizations (not category-specific)
-    match /organisations/{organisationId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null && 
-                       request.resource.data.CreatedBy == request.auth.uid;
-      allow update: if request.auth != null && canEdit(resource.data);
-      allow delete: if request.auth != null && canEdit(resource.data);
+    match /analysisLog/{logId} {
+      allow read, write: if isAuthenticated();
     }
-    
-    // ═══ AI AND EMBEDDINGS ═════════════════════════════════════════════════════
-    
-    // Embeddings (category-specific for AI isolation)
-    match /embeddingsAll/{embeddingId} {
-      allow read: if request.auth != null;
-      
-      allow create: if request.auth != null && 
-                       request.resource.data.CreatedBy == request.auth.uid &&
-                       // Embeddings must have valid category for AI isolation
-                       hasValidCategory(request.resource.data) &&
-                       hasCategoryAccess(getCategory(request.resource.data));
-      
-      allow update: if request.auth != null && 
-                       canEdit(resource.data) &&
-                       hasValidCategory(request.resource.data) &&
-                       hasCategoryAccess(getCategory(request.resource.data)) &&
-                       // Prevent category changes
-                       getCategory(request.resource.data) == getCategory(resource.data);
-      
-      allow delete: if request.auth != null && canEdit(resource.data);
+
+    match /syncConflicts/{conflictId} {
+      allow read, write: if isAuthenticated();
     }
-    
-    // AI Chat Sessions (category-specific)
+
+    match /sprayLogs/{logId} {
+      allow read, write: if isAuthenticated();
+    }
+
     match /aiChatSessions/{sessionId} {
-      allow read: if request.auth != null && 
-                     (resource.data.CreatedBy == request.auth.uid || isAdmin());
-      
-      allow create: if request.auth != null && 
-                       request.resource.data.CreatedBy == request.auth.uid &&
-                       // AI sessions should have category for isolation
-                       hasValidCategory(request.resource.data) &&
-                       hasCategoryAccess(getCategory(request.resource.data));
-      
-      allow update: if request.auth != null && 
-                       resource.data.CreatedBy == request.auth.uid &&
-                       hasValidCategory(request.resource.data) &&
-                       hasCategoryAccess(getCategory(request.resource.data)) &&
-                       // Prevent category changes
-                       getCategory(request.resource.data) == getCategory(resource.data);
-      
-      allow delete: if request.auth != null && 
-                       (resource.data.CreatedBy == request.auth.uid || isAdmin());
+      allow read, write: if isAuthenticated();
+    }
+
+    match /embeddingsAll/{embeddingId} {
+      allow read, write: if isAuthenticated();
     }
     
-    // ═══ LEGACY COLLECTIONS (for backward compatibility) ══════════════════════
+    // ═══ HERBICIDE COLLECTIONS (Standard names) ═════════════════════════════════
     
-    // Legacy trials collection (should redirect to category-specific collections)
     match /trials/{trialId} {
-      allow read: if request.auth != null;
-      // Prevent writes to encourage migration to category-specific collections
-      allow write: if false;
+      allow read: if isAuthenticated() && hasCategoryAccess('herbicide');
+      allow create: if isAuthenticated() && hasCategoryAccess('herbicide') && enforcesCategoryIsolation(request.resource.data, 'herbicide');
+      allow update: if isAuthenticated() && hasCategoryAccess('herbicide') && enforcesCategoryIsolation(request.resource.data, 'herbicide') && canEdit(resource.data);
+      allow delete: if isAuthenticated() && hasCategoryAccess('herbicide') && canEdit(resource.data);
     }
     
-    // Legacy projects collection
     match /projects/{projectId} {
-      allow read: if request.auth != null;
-      // Prevent writes to encourage migration to category-specific collections
-      allow write: if false;
+      allow read: if isAuthenticated() && hasCategoryAccess('herbicide');
+      allow create: if isAuthenticated() && hasCategoryAccess('herbicide');
+      allow update: if isAuthenticated() && hasCategoryAccess('herbicide') && canEdit(resource.data);
+      allow delete: if isAuthenticated() && hasCategoryAccess('herbicide') && canEdit(resource.data);
     }
     
-    // Legacy formulations collection
     match /formulations/{formulationId} {
-      allow read: if request.auth != null;
-      // Prevent writes to encourage migration to category-specific collections
-      allow write: if false;
+      allow read: if isAuthenticated() && hasCategoryAccess('herbicide');
+      allow create: if isAuthenticated() && hasCategoryAccess('herbicide');
+      allow update: if isAuthenticated() && hasCategoryAccess('herbicide') && canEdit(resource.data);
+      allow delete: if isAuthenticated() && hasCategoryAccess('herbicide') && canEdit(resource.data);
     }
     
-    // ═══ CATCH-ALL (DENY BY DEFAULT) ══════════════════════════════════════════
+    match /blocks/{blockId} {
+      allow read, write: if isAuthenticated() && hasCategoryAccess('herbicide');
+    }
+
+    // ═══ FUNGICIDE COLLECTIONS ══════════════════════════════════════════════════
     
-    // Deny all other document access
-    match /{document=**} {
-      allow read, write: if false;
+    match /fungicide_trials/{trialId} {
+      allow read: if isAuthenticated() && hasCategoryAccess('fungicide');
+      allow create: if isAuthenticated() && hasCategoryAccess('fungicide') && enforcesCategoryIsolation(request.resource.data, 'fungicide');
+      allow update: if isAuthenticated() && hasCategoryAccess('fungicide') && enforcesCategoryIsolation(request.resource.data, 'fungicide') && canEdit(resource.data);
+      allow delete: if isAuthenticated() && hasCategoryAccess('fungicide') && canEdit(resource.data);
+    }
+    
+    match /fungicide_projects/{projectId} {
+      allow read: if isAuthenticated() && hasCategoryAccess('fungicide');
+      allow create, update, delete: if isAuthenticated() && hasCategoryAccess('fungicide') && canEdit(resource.data);
+    }
+    
+    match /fungicide_formulations/{formulationId} {
+      allow read: if isAuthenticated() && hasCategoryAccess('fungicide');
+      allow create, update, delete: if isAuthenticated() && hasCategoryAccess('fungicide') && canEdit(resource.data);
+    }
+    
+    match /fungicide_ingredients/{id} {
+      allow read, write: if isAuthenticated() && hasCategoryAccess('fungicide');
+    }
+    
+    match /fungicide_blocks/{id} {
+      allow read, write: if isAuthenticated() && hasCategoryAccess('fungicide');
+    }
+
+    // ═══ PESTICIDE COLLECTIONS ══════════════════════════════════════════════════
+    
+    match /pesticide_trials/{trialId} {
+      allow read: if isAuthenticated() && hasCategoryAccess('pesticide');
+      allow create: if isAuthenticated() && hasCategoryAccess('pesticide') && enforcesCategoryIsolation(request.resource.data, 'pesticide');
+      allow update: if isAuthenticated() && hasCategoryAccess('pesticide') && enforcesCategoryIsolation(request.resource.data, 'pesticide') && canEdit(resource.data);
+      allow delete: if isAuthenticated() && hasCategoryAccess('pesticide') && canEdit(resource.data);
+    }
+    
+    match /pesticide_projects/{projectId} {
+      allow read: if isAuthenticated() && hasCategoryAccess('pesticide');
+      allow create, update, delete: if isAuthenticated() && hasCategoryAccess('pesticide') && canEdit(resource.data);
+    }
+    
+    match /pesticide_formulations/{formulationId} {
+      allow read: if isAuthenticated() && hasCategoryAccess('pesticide');
+      allow create, update, delete: if isAuthenticated() && hasCategoryAccess('pesticide') && canEdit(resource.data);
+    }
+    
+    match /pesticide_ingredients/{id} {
+      allow read, write: if isAuthenticated() && hasCategoryAccess('pesticide');
+    }
+    
+    match /pesticide_blocks/{id} {
+      allow read, write: if isAuthenticated() && hasCategoryAccess('pesticide');
+    }
+
+    // ═══ NUTRITION COLLECTIONS ══════════════════════════════════════════════════
+    
+    match /nutrition_trials/{trialId} {
+      allow read: if isAuthenticated() && hasCategoryAccess('nutrition');
+      allow create: if isAuthenticated() && hasCategoryAccess('nutrition') && enforcesCategoryIsolation(request.resource.data, 'nutrition');
+      allow update: if isAuthenticated() && hasCategoryAccess('nutrition') && enforcesCategoryIsolation(request.resource.data, 'nutrition') && canEdit(resource.data);
+      allow delete: if isAuthenticated() && hasCategoryAccess('nutrition') && canEdit(resource.data);
+    }
+    
+    match /nutrition_projects/{projectId} {
+      allow read: if isAuthenticated() && hasCategoryAccess('nutrition');
+      allow create, update, delete: if isAuthenticated() && hasCategoryAccess('nutrition') && canEdit(resource.data);
+    }
+    
+    match /nutrition_formulations/{formulationId} {
+      allow read: if isAuthenticated() && hasCategoryAccess('nutrition');
+      allow create, update, delete: if isAuthenticated() && hasCategoryAccess('nutrition') && canEdit(resource.data);
+    }
+    
+    match /nutrition_ingredients/{id} {
+      allow read, write: if isAuthenticated() && hasCategoryAccess('nutrition');
+    }
+    
+    match /nutrition_blocks/{id} {
+      allow read, write: if isAuthenticated() && hasCategoryAccess('nutrition');
+    }
+
+    // ═══ BIOSTIMULANT COLLECTIONS ═══════════════════════════════════════════════
+    
+    match /biostimulant_trials/{trialId} {
+      allow read: if isAuthenticated() && hasCategoryAccess('biostimulant');
+      allow create: if isAuthenticated() && hasCategoryAccess('biostimulant') && enforcesCategoryIsolation(request.resource.data, 'biostimulant');
+      allow update: if isAuthenticated() && hasCategoryAccess('biostimulant') && enforcesCategoryIsolation(request.resource.data, 'biostimulant') && canEdit(resource.data);
+      allow delete: if isAuthenticated() && hasCategoryAccess('biostimulant') && canEdit(resource.data);
+    }
+    
+    match /biostimulant_projects/{projectId} {
+      allow read: if isAuthenticated() && hasCategoryAccess('biostimulant');
+      allow create, update, delete: if isAuthenticated() && hasCategoryAccess('biostimulant') && canEdit(resource.data);
+    }
+    
+    match /biostimulant_formulations/{formulationId} {
+      allow read: if isAuthenticated() && hasCategoryAccess('biostimulant');
+      allow create, update, delete: if isAuthenticated() && hasCategoryAccess('biostimulant') && canEdit(resource.data);
+    }
+    
+    match /biostimulant_ingredients/{id} {
+      allow read, write: if isAuthenticated() && hasCategoryAccess('biostimulant');
+    }
+    
+    match /biostimulant_blocks/{id} {
+      allow read, write: if isAuthenticated() && hasCategoryAccess('biostimulant');
     }
   }
 }
