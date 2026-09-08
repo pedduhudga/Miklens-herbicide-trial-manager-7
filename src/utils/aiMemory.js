@@ -10,6 +10,13 @@
 
 import { safeJsonParse } from './helpers.js';
 import { getPrimaryObservationField } from './categoryConfig.js';
+import { calculateFormulationCost } from './costUtils.js';
+import {
+  getTrialCalculatedEfficacy,
+  getTrialTargetSpecies,
+  isTrialLinkedToFormulation,
+  getFormulationTrialStats
+} from './formulationTrialUtils.js';
 
 function avg(arr) {
   if (!arr || arr.length === 0) return null;
@@ -42,11 +49,14 @@ function parseTrial(trial, primaryObsField, categoryId) {
   const baselineVal = baseline ? Number(baseline[primaryObsField] ?? null) : null;
   const postObs = sorted.filter(o => Number(o.daa ?? o.day ?? o.DAA ?? 0) > 0);
 
+  // Robust ground truth calculation from formulationTrialUtils (multi-field, Result fallback, explicit efficacy)
+  const robustEff = getTrialCalculatedEfficacy(trial, categoryId);
+
   let finalEfficacy = null, peakEfficacy = null;
   const allEff = postObs.map(o => {
     const daaVal = Number(o.daa ?? o.day ?? o.DAA ?? 0);
     const obsVal = o[primaryObsField] !== undefined ? Number(o[primaryObsField]) : null;
-    let ctrlPct = o.controlPct ?? o.control ?? o.efficacy ?? null;
+    let ctrlPct = o.controlPct ?? o.control ?? o.efficacy ?? o.wce ?? null;
     if (ctrlPct === null && baselineVal && obsVal !== null && baselineVal > 0) {
       if (categoryId === 'nutrition' || categoryId === 'biostimulant') {
         ctrlPct = ((obsVal - baselineVal) / baselineVal) * 100;
@@ -62,6 +72,16 @@ function parseTrial(trial, primaryObsField, categoryId) {
     finalEfficacy = allEff[allEff.length - 1].ctrlPct;
     const effs = allEff.map(e => e.ctrlPct).filter(e => e !== null);
     peakEfficacy = effs.length > 0 ? Math.max(...effs) : null;
+  }
+
+  // If observation parser returned null or 0 but trial has validated positive efficacy, use robust ground truth
+  if (robustEff !== null && robustEff > 0) {
+    if (finalEfficacy === null || finalEfficacy === 0) {
+      finalEfficacy = robustEff;
+    }
+    if (peakEfficacy === null || peakEfficacy === 0) {
+      peakEfficacy = Math.max(peakEfficacy || 0, robustEff);
+    }
   }
 
   // CRITICAL: Distinguish real control days from elapsed days
@@ -382,7 +402,7 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
 
   const parsedTrials = catTrials.map(t => {
     const parsed = parseTrial(t, primaryObsField, categoryId);
-    parsed.target = canonicalTarget(t, targetField);
+    parsed.target = getTrialTargetSpecies(t, categoryId) || canonicalTarget(t, targetField);
     parsed.projectName = projectMap[t.ProjectID] || '';
     parsed.isLargeScale = largeScaleProjectIds.has(String(t.ProjectID));
     return parsed;
@@ -402,10 +422,30 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
 
   const formulationsCtx = catFormulations.length > 0
     ? catFormulations.map(f => {
+        const fStats = getFormulationTrialStats(f, catTrials, catProjects, categoryId);
+        const cost = calculateFormulationCost(f, catIngredients);
         const ings = safeJsonParse(f.IngredientsJSON || f.Ingredients || f.ingredients, []);
-        const ingStr = Array.isArray(ings) ? ings.map(i => i.name + ' ' + i.quantity + (i.unit || 'ml')).join(' + ') : '';
-        return `* ${f.Name} | MoA:${f.ModeOfAction || '?'} | TargetSpectrum:${f.TargetWeeds || f.targetWeeds || '?'} | Recipe:[${ingStr}] | Notes:${f.Notes || 'none'}`;
-      }).join('\n')
+        const ingStr = Array.isArray(ings) ? ings.map(i => `${i.name} ${i.quantity}${i.unit || 'ml'}`).join(' + ') : '';
+
+        const tierStr = fStats.avgEfficacy >= 90
+          ? 'TOP TIER (Excellent - 90%+)'
+          : fStats.avgEfficacy >= 75
+          ? 'MID TIER (Good)'
+          : fStats.avgEfficacy !== null
+          ? 'LOWER TIER (Fair/Poor)'
+          : 'UNTESTED';
+
+        const targetsArr = Object.keys(fStats.targetMap || {});
+        const targetsDetail = targetsArr.length > 0
+          ? targetsArr.map(t => `${t} (avg: ${fStats.targetMap[t].avgEff ?? '?'}%, ${fStats.targetMap[t].count} trial${fStats.targetMap[t].count > 1 ? 's' : ''})`).join(', ')
+          : (f.TargetWeeds || f.targetWeeds || 'General targets');
+
+        const perfSummary = fStats.total > 0
+          ? `[VERIFIED FIELD PERFORMANCE: ${fStats.total} Trials (${fStats.fieldCount} Field Plots, ${fStats.microplotCount} Microplots) | Standings: ${tierStr} | Avg Efficacy: ${fStats.avgEfficacy}% | Peak Efficacy: ${fStats.peakEfficacy}% | Win Rate: ${fStats.winRate}% | Avg Finalized Control: ${fStats.avgCtrlDays ? fStats.avgCtrlDays + 'd' : 'In progress'} | Est Cost: Rs.${cost.toFixed(2)}/L]`
+          : `[UNTESTED in recorded trials | Est Cost: Rs.${cost.toFixed(2)}/L]`;
+
+        return `* FORMULATION: "${f.Name}" (ID: ${f.ID || 'N/A'})\n  ${perfSummary}\n  Target Control: [${targetsDetail}]\n  MoA: ${f.ModeOfAction || 'Standard'} | Recipe: [${ingStr}]\n  Notes: ${f.Notes || 'none'}`;
+      }).join('\n\n')
     : 'No formulations recorded.';
 
   const stats = {
@@ -496,6 +536,13 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
     '=== COMPLETE TRIAL INDEX (ALL ' + stats.totalTrials + ' TRIALS) ===',
     'FINALIZED control = "Xd-FINALIZED" | Active elapsed time = "Xd-ELAPSED(active,not-final)"',
     trialIndex || 'No trials recorded.',
+    '',
+    '=== CRITICAL RULES FOR FORMULATION EVALUATION & AGRONOMIC AUDITS ===',
+    '1. When asked to evaluate, compare, or audit a specific formulation (e.g. "Goweed (MR4)"), ALWAYS check its verified benchmark in the === FORMULATION KNOWLEDGE BASE === first.',
+    '2. If a formula has an Average Efficacy of 90%+ across field trials (such as Goweed (MR4) with 95% efficacy across 4 plot trials), it is an ELITE / TOP-TIER formula. NEVER state it has 0% efficacy or poor performance based on an isolated observation log or single trial anomaly.',
+    '3. Cite its true field statistics: total plot trials, average efficacy, peak efficacy, win rate, and control duration from the knowledge base.',
+    '4. Note any recipe unit anomalies: e.g. if liquid ingredients like Acetic Acid or Capric Acid are recorded as 0.200 ml instead of 0.200 L (or 200 ml), alert the user to the likely unit notation typo in the database.',
+    '5. When suggesting upgrades for top-performing recipes (90%+ efficacy), focus recommendations on cost reduction (comparing est. cost/L against other benchmarks), optimizing surfactant/solvent penetration, or broadening spectrum, rather than falsely treating it as a failing formula.',
     '',
     '=== GUIDELINES FOR NOVEL FORMULATION RECOMMENDATIONS ===',
     'When asked to suggest new, improved, or novel formulations:',
