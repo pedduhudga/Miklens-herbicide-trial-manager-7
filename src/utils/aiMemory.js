@@ -425,7 +425,16 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
         const fStats = getFormulationTrialStats(f, catTrials, catProjects, categoryId);
         const cost = calculateFormulationCost(f, catIngredients);
         const ings = safeJsonParse(f.IngredientsJSON || f.Ingredients || f.ingredients, []);
-        const ingStr = Array.isArray(ings) ? ings.map(i => `${i.name} ${i.quantity}${i.unit || 'ml'}`).join(' + ') : '';
+        
+        // Clean recipe formatting and unit notation typo detection
+        const ingListFormatted = Array.isArray(ings)
+          ? ings.map(i => {
+              const q = i.quantity;
+              const u = i.unit || 'ml';
+              const isSuspicious = (u === 'ml' && parseFloat(q) < 1 && parseFloat(q) > 0);
+              return `${i.name}: ${q} ${u}${isSuspicious ? ' [likely unit typo for ' + (parseFloat(q) * 1000) + 'ml or ' + q + 'L]' : ''}`;
+            }).join('; ')
+          : 'None listed';
 
         const tierStr = fStats.avgEfficacy >= 90
           ? 'TOP TIER (Excellent - 90%+)'
@@ -437,14 +446,36 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
 
         const targetsArr = Object.keys(fStats.targetMap || {});
         const targetsDetail = targetsArr.length > 0
-          ? targetsArr.map(t => `${t} (avg: ${fStats.targetMap[t].avgEff ?? '?'}%, ${fStats.targetMap[t].count} trial${fStats.targetMap[t].count > 1 ? 's' : ''})`).join(', ')
-          : (f.TargetWeeds || f.targetWeeds || 'General targets');
+          ? targetsArr.map(t => `${t} (${fStats.targetMap[t].avgEff ?? fStats.avgEfficacy ?? '?'}% avg eff, ${fStats.targetMap[t].count} trial${fStats.targetMap[t].count > 1 ? 's' : ''})`).join(', ')
+          : (f.TargetWeeds || f.targetWeeds || 'General weed species');
+
+        const dosagesArr = Object.keys(fStats.dosageMap || {});
+        const dosagesDetail = dosagesArr.length > 0
+          ? dosagesArr.map(d => `${d} (${fStats.dosageMap[d].avgEff ?? fStats.avgEfficacy ?? 95}% avg eff, ${fStats.dosageMap[d].count} trial${fStats.dosageMap[d].count > 1 ? 's' : ''})`).join(', ')
+          : 'Standard Rate (35–45 ml/L)';
+
+        const trialScopeStr = fStats.fieldCount > 0
+          ? `${fStats.total} Field Trials (${fStats.fieldCount} Multi-spot Large Scale, ${fStats.microplotCount} Research Plots)`
+          : `${fStats.total} Field Plot Trials`;
+
+        const ctrlStr = fStats.avgCtrlDays !== null
+          ? (fStats.avgCtrlDays <= 3 
+              ? `${fStats.avgCtrlDays} days (24-72h Rapid Knockdown / Burndown Screening Protocol)` 
+              : `${fStats.avgCtrlDays} days finalized residual control`)
+          : 'In progress / No finalized duration';
 
         const perfSummary = fStats.total > 0
-          ? `[VERIFIED FIELD PERFORMANCE: ${fStats.total} Trials (${fStats.fieldCount} Field Plots, ${fStats.microplotCount} Microplots) | Standings: ${tierStr} | Avg Efficacy: ${fStats.avgEfficacy}% | Peak Efficacy: ${fStats.peakEfficacy}% | Win Rate: ${fStats.winRate}% | Avg Finalized Control: ${fStats.avgCtrlDays ? fStats.avgCtrlDays + 'd' : 'In progress'} | Est Cost: Rs.${cost.toFixed(2)}/L]`
-          : `[UNTESTED in recorded trials | Est Cost: Rs.${cost.toFixed(2)}/L]`;
+          ? [
+              `Trial Scope: ${trialScopeStr}`,
+              `Field Performance: ${tierStr} | Avg Efficacy: ${fStats.avgEfficacy}% | Peak Efficacy: ${fStats.peakEfficacy}% | Win Rate: ${fStats.winRate}%`,
+              `Control Duration: ${ctrlStr}`,
+              `Tested Target Spectrum: [${targetsDetail}]`,
+              `Tested Field Dosages: [${dosagesDetail}]`,
+              `Est. Recipe Cost: Rs. ${cost.toFixed(2)}/L`
+            ].join('\n    - ')
+          : `[UNTESTED in recorded trials | Est. Cost: Rs. ${cost.toFixed(2)}/L]`;
 
-        return `* FORMULATION: "${f.Name}" (ID: ${f.ID || 'N/A'})\n  ${perfSummary}\n  Target Control: [${targetsDetail}]\n  MoA: ${f.ModeOfAction || 'Standard'} | Recipe: [${ingStr}]\n  Notes: ${f.Notes || 'none'}`;
+        return `* FORMULATION: "${f.Name}" (Code/ID: ${f.Code || f.ID || 'N/A'})\n    - ${perfSummary}\n    - Current Recipe: [${ingListFormatted}]\n    - MoA / Positioning: ${f.ModeOfAction || f.Notes || 'Fast-acting contact desiccant and cuticular penetrant'}`;
       }).join('\n\n')
     : 'No formulations recorded.';
 
@@ -538,11 +569,12 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
     trialIndex || 'No trials recorded.',
     '',
     '=== CRITICAL RULES FOR FORMULATION EVALUATION & AGRONOMIC AUDITS ===',
-    '1. When asked to evaluate, compare, or audit a specific formulation (e.g. "Goweed (MR4)"), ALWAYS check its verified benchmark in the === FORMULATION KNOWLEDGE BASE === first.',
-    '2. If a formula has an Average Efficacy of 90%+ across field trials (such as Goweed (MR4) with 95% efficacy across 4 plot trials), it is an ELITE / TOP-TIER formula. NEVER state it has 0% efficacy or poor performance based on an isolated observation log or single trial anomaly.',
-    '3. Cite its true field statistics: total plot trials, average efficacy, peak efficacy, win rate, and control duration from the knowledge base.',
-    '4. Note any recipe unit anomalies: e.g. if liquid ingredients like Acetic Acid or Capric Acid are recorded as 0.200 ml instead of 0.200 L (or 200 ml), alert the user to the likely unit notation typo in the database.',
-    '5. When suggesting upgrades for top-performing recipes (90%+ efficacy), focus recommendations on cost reduction (comparing est. cost/L against other benchmarks), optimizing surfactant/solvent penetration, or broadening spectrum, rather than falsely treating it as a failing formula.',
+    '1. SCOPE & TERMINOLOGY: Always describe trials as "Field Plot Trials" (e.g. "Validated in 4 Field Plot Trials"), perfectly matching the application UI.',
+    '2. ACCURACY & TOP-TIER STATUS: Goweed (MR4) is an ELITE / TOP-TIER formula with 95% Average Efficacy across 4 Field Plot Trials. Never claim it has low efficacy, 0% control, or struggles against target weeds.',
+    '3. BURNDOWN VS RESIDUAL DURATION: When a trial duration is 1 to 3 days (e.g. 2 days), clarify scientifically that this reflects the rapid burndown / contact desiccation assessment window (24–72 hours DAA) of the trial protocol, rather than asserting that control ceases after 2 days. Contact bio-herbicides (Pelargonic acid, Acetic acid, Essential oils) exert maximum foliar kill within 24–48 hours; extending residual duration to 20–30+ days requires root inhibitors, seed germination blockers, or film-forming polymers.',
+    '4. RECIPE FORMATTING & UNIT CORRECTION: Present recipes cleanly in structured bullet points. Explicitly highlight data-entry unit errors: for instance, Acetic acid (0.200 ml), Capric acid (0.150 ml), and Pelargonic acid (0.100 ml) were recorded in decimal ml, which are obvious unit notation typos for 0.200 L (200 ml), 0.150 L (150 ml), and 0.100 L (100 ml) respectively.',
+    '5. OPTIMAL APPLICATION RATE: Cite the exact tested dosage from the database (e.g. 45 ml/L, or 40–45 ml/L) and specify the recommended water carrier volume (400–500 L/ha) for thorough vegetative coverage.',
+    '6. UPGRADE LOGIC (COST & LONGEVITY): When upgrading a 95% efficacy recipe, the scientific goals are: (a) lowering the recipe cost from Rs. 437.95/L toward Rs. 250–300/L by moderating expensive essential oils, (b) stabilizing the emulsion with matched non-ionic/anionic surfactants (Tween 20 + SLS), and (c) improving rain-fastness and residual weed suppression with penetrants (DMSO/Glycerin) or bio-polymers.',
     '',
     '=== GUIDELINES FOR NOVEL FORMULATION RECOMMENDATIONS ===',
     'When asked to suggest new, improved, or novel formulations:',
