@@ -141,10 +141,13 @@ describe('formulationTrialUtils', () => {
       expect(badge90.isUntested).toBe(false);
 
       const badge70 = getEfficacyRatingBadge(70);
-      expect(badge70.label).toContain('70% • Good');
+      expect(badge70.label).toContain('70% • Excellent');
 
-      const badge50 = getEfficacyRatingBadge(50);
-      expect(badge50.label).toContain('50% • Fair');
+      const badge60 = getEfficacyRatingBadge(60);
+      expect(badge60.label).toContain('60% • Good');
+
+      const badge45 = getEfficacyRatingBadge(45);
+      expect(badge45.label).toContain('45% • Fair');
 
       const badge30 = getEfficacyRatingBadge(30);
       expect(badge30.label).toContain('30% • Poor');
@@ -154,6 +157,76 @@ describe('formulationTrialUtils', () => {
       const untested = getEfficacyRatingBadge(null);
       expect(untested.label).toBe('Untested');
       expect(untested.isUntested).toBe(true);
+    });
+  });
+
+  describe('Legacy compatibility and dynamic control duration', () => {
+    const formulation = {
+      ID: 'FORM-001',
+      Name: 'Contact Bio-Herbi 5',
+      Code: 'CB-5',
+      Category: 'herbicide'
+    };
+
+    it('links legacy trial without Code, using original Name or ID', () => {
+      // Legacy trial with only legacy FormulationName
+      const legacyTrial = {
+        ID: 'LEGACY-01',
+        FormulationName: 'Contact Bio-Herbi 5',
+        Category: 'herbicide'
+      };
+      expect(isTrialLinkedToFormulation(formulation, legacyTrial)).toBe(true);
+
+      // Legacy trial with FormulationID pointing directly to formulation ID
+      const legacyTrialById = {
+        ID: 'LEGACY-02',
+        FormulationID: 'FORM-001',
+        FormulationName: 'Old Custom Batch',
+        Category: 'herbicide'
+      };
+      expect(isTrialLinkedToFormulation(formulation, legacyTrialById)).toBe(true);
+    });
+
+    it('links new trials with formulation code, dosage suffix, and variation syntax', () => {
+      const trialWithDosage = {
+        ID: 'TR-NEW-01',
+        FormulationName: 'Contact Bio-Herbi 5 @ 2.5 ml/L',
+        Category: 'herbicide'
+      };
+      expect(isTrialLinkedToFormulation(formulation, trialWithDosage)).toBe(true);
+
+      const trialWithCode = {
+        ID: 'TR-NEW-02',
+        FormulationID: 'CB-5',
+        Category: 'herbicide'
+      };
+      expect(isTrialLinkedToFormulation(formulation, trialWithCode)).toBe(true);
+    });
+
+    it('computes control days from observation timeline based on efficacy and weed regrowth', () => {
+      // Active trial with rich observation timeline, no FinalControlDuration filled
+      const activeTrialWithTimeline = {
+        ID: 'TR-ACTIVE-TIMELINE',
+        FormulationID: 'FORM-001',
+        FormulationName: 'Contact Bio-Herbi 5',
+        IsCompleted: false,
+        FinalEfficacy: 95,
+        EfficacyDataJSON: JSON.stringify({
+          observations: [
+            { daa: 7, controlPct: 95, weedPressurePct: 5 },
+            { daa: 14, controlPct: 90, weedPressurePct: 10 },
+            { daa: 28, controlPct: 75, weedPressurePct: 25 },
+            { daa: 42, controlPct: 40, weedPressurePct: 60 } // regrowth breakdown (< 70%)
+          ]
+        })
+      };
+
+      const stats = getFormulationTrialStats(formulation, [activeTrialWithTimeline], [], 'herbicide');
+      expect(stats.total).toBe(1);
+      // Efficacy was >= 70% up to DAA 28 before regrowth breakdown at DAA 42
+      expect(stats.avgCtrlDays).toBe(28);
+      expect(stats.peakEfficacy).toBe(95);
+      expect(stats.winCount).toBe(1); // >= 70% counts as win
     });
   });
 });

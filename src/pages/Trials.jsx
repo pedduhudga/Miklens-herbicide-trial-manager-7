@@ -384,6 +384,15 @@ export default function Trials({ onMenuClick }) {
       setFilterResult('');
       setFilterProject('');
 
+      const cleanTarget = String(targetId).trim().toLowerCase();
+      const foundTrial = (state.trials || []).find(t => 
+        String(t.ID || t.id || '').trim().toLowerCase() === cleanTarget
+      );
+      if (foundTrial) {
+        setActiveTrial(foundTrial);
+        setDetailTab('info');
+      }
+
       updateState({ highlightTrialId: targetId });
 
       // Retry scrolling to handle async rendering
@@ -406,7 +415,7 @@ export default function Trials({ onMenuClick }) {
 
     window.addEventListener('app:navigate_to_trial', handleNavigateToTrial);
     return () => window.removeEventListener('app:navigate_to_trial', handleNavigateToTrial);
-  }, [updateState]);
+  }, [state.trials, updateState]);
 
   // --- Formulation Quick-Peek Modal ---
   const [quickPeekForm, setQuickPeekForm] = useState(null);
@@ -692,10 +701,36 @@ export default function Trials({ onMenuClick }) {
     const searchParams = new URLSearchParams(location.search);
     const focusId = searchParams.get('focus');
     if (focusId) {
-      const trialToFocus = state.trials?.find(t => t.ID === focusId);
+      const cleanFocusId = String(focusId).trim().toLowerCase();
+      const trialToFocus = (state.trials || []).find(t => 
+        String(t.ID || t.id || '').trim().toLowerCase() === cleanFocusId
+      );
       if (trialToFocus) {
+        // Reset filters so targeted trial is guaranteed to be visible
+        setActiveTab('all');
+        setSearch('');
+        setFilterFormulation('');
+        setFilterResult('');
+        setFilterProject('');
         setActiveTrial(trialToFocus);
         setDetailTab('info');
+        updateState({ highlightTrialId: trialToFocus.ID });
+
+        let attempts = 0;
+        const scrollInterval = setInterval(() => {
+          attempts++;
+          const el = document.getElementById(`trial-card-${trialToFocus.ID}`);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            clearInterval(scrollInterval);
+          } else if (attempts >= 10) {
+            clearInterval(scrollInterval);
+          }
+        }, 150);
+
+        setTimeout(() => {
+          updateState({ highlightTrialId: null });
+        }, 4000);
       }
     }
 
@@ -737,7 +772,7 @@ export default function Trials({ onMenuClick }) {
   // Keep activeTrial in sync with the global state (e.g. after sync updates)
   useEffect(() => {
     if (activeTrial) {
-      const latestTrial = state.trials?.find(t => t.ID === activeTrial.ID);
+      const latestTrial = state.trials?.find(t => String(t.ID || t.id || '') === String(activeTrial.ID || activeTrial.id || ''));
       if (latestTrial && JSON.stringify(latestTrial) !== JSON.stringify(activeTrial)) {
         setActiveTrial(latestTrial);
       }

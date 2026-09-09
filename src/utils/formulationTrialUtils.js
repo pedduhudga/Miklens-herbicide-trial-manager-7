@@ -1,6 +1,7 @@
 import { safeJsonParse } from './helpers.js';
 import { getCategoryConfig, getObservationPrimaryValue, calculateEfficacy } from './categoryConfig.js';
 import { validateEfficacyData } from './analysisUtils.js';
+import { calculateEffectiveControlDays } from './trialLifecycle.js';
 
 /**
  * Accurately extracts or calculates efficacy % for a trial in any category.
@@ -22,7 +23,8 @@ export function getTrialCalculatedEfficacy(trial, category = 'herbicide') {
   }
 
   // 2. Derive dynamically from EfficacyDataJSON
-  const rawEffData = safeJsonParse(trial.EfficacyDataJSON, []);
+  const parsedEffData = safeJsonParse(trial.EfficacyDataJSON, []);
+  const rawEffData = Array.isArray(parsedEffData) ? parsedEffData : (parsedEffData && Array.isArray(parsedEffData.observations) ? parsedEffData.observations : []);
   if (Array.isArray(rawEffData) && rawEffData.length > 0) {
     const sorted = [...rawEffData].sort((a, b) => Number(a.daa ?? 0) - Number(b.daa ?? 0));
     const baseObs = sorted.find(o => o.isBaseline || Number(o.daa) === 0) || sorted[0];
@@ -96,36 +98,81 @@ export function getTrialTargetSpecies(trial, category = 'herbicide') {
 
 /**
  * Robustly matches whether a trial is associated with a formulation.
- * Handles ID match, Name match, and dosage-tagged names (e.g. "CL-5 @ 2.5 ml/L").
+ * Supports legacy trials as-is, while upgrading matching for new trials with codes,
+ * dosages (e.g. "CL-5 @ 2.5 ml/L", "CL-5 - 40ml"), and ID references.
  *
  * @param {Object} trial - Trial record
  * @param {Object} formulation - Formulation object
  * @returns {boolean} True if linked
  */
-export function isTrialLinkedToFormulation(trial, formulation) {
-  if (!trial || !formulation) return false;
+export function isTrialLinkedToFormulation(arg1, arg2) {
+  if (!arg1 || !arg2) return false;
+
+  // Flexible argument order: detect whether (trial, formulation) or (formulation, trial) was passed
+  let trial = arg1;
+  let formulation = arg2;
+  if (
+    (arg1.Ingredients || (arg1.Code && !arg1.FormulationID && !arg1.FormulationName)) &&
+    (arg2.FormulationID !== undefined || arg2.FormulationName !== undefined || arg2.WeedSpecies !== undefined || arg2.TargetWeed !== undefined || arg2.PlotSize !== undefined || arg2.EfficacyDataJSON !== undefined)
+  ) {
+    trial = arg2;
+    formulation = arg1;
+  }
 
   const fId = String(formulation.ID || formulation.id || '').trim().toLowerCase();
   const fName = String(formulation.Name || formulation.name || '').trim().toLowerCase();
   const fCode = String(formulation.Code || formulation.code || '').trim().toLowerCase();
 
   const tFormId = String(trial.FormulationID || trial.formulationId || '').trim().toLowerCase();
-  if (fId && tFormId && fId === tFormId) return true;
+  // 1. Direct ID match (handles both internal ID and formulation Code)
+  if (tFormId) {
+    if (fId && tFormId === fId) return true;
+    if (fCode && tFormId === fCode) return true;
+    if (fName && tFormId === fName) return true;
+  }
 
   const tFormName = String(trial.FormulationName || trial.formulationName || trial.Product || '').trim().toLowerCase();
   if (!tFormName) return false;
 
+  // 2. Direct Name or Code match
   if (fName && tFormName === fName) return true;
   if (fCode && tFormName === fCode) return true;
 
-  // Handle dosage suffix like "CL-5 @ 2.5 ml/L" or "CL-5 (F-HER-123)"
-  if (fName && (
-    tFormName.startsWith(fName + ' ') ||
-    tFormName.startsWith(fName + '@') ||
-    tFormName.includes(` ${fName} `) ||
-    tFormName.startsWith(`${fName}(`)
+  // 3. Handle dosage, test suffix or project tags:
+  // e.g. "CL-5 @ 2.5 ml/L", "CL-5 - 30ml", "CL-5(Trial 1)", "CL-5/Plot 2", "CL-5 (F-HER-01)"
+  if (fName) {
+    if (
+      tFormName.startsWith(fName + ' ') ||
+      tFormName.startsWith(fName + '@') ||
+      tFormName.startsWith(fName + '-') ||
+      tFormName.startsWith(fName + '/') ||
+      tFormName.startsWith(`${fName}(`) ||
+      tFormName.includes(` ${fName} `) ||
+      tFormName.includes(`(${fName})`) ||
+      tFormName.endsWith(` ${fName}`)
+    ) {
+      return true;
+    }
+  }
+
+  // 4. Code within trial name
+  if (fCode && (
+    tFormName.startsWith(fCode + ' ') ||
+    tFormName.startsWith(fCode + '@') ||
+    tFormName.includes(` ${fCode} `) ||
+    tFormName.includes(`(${fCode})`) ||
+    tFormName.endsWith(` ${fCode}`)
   )) {
     return true;
+  }
+
+  // 5. Normalized alphanumeric match for punctuation variations (e.g. "CL-5" vs "CL 5", "NPK 19-19-19" vs "NPK 19:19:19")
+  const normFName = fName.replace(/[^a-z0-9]/g, '');
+  const normTName = tFormName.replace(/[^a-z0-9]/g, '');
+  if (normFName && normTName && normFName.length >= 3) {
+    if (normTName === normFName || normTName.startsWith(normFName)) {
+      return true;
+    }
   }
 
   return false;
@@ -191,27 +238,36 @@ export function getFormulationTrialStats(formulation, allTrials = [], allProject
     const isFinalized = t.IsCompleted === true || t.IsCompleted === 'true' || t.ControlFinalized === true || t.Status === 'Finalized';
     if (isFinalized) finalizedCount++;
 
-    // Rating & Win count
-    const r = (t.Result || '').trim().toLowerCase();
-    if (r === 'excellent' || r === 'good') {
-      winCount++;
-    }
-
     // Calculated Efficacy %
     const eff = getTrialCalculatedEfficacy(t, category);
     if (eff !== null && !isNaN(eff) && eff > 0) {
       efficacies.push(eff);
     }
 
-    // Control Duration (Finalized only)
-    if (isFinalized) {
-      if (t.FinalControlDuration) {
-        const days = parseInt(t.FinalControlDuration, 10);
-        if (!isNaN(days) && days > 0) ctrlDaysList.push(days);
-      } else if (t.Date && t.FinalizationDate) {
-        const days = Math.max(0, Math.round((new Date(t.FinalizationDate) - new Date(t.Date)) / 86400000));
-        if (days > 0) ctrlDaysList.push(days);
-      }
+    // Rating & Win count (Scientific standard: >= 70% is an effective win / excellent control)
+    const r = (t.Result || '').trim().toLowerCase();
+    const isWin = (r === 'excellent' || r === 'good') || (eff !== null && eff >= 70);
+    if (isWin) {
+      winCount++;
+    }
+
+    // Control Duration: Strictly calculated based on efficacy and weed regrowth (not photo dates)
+    let ctrlDays = null;
+    if (t.FinalControlDuration) {
+      const days = parseInt(t.FinalControlDuration, 10);
+      if (!isNaN(days) && days > 0) ctrlDays = days;
+    }
+    if (ctrlDays === null) {
+      // Calculate effective days based on sustained efficacy (WCE >= 70% before regrowth breakdown)
+      const effDays = calculateEffectiveControlDays(t);
+      if (effDays > 0) ctrlDays = effDays;
+    }
+    if (ctrlDays === null && isFinalized && t.Date && t.FinalizationDate) {
+      const days = Math.max(0, Math.round((new Date(t.FinalizationDate) - new Date(t.Date)) / 86400000));
+      if (days > 0) ctrlDays = days;
+    }
+    if (ctrlDays !== null && ctrlDays > 0) {
+      ctrlDaysList.push(ctrlDays);
     }
 
     // Target breakdown
@@ -292,7 +348,7 @@ export function getFormulationTrialStats(formulation, allTrials = [], allProject
  */
 export function getEfficacyRatingBadge(avgEff, fallbackResult = null) {
   if (avgEff !== null && avgEff !== undefined && !isNaN(avgEff)) {
-    if (avgEff >= 80) {
+    if (avgEff >= 70) {
       return {
         label: `${avgEff}% • Excellent`,
         shortLabel: `${avgEff}%`,
@@ -301,7 +357,7 @@ export function getEfficacyRatingBadge(avgEff, fallbackResult = null) {
         isUntested: false
       };
     }
-    if (avgEff >= 65) {
+    if (avgEff >= 55) {
       return {
         label: `${avgEff}% • Good`,
         shortLabel: `${avgEff}%`,
@@ -310,7 +366,7 @@ export function getEfficacyRatingBadge(avgEff, fallbackResult = null) {
         isUntested: false
       };
     }
-    if (avgEff >= 45) {
+    if (avgEff >= 40) {
       return {
         label: `${avgEff}% • Fair`,
         shortLabel: `${avgEff}%`,

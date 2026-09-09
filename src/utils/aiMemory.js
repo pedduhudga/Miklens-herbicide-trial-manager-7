@@ -11,6 +11,7 @@
 import { safeJsonParse } from './helpers.js';
 import { getPrimaryObservationField } from './categoryConfig.js';
 import { calculateFormulationCost } from './costUtils.js';
+import { calculateEffectiveControlDays } from './trialLifecycle.js';
 import {
   getTrialCalculatedEfficacy,
   getTrialTargetSpecies,
@@ -84,28 +85,44 @@ function parseTrial(trial, primaryObsField, categoryId) {
     }
   }
 
-  // CRITICAL: Distinguish real control days from elapsed days
-  // - finalizedControlDays: only set if trial is Finalized (real measured duration)
-  // - elapsedDays: how long since trial started (NOT control duration for Active trials)
-  let finalizedControlDays = null;
-  let elapsedDays = null;
+  // Control Duration: Strictly calculated based on efficacy and weed regrowth (not photo dates)
+  // 1. Explicitly recorded FinalControlDuration if present
+  // 2. Computed effective control days from observation timeline (WCE >= 70% before regrowth breakdown)
+  // 3. Start to finalization date difference if finalized
+  let effectiveControlDays = null;
+  if (trial.FinalControlDuration) {
+    const parsed = parseInt(trial.FinalControlDuration, 10);
+    if (!isNaN(parsed) && parsed > 0) effectiveControlDays = parsed;
+  }
+  if (effectiveControlDays === null) {
+    const calculatedDays = calculateEffectiveControlDays(trial);
+    if (calculatedDays > 0) effectiveControlDays = calculatedDays;
+  }
+  if (effectiveControlDays === null && isCompleted && trial.Date && trial.FinalizationDate) {
+    const start = new Date(trial.Date);
+    const end = new Date(trial.FinalizationDate);
+    const diff = Math.max(0, Math.round((end - start) / 86400000));
+    if (diff > 0) effectiveControlDays = diff;
+  }
 
-  if (isCompleted) {
-    // Finalized trial: use recorded FinalControlDuration, or compute from finalization date
-    if (trial.FinalControlDuration) {
-      const parsed = parseInt(trial.FinalControlDuration, 10);
-      finalizedControlDays = isNaN(parsed) ? null : parsed;
-    }
-    if (finalizedControlDays === null && trial.Date && trial.FinalizationDate) {
-      const start = new Date(trial.Date);
-      const end = new Date(trial.FinalizationDate);
-      finalizedControlDays = Math.max(0, Math.round((end - start) / 86400000));
-    }
-  } else {
-    // Active trial: elapsed time is NOT a control duration measurement
-    if (trial.Date) {
-      const start = new Date(trial.Date);
-      elapsedDays = Math.max(0, Math.round((new Date() - start) / 86400000));
+  // Active elapsed days since trial started (for running trials)
+  let elapsedDays = null;
+  if (!isCompleted && trial.Date) {
+    const start = new Date(trial.Date);
+    elapsedDays = Math.max(0, Math.round((new Date() - start) / 86400000));
+  }
+
+  // Deduce scientific rating: >= 70% is considered Excellent (user feedback requirement)
+  let deducedResult = (trial.Result || '').trim();
+  if (!deducedResult || deducedResult.toLowerCase() === 'unrated') {
+    const effToCheck = finalEfficacy !== null ? finalEfficacy : robustEff;
+    if (effToCheck !== null && !isNaN(effToCheck)) {
+      if (effToCheck >= 70) deducedResult = 'Excellent';
+      else if (effToCheck >= 55) deducedResult = 'Good';
+      else if (effToCheck >= 40) deducedResult = 'Fair';
+      else deducedResult = 'Poor';
+    } else {
+      deducedResult = 'Unrated';
     }
   }
 
@@ -115,7 +132,7 @@ function parseTrial(trial, primaryObsField, categoryId) {
     id: trial.ID,
     formulation: fmt(trial.FormulationName),
     dosage: fmt(trial.Dosage),
-    result: fmt(trial.Result, 'Unrated'),
+    result: deducedResult,
     target: '',
     location: fmt(trial.Location),
     investigator: fmt(trial.InvestigatorName || trial.AuthorEmail || trial.CreatedBy),
@@ -124,8 +141,10 @@ function parseTrial(trial, primaryObsField, categoryId) {
     month: trial.Date ? new Date(trial.Date).toLocaleString('en', { month: 'long', year: 'numeric' }) : null,
     isCompleted,
     status: isCompleted ? 'Finalized' : 'Active (still running)',
-    finalizedControlDays,   // REAL control days — only for Finalized trials
-    elapsedDays,            // Days since start — only for Active trials, NOT control duration
+    effectiveControlDays,                          // Demonstrated control days from efficacy & weed regrowth
+    finalizedControlDays: isCompleted ? effectiveControlDays : null,
+    activeControlDays: !isCompleted ? effectiveControlDays : null,
+    elapsedDays,
     finalEfficacy,
     peakEfficacy,
     baselineCover: round1(baselineVal),
@@ -164,24 +183,23 @@ function buildTargetRankings(parsedTrials, topN) {
       const resultCounts = { Excellent: 0, Good: 0, Fair: 0, Poor: 0, Unrated: 0 };
       trials.forEach(t => { resultCounts[t.result] = (resultCounts[t.result] || 0) + 1; });
 
-      // ONLY use finalized control days for rankings — active elapsed days are meaningless here
-      const finalizedTrials = trials.filter(t => t.isCompleted && t.finalizedControlDays !== null);
-      const controlDaysArr = finalizedTrials.map(t => t.finalizedControlDays).filter(d => d > 0);
+      // Control days calculated strictly from efficacy and weed regrowth
+      const controlDaysArr = trials.map(t => t.effectiveControlDays).filter(d => d !== null && d > 0);
 
       const avgEff = avg(efficacies);
       const avgCtrlDays = avg(controlDaysArr);
 
-      // Score: efficacy 60% + finalized control days 40%
+      // Score: efficacy 60% + control days 40% (normalized to 30d benchmark)
       const effScore = avgEff !== null ? avgEff : 0;
-      const dayScore = avgCtrlDays !== null ? Math.min(avgCtrlDays / 60 * 100, 100) : 0;
+      const dayScore = avgCtrlDays !== null ? Math.min((avgCtrlDays / 30) * 100, 100) : 0;
       const score = effScore * 0.6 + dayScore * 0.4;
 
       return {
         formula, dosage, trialCount: trials.length,
-        finalizedTrialCount: finalizedTrials.length,
+        finalizedTrialCount: trials.filter(t => t.isCompleted).length,
         activeTrialCount: trials.filter(t => !t.isCompleted).length,
         avgEfficacy: avgEff,
-        avgCtrlDays: avgCtrlDays,   // Only from Finalized trials
+        avgCtrlDays: avgCtrlDays,   // Real control days from efficacy & weed regrowth
         maxCtrlDays: controlDaysArr.length ? Math.max(...controlDaysArr) : null,
         resultBreakdown: resultCounts,
         score,
@@ -282,9 +300,8 @@ function buildFormulaSummary(parsedTrials) {
     const resultCounts = { Excellent: 0, Good: 0, Fair: 0, Poor: 0, Unrated: 0 };
     trials.forEach(t => { resultCounts[t.result] = (resultCounts[t.result] || 0) + 1; });
 
-    // Only finalized control days for stats
-    const finalizedTrials = trials.filter(t => t.isCompleted && t.finalizedControlDays !== null);
-    const ctrlDaysArr = finalizedTrials.map(t => t.finalizedControlDays).filter(d => d > 0);
+    // Control days calculated strictly from efficacy and weed regrowth
+    const ctrlDaysArr = trials.map(t => t.effectiveControlDays).filter(d => d !== null && d > 0);
 
     const avgEff = avg(efficacies);
     const maxEff = efficacies.length ? Math.max(...efficacies) : null;
@@ -292,7 +309,7 @@ function buildFormulaSummary(parsedTrials) {
     const maxCtrlDays = ctrlDaysArr.length ? Math.max(...ctrlDaysArr) : null;
     const targets = [...new Set(trials.map(t => t.target).filter(Boolean))];
 
-    // Composite Agronomic Score: 45% Kill Rate, 45% Sustained Control Days (normalized to 30d), 10% Broad Spectrum target count
+    // Composite Agronomic Score: 45% Kill Rate, 45% Sustained Control Days (normalized to 30d benchmark), 10% Broad Spectrum target count
     const effScore = avgEff !== null ? avgEff : 0;
     const dayScore = avgCtrlDays !== null ? Math.min((avgCtrlDays / 30) * 100, 100) : 0;
     const specScore = Math.min((targets.length / 4) * 100, 100);
@@ -300,14 +317,14 @@ function buildFormulaSummary(parsedTrials) {
 
     return {
       formula, dosage, trialCount: trials.length,
-      finalizedCount: finalizedTrials.length,
+      finalizedCount: trials.filter(t => t.isCompleted).length,
       activeCount: trials.filter(t => !t.isCompleted).length,
       targets,
       avgEfficacy: avgEff,
       minEfficacy: efficacies.length ? Math.min(...efficacies) : null,
       maxEfficacy: maxEff,
-      avgFinalizedCtrlDays: avgCtrlDays,
-      maxFinalizedCtrlDays: maxCtrlDays,
+      avgCtrlDays: avgCtrlDays,
+      maxCtrlDays: maxCtrlDays,
       agronomicScore,
       resultBreakdown: resultCounts,
       locations: [...new Set(trials.map(t => t.location).filter(Boolean))]
@@ -315,17 +332,44 @@ function buildFormulaSummary(parsedTrials) {
   }).sort((a, b) => (b.agronomicScore || 0) - (a.agronomicScore || 0));
 }
 
+function buildExcellentTrialsList(parsedTrials) {
+  // Filter for trials with efficacy >= 70% or Result === 'Excellent' (agronomic field standard)
+  const excellent = parsedTrials.filter(t => 
+    (t.finalEfficacy !== null && t.finalEfficacy >= 70) || 
+    (t.peakEfficacy !== null && t.peakEfficacy >= 70) ||
+    t.result === 'Excellent'
+  );
+
+  excellent.sort((a, b) => {
+    const effA = a.finalEfficacy ?? a.peakEfficacy ?? (a.result === 'Excellent' ? 90 : 0);
+    const effB = b.finalEfficacy ?? b.peakEfficacy ?? (b.result === 'Excellent' ? 90 : 0);
+    if (effB !== effA) return effB - effA;
+    return (b.effectiveControlDays || 0) - (a.effectiveControlDays || 0);
+  });
+
+  if (excellent.length === 0) return 'No trials currently recorded meeting the >= 70% efficacy threshold.';
+
+  return excellent.slice(0, 50).map(t => {
+    const effVal = t.finalEfficacy !== null ? `${t.finalEfficacy}%` : (t.peakEfficacy !== null ? `${t.peakEfficacy}% (peak)` : '>=70%');
+    const ctrlVal = t.effectiveControlDays !== null 
+      ? `${t.effectiveControlDays} days sustained control (${t.isCompleted ? 'finalized' : 'active demonstrated'})`
+      : (t.elapsedDays ? `${t.elapsedDays}d elapsed (active)` : 'Under evaluation');
+    return `* [🔬 Trial: ${t.formulation} @ ${t.dosage} (${t.id})](#/trials?focus=${t.id}) | Target: ${t.target} | Kill Rate: ${effVal} (${t.result}) | Control Longevity: ${ctrlVal} | Status: ${t.status} | Location: ${t.location} | Date: ${t.dateISO || t.date} | Inv: ${t.investigator}`;
+  }).join('\n');
+}
+
 function buildTrialIndex(parsedTrials, projectMap) {
   return parsedTrials.map(t => {
     const proj = projectMap[t.projectId] ? '[' + projectMap[t.projectId] + ']' : '';
     const eff = t.finalEfficacy !== null ? t.finalEfficacy + '%eff' : 'no-eff';
 
-    // CLEAR labeling: Finalized real control days vs Active elapsed days
     let ctrlStr;
-    if (t.isCompleted) {
-      ctrlStr = t.finalizedControlDays !== null ? t.finalizedControlDays + 'd-FINALIZED' : '?d-FINALIZED';
+    if (t.effectiveControlDays !== null) {
+      ctrlStr = t.isCompleted ? `${t.effectiveControlDays}d-FINALIZED` : `${t.effectiveControlDays}d-DEMONSTRATED(active)`;
+    } else if (t.elapsedDays !== null) {
+      ctrlStr = `${t.elapsedDays}d-ELAPSED(active)`;
     } else {
-      ctrlStr = t.elapsedDays !== null ? t.elapsedDays + 'd-ELAPSED(active,not-final)' : 'ongoing';
+      ctrlStr = 'ongoing';
     }
 
     const wx = [
@@ -337,7 +381,7 @@ function buildTrialIndex(parsedTrials, projectMap) {
 
     const notes = t.notes ? ' | notes:' + t.notes.slice(0, 80) : '';
     const obs = t.obsTimeline ? ' | obs:[' + t.obsTimeline + ']' : '';
-    return '* [' + t.id + '] ' + t.formulation + ' @' + t.dosage + ' | target:' + t.target + ' | ' + (t.dateISO || t.date) + ' | ' + t.location + ' | inv:' + t.investigator + ' | ' + eff + ' | ' + ctrlStr + ' | ' + t.status + ' | result:' + t.result + proj + ' | wx:' + wx + obs + notes;
+    return '* [🔬 Trial: ' + t.formulation + ' @ ' + t.dosage + ' (' + t.id + ')](#/trials?focus=' + t.id + ') | target:' + t.target + ' | ' + (t.dateISO || t.date) + ' | ' + t.location + ' | inv:' + t.investigator + ' | ' + eff + ' | ' + ctrlStr + ' | ' + t.status + ' | result:' + t.result + proj + ' | wx:' + wx + obs + notes;
   }).join('\n');
 }
 
@@ -427,6 +471,7 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
   const formulaSums = buildFormulaSummary(parsedTrials);
   const trialIndex = buildTrialIndex(parsedTrials, projectMap);
   const ingredientSynergy = buildIngredientSynergySummary(parsedTrials, catFormulations, catIngredients);
+  const excellentTrialsList = buildExcellentTrialsList(parsedTrials);
 
   const finalizedTrials = parsedTrials.filter(t => t.isCompleted);
   const activeTrials = parsedTrials.filter(t => !t.isCompleted);
@@ -449,9 +494,9 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
             }).join('; ')
           : 'None listed';
 
-        const tierStr = fStats.avgEfficacy >= 90
-          ? 'TOP TIER (Excellent - 90%+)'
-          : fStats.avgEfficacy >= 75
+        const tierStr = fStats.avgEfficacy >= 70
+          ? 'TOP TIER (Excellent - 70%+)'
+          : fStats.avgEfficacy >= 55
           ? 'MID TIER (Good)'
           : fStats.avgEfficacy !== null
           ? 'LOWER TIER (Fair/Poor)'
@@ -474,8 +519,8 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
         const ctrlStr = fStats.avgCtrlDays !== null
           ? (fStats.avgCtrlDays <= 3 
               ? `${fStats.avgCtrlDays} days (24-72h Rapid Knockdown / Burndown Screening Protocol)` 
-              : `${fStats.avgCtrlDays} days finalized residual control`)
-          : 'In progress / No finalized duration';
+              : `${fStats.avgCtrlDays} days demonstrated control (efficacy & weed regrowth verified)`)
+          : 'In progress / Evaluating';
 
         const perfSummary = fStats.total > 0
           ? [
@@ -513,7 +558,7 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
     const topStr = r.topFormulas.map(f =>
       '    #' + f.rank + ' ' + f.formula + ' @' + f.dosage +
       ' | avgEff:' + (f.avgEfficacy !== null ? f.avgEfficacy + '%' : '?') +
-      ' | avgCtrlDays:' + (f.avgCtrlDays !== null ? f.avgCtrlDays + 'd (from ' + f.finalizedTrialCount + ' finalized trials)' : 'no-finalized-data') +
+      ' | avgCtrlDays:' + (f.avgCtrlDays !== null ? f.avgCtrlDays + 'd (from ' + f.trialCount + ' trials)' : 'under-eval') +
       ' | maxCtrlDays:' + (f.maxCtrlDays !== null ? f.maxCtrlDays + 'd' : '?') +
       ' | trials:' + f.trialCount + '(finalized:' + f.finalizedTrialCount + ', active:' + f.activeTrialCount + ')' +
       ' | E' + f.resultBreakdown.Excellent + '/G' + f.resultBreakdown.Good + '/F' + f.resultBreakdown.Fair + '/P' + f.resultBreakdown.Poor
@@ -541,8 +586,8 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
     '  ' + f.formula + ' @' + f.dosage + ' | Agronomic Score: ' + (f.agronomicScore ? f.agronomicScore.toFixed(1) : '?') + '/100' +
     ' | Kill Rate(avgEff):' + (f.avgEfficacy !== null ? f.avgEfficacy + '%' : '?') +
     ' | maxEff:' + (f.maxEfficacy !== null ? f.maxEfficacy + '%' : '?') +
-    ' | Control Days(avgFinalized):' + (f.avgFinalizedCtrlDays !== null ? f.avgFinalizedCtrlDays + 'd' : 'no-finalized-data') +
-    ' | maxCtrlDays:' + (f.maxFinalizedCtrlDays !== null ? f.maxFinalizedCtrlDays + 'd' : '?') +
+    ' | Control Days(avg):' + (f.avgCtrlDays !== null ? f.avgCtrlDays + 'd' : 'under-eval') +
+    ' | maxCtrlDays:' + (f.maxCtrlDays !== null ? f.maxCtrlDays + 'd' : '?') +
     ' | targets:[' + f.targets.join(', ') + '] (' + f.targets.length + ' weed species)' +
     ' | trials:' + f.trialCount + '(fin:' + f.finalizedCount + ',act:' + f.activeCount + ')'
   ).join('\n');
@@ -551,11 +596,13 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
     '=== DATABASE OVERVIEW ===',
     'Category: ' + categoryId.toUpperCase(),
     'Total Trials: ' + stats.totalTrials + ' (' + stats.standardTrials + ' Standard/Plot Trials, ' + stats.largeFieldTrials + ' Large-Scale Field Studies)',
-    'Finalized Trials: ' + stats.completedTrials + ' (real measured control duration)',
-    'Active Trials: ' + stats.activeTrials + ' (still running — elapsed days is NOT control duration)',
+    'Finalized Trials: ' + stats.completedTrials + ' | Active Trials: ' + stats.activeTrials + ' (active trials stay active until photo inactivity concludes them)',
     'Unique Targets: ' + stats.uniqueTargets + ' | Unique Formulas: ' + stats.uniqueFormulas,
     'Locations: ' + stats.uniqueLocations + ' | Investigators: ' + stats.uniqueInvestigators,
     'Date Range: ' + (stats.dateRange.earliest || '?') + ' to ' + (stats.dateRange.latest || '?'),
+    '',
+    '=== 🏆 TOP PERFORMING & EXCELLENT FIELD TRIALS (KILL RATE >= 70% OR EXCELLENT RATING) ===',
+    excellentTrialsList,
     '',
     '=== TRIAL TYPES & FIELD-SCALE VALIDATION ===',
     'Standard Trials: Microplot/pot trials for initial screening.',
@@ -567,10 +614,10 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
     '=== FORMULATION KNOWLEDGE BASE ===',
     formulationsCtx,
     '',
-    '=== FORMULA PERFORMANCE OVERVIEW (ALL TRIALS, ctrl days from Finalized only) ===',
+    '=== FORMULA PERFORMANCE OVERVIEW (Demonstrated Control Days from Efficacy & Regrowth) ===',
     forSumStr || 'No performance data available.',
     '',
-    '=== TARGET-BASED FORMULA RANKINGS (Top 5 per target, ctrl days from Finalized only) ===',
+    '=== TARGET-BASED FORMULA RANKINGS (Top 5 per target, based on Efficacy & Sustained Control) ===',
     rankStr || 'No ranking data available.',
     '',
     '=== SAME-FORMULA VARIABLE OUTCOMES — Weather/Timing Analysis ===',
@@ -579,24 +626,23 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
     '=== INVESTIGATOR SUMMARY ===',
     invStr || 'No investigator data available.',
     '',
-    '=== COMPLETE TRIAL INDEX (ALL ' + stats.totalTrials + ' TRIALS) ===',
-    'FINALIZED control = "Xd-FINALIZED" | Active elapsed time = "Xd-ELAPSED(active,not-final)"',
+    '=== COMPLETE TRIAL INDEX (ALL ' + stats.totalTrials + ' TRIALS WITH CLICKABLE LINKS) ===',
     trialIndex || 'No trials recorded.',
     '',
-    '=== CRITICAL RULES FOR FORMULATION EVALUATIONS & AUDITS ===',
-    '1. STRICT DATABASE GROUNDING: Always retrieve the queried formulation from === FORMULATION KNOWLEDGE BASE ===. Quote its exact Trial Scope, Field Performance tier, Avg Efficacy %, Peak Efficacy %, and Est. Recipe Cost directly from its database record. Never invent, guess, or contradict database metrics.',
-    '2. FIELD TRIALS MATCHING: Use the Trial Scope metric directly (e.g. "Validated across X Field Plot Trials"), which reflects all verified research plots in the database.',
-    '3. EFFICACY INTEGRITY: Never declare a formulation as failing or having 0% efficacy if its database record demonstrates Top Tier / High Efficacy performance across completed trials. Always prioritize the consolidated formulation statistics over an isolated or unparsed observation log.',
-    '4. CONTROL DURATION & PROTOCOLS: When evaluating control duration, cite the recorded duration from the database. If the duration is short (e.g. 1–3 days), explain that this reflects the initial foliar knockdown / burndown evaluation window of the trial protocol, rather than premature failure.',
+    '=== CRITICAL RULES FOR FORMULATION & TRIAL EVALUATIONS ===',
+    '1. STRICT DATABASE GROUNDING: Always cite the queried trial or formulation using real database facts. Quote exact Trial Scope, Field Performance tier, Avg Efficacy %, Peak Efficacy %, and Est. Recipe Cost directly from its database record. Never invent or hallucinate data.',
+    '2. EXCELLENT TRIALS DEFINITION (AGRONOMIC STANDARD: >= 70% EFFICACY): Treat any trial with Kill Rate / Efficacy >= 70% (or Result="Excellent") as an excellent, effective field trial. Highlight these trials from the 🏆 TOP PERFORMING & EXCELLENT FIELD TRIALS section when users ask for the best, most effective, or top-performing trials.',
+    '3. REAL CONTROL DAYS (EFFICACY & WEED REGROWTH GROUND TRUTH): Control days are calculated scientifically based on sustained efficacy and weed regrowth (how many days the treatment maintained effective suppression >= 70% before regrowth breakdown occurred), or recorded final control duration. NEVER claim control days are missing if observation data demonstrates weed suppression. Both active and finalized trials with verified observations have valid demonstrated control days.',
+    '4. MANDATORY CLICKABLE TRIAL LINKS: For EVERY trial you mention, wrap it in a clickable link: [🔬 Trial: Formula @ Dosage (ID)](#/trials?focus=ID). Example: [🔬 Trial: CL-5 @ 40 ml/L (1781673863156)](#/trials?focus=1781673863156). When clicked, this immediately navigates the user directly to the exact trial in the system.',
     '5. TESTED FIELD DOSAGES: When asked for the optimal dosage of a formula, cite the exact rates listed under "Tested Field Dosages" for that formula in the database (e.g. "X ml/L with Y% avg eff"). Recommend an appropriate carrier volume (typically 400–500 L/ha water) based on agronomic standards.',
     '6. RECIPE & UNIT ANOMALY DETECTION: Present the current recipe from the database cleanly in bullet points. If any liquid active ingredient has a recorded quantity < 1 with unit "ml" (such as 0.100 ml or 0.200 ml), alert the user to the likely unit notation typo in data entry (likely intended as Litres or hundreds of ml).',
     '7. REALISTIC INGREDIENT UPGRADES: When suggesting recipe upgrades, base all proposed ingredients strictly on the INGREDIENT INVENTORY & FIELD SYNERGY MATRIX. Compare the formula\'s estimated cost per liter against cheaper database benchmarks, and propose realistic adjustments (cost reduction, penetration enhancers, or film-formers) grounded in real inventory components.',
     '8. AGRONOMIC CRITERIA FOR "BEST" FORMULATION (HIGHEST CONTROL DAYS & COMPLETE KILL RATE):',
     '   When the user asks which formulation is "best", performs best, or to compare options, evaluate strictly against these three core agronomic pillars:',
-    '   a) KILL RATE (Complete Weed Mortality): Higher average and peak efficacy (target complete kill, 90-100%).',
+    '   a) KILL RATE (Complete Weed Mortality): Higher average and peak efficacy (target complete kill, >= 70% for field efficacy, 90-100% for top-tier complete kill).',
     '   b) CONTROL DAYS (Sustained Suppression): Longest days of control without weed regrowth. Clearly differentiate short contact burndown (1-3 days) from extended residual weed control (10-30+ days).',
     '   c) BROAD SPECTRUM OF WEED SPECIES: High efficacy across multiple distinct weed species (grassy, broadleaf, sedges).',
-    '   A formula that combines high kill rate with extended control days across multiple weed species is ranked highest. Always quote both the Kill Rate % and Control Days (from finalized trials) directly from the database.',
+    '   A formula that combines high kill rate with extended control days across multiple weed species is ranked highest. Always quote both the Kill Rate % and Control Days directly from the database.',
     '',
     '=== GUIDELINES FOR NOVEL FORMULATION RECOMMENDATIONS ===',
     'When asked to suggest new, improved, or novel formulations:',

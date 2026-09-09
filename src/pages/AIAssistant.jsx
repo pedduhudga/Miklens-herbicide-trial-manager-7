@@ -6,6 +6,7 @@ import { Sparkles, SendHorizontal, Trash2, Copy, Check, Paperclip, X, Mic, MicOf
 import { safeJsonParse } from '../utils/helpers.js';
 import { sanitizeAiContent } from '../utils/sanitize.js';
 import { _callGeminiApiWithRetries, resetGeminiState } from '../services/ai.js';
+import { generateTextWithAI } from '../services/multiProviderAI.js';
 import { getAiChatSessions, saveAiChatSession, deleteAiChatSession, addFormulation, validateCategoryDataOperation } from '../services/dataLayer.js';
 import { calculateFormulationCost } from '../utils/costUtils.js';
 import { getCategoryConfig, getPrimaryObservationField } from '../utils/categoryConfig.js';
@@ -513,33 +514,42 @@ export default function AIAssistant({ onMenuClick }) {
 
       console.log(`[AI Memory] Built context for ${memStats.totalTrials} trials, ${memStats.uniqueFormulas} formulas, ${memStats.uniqueTargets} targets`);
 
-      const systemCtx = `You are a Senior ${config.name} Scientist and expert AI research assistant with complete access to this organization's entire ${config.name} trial database.
+      const systemCtx = `You are the Senior Principal ${config.name} Research Director and Chief Agronomist, serving as the definitive expert AI research engine with direct access to this organization's complete ${config.name} trial and formulation database.
 
-YOUR ROLE: Answer ANY question about trials, formulations, weeds/targets, weather effects, control days, investigators, locations, or experiment history using ONLY the data provided below. NEVER hallucinate — every fact you state must come from the database.
+YOUR MISSION: Answer ANY question about trials, formulations, weeds/targets, efficacy, weather effects, control days, investigators, locations, or field experiment history using ONLY the verified database provided below.
+ZERO HALLUCINATION POLICY: Every fact, number, trial ID, dosage, and efficacy percentage MUST come directly from the real database. Never invent data or assume trials that do not exist.
 
 CRITICAL RULES:
-1. You are analyzing ${activeCategory.toUpperCase()} category data ONLY.
-2. Do NOT reference data from other categories (${['herbicide', 'fungicide', 'pesticide', 'nutrition', 'biostimulant'].filter(c => c !== activeCategory).join(', ')}).
-3. NEVER invent data. If something is not in the database, say "No data found for that query."
-4. For EVERY trial you mention, wrap it in a clickable link: [Formula - Dosage](#/trials?focus=TRIAL_ID)
-5. For simple greetings ("hi", "hello"), respond warmly as a Senior ${config.name} Scientist and ask what they'd like to analyze.
+1. You are analyzing ${activeCategory.toUpperCase()} category data ONLY. Do NOT reference data from other categories (${['herbicide', 'fungicide', 'pesticide', 'nutrition', 'biostimulant'].filter(c => c !== activeCategory).join(', ')}).
+2. If something is truly not found in the database, explicitly state: "No matching trial or formulation data found in the ${activeCategory} database."
+3. FOR EVERY TRIAL YOU MENTION: You MUST wrap it in a clickable markdown link using this EXACT format:
+   [🔬 Trial: {Formulation} @ {Dosage} ({ID})](#/trials?focus={ID})
+   Example: [🔬 Trial: CL-5 @ 2.5 ml/L (TR-2024-001)](#/trials?focus=TR-2024-001)
+   When the user clicks this link, the app will instantly open that exact trial with its full observation timeline, photos, and ratings.
+4. For simple greetings ("hi", "hello"), respond warmly as the Senior ${config.name} Scientist and offer high-value analyses (e.g. top performing formulations, weed control leaderboards, recipe suggestions).
 
-CONTROL DAYS & TRIAL PROTOCOLS — CRITICAL DISTINCTION:
-- "Finalized" trials (status=Finalized, ctrl shows as "Xd-FINALIZED"): have real measured assessment duration.
-- Short Finalized Durations (1–3 days): For fast-acting contact desiccant herbicides (organic fatty acids, essential oils), short durations (e.g. 1–3 days) represent the rapid foliar knockdown / burndown evaluation window (24–72h DAA) of the trial protocol, NOT that control collapsed after 2 days. Explain that contact burndown achieves maximum tissue necrosis within 24–48 hours, and extending residual control to 20–30+ days requires combining contact action with pre-emergent or residual film-forming adjuvants.
-- "Active" trials (status=Active, ctrl shows as "Xd-ELAPSED(active,not-final)"): are STILL RUNNING. Their elapsed days is just how long since the trial started — it is NOT the control duration achieved. NEVER report Active trial elapsed days as "control days" or "days of control achieved." Always mention they are still active.
-- When answering questions about "which formula gave longest control", only count FINALIZED control days. Skip Active trials for this metric.
-- In rankings, "avgCtrlDays (finalized-only)" means the average only over completed trials.
+CONTROL DURATION & TRIAL STATUS — SCIENTIFIC LOGIC:
+- SCIENTIFIC BASIS: Control duration is calculated based on EFFICACY and WEED REGROWTH (the standard EWRS threshold of sustained >= 70% control before regrowth breakdown occurs).
+- DO NOT rely on photo dates to determine control duration. Control duration is determined by recorded efficacy and regrowth observations.
+- ACTIVE TRIALS: Active trials are ongoing field experiments (the system will automatically conclude a trial if no photo is logged for the designated inactivity period). For active trials, report their demonstrated control duration achieved to date (labeled as "Xd-DEMONSTRATED(active)"). NEVER claim they have "no data" or "0 days control" when their observation timeline records sustained weed control!
+- COMPLETED / FINALIZED TRIALS: Report their finalized control duration (labeled as "Xd-FINALIZED").
+- Fast-acting contact burndown herbicides: Durations of 1–3 days in trial protocols represent the immediate foliar knockdown evaluation window (24–72h DAA), not that control collapsed. Residual control (15–45+ days) requires systemic action or residual pre-emergent tank mixes.
+
+EXCELLENT TRIALS & TOP PERFORMERS:
+- Field trials demonstrating >= 70% efficacy (or qualitative rating of "Excellent") are classified as Excellent / Top-Performing trials.
+- When asked for "excellent trials", "best trials", or "top performers", ALWAYS provide a clean Markdown table with:
+  | Trial Link | Formulation | Target Weed | Dosage | Max Efficacy | Control Duration | Status |
+  and cite their specific observed results.
+- Refer to the dedicated "🏆 TOP PERFORMING & EXCELLENT FIELD TRIALS" section in the data below.
 
 ANALYSIS & TERMINOLOGY GUIDELINES:
-- Trial Terminology: Always refer to trials as "Field Plot Trials" (matching the UI's "FIELD TRIALS: X Plot" cards).
-- Formulations: Always prioritize the verified stats from the FORMULATION KNOWLEDGE BASE.
+- Trial Terminology: Refer to trials as "Field Plot Trials" (matching the UI's "FIELD TRIALS: X Plot" cards).
+- Formulations: Always prioritize the verified stats from the FORMULATION KNOWLEDGE BASE and note that both legacy trial records and new trials with formulation codes or dosage variations are linked.
 - Primary Metric: ${config.primaryMetric?.label || 'Efficacy'} (${config.primaryMetric?.unit || '%'})
 - Target Field: ${config.targetLabel || 'Target'}
 - Recipe Analysis: Format ingredients cleanly in structured lists. If any active ingredient has a decimal quantity with unit "ml" (quantity < 1 ml in a bulk formula), explicitly note the unit notation typo from data entry and clarify the intended commercial volume.
-- When comparing formulas: always cite trial count, avg efficacy, avg finalized control days, and result breakdown (Excellent/Good/Fair/Poor).
+- When comparing formulations: cite trial count, avg efficacy %, max efficacy %, demonstrated control days, and result breakdown.
 - When analyzing failures: cite weather conditions (temp, humidity, rain) at application time.
-- For rankings: use the pre-computed rankings from the database below (ctrl days from finalized trials only).
 - DAA = Days After Application. Baseline is DAA=0, post-treatment is DAA>0.
 
 ${memoryContext}`;
@@ -581,7 +591,16 @@ ${memoryContext}`;
         }
       };
 
-      reply = await _callGeminiApiWithRetries(geminiCall, getAppState);
+      try {
+        reply = await _callGeminiApiWithRetries(geminiCall, getAppState);
+      } catch (geminiErr) {
+        console.warn('[AI Assistant] Primary Gemini call failed, attempting multi-provider fallback:', geminiErr.message);
+        try {
+          reply = await generateTextWithAI(fullPrompt, systemCtx);
+        } catch (fallbackErr) {
+          throw new Error(`AI analysis error: ${geminiErr.message}. (Fallback error: ${fallbackErr.message})`);
+        }
+      }
 
       // Validate that AI results respect category boundaries
       validateAnalysisResults(reply, activeCategory, 'AI Assistant Chat');
@@ -1311,7 +1330,30 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
           )}
 
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
+          <div 
+            className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0"
+            onClick={(e) => {
+              const link = e.target.closest('a');
+              if (!link) return;
+              const href = link.getAttribute('href') || '';
+              const dataTrialId = link.getAttribute('data-trial-id');
+              let trialId = dataTrialId;
+              if (!trialId && href.includes('focus=')) {
+                try {
+                  const url = new URL(href, window.location.origin);
+                  trialId = url.searchParams.get('focus') || (href.match(/focus=([^&#]+)/)?.[1]);
+                } catch {
+                  trialId = href.match(/focus=([^&#]+)/)?.[1];
+                }
+              }
+              if (trialId) {
+                e.preventDefault();
+                e.stopPropagation();
+                navigate(`/trials?focus=${encodeURIComponent(trialId)}`);
+                window.dispatchEvent(new CustomEvent('app:navigate_to_trial', { detail: { trialId } }));
+              }
+            }}
+          >
             {history.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-slate-400 py-6 max-w-2xl mx-auto">
                 <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-3 shadow-inner" style={{ backgroundColor: config.color.hexLight, color: config.color.hex }}>

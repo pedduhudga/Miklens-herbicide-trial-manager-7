@@ -70,9 +70,20 @@ export function sanitizeAiContent(content, options = {}) {
     
     const isSafe = /^https?:\/\//i.test(decodedUrl) || decodedUrl.startsWith('#') || decodedUrl.startsWith('/');
     const safeUrl = isSafe ? escapeHtml(decodedUrl) : '#';
+
+    // Extract trial focus ID for direct click handling
+    const focusMatch = decodedUrl.match(/[?&]focus=([^&#\s]+)/i);
+    const trialId = focusMatch ? focusMatch[1] : '';
+
+    let appliedClass = linkClass ? escapeHtml(linkClass) : '';
+    if (trialId) {
+      appliedClass = (appliedClass + ' trial-redirect-link inline-flex items-center gap-1 font-bold px-2 py-0.5 rounded-lg border border-emerald-300 bg-white hover:bg-emerald-50 text-emerald-800 shadow-2xs hover:shadow-xs cursor-pointer transition text-xs my-0.5').trim();
+    }
+
     const attrs = [
       `href="${safeUrl}"`,
-      linkClass ? `class="${escapeHtml(linkClass)}"` : '',
+      trialId ? `data-trial-id="${escapeHtml(trialId)}"` : '',
+      appliedClass ? `class="${appliedClass}"` : '',
       linkStyle ? `style="${escapeHtml(linkStyle)}"` : '',
       'rel="noopener noreferrer"'
     ].filter(Boolean).join(' ');

@@ -79,7 +79,8 @@ export function getTrialLastActivityDate(trial) {
 export function calculateEffectiveControlDays(trial, controlTrial = null) {
   if (!trial) return 0;
 
-  const observations = safeJsonParse(trial.EfficacyDataJSON || trial.observations, []);
+  const rawObs = safeJsonParse(trial.EfficacyDataJSON || trial.observations, []);
+  const observations = Array.isArray(rawObs) ? rawObs : (rawObs && Array.isArray(rawObs.observations) ? rawObs.observations : []);
   if (!Array.isArray(observations) || observations.length === 0) {
     if (trial.FinalControlDuration) {
       const parsed = parseInt(trial.FinalControlDuration, 10);
