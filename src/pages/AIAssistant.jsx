@@ -536,7 +536,7 @@ ANALYSIS & TERMINOLOGY GUIDELINES:
 - Formulations: Always prioritize the verified stats from the FORMULATION KNOWLEDGE BASE.
 - Primary Metric: ${config.primaryMetric?.label || 'Efficacy'} (${config.primaryMetric?.unit || '%'})
 - Target Field: ${config.targetLabel || 'Target'}
-- Recipe Analysis: Format ingredients cleanly in structured lists. If liquid actives have decimal "ml" quantities (like 0.200 ml), explicitly note the unit typo and explain the intended commercial volume (e.g. 200 ml / 0.2 L).
+- Recipe Analysis: Format ingredients cleanly in structured lists. If any active ingredient has a decimal quantity with unit "ml" (quantity < 1 ml in a bulk formula), explicitly note the unit notation typo from data entry and clarify the intended commercial volume.
 - When comparing formulas: always cite trial count, avg efficacy, avg finalized control days, and result breakdown (Excellent/Good/Fair/Poor).
 - When analyzing failures: cite weather conditions (temp, humidity, rain) at application time.
 - For rankings: use the pre-computed rankings from the database below (ctrl days from finalized trials only).
