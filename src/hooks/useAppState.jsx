@@ -112,6 +112,7 @@ const FilterStateContext = createContext();
 const CategoryContext = createContext();
 const PageContext = createContext();
 const LoadedContext = createContext();
+const AIChatContext = createContext();
 
 function safeLocalStorageSet(key, value) {
   try {
@@ -207,39 +208,52 @@ function StateProvider({ children, state }) {
   const categoryValue = useMemo(() => state.activeCategory, [state.activeCategory]);
   const pageValue = useMemo(() => state.currentPage, [state.currentPage]);
   const loadedValue = useMemo(() => state.hasLoadedInitialData, [state.hasLoadedInitialData]);
+  const aiChatValue = useMemo(() => ({
+    sessions: state.aiChatSessions || [],
+    currentSessionId: state.currentAiChatSessionId ?? null
+  }), [state.aiChatSessions, state.currentAiChatSessionId]);
 
   return (
     <AppCoreContext.Provider value={coreValue}>
-      <AuthContext.Provider value={authValue}>
-        <TrialsContext.Provider value={trialsValue}>
-          <ProjectsContext.Provider value={projectsValue}>
-            <FormulationsContext.Provider value={formulationsValue}>
-              <IngredientsContext.Provider value={ingredientsValue}>
-                <BlocksContext.Provider value={blocksValue}>
-                  <SettingsContext.Provider value={settingsValue}>
-                    <SyncQueueContext.Provider value={syncQueueValue}>
-                      <FilterStateContext.Provider value={filterStateValue}>
-                        <CategoryContext.Provider value={categoryValue}>
-                          <PageContext.Provider value={pageValue}>
-                            <LoadedContext.Provider value={loadedValue}>
-                              {children}
-                            </LoadedContext.Provider>
-                          </PageContext.Provider>
-                        </CategoryContext.Provider>
-                      </FilterStateContext.Provider>
-                    </SyncQueueContext.Provider>
-                  </SettingsContext.Provider>
-                </BlocksContext.Provider>
-              </IngredientsContext.Provider>
-            </FormulationsContext.Provider>
-          </ProjectsContext.Provider>
-        </TrialsContext.Provider>
-      </AuthContext.Provider>
+      <AIChatContext.Provider value={aiChatValue}>
+        <AuthContext.Provider value={authValue}>
+          <TrialsContext.Provider value={trialsValue}>
+            <ProjectsContext.Provider value={projectsValue}>
+              <FormulationsContext.Provider value={formulationsValue}>
+                <IngredientsContext.Provider value={ingredientsValue}>
+                  <BlocksContext.Provider value={blocksValue}>
+                    <SettingsContext.Provider value={settingsValue}>
+                      <SyncQueueContext.Provider value={syncQueueValue}>
+                        <FilterStateContext.Provider value={filterStateValue}>
+                          <CategoryContext.Provider value={categoryValue}>
+                            <PageContext.Provider value={pageValue}>
+                              <LoadedContext.Provider value={loadedValue}>
+                                {children}
+                              </LoadedContext.Provider>
+                            </PageContext.Provider>
+                          </CategoryContext.Provider>
+                        </FilterStateContext.Provider>
+                      </SyncQueueContext.Provider>
+                    </SettingsContext.Provider>
+                  </BlocksContext.Provider>
+                </IngredientsContext.Provider>
+              </FormulationsContext.Provider>
+            </ProjectsContext.Provider>
+          </TrialsContext.Provider>
+        </AuthContext.Provider>
+      </AIChatContext.Provider>
     </AppCoreContext.Provider>
   );
 }
 
 // Custom hooks for each context slice - components can import only what they need
+export function useAIChat() {
+  const context = useContext(AIChatContext);
+  if (context === undefined) {
+    throw new Error('useAIChat must be used within AppStateProvider');
+  }
+  return context;
+}
 export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {
@@ -362,6 +376,7 @@ export function useAppState() {
   const activeCategory = useContext(CategoryContext);
   const currentPage = useContext(PageContext);
   const hasLoadedInitialData = useContext(LoadedContext);
+  const aiChat = useContext(AIChatContext);
 
   if (core === undefined) {
     throw new Error('useAppState must be used within an AppStateProvider');
@@ -384,7 +399,9 @@ export function useAppState() {
       filterState,
       activeCategory,
       currentPage,
-      hasLoadedInitialData
+      hasLoadedInitialData,
+      aiChatSessions: aiChat ? aiChat.sessions : (fullState.aiChatSessions || []),
+      currentAiChatSessionId: aiChat ? aiChat.currentSessionId : (fullState.currentAiChatSessionId ?? null)
     },
     ...core
   };
@@ -428,11 +445,14 @@ export function AppStateProvider({ children }) {
     filterState: state.filterState,
     activeCategory: state.activeCategory,
     currentPage: state.currentPage,
-    hasLoadedInitialData: state.hasLoadedInitialData
+    hasLoadedInitialData: state.hasLoadedInitialData,
+    aiChatSessions: state.aiChatSessions,
+    currentAiChatSessionId: state.currentAiChatSessionId
   }), [wrappedDispatch, wrappedUpdateState, wrappedUpdateSettings, wrappedGetAppState, 
       state.auth, state.trials, state.projects, state.formulations, state.ingredients, 
       state.blocks, state.settings, state.syncQueue, state.filterState, 
-      state.activeCategory, state.currentPage, state.hasLoadedInitialData]);
+      state.activeCategory, state.currentPage, state.hasLoadedInitialData,
+      state.aiChatSessions, state.currentAiChatSessionId]);
 
   useEffect(() => {
     try {

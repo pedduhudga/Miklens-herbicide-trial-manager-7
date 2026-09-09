@@ -1173,9 +1173,24 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
     }
   };
 
-  const handleNewChat = () => {
+  const handleNewChat = useCallback(() => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    setSpeakingMsgIdx(null);
+    setInput('');
+    setAttachedImage(null);
+    setStreamingMessage('');
+    setIsLoading(false);
+    setSearchQuery('');
+    setIsSearchOpen(false);
+    setSimResult(null);
+    setIsSimulatorOpen(false);
     updateState({ currentAiChatSessionId: null });
-  };
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 50);
+  }, [updateState]);
 
   const modelName = state.settings?.selectedModel || DEFAULT_GEMINI_MODEL;
   const hasKey = (state.settings?.apiKeys || []).length > 0;
@@ -1191,7 +1206,13 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
         {/* Sidebar */}
         <div className={`${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 absolute md:relative z-20 w-64 h-full bg-slate-900 text-slate-300 flex flex-col transition-transform duration-300 ease-in-out`}>
           <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-            <button onClick={() => { handleNewChat(); setIsSidebarOpen(false); }} className="w-full flex items-center gap-2 text-white px-3 py-2 rounded-lg transition-colors font-medium text-sm" style={{ backgroundColor: config.color.hex }}>
+            <button 
+              type="button"
+              onClick={() => { handleNewChat(); setIsSidebarOpen(false); }} 
+              className="w-full flex items-center justify-center gap-2 text-white px-3 py-2.5 rounded-xl transition-all font-semibold text-sm shadow-xs active:scale-98 cursor-pointer" 
+              style={{ backgroundColor: config.color.hex }}
+              title="Start a new chat session"
+            >
               <PlusCircle className="w-4 h-4" />
               New Chat
             </button>
@@ -1204,7 +1225,19 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
             {sessions.map(session => (
               <button
                 key={session.id}
-                onClick={() => { updateState({ currentAiChatSessionId: session.id }); setIsSidebarOpen(false); }}
+                type="button"
+                onClick={() => { 
+                  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+                    window.speechSynthesis.cancel();
+                  }
+                  setSpeakingMsgIdx(null);
+                  setStreamingMessage('');
+                  setIsLoading(false);
+                  setSearchQuery('');
+                  setIsSearchOpen(false);
+                  updateState({ currentAiChatSessionId: session.id }); 
+                  setIsSidebarOpen(false); 
+                }}
                 className={`w-full flex items-center gap-2 text-left px-3 py-2.5 rounded-lg transition-colors text-sm ${currentSessionId === session.id ? 'bg-slate-800 text-white font-medium' : 'hover:bg-slate-800/50'}`}
               >
                 <MessageSquare className="w-4 h-4 shrink-0 opacity-70" />
@@ -1253,33 +1286,44 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                 </p>
               </div>
             </div>
-            {history.length > 0 && (
-              <div className="flex items-center gap-2">
-                {isSearchOpen ? (
-                  <div className="flex items-center bg-white border border-slate-300 rounded-lg overflow-hidden h-8 px-2 transition-all shadow-inner">
-                    <Search className="w-3.5 h-3.5 text-slate-400 mr-2" />
-                    <input
-                      type="text"
-                      value={searchQuery}
-                      onChange={e => setSearchQuery(e.target.value)}
-                      placeholder="Search messages..."
-                      className="text-xs outline-none bg-transparent w-32"
-                      autoFocus
-                    />
-                    <button onClick={() => { setIsSearchOpen(false); setSearchQuery(''); }} className="text-slate-400 hover:text-slate-600">
-                      <X className="w-3.5 h-3.5" />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleNewChat}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 shadow-2xs transition active:scale-95 cursor-pointer"
+                title="Start a new chat session"
+              >
+                <PlusCircle className="w-3.5 h-3.5 text-emerald-600" />
+                <span className="hidden sm:inline">New Chat</span>
+              </button>
+              {history.length > 0 && (
+                <>
+                  {isSearchOpen ? (
+                    <div className="flex items-center bg-white border border-slate-300 rounded-lg overflow-hidden h-8 px-2 transition-all shadow-inner">
+                      <Search className="w-3.5 h-3.5 text-slate-400 mr-2" />
+                      <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={e => setSearchQuery(e.target.value)}
+                        placeholder="Search messages..."
+                        className="text-xs outline-none bg-transparent w-32"
+                        autoFocus
+                      />
+                      <button onClick={() => { setIsSearchOpen(false); setSearchQuery(''); }} className="text-slate-400 hover:text-slate-600">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button onClick={() => setIsSearchOpen(true)} title="Search chat" className="p-2 text-slate-400 hover:bg-slate-50 rounded-lg transition" style={{ color: config.color.hex }}>
+                      <Search className="w-4 h-4" />
                     </button>
-                  </div>
-                ) : (
-                  <button onClick={() => setIsSearchOpen(true)} title="Search chat" className="p-2 text-slate-400 hover:bg-slate-50 rounded-lg transition" style={{ color: config.color.hex }}>
-                    <Search className="w-4 h-4" />
+                  )}
+                  <button onClick={handleClear} title="Clear all chat history" className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition">
+                    <Trash2 className="w-4 h-4" />
                   </button>
-                )}
-                <button onClick={handleClear} title="Clear all chat history" className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition">
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            )}
+                </>
+              )}
+            </div>
           </div>
 
           {/* Collapsible Trial Outcome Simulator Drawer */}
