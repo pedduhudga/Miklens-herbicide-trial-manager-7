@@ -32,7 +32,8 @@ import PhotoAnalyzerView from '../components/PhotoAnalyzerView.jsx';
 import { analyzePhoto, analyzePhotosBatch, identifyWeedFromPhoto as identifyWeedFromPhotoService, getAPIKeys, generateTextWithAI, parseHarvestTextLog } from '../services/multiProviderAI.js';
 import TrialCard from '../components/TrialCard.jsx';
 import FormulationQuickPeekModal from '../components/FormulationQuickPeekModal.jsx';
-import { isFormulationEligibleForTrial } from '../utils/formulationTrialUtils.js';
+import { isFormulationEligibleForTrial, getTrialCalculatedEfficacy } from '../utils/formulationTrialUtils.js';
+import { calculateEffectiveControlDays } from '../utils/trialLifecycle.js';
 import TrialFiltersBar from '../components/trials/TrialFiltersBar.jsx';
 import TrialTimelineView from '../components/trials/TrialTimelineView.jsx';
 import TrialKanbanBoard from '../components/trials/TrialKanbanBoard.jsx';
@@ -816,6 +817,57 @@ export default function Trials({ onMenuClick }) {
 
   const groupedTimelineTrials = useMemo(() => {
     if (activeTab === 'rcbd') return [];
+
+    // When sorting by Longest Control Days, group by Duration Tiers
+    if (sortBy === 'control-days') {
+      const tiers = [
+        { key: '🏆 30+ Days Sustained Control', min: 30, max: Infinity, trials: [] },
+        { key: '⭐ 20–29 Days Control', min: 20, max: 29.99, trials: [] },
+        { key: '🌿 10–19 Days Control', min: 10, max: 19.99, trials: [] },
+        { key: '🌱 1–9 Days Control', min: 1, max: 9.99, trials: [] },
+        { key: '⚠️ 0 Days / Ineffective Control', min: -Infinity, max: 0.99, trials: [] }
+      ];
+      filteredTrials.forEach(t => {
+        const days = calculateEffectiveControlDays(t) || (parseInt(t.FinalControlDuration, 10) || 0);
+        const tier = tiers.find(tr => days >= tr.min && days <= tr.max) || tiers[tiers.length - 1];
+        tier.trials.push(t);
+      });
+      return tiers.filter(tr => tr.trials.length > 0);
+    }
+
+    // When sorting by Kill Rate, group by Efficacy Rating Tiers
+    if (sortBy === 'kill-rate') {
+      const tiers = [
+        { key: '🏆 Excellent Kill Rate (≥ 70%)', min: 70, max: Infinity, trials: [] },
+        { key: '⭐ Good Kill Rate (55% – 69%)', min: 55, max: 69.99, trials: [] },
+        { key: '🌿 Fair Kill Rate (40% – 54%)', min: 40, max: 54.99, trials: [] },
+        { key: '⚠️ Low Kill Rate (< 40%)', min: -Infinity, max: 39.99, trials: [] }
+      ];
+      filteredTrials.forEach(t => {
+        const eff = getTrialCalculatedEfficacy(t, activeCategory) ?? 0;
+        const tier = tiers.find(tr => eff >= tr.min && eff <= tr.max) || tiers[tiers.length - 1];
+        tier.trials.push(t);
+      });
+      return tiers.filter(tr => tr.trials.length > 0);
+    }
+
+    // When sorting by Best (High Kill & Long Control), group by Overall Performance Tiers
+    if (sortBy === 'best') {
+      const tiers = [
+        { key: '🏆 Top Tier: High Kill & Extended Control', minScore: 65, trials: [] },
+        { key: '⭐ Strong Performance', minScore: 45, trials: [] },
+        { key: '🌿 Moderate Performance', minScore: 25, trials: [] },
+        { key: '⚠️ Developing / Low Control', minScore: -Infinity, trials: [] }
+      ];
+      filteredTrials.forEach(t => {
+        const eff = getTrialCalculatedEfficacy(t, activeCategory) ?? 0;
+        const days = calculateEffectiveControlDays(t) || (parseInt(t.FinalControlDuration, 10) || 0);
+        const score = eff * 0.5 + Math.min(100, (days / 30) * 100) * 0.5;
+        const tier = tiers.find(tr => score >= tr.minScore) || tiers[tiers.length - 1];
+        tier.trials.push(t);
+      });
+      return tiers.filter(tr => tr.trials.length > 0);
+    }
     
     const getTrialDateGroupKey = (trialDateStr) => {
       if (!trialDateStr) return 'No Date Set';
@@ -852,7 +904,7 @@ export default function Trials({ onMenuClick }) {
     });
 
     return grouped;
-  }, [filteredTrials, activeTab]);
+  }, [filteredTrials, activeTab, sortBy, activeCategory]);
 
   const groupedRcbdTrials = useMemo(() => {
     if (activeTab !== 'rcbd') return { groups: {}, orphaned: [] };

@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
 import { safeJsonParse } from '../utils/helpers.js';
 import { getTrialCalculatedEfficacy } from '../utils/formulationTrialUtils.js';
+import { calculateEffectiveControlDays } from '../utils/trialLifecycle.js';
+import { parseCustomDate } from '../utils/dateUtils.js';
 
 const fuzzyMatch = (text, query) => {
   if (!text) return false;
@@ -143,19 +145,22 @@ export function useTrialsFilter(trials, {
       return 0;
     };
 
-    // Helper to extract control days from trial
+    // Helper to safely extract timestamp from any date string
+    const getTimeFromDate = (d) => {
+      if (!d) return 0;
+      const parsed = parseCustomDate(d);
+      if (parsed && !isNaN(parsed.getTime())) return parsed.getTime();
+      const std = new Date(d);
+      return isNaN(std.getTime()) ? 0 : std.getTime();
+    };
+
+    // Helper to extract control days from trial (strictly matching TrialCard logic)
     const getTrialControlDays = (t) => {
+      const effDays = calculateEffectiveControlDays(t);
+      if (effDays > 0) return effDays;
       if (t.FinalControlDuration && !isNaN(parseInt(t.FinalControlDuration, 10))) {
-        return parseInt(t.FinalControlDuration, 10);
-      }
-      if (t.Date && t.FinalizationDate) {
-        const diff = Math.round((new Date(t.FinalizationDate) - new Date(t.Date)) / 86400000);
-        if (diff > 0) return diff;
-      }
-      const obs = safeJsonParse(t.EfficacyDataJSON, []);
-      if (Array.isArray(obs) && obs.length > 0) {
-        const daas = obs.map(o => Number(o.daa ?? o.day ?? o.DAA ?? 0)).filter(d => !isNaN(d) && d > 0);
-        if (daas.length > 0) return Math.max(...daas);
+        const parsed = parseInt(t.FinalControlDuration, 10);
+        if (parsed > 0) return parsed;
       }
       return 0;
     };
@@ -170,7 +175,7 @@ export function useTrialsFilter(trials, {
         const scoreA = effA * 0.5 + Math.min(100, (daysA / 30) * 100) * 0.5;
         const scoreB = effB * 0.5 + Math.min(100, (daysB / 30) * 100) * 0.5;
         if (scoreB !== scoreA) return scoreB - scoreA;
-        return new Date(b.Date || 0) - new Date(a.Date || 0);
+        return getTimeFromDate(b.Date) - getTimeFromDate(a.Date);
       }
       if (sortBy === 'kill-rate') {
         const effA = getTrialCalculatedEfficacy(a, activeCategory) ?? -1;
@@ -179,7 +184,7 @@ export function useTrialsFilter(trials, {
         const daysA = getTrialControlDays(a);
         const daysB = getTrialControlDays(b);
         if (daysB !== daysA) return daysB - daysA;
-        return new Date(b.Date || 0) - new Date(a.Date || 0);
+        return getTimeFromDate(b.Date) - getTimeFromDate(a.Date);
       }
       if (sortBy === 'control-days') {
         const daysA = getTrialControlDays(a);
@@ -188,10 +193,10 @@ export function useTrialsFilter(trials, {
         const effA = getTrialCalculatedEfficacy(a, activeCategory) ?? -1;
         const effB = getTrialCalculatedEfficacy(b, activeCategory) ?? -1;
         if (effB !== effA) return effB - effA;
-        return new Date(b.Date || 0) - new Date(a.Date || 0);
+        return getTimeFromDate(b.Date) - getTimeFromDate(a.Date);
       }
       if (sortBy === 'date-desc') {
-        const dateDiff = new Date(b.Date || 0) - new Date(a.Date || 0);
+        const dateDiff = getTimeFromDate(b.Date) - getTimeFromDate(a.Date);
         if (dateDiff !== 0) return dateDiff;
 
         const potSort = comparePots(a, b);
@@ -203,7 +208,7 @@ export function useTrialsFilter(trials, {
         return new Date(b.CreatedAt || 0) - new Date(a.CreatedAt || 0);
       }
       if (sortBy === 'date-asc') {
-        const dateDiff = new Date(a.Date || 0) - new Date(b.Date || 0);
+        const dateDiff = getTimeFromDate(a.Date) - getTimeFromDate(b.Date);
         if (dateDiff !== 0) return dateDiff;
 
         const potSort = comparePots(a, b);
@@ -222,7 +227,7 @@ export function useTrialsFilter(trials, {
         const bShared = b.AuthorID && b.AuthorID !== ownUid;
         if (aShared && !bShared) return 1;
         if (!aShared && bShared) return -1;
-        return new Date(b.Date || 0) - new Date(a.Date || 0);
+        return getTimeFromDate(b.Date) - getTimeFromDate(a.Date);
       }
       return 0;
     });

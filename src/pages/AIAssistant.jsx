@@ -1415,7 +1415,7 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                         <Sparkles className="w-3.5 h-3.5" />
                       </div>
                     )}
-                    <div className={`relative max-w-[85%] rounded-2xl px-4 py-3 ${msg.role === 'user' ? 'text-white rounded-br-sm' : 'bg-slate-100 text-slate-800 rounded-bl-sm'}`} style={msg.role === 'user' ? { backgroundColor: config.color.hex } : undefined}>
+                    <div className={`relative ${msg.role === 'user' ? 'max-w-[85%] rounded-2xl px-4 py-3 text-white rounded-br-sm' : 'max-w-[95%] lg:max-w-[90%] rounded-2xl rounded-bl-sm px-5 py-4 bg-white/95 border border-slate-200/90 shadow-2xs text-slate-800'}`} style={msg.role === 'user' ? { backgroundColor: config.color.hex } : undefined}>
                       {parsedParts.map((part, pIdx) => {
                         if (part.type === 'formula') {
                           return (
@@ -1431,7 +1431,7 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                           );
                         }
                         return (
-                          <div key={pIdx} className="text-sm whitespace-pre-wrap leading-relaxed"
+                          <div key={pIdx} className={msg.role === 'user' ? "text-sm whitespace-pre-wrap leading-relaxed" : "text-sm leading-relaxed max-w-full overflow-hidden"}
                             dangerouslySetInnerHTML={{ __html: sanitizeAiContent(part.text, {
                               linkClass: msg.role === 'user' ? 'text-white/80 hover:text-white' : 'font-semibold underline',
                               linkStyle: msg.role === 'assistant' ? `color: ${config.color.hex}` : ''
