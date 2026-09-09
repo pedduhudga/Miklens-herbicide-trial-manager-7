@@ -92,6 +92,13 @@ describe('aiMemory - Super Knowledge Base Engine', () => {
     expect(contextString).toContain('[🔬 Trial: Bio-Kill Contact Herbicide @ 2.5 ml/L (TR-2026-ACTIVE)](#/trials?focus=TR-2026-ACTIVE)');
   });
 
+  it('generates exact clickable markdown links to navigate directly to formulations', () => {
+    const { contextString } = buildAIMemoryContext(trials, formulations, projects, [], 'herbicide');
+
+    // Check formulation link pattern in knowledge base and excellent list
+    expect(contextString).toContain('[🧪 Formula: Bio-Kill Contact Herbicide](#/formulations?focus=');
+  });
+
   it('calculates demonstrated control days for active trials from observation timeline', () => {
     const { contextString } = buildAIMemoryContext(trials, formulations, projects, [], 'herbicide');
 

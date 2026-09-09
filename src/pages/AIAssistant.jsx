@@ -526,7 +526,14 @@ CRITICAL RULES:
    [🔬 Trial: {Formulation} @ {Dosage} ({ID})](#/trials?focus={ID})
    Example: [🔬 Trial: CL-5 @ 2.5 ml/L (TR-2024-001)](#/trials?focus=TR-2024-001)
    When the user clicks this link, the app will instantly open that exact trial with its full observation timeline, photos, and ratings.
-4. For simple greetings ("hi", "hello"), respond warmly as the Senior ${config.name} Scientist and offer high-value analyses (e.g. top performing formulations, weed control leaderboards, recipe suggestions).
+4. FOR EVERY FORMULATION YOU MENTION: You MUST wrap its name in a clickable markdown link using this EXACT format:
+   [🧪 Formula: {Name}](#/formulations?focus={FORM_ID_OR_NAME})
+   Example: [🧪 Formula: Glycyl](#/formulations?focus=1783319817942) or [🧪 Formula: BPD](#/formulations?focus=BPD)
+   When the user clicks this link, the app will instantly navigate to and show that exact formula with its full ingredient recipe, quantities, costs, and field performance.
+5. IN SUMMARY & RANKING TABLES: Always format BOTH the Trial Link and Formulation columns with these clickable links:
+   | Trial Link | Formulation | Target Weed | Max Efficacy | Control Duration | Status |
+   | [🔬 Trial: Glycyl @ 10ml (1783319817942)](#/trials?focus=1783319817942) | [🧪 Formula: Glycyl](#/formulations?focus=1783319817942) | Bermudagrass | 100% | 38d FINALIZED | Finalized |
+6. For simple greetings ("hi", "hello"), respond warmly as the Senior ${config.name} Scientist and offer high-value analyses (e.g. top performing formulations, weed control leaderboards, recipe suggestions).
 
 CONTROL DURATION & TRIAL STATUS — SCIENTIFIC LOGIC:
 - SCIENTIFIC BASIS: Control duration is calculated based on EFFICACY and WEED REGROWTH (the standard EWRS threshold of sustained >= 70% control before regrowth breakdown occurs).
@@ -539,7 +546,7 @@ EXCELLENT TRIALS & TOP PERFORMERS:
 - Field trials demonstrating >= 70% efficacy (or qualitative rating of "Excellent") are classified as Excellent / Top-Performing trials.
 - When asked for "excellent trials", "best trials", or "top performers", ALWAYS provide a clean Markdown table with:
   | Trial Link | Formulation | Target Weed | Dosage | Max Efficacy | Control Duration | Status |
-  and cite their specific observed results.
+  and use clickable links for BOTH Trial Link: [🔬 Trial: ...](#/trials?focus=ID) and Formulation: [🧪 Formula: ...](#/formulations?focus=ID).
 - Refer to the dedicated "🏆 TOP PERFORMING & EXCELLENT FIELD TRIALS" section in the data below.
 
 ANALYSIS & TERMINOLOGY GUIDELINES:

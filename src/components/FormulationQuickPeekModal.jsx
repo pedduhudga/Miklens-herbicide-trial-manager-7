@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { X, FlaskConical, ExternalLink, Filter, Layers, DollarSign, Trophy, ArrowRight } from 'lucide-react';
+import { X, FlaskConical, ExternalLink, Filter, Layers, DollarSign, Trophy, ArrowRight, Edit } from 'lucide-react';
 import { safeJsonParse } from '../utils/helpers.js';
 import { calculateFormulationCost } from '../utils/costUtils.js';
 import { getCategoryConfig } from '../utils/categoryConfig.js';
@@ -12,7 +12,8 @@ export default function FormulationQuickPeekModal({
   allTrials = [],
   ingredientsList = [],
   activeCategory = 'herbicide',
-  onApplyTrialFilter
+  onApplyTrialFilter,
+  onEdit
 }) {
   const navigate = useNavigate();
   const config = getCategoryConfig(activeCategory);
@@ -54,9 +55,13 @@ export default function FormulationQuickPeekModal({
 
   if (!isOpen || !formulation) return null;
 
+  const isAlreadyInFormulations = typeof window !== 'undefined' && window.location.hash.includes('/formulations');
+
   const handleGoToFormulations = () => {
     onClose();
-    navigate('/formulations');
+    if (!isAlreadyInFormulations) {
+      navigate(`/formulations?focus=${encodeURIComponent(formulation.ID || formulation.Code || formulation.Name)}`);
+    }
   };
 
   const handleFilterTrials = () => {
@@ -136,6 +141,20 @@ export default function FormulationQuickPeekModal({
 
           {/* Direct CTA Buttons */}
           <div className="space-y-2 pt-2">
+            {onEdit && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onEdit(formulation);
+                }}
+                className="w-full py-2 px-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl font-bold transition flex items-center justify-center gap-2 shadow-2xs"
+              >
+                <Edit className="w-3.5 h-3.5 text-emerald-700" />
+                <span>Edit Full Recipe</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={handleFilterTrials}
@@ -144,14 +163,17 @@ export default function FormulationQuickPeekModal({
               <Filter className="w-3.5 h-3.5" />
               Filter Trials by this Formulation ({stats.totalTrials})
             </button>
-            <button
-              type="button"
-              onClick={handleGoToFormulations}
-              className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold transition flex items-center justify-center gap-2 shadow-xs"
-            >
-              <span>View in Formulations Hub</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
+
+            {!isAlreadyInFormulations && (
+              <button
+                type="button"
+                onClick={handleGoToFormulations}
+                className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold transition flex items-center justify-center gap-2 shadow-xs"
+              >
+                <span>View in Formulations Hub</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
 
         </div>

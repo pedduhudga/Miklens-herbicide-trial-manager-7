@@ -107,12 +107,23 @@ export function sanitizeAiContent(content, options = {}) {
     const isSafe = /^https?:\/\//i.test(href) || href.startsWith('#') || href.startsWith('/');
     const safeUrl = isSafe ? href : '#';
 
-    // Extract trial focus ID for direct click handling
+    // Extract focus ID for direct click handling
     const focusMatch = safeUrl.match(/[?&]focus=([^&#\s]+)/i);
-    const trialId = focusMatch ? focusMatch[1] : '';
+    const focusId = focusMatch ? focusMatch[1] : '';
 
-    if (trialId) {
-      return `<a href="${safeUrl}" data-trial-id="${trialId}" class="trial-redirect-link inline-flex items-center gap-1.5 font-bold px-2.5 py-1 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 shadow-2xs hover:shadow-xs cursor-pointer transition text-xs my-0.5" rel="noopener noreferrer">${text}</a>`;
+    const isFormulationLink = safeUrl.includes('/formulations') || safeUrl.startsWith('formula:');
+    const isTrialLink = safeUrl.includes('/trials') || safeUrl.startsWith('trial:');
+
+    if (isFormulationLink && focusId) {
+      return `<a href="${safeUrl}" data-formula-id="${focusId}" class="formula-redirect-link inline-flex items-center gap-1.5 font-bold px-2.5 py-1 rounded-lg border border-purple-300 bg-purple-50 hover:bg-purple-100 text-purple-900 shadow-2xs hover:shadow-xs cursor-pointer transition text-xs my-0.5" rel="noopener noreferrer">${text}</a>`;
+    }
+
+    if (isTrialLink && focusId) {
+      return `<a href="${safeUrl}" data-trial-id="${focusId}" class="trial-redirect-link inline-flex items-center gap-1.5 font-bold px-2.5 py-1 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 shadow-2xs hover:shadow-xs cursor-pointer transition text-xs my-0.5" rel="noopener noreferrer">${text}</a>`;
+    }
+
+    if (focusId && !isFormulationLink) {
+      return `<a href="${safeUrl}" data-trial-id="${focusId}" class="trial-redirect-link inline-flex items-center gap-1.5 font-bold px-2.5 py-1 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 shadow-2xs hover:shadow-xs cursor-pointer transition text-xs my-0.5" rel="noopener noreferrer">${text}</a>`;
     }
 
     const appliedClass = linkClass ? linkClass : 'font-semibold text-emerald-700 hover:text-emerald-900 underline transition';

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAppState } from '../hooks/useAppState.jsx';
 import { useAuth } from '../hooks/useAuth.js';
 import TopBar from '../components/TopBar.jsx';
@@ -17,6 +17,7 @@ import AppSharingModal from '../components/AppSharingModal.jsx';
 import LinkedTrialsModal from '../components/LinkedTrialsModal.jsx';
 import FormulationComparisonModal from '../components/FormulationComparisonModal.jsx';
 import AiFormulaGeneratorModal from '../components/AiFormulaGeneratorModal.jsx';
+import FormulationQuickPeekModal from '../components/FormulationQuickPeekModal.jsx';
 import { exportFormulationDossier } from '../services/formulationDossier.js';
 import { 
   getFormulationTrialStats, 
@@ -33,6 +34,8 @@ function FormulationCard({
   isViewer,
   CURRENCY_SYMBOL,
   isSelectedForCompare,
+  isHighlighted = false,
+  onQuickPeek,
   onToggleCompare,
   onViewLinkedTrials,
   onLaunchTrial,
@@ -65,8 +68,11 @@ function FormulationCard({
 
   return (
     <div
-      className={`bg-white rounded-2xl p-5 border transition-all duration-200 flex flex-col justify-between ${
-        isSelectedForCompare
+      id={`form-card-${form.ID}`}
+      className={`bg-white rounded-2xl p-5 border transition-all duration-300 flex flex-col justify-between ${
+        isHighlighted
+          ? 'ring-4 ring-purple-500/80 border-purple-500 shadow-2xl bg-purple-50/25'
+          : isSelectedForCompare
           ? 'border-indigo-400 ring-2 ring-indigo-500/20 shadow-md bg-indigo-50/10'
           : 'border-slate-200/90 hover:border-emerald-400/80 hover:shadow-lg shadow-2xs'
       }`}
@@ -76,7 +82,11 @@ function FormulationCard({
         <div className="flex justify-between items-start gap-3 mb-3">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap mb-1">
-              <h3 className="font-bold text-base text-slate-900 break-words leading-tight">
+              <h3
+                onClick={() => onQuickPeek && onQuickPeek(form)}
+                className="font-bold text-base text-slate-900 break-words leading-tight hover:text-purple-700 cursor-pointer transition flex items-center gap-1.5"
+                title="Click to view exact formula recipe and ingredients"
+              >
                 {form.Name}
               </h3>
               {form.Code && (
@@ -472,6 +482,55 @@ export default function Formulations({ onMenuClick }) {
   };
   const [editingForm, setEditingForm] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [highlightFormId, setHighlightFormId] = useState(null);
+  const [quickPeekForm, setQuickPeekForm] = useState(null);
+
+  const location = useLocation();
+
+  // ── ROUTING & FOCUS EFFECT ──────────────────────────────────────────
+  useEffect(() => {
+    const searchParams = new URLSearchParams(location.search);
+    const focusId = searchParams.get('focus');
+    if (focusId) {
+      const cleanFocus = decodeURIComponent(focusId).trim().toLowerCase();
+      const formToFocus = (state.formulations || []).find(f => {
+        const fid = String(f.ID || '').trim().toLowerCase();
+        const fcode = String(f.Code || '').trim().toLowerCase();
+        const fname = String(f.Name || '').trim().toLowerCase();
+        return fid === cleanFocus || fcode === cleanFocus || fname === cleanFocus ||
+               (cleanFocus.length > 2 && fname.includes(cleanFocus)) ||
+               (fname.length > 2 && cleanFocus.includes(fname));
+      });
+
+      if (formToFocus) {
+        setSearchTerm('');
+        setPerformanceFilter('all');
+        setHighlightFormId(formToFocus.ID);
+        setQuickPeekForm(formToFocus);
+
+        let attempts = 0;
+        const scrollInterval = setInterval(() => {
+          attempts++;
+          const el = document.getElementById(`form-card-${formToFocus.ID}`);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            clearInterval(scrollInterval);
+          } else if (attempts >= 10) {
+            clearInterval(scrollInterval);
+          }
+        }, 150);
+
+        const timeout = setTimeout(() => {
+          setHighlightFormId(null);
+        }, 4500);
+
+        return () => {
+          clearInterval(scrollInterval);
+          clearTimeout(timeout);
+        };
+      }
+    }
+  }, [location.search, state.formulations]);
 
   // Form State
   const [name, setName] = useState('');
@@ -863,6 +922,8 @@ export default function Formulations({ onMenuClick }) {
                   isViewer={isViewer}
                   CURRENCY_SYMBOL={CURRENCY_SYMBOL}
                   isSelectedForCompare={isSelectedForCompare}
+                  isHighlighted={highlightFormId === form.ID}
+                  onQuickPeek={setQuickPeekForm}
                   onToggleCompare={toggleCompareSelection}
                   onViewLinkedTrials={setViewingLinkedTrialsForm}
                   onLaunchTrial={handleLaunchTrial}
@@ -1098,6 +1159,21 @@ export default function Formulations({ onMenuClick }) {
         activeCategory={activeCategory}
         libraryIngredients={state.ingredients}
         allTrials={state.trials}
+      />
+
+      {/* Exact Formula Quick-Peek Modal */}
+      <FormulationQuickPeekModal
+        isOpen={!!quickPeekForm}
+        onClose={() => setQuickPeekForm(null)}
+        formulation={quickPeekForm}
+        allTrials={state.trials}
+        ingredientsList={state.ingredients}
+        activeCategory={activeCategory}
+        onApplyTrialFilter={(name) => navigate('/trials', { state: { searchFilter: name } })}
+        onEdit={(f) => {
+          setQuickPeekForm(null);
+          handleOpenModal(f);
+        }}
       />
     </div>
   );

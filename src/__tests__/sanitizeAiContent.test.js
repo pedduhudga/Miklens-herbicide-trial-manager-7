@@ -8,8 +8,8 @@ describe('sanitizeAiContent - Professional Markdown Chat Renderer', () => {
 
 | Formulation | Trial Link | Target Weed | Dosage | Max Efficacy | Control Duration |
 |---|---|---|---|---|---|
-| Glycyl | [🔬 Trial: Glycyl @ 10ml (TR-01)](#/trials?focus=TR-01) | Bermudagrass | 10ml | 100% | 38d-FINALIZED |
-| BPD | [🔬 Trial: BPD @ 5ml (TR-02)](#/trials?focus=TR-02) | Bermuda Grass | 5ml | 100% | 38d-FINALIZED |
+| [🧪 Formula: Glycyl](#/formulations?focus=FORM-GLYCYL) | [🔬 Trial: Glycyl @ 10ml (TR-01)](#/trials?focus=TR-01) | Bermudagrass | 10ml | 100% | 38d-FINALIZED |
+| [🧪 Formula: BPD](#/formulations?focus=FORM-BPD) | [🔬 Trial: BPD @ 5ml (TR-02)](#/trials?focus=TR-02) | Bermuda Grass | 5ml | 100% | 38d-FINALIZED |
 `;
 
     const html = sanitizeAiContent(markdown);
@@ -28,6 +28,11 @@ describe('sanitizeAiContent - Professional Markdown Chat Renderer', () => {
     expect(html).toContain('class="trial-redirect-link inline-flex items-center gap-1.5 font-bold');
     expect(html).toContain('data-trial-id="TR-01"');
     expect(html).toContain('href="#/trials?focus=TR-01"');
+
+    // Verifies formulation link is decorated with formula-redirect-link badge
+    expect(html).toContain('class="formula-redirect-link inline-flex items-center gap-1.5 font-bold');
+    expect(html).toContain('data-formula-id="FORM-GLYCYL"');
+    expect(html).toContain('href="#/formulations?focus=FORM-GLYCYL"');
   });
 
   it('converts bullet points into styled lists', () => {

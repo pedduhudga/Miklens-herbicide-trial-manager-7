@@ -332,7 +332,7 @@ function buildFormulaSummary(parsedTrials) {
   }).sort((a, b) => (b.agronomicScore || 0) - (a.agronomicScore || 0));
 }
 
-function buildExcellentTrialsList(parsedTrials) {
+function buildExcellentTrialsList(parsedTrials, catFormulations = []) {
   // Filter for trials with efficacy >= 70% or Result === 'Excellent' (agronomic field standard)
   const excellent = parsedTrials.filter(t => 
     (t.finalEfficacy !== null && t.finalEfficacy >= 70) || 
@@ -354,7 +354,15 @@ function buildExcellentTrialsList(parsedTrials) {
     const ctrlVal = t.effectiveControlDays !== null 
       ? `${t.effectiveControlDays} days sustained control (${t.isCompleted ? 'finalized' : 'active demonstrated'})`
       : (t.elapsedDays ? `${t.elapsedDays}d elapsed (active)` : 'Under evaluation');
-    return `* [🔬 Trial: ${t.formulation} @ ${t.dosage} (${t.id})](#/trials?focus=${t.id}) | Target: ${t.target} | Kill Rate: ${effVal} (${t.result}) | Control Longevity: ${ctrlVal} | Status: ${t.status} | Location: ${t.location} | Date: ${t.dateISO || t.date} | Inv: ${t.investigator}`;
+
+    const matchedF = (catFormulations || []).find(cf => 
+      String(cf.Name || '').trim().toLowerCase() === String(t.formulation || '').trim().toLowerCase() ||
+      String(cf.Code || '').trim().toLowerCase() === String(t.formulation || '').trim().toLowerCase()
+    );
+    const formId = matchedF ? (matchedF.ID || matchedF.Code || t.formulation) : t.formulation;
+    const formLink = `[🧪 Formula: ${t.formulation}](#/formulations?focus=${encodeURIComponent(formId)})`;
+
+    return `* [🔬 Trial: ${t.formulation} @ ${t.dosage} (${t.id})](#/trials?focus=${t.id}) | Formulation: ${formLink} | Target: ${t.target} | Kill Rate: ${effVal} (${t.result}) | Control Longevity: ${ctrlVal} | Status: ${t.status} | Location: ${t.location} | Date: ${t.dateISO || t.date} | Inv: ${t.investigator}`;
   }).join('\n');
 }
 
@@ -471,7 +479,7 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
   const formulaSums = buildFormulaSummary(parsedTrials);
   const trialIndex = buildTrialIndex(parsedTrials, projectMap);
   const ingredientSynergy = buildIngredientSynergySummary(parsedTrials, catFormulations, catIngredients);
-  const excellentTrialsList = buildExcellentTrialsList(parsedTrials);
+  const excellentTrialsList = buildExcellentTrialsList(parsedTrials, catFormulations);
 
   const finalizedTrials = parsedTrials.filter(t => t.isCompleted);
   const activeTrials = parsedTrials.filter(t => !t.isCompleted);
@@ -534,7 +542,8 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
             ].join('\n    - ')
           : `[UNTESTED in recorded trials | Est. Cost: Rs. ${cost.toFixed(2)}/L]`;
 
-        return `* FORMULATION: "${f.Name}" (Code/ID: ${f.Code || f.ID || 'N/A'})\n    - ${perfSummary}\n    - Current Recipe: [${ingListFormatted}]\n    - MoA / Positioning: ${f.ModeOfAction || f.Notes || 'Fast-acting contact desiccant and cuticular penetrant'}`;
+        const formLink = `[🧪 Formula: ${f.Name}](#/formulations?focus=${encodeURIComponent(f.ID || f.Code || f.Name)})`;
+        return `* FORMULATION: ${formLink} (ID: ${f.ID}, Code: ${f.Code || 'N/A'})\n    - ${perfSummary}\n    - Current Recipe: [${ingListFormatted}]\n    - MoA / Positioning: ${f.ModeOfAction || f.Notes || 'Fast-acting contact desiccant and cuticular penetrant'}`;
       }).join('\n\n')
     : 'No formulations recorded.';
 
@@ -555,14 +564,20 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
   };
 
   const rankStr = targetRankings.map(r => {
-    const topStr = r.topFormulas.map(f =>
-      '    #' + f.rank + ' ' + f.formula + ' @' + f.dosage +
-      ' | avgEff:' + (f.avgEfficacy !== null ? f.avgEfficacy + '%' : '?') +
-      ' | avgCtrlDays:' + (f.avgCtrlDays !== null ? f.avgCtrlDays + 'd (from ' + f.trialCount + ' trials)' : 'under-eval') +
-      ' | maxCtrlDays:' + (f.maxCtrlDays !== null ? f.maxCtrlDays + 'd' : '?') +
-      ' | trials:' + f.trialCount + '(finalized:' + f.finalizedTrialCount + ', active:' + f.activeTrialCount + ')' +
-      ' | E' + f.resultBreakdown.Excellent + '/G' + f.resultBreakdown.Good + '/F' + f.resultBreakdown.Fair + '/P' + f.resultBreakdown.Poor
-    ).join('\n');
+    const topStr = r.topFormulas.map(f => {
+      const matchedF = (catFormulations || []).find(cf => 
+        String(cf.Name || '').trim().toLowerCase() === String(f.formula || '').trim().toLowerCase() ||
+        String(cf.Code || '').trim().toLowerCase() === String(f.formula || '').trim().toLowerCase()
+      );
+      const formId = matchedF ? (matchedF.ID || matchedF.Code || f.formula) : f.formula;
+      const formLink = `[🧪 Formula: ${f.formula}](#/formulations?focus=${encodeURIComponent(formId)})`;
+      return '    #' + f.rank + ' ' + formLink + ' @' + f.dosage +
+        ' | avgEff:' + (f.avgEfficacy !== null ? f.avgEfficacy + '%' : '?') +
+        ' | avgCtrlDays:' + (f.avgCtrlDays !== null ? f.avgCtrlDays + 'd (from ' + f.trialCount + ' trials)' : 'under-eval') +
+        ' | maxCtrlDays:' + (f.maxCtrlDays !== null ? f.maxCtrlDays + 'd' : '?') +
+        ' | trials:' + f.trialCount + '(finalized:' + f.finalizedTrialCount + ', active:' + f.activeTrialCount + ')' +
+        ' | E' + f.resultBreakdown.Excellent + '/G' + f.resultBreakdown.Good + '/F' + f.resultBreakdown.Fair + '/P' + f.resultBreakdown.Poor;
+    }).join('\n');
     return '  TARGET: ' + r.target + ' (' + r.trialCount + ' trials)\n' + topStr;
   }).join('\n\n');
 
@@ -582,15 +597,21 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
     ' | lastTrial:' + (i.lastTrialDate || '?') + ' | targets:[' + i.targets.slice(0, 5).join(', ') + ']'
   ).join('\n');
 
-  const forSumStr = formulaSums.map(f =>
-    '  ' + f.formula + ' @' + f.dosage + ' | Agronomic Score: ' + (f.agronomicScore ? f.agronomicScore.toFixed(1) : '?') + '/100' +
-    ' | Kill Rate(avgEff):' + (f.avgEfficacy !== null ? f.avgEfficacy + '%' : '?') +
-    ' | maxEff:' + (f.maxEfficacy !== null ? f.maxEfficacy + '%' : '?') +
-    ' | Control Days(avg):' + (f.avgCtrlDays !== null ? f.avgCtrlDays + 'd' : 'under-eval') +
-    ' | maxCtrlDays:' + (f.maxCtrlDays !== null ? f.maxCtrlDays + 'd' : '?') +
-    ' | targets:[' + f.targets.join(', ') + '] (' + f.targets.length + ' weed species)' +
-    ' | trials:' + f.trialCount + '(fin:' + f.finalizedCount + ',act:' + f.activeCount + ')'
-  ).join('\n');
+  const forSumStr = formulaSums.map(f => {
+    const matchedF = (catFormulations || []).find(cf => 
+      String(cf.Name || '').trim().toLowerCase() === String(f.formula || '').trim().toLowerCase() ||
+      String(cf.Code || '').trim().toLowerCase() === String(f.formula || '').trim().toLowerCase()
+    );
+    const formId = matchedF ? (matchedF.ID || matchedF.Code || f.formula) : f.formula;
+    const formLink = `[🧪 Formula: ${f.formula}](#/formulations?focus=${encodeURIComponent(formId)})`;
+    return '  ' + formLink + ' @' + f.dosage + ' | Agronomic Score: ' + (f.agronomicScore ? f.agronomicScore.toFixed(1) : '?') + '/100' +
+      ' | Kill Rate(avgEff):' + (f.avgEfficacy !== null ? f.avgEfficacy + '%' : '?') +
+      ' | maxEff:' + (f.maxEfficacy !== null ? f.maxEfficacy + '%' : '?') +
+      ' | Control Days(avg):' + (f.avgCtrlDays !== null ? f.avgCtrlDays + 'd' : 'under-eval') +
+      ' | maxCtrlDays:' + (f.maxCtrlDays !== null ? f.maxCtrlDays + 'd' : '?') +
+      ' | targets:[' + f.targets.join(', ') + '] (' + f.targets.length + ' weed species)' +
+      ' | trials:' + f.trialCount + '(fin:' + f.finalizedCount + ',act:' + f.activeCount + ')';
+  }).join('\n');
 
   const contextString = [
     '=== DATABASE OVERVIEW ===',
@@ -633,7 +654,12 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
     '1. STRICT DATABASE GROUNDING: Always cite the queried trial or formulation using real database facts. Quote exact Trial Scope, Field Performance tier, Avg Efficacy %, Peak Efficacy %, and Est. Recipe Cost directly from its database record. Never invent or hallucinate data.',
     '2. EXCELLENT TRIALS DEFINITION (AGRONOMIC STANDARD: >= 70% EFFICACY): Treat any trial with Kill Rate / Efficacy >= 70% (or Result="Excellent") as an excellent, effective field trial. Highlight these trials from the 🏆 TOP PERFORMING & EXCELLENT FIELD TRIALS section when users ask for the best, most effective, or top-performing trials.',
     '3. REAL CONTROL DAYS (EFFICACY & WEED REGROWTH GROUND TRUTH): Control days are calculated scientifically based on sustained efficacy and weed regrowth (how many days the treatment maintained effective suppression >= 70% before regrowth breakdown occurred), or recorded final control duration. NEVER claim control days are missing if observation data demonstrates weed suppression. Both active and finalized trials with verified observations have valid demonstrated control days.',
-    '4. MANDATORY CLICKABLE TRIAL LINKS: For EVERY trial you mention, wrap it in a clickable link: [🔬 Trial: Formula @ Dosage (ID)](#/trials?focus=ID). Example: [🔬 Trial: CL-5 @ 40 ml/L (1781673863156)](#/trials?focus=1781673863156). When clicked, this immediately navigates the user directly to the exact trial in the system.',
+    '4. MANDATORY CLICKABLE TRIAL & FORMULATION LINKS:',
+    '   a) FOR EVERY TRIAL YOU MENTION: Wrap it in a clickable link: [🔬 Trial: Formula @ Dosage (ID)](#/trials?focus=ID). Example: [🔬 Trial: CL-5 @ 40 ml/L (1781673863156)](#/trials?focus=1781673863156). When clicked, this immediately navigates the user directly to the exact trial in the system.',
+    '   b) FOR EVERY FORMULATION YOU MENTION: Wrap its name in a clickable link: [🧪 Formula: {Name}](#/formulations?focus={FORM_ID_OR_NAME}). Example: [🧪 Formula: Glycyl](#/formulations?focus=1783319817942) or [🧪 Formula: BPD](#/formulations?focus=BPD). When clicked, this immediately opens and shows the user the exact recipe and formula details.',
+    '   c) IN RANKING & COMPARISON TABLES: Always use clickable links for BOTH the Trial Link and Formulation columns:',
+    '      | Trial Link | Formulation | Target Weed | Max Efficacy | Control Duration | Status |',
+    '      | [🔬 Trial: Glycyl @ 10ml (1783319817942)](#/trials?focus=1783319817942) | [🧪 Formula: Glycyl](#/formulations?focus=1783319817942) | Bermudagrass | 100% | 38d FINALIZED | Finalized |',
     '5. TESTED FIELD DOSAGES: When asked for the optimal dosage of a formula, cite the exact rates listed under "Tested Field Dosages" for that formula in the database (e.g. "X ml/L with Y% avg eff"). Recommend an appropriate carrier volume (typically 400–500 L/ha water) based on agronomic standards.',
     '6. RECIPE & UNIT ANOMALY DETECTION: Present the current recipe from the database cleanly in bullet points. If any liquid active ingredient has a recorded quantity < 1 with unit "ml" (such as 0.100 ml or 0.200 ml), alert the user to the likely unit notation typo in data entry (likely intended as Litres or hundreds of ml).',
     '7. REALISTIC INGREDIENT UPGRADES: When suggesting recipe upgrades, base all proposed ingredients strictly on the INGREDIENT INVENTORY & FIELD SYNERGY MATRIX. Compare the formula\'s estimated cost per liter against cheaper database benchmarks, and propose realistic adjustments (cost reduction, penetration enhancers, or film-formers) grounded in real inventory components.',
