@@ -273,3 +273,162 @@ export async function fetchSoilData(lat, lon, date = null) {
         return null;
     }
 }
+
+/**
+ * Evaluates spray application weather suitability and chemical rainfastness risk.
+ *
+ * @param {Object} params
+ * @param {Object|string} params.weather - Weather data or conditions { temp, wind, rain, humidity }
+ * @param {Object|string} params.formulation - Formulation object or name
+ * @param {string} [params.activeCategory='herbicide'] - Category
+ * @returns {Object} Risk analysis { status, severity, rainfastHours, chemistryType, risks, recommendations, isOptimal }
+ */
+export function evaluateSprayWeatherRisk({ weather = {}, formulation = null, activeCategory = 'herbicide' }) {
+    const temp = typeof weather?.temp === 'number' ? weather.temp : parseFloat(weather?.temp || weather?.Temperature || 25);
+    const wind = typeof weather?.wind === 'number' ? weather.wind : parseFloat(weather?.wind || weather?.Windspeed || weather?.wind_speed || 8);
+    const humidity = typeof weather?.humidity === 'number' ? weather.humidity : parseFloat(weather?.humidity || weather?.Humidity || 60);
+    const rainDesc = String(weather?.rain || weather?.Rain || '').toLowerCase();
+
+    // Determine rainfastness requirement (in hours) based on chemistry
+    let rainfastHours = 2.0;
+    let chemistryType = 'Standard Systemic';
+
+    const formText = (
+        (typeof formulation === 'string' ? formulation : '') + ' ' +
+        (formulation?.Name || '') + ' ' +
+        (formulation?.Notes || '') + ' ' +
+        (formulation?.IngredientsJSON || '')
+    ).toLowerCase();
+
+    if (
+        formText.includes('glufosinate') ||
+        formText.includes('paraquat') ||
+        formText.includes('diquat') ||
+        formText.includes('carfentrazone') ||
+        formText.includes('oxyfluorfen')
+    ) {
+        rainfastHours = 0.5;
+        chemistryType = 'Rapid Contact Knockdown (0.5h Rainfast)';
+    } else if (
+        formText.includes('glyphosate') ||
+        formText.includes('glycyl') ||
+        formText.includes('goweed')
+    ) {
+        rainfastHours = formText.includes('surfactant') || formText.includes('ams') ? 2.0 : 3.5;
+        chemistryType = 'Deep Systemic Translocation (2-4h Rainfast)';
+    } else if (
+        formText.includes('2,4-d') ||
+        formText.includes('dicamba') ||
+        formText.includes('mcpa') ||
+        formText.includes('triclopyr')
+    ) {
+        rainfastHours = 2.5;
+        chemistryType = 'Synthetic Auxin Systemic (2.5h Rainfast)';
+    } else if (
+        formText.includes('clethodim') ||
+        formText.includes('haloxyfop') ||
+        formText.includes('quizalofop')
+    ) {
+        rainfastHours = 1.5;
+        chemistryType = 'ACCase Foliar Graminicide (1.5h Rainfast)';
+    }
+
+    const risks = [];
+    const recommendations = [];
+
+    // 1. Evaluate Wind & Drift Hazard
+    if (wind > 20) {
+        risks.push({
+            type: 'drift',
+            severity: 'high',
+            title: `High Wind Drift Risk (${wind} km/h)`,
+            message: 'Wind speed exceeds 20 km/h. Severe risk of off-target herbicide drift and plot cross-contamination.'
+        });
+        recommendations.push('Do NOT apply under wind > 20 km/h. Postpone spray until early morning or calm evening window.');
+    } else if (wind > 14) {
+        risks.push({
+            type: 'drift',
+            severity: 'moderate',
+            title: `Moderate Drift Risk (${wind} km/h)`,
+            message: 'Elevated droplet drift hazard. Fine spray droplets will drift outside the target microplot boundary.'
+        });
+        recommendations.push('Lower boom height and switch to coarse air-induction nozzles to suppress fine driftable droplets.');
+    } else if (wind < 3) {
+        risks.push({
+            type: 'inversion',
+            severity: 'moderate',
+            title: 'Dead Calm / Temperature Inversion Risk',
+            message: 'Extremely calm wind (< 3 km/h) often correlates with surface temperature inversions, suspending small droplets in fog layers.'
+        });
+        recommendations.push('Verify vertical air mixing; avoid spraying if smoke or mist hangs horizontally near the soil.');
+    }
+
+    // 2. Evaluate Rain & Wash-off Risk
+    const isRainingNow = rainDesc.includes('rain') || rainDesc.includes('wet') || rainDesc.includes('shower') || rainDesc.includes('storm');
+    if (isRainingNow) {
+        risks.push({
+            type: 'washoff',
+            severity: 'high',
+            title: 'High Wash-Off Risk (Precipitation Active)',
+            message: `Active precipitation will strip unabsorbed herbicide before the required ${rainfastHours}h rainfast duration.`
+        });
+        recommendations.push(`Halt application immediately. Foliar active requires at least ${rainfastHours}h dry canopy post-spray.`);
+    } else if (rainDesc.includes('cloudy') || rainDesc.includes('overcast') || humidity > 85) {
+        risks.push({
+            type: 'washoff',
+            severity: 'moderate',
+            title: `High Humidity / Wash-Off Caution (${humidity}%)`,
+            message: `Overcast high-humidity conditions slow droplet drying and increase wash-off risk if rain arrives within ${rainfastHours} hours.`
+        });
+        recommendations.push(`Add rain-adhering sticker adjuvant to shorten required rainfast duration.`);
+    }
+
+    // 3. Evaluate Temperature & Volatilization
+    if (temp > 32) {
+        risks.push({
+            type: 'volatilization',
+            severity: 'high',
+            title: `High Heat Volatilization (${temp}°C)`,
+            message: 'Air temperature exceeds 32°C. Droplets rapidly evaporate before leaf absorption, and auxin herbicides may vaporize.'
+        });
+        recommendations.push('Schedule application before 9:00 AM or after 5:00 PM when temperatures are below 28°C.');
+    } else if (temp < 12) {
+        risks.push({
+            type: 'cold',
+            severity: 'moderate',
+            title: `Low Temperature Translocation Slowdown (${temp}°C)`,
+            message: 'Cold ambient temperature slows down plant vascular transport, significantly delaying visual symptom onset.'
+        });
+        recommendations.push('Expect delayed herbicide knockdown (3–5 extra days to reach peak efficacy).');
+    }
+
+    const hasHigh = risks.some(r => r.severity === 'high');
+    const hasModerate = risks.some(r => r.severity === 'moderate');
+
+    let status = 'Optimal Application Conditions';
+    let severity = 'optimal';
+    if (hasHigh) {
+        status = 'High Spray Hazard';
+        severity = 'high';
+    } else if (hasModerate) {
+        status = 'Moderate Spray Caution';
+        severity = 'moderate';
+    }
+
+    if (risks.length === 0) {
+        recommendations.push(`Conditions optimal: ${temp}°C, ${wind} km/h wind, dry foliage. Optimal for ${chemistryType}.`);
+    }
+
+    return {
+        status,
+        severity,
+        rainfastHours,
+        chemistryType,
+        temp,
+        wind,
+        humidity,
+        risks,
+        recommendations,
+        isOptimal: severity === 'optimal'
+    };
+}

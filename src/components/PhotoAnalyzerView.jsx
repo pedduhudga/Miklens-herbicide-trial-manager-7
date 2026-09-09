@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { X, Sliders, Copy, Check, Leaf, Activity, Sparkles, SlidersHorizontal, Eye, Flame, RefreshCw } from 'lucide-react';
-import { analyzePlantPhenotype } from '../utils/phenotyping.js';
+import { X, Sliders, Copy, Check, Leaf, Activity, Sparkles, SlidersHorizontal, Eye, Flame, RefreshCw, ArrowLeftRight, Clock, Image as ImageIcon, Split } from 'lucide-react';
+import { analyzePlantPhenotype, comparePhenotypeProgression } from '../utils/phenotyping.js';
 
 export default function PhotoAnalyzerView({
   isOpen,
@@ -10,7 +10,8 @@ export default function PhotoAnalyzerView({
   results = [],
   onApplyValue,
   activeCategory = 'herbicide',
-  onSave
+  onSave,
+  allPhotos = []
 }) {
   const [opacity, setOpacity] = useState(0.4);
   const [minConfidence, setMinConfidence] = useState(0.4);
@@ -19,10 +20,39 @@ export default function PhotoAnalyzerView({
   const [imgLoaded, setImgLoaded] = useState(false);
 
   // --- Pixel Phenotyping State ---
-  const [activeAnalysisMode, setActiveAnalysisMode] = useState('boxes'); // 'boxes' | 'phenotype'
+  const [activeAnalysisMode, setActiveAnalysisMode] = useState('boxes'); // 'boxes' | 'phenotype' | 'progression'
   const [phenotypeResult, setPhenotypeResult] = useState(null);
   const [phenotypeLoading, setPhenotypeLoading] = useState(false);
   const [showPhenotypeMask, setShowPhenotypeMask] = useState(true);
+
+  // --- Temporal Progression State ---
+  const candidatePhotos = useMemo(() => {
+    const list = Array.isArray(allPhotos) ? allPhotos : [];
+    return list.map(p => {
+      if (typeof p === 'string') return { url: p, name: 'Observation Photo', daa: null, date: '' };
+      return {
+        url: p.fileData || p.url || p.dataUrl || p.driveId || '',
+        name: p.fileName || p.name || p.label || 'Observation Photo',
+        daa: p.daa !== undefined ? p.daa : (p.day !== undefined ? p.day : null),
+        date: p.date || p.timestamp || ''
+      };
+    }).filter(p => p.url && p.url !== imageUrl);
+  }, [allPhotos, imageUrl]);
+
+  const [baselinePhotoUrl, setBaselinePhotoUrl] = useState('');
+  const [sliderPosition, setSliderPosition] = useState(50);
+  const [isDraggingSlider, setIsDraggingSlider] = useState(false);
+  const [progressionResult, setProgressionResult] = useState(null);
+  const [progressionLoading, setProgressionLoading] = useState(false);
+  const splitContainerRef = useRef(null);
+
+  // Set default baseline photo when candidatePhotos change
+  useEffect(() => {
+    if (candidatePhotos.length > 0 && !baselinePhotoUrl) {
+      const zeroDaa = candidatePhotos.find(p => p.daa === 0 || String(p.daa) === '0');
+      setBaselinePhotoUrl(zeroDaa ? zeroDaa.url : candidatePhotos[0].url);
+    }
+  }, [candidatePhotos, baselinePhotoUrl]);
 
   const [localResults, setLocalResults] = useState([]);
   const [selectedIndex, setSelectedIndex] = useState(null);
@@ -58,11 +88,31 @@ export default function PhotoAnalyzerView({
     }
   }, []);
 
+  // Temporal Progression runner
+  const runProgressionComparison = useCallback(async (customBaseline) => {
+    const targetBaseline = customBaseline || baselinePhotoUrl;
+    if (!imageUrl || !targetBaseline) return;
+    setProgressionLoading(true);
+    try {
+      const res = await comparePhenotypeProgression(targetBaseline, imageUrl, {
+        daysBetween: 7,
+        generateHeatmaps: false
+      });
+      setProgressionResult(res);
+    } catch (err) {
+      console.warn('[PhotoAnalyzerView] Progression analysis error:', err);
+    } finally {
+      setProgressionLoading(false);
+    }
+  }, [imageUrl, baselinePhotoUrl]);
+
   useEffect(() => {
     if (activeAnalysisMode === 'phenotype' && !phenotypeResult && !phenotypeLoading && imgLoaded) {
       runPhenotyping();
+    } else if (activeAnalysisMode === 'progression' && baselinePhotoUrl && !progressionResult && !progressionLoading) {
+      runProgressionComparison();
     }
-  }, [activeAnalysisMode, phenotypeResult, phenotypeLoading, imgLoaded, runPhenotyping]);
+  }, [activeAnalysisMode, phenotypeResult, phenotypeLoading, imgLoaded, runPhenotyping, baselinePhotoUrl, progressionResult, progressionLoading, runProgressionComparison]);
 
   // Dynamic category UI labels
   const getCategoryLabels = () => {
@@ -526,6 +576,67 @@ export default function PhotoAnalyzerView({
               <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
               <p className="text-sm">Running AI Computer Vision Analysis...</p>
             </div>
+          ) : activeAnalysisMode === 'progression' && baselinePhotoUrl ? (
+            <div
+              ref={splitContainerRef}
+              onMouseMove={(e) => {
+                if (!isDraggingSlider || !splitContainerRef.current) return;
+                const rect = splitContainerRef.current.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const pct = Math.min(100, Math.max(0, (x / rect.width) * 100));
+                setSliderPosition(Math.round(pct));
+              }}
+              onTouchMove={(e) => {
+                if (!isDraggingSlider || !splitContainerRef.current) return;
+                const rect = splitContainerRef.current.getBoundingClientRect();
+                const x = e.touches[0].clientX - rect.left;
+                const pct = Math.min(100, Math.max(0, (x / rect.width) * 100));
+                setSliderPosition(Math.round(pct));
+              }}
+              onMouseUp={() => setIsDraggingSlider(false)}
+              onTouchEnd={() => setIsDraggingSlider(false)}
+              onMouseLeave={() => setIsDraggingSlider(false)}
+              className="relative inline-block max-w-full max-h-[70vh] p-2 select-none overflow-hidden"
+            >
+              {/* Current Observation Photo (Base layer) */}
+              <img
+                src={imageUrl}
+                alt="Current Observation"
+                className="max-w-full max-h-[65vh] object-contain rounded select-none block pointer-events-none"
+              />
+
+              {/* Baseline Photo (Clipped Overlay layer) */}
+              <div
+                className="absolute inset-2 overflow-hidden pointer-events-none rounded"
+                style={{ clipPath: `polygon(0 0, ${sliderPosition}% 0, ${sliderPosition}% 100%, 0 100%)` }}
+              >
+                <img
+                  src={baselinePhotoUrl}
+                  alt="Baseline Observation"
+                  className="max-w-full max-h-[65vh] object-contain select-none block"
+                />
+              </div>
+
+              {/* Draggable Vertical Divider Handle */}
+              <div
+                className="absolute top-2 bottom-2 w-1 bg-white shadow-xl flex items-center justify-center cursor-ew-resize z-30"
+                style={{ left: `calc(${sliderPosition}% + 4px)` }}
+                onMouseDown={() => setIsDraggingSlider(true)}
+                onTouchStart={() => setIsDraggingSlider(true)}
+              >
+                <div className="w-8 h-8 rounded-full bg-white shadow-2xl border-2 border-blue-600 flex items-center justify-center text-blue-800 text-xs font-black select-none active:scale-110 transition-transform">
+                  <ArrowLeftRight className="w-4 h-4" />
+                </div>
+              </div>
+
+              {/* Floating badges for Baseline vs Current */}
+              <div className="absolute top-4 left-4 z-20 px-2.5 py-1 bg-slate-900/80 text-white rounded-lg text-[10px] font-bold backdrop-blur-xs shadow">
+                0 DAA Baseline
+              </div>
+              <div className="absolute top-4 right-4 z-20 px-2.5 py-1 bg-blue-900/80 text-white rounded-lg text-[10px] font-bold backdrop-blur-xs shadow">
+                Current Observation
+              </div>
+            </div>
           ) : (
             <div className="relative inline-block max-w-full max-h-[70vh] p-2">
               <img
@@ -574,14 +685,14 @@ export default function PhotoAnalyzerView({
             <button
               type="button"
               onClick={() => setActiveAnalysisMode('boxes')}
-              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+              className={`flex-1 py-1.5 px-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 ${
                 activeAnalysisMode === 'boxes'
                   ? 'bg-emerald-600 text-white shadow-xs'
                   : 'text-slate-500 hover:bg-slate-100'
               }`}
             >
               <Leaf className="w-3.5 h-3.5" />
-              <span>Weed Boxes</span>
+              <span>Boxes</span>
             </button>
             <button
               type="button"
@@ -589,20 +700,149 @@ export default function PhotoAnalyzerView({
                 setActiveAnalysisMode('phenotype');
                 if (!phenotypeResult && !phenotypeLoading) runPhenotyping();
               }}
-              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+              className={`flex-1 py-1.5 px-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 ${
                 activeAnalysisMode === 'phenotype'
                   ? 'bg-purple-600 text-white shadow-xs'
                   : 'text-slate-500 hover:bg-slate-100'
               }`}
             >
               <Sparkles className="w-3.5 h-3.5" />
-              <span>Pixel Phenotype</span>
+              <span>Phenotype</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveAnalysisMode('progression');
+                if (!progressionResult && !progressionLoading && baselinePhotoUrl) runProgressionComparison();
+              }}
+              className={`flex-1 py-1.5 px-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 ${
+                activeAnalysisMode === 'progression'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-500 hover:bg-slate-100'
+              }`}
+            >
+              <ArrowLeftRight className="w-3.5 h-3.5" />
+              <span>Progression</span>
             </button>
           </div>
 
           {/* Results list */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            {activeAnalysisMode === 'phenotype' ? (
+            {activeAnalysisMode === 'progression' ? (
+              <div className="space-y-3.5">
+                {/* Baseline selector */}
+                <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs space-y-2">
+                  <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 flex items-center justify-between">
+                    <span>Baseline (0 DAA) Photo</span>
+                    <Clock className="w-3 h-3 text-blue-600" />
+                  </label>
+                  {candidatePhotos.length > 0 ? (
+                    <select
+                      value={baselinePhotoUrl}
+                      onChange={(e) => {
+                        setBaselinePhotoUrl(e.target.value);
+                        setProgressionResult(null);
+                        runProgressionComparison(e.target.value);
+                      }}
+                      className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 font-medium text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      {candidatePhotos.map((p, idx) => (
+                        <option key={idx} value={p.url}>
+                          {p.daa !== null ? `${p.daa} DAA - ` : ''}{p.name} {p.date ? `(${p.date})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <p className="text-[11px] text-slate-400 italic">
+                      Trial has one photo. Add or select another observation photo to compare progression.
+                    </p>
+                  )}
+                </div>
+
+                {/* KPI Progression Card */}
+                {progressionLoading ? (
+                  <div className="py-8 flex flex-col items-center justify-center gap-2 text-slate-400">
+                    <RefreshCw className="w-6 h-6 text-blue-600 animate-spin" />
+                    <span className="text-xs font-medium">Computing Canopy Delta & Desiccation...</span>
+                  </div>
+                ) : progressionResult ? (
+                  <div className="space-y-3">
+                    <div className="bg-gradient-to-br from-blue-900 to-slate-900 text-white p-3.5 rounded-xl border border-blue-800/40 shadow-sm">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-blue-300 flex items-center gap-1">
+                          <ArrowLeftRight className="w-3 h-3 text-blue-400" /> Knockdown Rate
+                        </span>
+                        <span className="text-[10px] font-mono text-blue-300">Baseline-Adjusted</span>
+                      </div>
+                      <div className="flex items-baseline justify-between">
+                        <span className="text-2xl font-black text-white">
+                          {progressionResult.knockdownRate}%
+                        </span>
+                        <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-400/30">
+                          Weed Suppression
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="p-2.5 bg-white rounded-xl border border-emerald-100 shadow-2xs">
+                        <div className="text-[10px] font-bold uppercase text-emerald-700">Canopy Loss</div>
+                        <div className="text-base font-black text-slate-800 mt-0.5">
+                          {progressionResult.deltaGreenPct > 0 ? `-${progressionResult.deltaGreenPct}%` : '0%'}
+                        </div>
+                        <div className="text-[10px] text-slate-400">Live foliage reduction</div>
+                      </div>
+                      <div className="p-2.5 bg-white rounded-xl border border-amber-100 shadow-2xs">
+                        <div className="text-[10px] font-bold uppercase text-amber-700">Necrosis Gain</div>
+                        <div className="text-base font-black text-slate-800 mt-0.5">
+                          +{progressionResult.deltaNecrosisPct}%
+                        </div>
+                        <div className="text-[10px] text-slate-400">Tissue burn progression</div>
+                      </div>
+                    </div>
+
+                    {progressionResult.desiccationVelocity && (
+                      <div className="p-2.5 bg-white rounded-xl border border-slate-200/80 text-xs flex justify-between items-center">
+                        <span className="text-slate-500 font-semibold">Desiccation Velocity:</span>
+                        <span className="font-mono font-black text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
+                          {progressionResult.desiccationVelocity}% / day
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Quick Swipe Presets */}
+                    <div className="p-2.5 bg-white rounded-xl border border-slate-200/80 space-y-1.5">
+                      <div className="flex justify-between text-[11px] font-bold text-slate-600">
+                        <span>Swipe Split Position</span>
+                        <span className="font-mono text-blue-700">{sliderPosition}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={sliderPosition}
+                        onChange={(e) => setSliderPosition(Number(e.target.value))}
+                        className="w-full h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                      />
+                      <div className="flex justify-between gap-1 pt-1">
+                        <button type="button" onClick={() => setSliderPosition(25)} className="text-[10px] font-bold px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-600">25%</button>
+                        <button type="button" onClick={() => setSliderPosition(50)} className="text-[10px] font-bold px-2 py-0.5 bg-blue-100 hover:bg-blue-200 rounded text-blue-700">50%</button>
+                        <button type="button" onClick={() => setSliderPosition(75)} className="text-[10px] font-bold px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-600">75%</button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => runProgressionComparison()}
+                    disabled={!baselinePhotoUrl}
+                    className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow transition flex items-center justify-center gap-2"
+                  >
+                    <ArrowLeftRight className="w-4 h-4" /> Compare Canopy Progression
+                  </button>
+                )}
+              </div>
+            ) : activeAnalysisMode === 'phenotype' ? (
               <div className="space-y-4">
                 <div className="bg-gradient-to-br from-purple-900 to-slate-900 text-white p-3.5 rounded-xl border border-purple-800/40 shadow-sm">
                   <div className="flex items-center justify-between mb-1">
@@ -818,7 +1058,21 @@ export default function PhotoAnalyzerView({
                 Copy Info
               </button>
 
-              {activeAnalysisMode === 'phenotype' ? (
+              {activeAnalysisMode === 'progression' ? (
+                <button
+                  type="button"
+                  disabled={!progressionResult}
+                  onClick={() => {
+                    if (progressionResult && progressionResult.knockdownRate !== undefined && onApplyValue) {
+                      onApplyValue(progressionResult.knockdownRate);
+                      onClose();
+                    }
+                  }}
+                  className="flex-1 py-2 px-3 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl shadow transition"
+                >
+                  Apply Knockdown ({progressionResult ? progressionResult.knockdownRate : 0}%)
+                </button>
+              ) : activeAnalysisMode === 'phenotype' ? (
                 <button
                   type="button"
                   disabled={!phenotypeResult}

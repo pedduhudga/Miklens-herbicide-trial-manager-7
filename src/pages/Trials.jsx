@@ -29,6 +29,7 @@ import CameraCapture from '../components/CameraCapture.jsx';
 import CropperModal from '../components/CropperModal.jsx';
 import CategoryValidationAlert, { showCategoryValidationToast } from '../components/CategoryValidationAlert.jsx';
 import PhotoAnalyzerView from '../components/PhotoAnalyzerView.jsx';
+import SprayWeatherRiskBadge from '../components/SprayWeatherRiskBadge.jsx';
 import { analyzePhoto, analyzePhotosBatch, identifyWeedFromPhoto as identifyWeedFromPhotoService, getAPIKeys, generateTextWithAI, parseHarvestTextLog } from '../services/multiProviderAI.js';
 import TrialCard from '../components/TrialCard.jsx';
 import FormulationQuickPeekModal from '../components/FormulationQuickPeekModal.jsx';
@@ -8920,6 +8921,18 @@ If none are present, write "None".`;
                       </div>
                     )}
 
+                    {/* Spray Weather Risk & Rainfastness Watchdog */}
+                    <SprayWeatherRiskBadge
+                      weather={{
+                        temp: detailTrial.Temperature,
+                        humidity: detailTrial.Humidity,
+                        wind: detailTrial.Windspeed,
+                        rain: detailTrial.Rain
+                      }}
+                      formulation={detailTrial.FormulationName || detailTrial.FormulationID}
+                      activeCategory={detailTrial.Category || state?.activeCategory}
+                    />
+
                     {/* Climate Risk Audit */}
                     <div className="border rounded-xl p-4 bg-slate-50">
                       <p className="text-xs font-bold text-slate-700 uppercase mb-3 flex items-center gap-1.5">
@@ -9190,6 +9203,18 @@ If none are present, write "None".`;
                   <option value="Yes">Yes</option>
                 </select>
               </div>
+            </div>
+            <div className="mt-3">
+              <SprayWeatherRiskBadge
+                weather={{
+                  temp: appForm.temp,
+                  humidity: appForm.humidity,
+                  wind: appForm.windspeed,
+                  rain: appForm.rain
+                }}
+                formulation={activeTrial?.FormulationName || activeTrial?.FormulationID}
+                activeCategory={activeTrial?.Category || state?.activeCategory}
+              />
             </div>
           </div>
 
@@ -9905,20 +9930,20 @@ If none are present, write "None".`;
                 <input type="number" min="0" step="0.1" value={obsForm.weatherRain} onChange={e => setObsForm(p=>({...p,weatherRain:e.target.value}))} placeholder="e.g. 0" className="w-full px-2 py-1.5 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400" />
               </div>
             </div>
-            {/* Live climate risk preview */}
-            {(() => {
-              const risks = getClimateRisks(obsForm.weatherTemp, obsForm.weatherWind, obsForm.weatherRain);
-              if (!risks.length) return null;
-              return (
-                <div className="space-y-1">
-                  {risks.map((r, i) => (
-                    <div key={i} className={`text-[10px] px-2 py-1 rounded font-semibold flex items-center gap-1 ${
-                      r.type === 'danger' ? 'bg-red-50 text-red-700' : r.type === 'warning' ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'
-                    }`}>{r.type === 'danger' ? '⚠' : 'ℹ'} {r.msg}</div>
-                  ))}
-                </div>
-              );
-            })()}
+            {/* Live Spray Weather & Rainfastness Risk Preview */}
+            <div className="mt-2">
+              <SprayWeatherRiskBadge
+                weather={{
+                  temp: obsForm.weatherTemp,
+                  humidity: obsForm.weatherHumidity,
+                  wind: obsForm.weatherWind,
+                  rain: obsForm.weatherRain
+                }}
+                formulation={activeTrial?.FormulationName || activeTrial?.FormulationID}
+                activeCategory={activeTrial?.Category || state?.activeCategory}
+                compact={true}
+              />
+            </div>
           </div>
 
           <div>
@@ -10457,6 +10482,7 @@ If none are present, write "None".`;
         isOpen={photoAnalyzerOpen}
         onClose={() => { setPhotoAnalyzerOpen(false); setPhotoAnalyzerResults([]); setPhotoAnalyzerUrl(null); }}
         imageUrl={photoAnalyzerUrl}
+        allPhotos={safeJsonParse(activeTrial?.PhotoURLs, [])}
         loading={photoAnalyzerLoading}
         results={photoAnalyzerResults}
         onApplyValue={(val) => {

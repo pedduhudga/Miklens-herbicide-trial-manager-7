@@ -195,3 +195,60 @@ export function generatePhenotypeHeatmap(imageSource, options = {}) {
   ctx.putImageData(imgData, 0, 0);
   return canvas.toDataURL('image/jpeg', 0.85);
 }
+
+/**
+ * Compare two chronological plant canopy images (e.g., 0 DAA Baseline vs 7 DAA Current)
+ * to calculate delta canopy reduction, necrotic tissue expansion, and desiccation velocity.
+ *
+ * @param {HTMLImageElement|HTMLCanvasElement|string} baselineSource - Baseline image (0 DAA)
+ * @param {HTMLImageElement|HTMLCanvasElement|string} currentSource - Current observation image (X DAA)
+ * @param {Object} options - { daysBetween, generateHeatmaps, sampleStep, baselineCanvas, currentCanvas }
+ * @returns {Promise<Object>} Comprehensive progression analysis
+ */
+export async function comparePhenotypeProgression(baselineSource, currentSource, options = {}) {
+  const { daysBetween = null, generateHeatmaps = true, sampleStep = 2, baselineCanvas, currentCanvas } = options;
+
+  const [baselineMetrics, currentMetrics] = await Promise.all([
+    analyzePlantPhenotype(baselineSource, { sampleStep, generateHeatmap: generateHeatmaps, canvas: baselineCanvas }),
+    analyzePlantPhenotype(currentSource, { sampleStep, generateHeatmap: generateHeatmaps, canvas: currentCanvas })
+  ]);
+
+  // Delta Green Canopy Reduction: Baseline Green % - Current Green %
+  // Positive value indicates live weed canopy has been destroyed.
+  const deltaGreenPct = parseFloat((baselineMetrics.greenCanopyPct - currentMetrics.greenCanopyPct).toFixed(1));
+
+  // Delta Necrosis Expansion: Current Necrosis % - Baseline Necrosis %
+  // Positive value indicates herbicide chemical burning has increased.
+  const deltaNecrosisPct = parseFloat((currentMetrics.necroticPct - baselineMetrics.necroticPct).toFixed(1));
+
+  // Relative Knockdown Efficacy %:
+  // How much of the baseline photosynthetic foliage was suppressed
+  let knockdownRate = 0;
+  if (baselineMetrics.greenCanopyPct > 0) {
+    const rawReduction = ((baselineMetrics.greenCanopyPct - currentMetrics.greenCanopyPct) / baselineMetrics.greenCanopyPct) * 100;
+    knockdownRate = Math.min(100, Math.max(0, Math.round(rawReduction)));
+  } else {
+    knockdownRate = currentMetrics.calculatedDesiccationRate;
+  }
+
+  // Desiccation Velocity: % canopy destruction per day
+  let desiccationVelocity = null;
+  const days = Number(daysBetween);
+  if (!isNaN(days) && days > 0) {
+    desiccationVelocity = parseFloat((Math.max(deltaGreenPct, deltaNecrosisPct) / days).toFixed(2));
+  }
+
+  return {
+    baselineMetrics,
+    currentMetrics,
+    deltaGreenPct,
+    deltaNecrosisPct,
+    knockdownRate,
+    desiccationVelocity,
+    daysBetween: days > 0 ? days : null,
+    progressionSummary: deltaGreenPct > 0
+      ? `Live canopy reduced by ${deltaGreenPct}% with ${currentMetrics.necroticPct}% foliar desiccation.`
+      : `No significant canopy reduction detected between observations.`
+  };
+}
+
