@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { X, Sliders, Copy, Check, Leaf } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { X, Sliders, Copy, Check, Leaf, Activity, Sparkles, SlidersHorizontal, Eye, Flame, RefreshCw } from 'lucide-react';
+import { analyzePlantPhenotype } from '../utils/phenotyping.js';
 
 export default function PhotoAnalyzerView({
   isOpen,
@@ -16,6 +17,12 @@ export default function PhotoAnalyzerView({
   const [highlightedIndex, setHighlightedIndex] = useState(null);
   const [copied, setCopied] = useState(false);
   const [imgLoaded, setImgLoaded] = useState(false);
+
+  // --- Pixel Phenotyping State ---
+  const [activeAnalysisMode, setActiveAnalysisMode] = useState('boxes'); // 'boxes' | 'phenotype'
+  const [phenotypeResult, setPhenotypeResult] = useState(null);
+  const [phenotypeLoading, setPhenotypeLoading] = useState(false);
+  const [showPhenotypeMask, setShowPhenotypeMask] = useState(true);
 
   const [localResults, setLocalResults] = useState([]);
   const [selectedIndex, setSelectedIndex] = useState(null);
@@ -36,6 +43,26 @@ export default function PhotoAnalyzerView({
       setLocalResults(results);
     }
   }, [results]);
+
+  // Autonomous Phenotyping runner
+  const runPhenotyping = useCallback(async () => {
+    if (!imgRef.current) return;
+    setPhenotypeLoading(true);
+    try {
+      const res = await analyzePlantPhenotype(imgRef.current, { generateHeatmap: true });
+      setPhenotypeResult(res);
+    } catch (err) {
+      console.warn('[PhotoAnalyzerView] Phenotyping error:', err);
+    } finally {
+      setPhenotypeLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeAnalysisMode === 'phenotype' && !phenotypeResult && !phenotypeLoading && imgLoaded) {
+      runPhenotyping();
+    }
+  }, [activeAnalysisMode, phenotypeResult, phenotypeLoading, imgLoaded, runPhenotyping]);
 
   // Dynamic category UI labels
   const getCategoryLabels = () => {
@@ -358,6 +385,22 @@ export default function PhotoAnalyzerView({
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+    // If viewing autonomous phenotype mask, draw heatmap image
+    if (activeAnalysisMode === 'phenotype') {
+      if (showPhenotypeMask && phenotypeResult?.heatmapDataUrl) {
+        const maskImg = new Image();
+        maskImg.onload = () => {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.save();
+          ctx.globalAlpha = Math.min(0.85, opacity + 0.2);
+          ctx.drawImage(maskImg, 0, 0, canvas.width, canvas.height);
+          ctx.restore();
+        };
+        maskImg.src = phenotypeResult.heatmapDataUrl;
+      }
+      return;
+    }
+
     if (filteredResults.length === 0 && !drawingRect) return;
 
     filteredResults.forEach((item, index) => {
@@ -448,7 +491,7 @@ export default function PhotoAnalyzerView({
       );
       ctx.restore();
     }
-  }, [isOpen, imgLoaded, filteredResults, opacity, highlightedIndex, selectedIndex, dragMode, drawingRect]);
+  }, [isOpen, imgLoaded, filteredResults, opacity, highlightedIndex, selectedIndex, dragMode, drawingRect, activeAnalysisMode, showPhenotypeMask, phenotypeResult]);
 
   // Handle window resizing
   useEffect(() => {
@@ -526,9 +569,133 @@ export default function PhotoAnalyzerView({
             </button>
           </div>
 
+          {/* Analysis Mode Switcher */}
+          <div className="p-2 border-b border-slate-100 bg-white flex gap-1">
+            <button
+              type="button"
+              onClick={() => setActiveAnalysisMode('boxes')}
+              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                activeAnalysisMode === 'boxes'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-500 hover:bg-slate-100'
+              }`}
+            >
+              <Leaf className="w-3.5 h-3.5" />
+              <span>Weed Boxes</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveAnalysisMode('phenotype');
+                if (!phenotypeResult && !phenotypeLoading) runPhenotyping();
+              }}
+              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                activeAnalysisMode === 'phenotype'
+                  ? 'bg-purple-600 text-white shadow-xs'
+                  : 'text-slate-500 hover:bg-slate-100'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Pixel Phenotype</span>
+            </button>
+          </div>
+
           {/* Results list */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            {loading ? (
+            {activeAnalysisMode === 'phenotype' ? (
+              <div className="space-y-4">
+                <div className="bg-gradient-to-br from-purple-900 to-slate-900 text-white p-3.5 rounded-xl border border-purple-800/40 shadow-sm">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-purple-300 flex items-center gap-1">
+                      <Sparkles className="w-3 h-3 text-purple-400" /> Autonomous Index
+                    </span>
+                    <span className="text-[10px] font-mono text-purple-300">ExG (2G-R-B)</span>
+                  </div>
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-2xl font-black text-white">
+                      {phenotypeResult ? `${phenotypeResult.estimatedWeedControlPct}%` : '—'}
+                    </span>
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
+                      Estimated Weed Kill
+                    </span>
+                  </div>
+                </div>
+
+                {phenotypeLoading ? (
+                  <div className="py-8 flex flex-col items-center justify-center gap-2 text-slate-400">
+                    <RefreshCw className="w-6 h-6 text-purple-600 animate-spin" />
+                    <span className="text-xs font-medium">Scanning Foliage Pixels (ExG & Necrosis)...</span>
+                  </div>
+                ) : phenotypeResult ? (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="p-2.5 bg-white rounded-xl border border-emerald-100 shadow-2xs">
+                        <div className="text-[10px] font-bold uppercase text-emerald-700 flex items-center gap-1">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
+                          Green Canopy
+                        </div>
+                        <div className="text-lg font-black text-slate-800 mt-0.5">{phenotypeResult.greenCanopyPct}%</div>
+                        <div className="text-[10px] text-slate-400">Healthy live foliage</div>
+                      </div>
+                      <div className="p-2.5 bg-white rounded-xl border border-amber-100 shadow-2xs">
+                        <div className="text-[10px] font-bold uppercase text-amber-700 flex items-center gap-1">
+                          <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
+                          Necrosis / Burn
+                        </div>
+                        <div className="text-lg font-black text-slate-800 mt-0.5">{phenotypeResult.necrosisPct}%</div>
+                        <div className="text-[10px] text-slate-400">Desiccated foliage</div>
+                      </div>
+                    </div>
+
+                    {/* Breakdown bar */}
+                    <div className="p-3 bg-white rounded-xl border border-slate-200/80 space-y-1.5">
+                      <div className="flex justify-between text-[11px] font-bold text-slate-700">
+                        <span>Canopy Composition</span>
+                        <span className="font-mono text-slate-500">{phenotypeResult.totalFoliagePixels?.toLocaleString?.() || phenotypeResult.totalFoliagePixels} px</span>
+                      </div>
+                      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden flex">
+                        <div style={{ width: `${phenotypeResult.necrosisPct}%` }} className="bg-amber-500 h-full" title="Desiccated" />
+                        <div style={{ width: `${phenotypeResult.greenCanopyPct}%` }} className="bg-emerald-500 h-full" title="Green Foliage" />
+                      </div>
+                      <div className="flex justify-between text-[10px] text-slate-400">
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block" />Necrotic {phenotypeResult.necrosisPct}%</span>
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />Green {phenotypeResult.greenCanopyPct}%</span>
+                      </div>
+                    </div>
+
+                    {/* Heatmap overlay toggle */}
+                    <label className="flex items-center justify-between p-2.5 bg-purple-50/50 border border-purple-100 rounded-xl cursor-pointer hover:bg-purple-50 transition">
+                      <span className="text-xs font-semibold text-purple-900 flex items-center gap-1.5">
+                        <Eye className="w-3.5 h-3.5 text-purple-600" />
+                        Overlay Phenotype Heatmap
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={showPhenotypeMask}
+                        onChange={e => setShowPhenotypeMask(e.target.checked)}
+                        className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500 border-slate-300 cursor-pointer"
+                      />
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={runPhenotyping}
+                      className="w-full py-1.5 text-[11px] font-semibold text-slate-500 hover:text-slate-700 flex items-center justify-center gap-1 hover:bg-slate-100 rounded-lg transition"
+                    >
+                      <RefreshCw className="w-3 h-3" /> Re-scan Pixels
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={runPhenotyping}
+                    className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl shadow transition flex items-center justify-center gap-2"
+                  >
+                    <Sparkles className="w-4 h-4" /> Start Autonomous Phenotype Scan
+                  </button>
+                )}
+              </div>
+            ) : loading ? (
               <div className="space-y-2.5">
                 {[1, 2, 3].map(i => (
                   <div key={i} className="h-16 bg-slate-100 rounded-lg animate-pulse" />
@@ -651,16 +818,32 @@ export default function PhotoAnalyzerView({
                 Copy Info
               </button>
 
-              {onApplyValue && localResults && localResults.length > 0 && (
+              {activeAnalysisMode === 'phenotype' ? (
                 <button
+                  type="button"
+                  disabled={!phenotypeResult}
                   onClick={() => {
-                    const totalVal = filteredResults.reduce((acc, curr) => acc + (curr.cover || curr.value || 0), 0);
-                    onApplyValue(Math.min(100, totalVal));
+                    if (phenotypeResult && onApplyValue) {
+                      onApplyValue(phenotypeResult.estimatedWeedControlPct);
+                      onClose();
+                    }
                   }}
-                  className="flex-1 py-2 px-3 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow transition"
+                  className="flex-1 py-2 px-3 text-xs font-bold bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white rounded-xl shadow transition"
                 >
-                  {labels.applyLabel} ({Math.min(100, filteredResults.reduce((acc, curr) => acc + (curr.cover || curr.value || 0), 0))}%)
+                  Apply Phenotype Kill ({phenotypeResult ? phenotypeResult.estimatedWeedControlPct : 0}%)
                 </button>
+              ) : (
+                onApplyValue && localResults && localResults.length > 0 && (
+                  <button
+                    onClick={() => {
+                      const totalVal = filteredResults.reduce((acc, curr) => acc + (curr.cover || curr.value || 0), 0);
+                      onApplyValue(Math.min(100, totalVal));
+                    }}
+                    className="flex-1 py-2 px-3 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow transition"
+                  >
+                    {labels.applyLabel} ({Math.min(100, filteredResults.reduce((acc, curr) => acc + (curr.cover || curr.value || 0), 0))}%)
+                  </button>
+                )
               )}
             </div>
           </div>

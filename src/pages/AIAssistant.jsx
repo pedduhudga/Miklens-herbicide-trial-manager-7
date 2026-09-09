@@ -19,14 +19,15 @@ import {
 } from '../utils/aiCategoryIsolation.js';
 import { buildAIMemoryContext } from '../utils/aiMemory.js';
 import { DEFAULT_GEMINI_MODEL } from '../utils/aiConstants.js';
+import ChatArtifactRenderer from '../components/ChatArtifactRenderer.jsx';
 
 /**
- * Parses message text to separate regular text from novel candidate formula JSON blocks
+ * Parses message text to separate regular text from novel candidate formula and rich visual artifact blocks
  */
 function parseMessageContent(content) {
   if (!content) return [{ type: 'text', text: '' }];
 
-  const blockRegex = /```(?:formula|json)?\s*(\{[\s\S]*?\})\s*```/gi;
+  const blockRegex = /```(?:formula|json|artifact(?::\w+)?|chart|doseresponse|launch_trial)?\s*(\{[\s\S]*?\})\s*```/gi;
   const parts = [];
   let lastIndex = 0;
   let match;
@@ -40,6 +41,29 @@ function parseMessageContent(content) {
       parsed = null;
     }
 
+    if (!parsed) continue;
+
+    // 1. Check for Interactive Visual Artifact blocks (Charts, Dose-Response, 1-Click Launchers)
+    const isChartArtifact = parsed.artifactType === 'chart' || parsed.chartType || (Array.isArray(parsed.datasets) && Array.isArray(parsed.labels));
+    const isDoseResponseArtifact = parsed.artifactType === 'doseresponse' || parsed.artifactType === 'dose_response' || (parsed.ed50 !== undefined && parsed.formula);
+    const isLaunchTrialArtifact = parsed.artifactType === 'launch_trial' || parsed.artifactType === 'launchtrial' || parsed.launchTrial;
+
+    if (isChartArtifact || isDoseResponseArtifact || isLaunchTrialArtifact) {
+      const textBefore = content.substring(lastIndex, match.index);
+      if (textBefore.trim()) {
+        parts.push({ type: 'text', text: textBefore });
+      }
+      const artifactType = isChartArtifact ? 'chart' : (isDoseResponseArtifact ? 'doseresponse' : 'launch_trial');
+      parts.push({
+        type: 'artifact',
+        artifactType,
+        data: parsed
+      });
+      lastIndex = blockRegex.lastIndex;
+      continue;
+    }
+
+    // 2. Check for Candidate Formula blocks
     const hasName = parsed && (parsed.Name || parsed.name || parsed.formulaName);
     const hasIngredients = parsed && Array.isArray(parsed.Ingredients || parsed.ingredients);
 
@@ -1434,6 +1458,15 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                               onRefinePrompt={(refineText) => sendMessage(refineText)}
                               isSaved={!!savedFormulas[part.data.Code || part.data.Name]}
                               isViewer={isViewer}
+                            />
+                          );
+                        }
+                        if (part.type === 'artifact') {
+                          return (
+                            <ChatArtifactRenderer
+                              key={pIdx}
+                              artifactType={part.artifactType}
+                              data={part.data}
                             />
                           );
                         }

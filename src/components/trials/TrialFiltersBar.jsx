@@ -1,12 +1,13 @@
 import React from 'react';
 import {
   Search, X, SlidersHorizontal, Grid, Calendar, FileDown,
-  RefreshCw, FolderPlus, Plus, Columns3
+  RefreshCw, FolderPlus, Plus, Columns3, Mic
 } from 'lucide-react';
 
 export default function TrialFiltersBar({
   search,
   setSearch,
+  onOpenVoiceScout,
   filterOwner,
   setFilterOwner,
   ownerOptions = [],
@@ -192,6 +193,18 @@ export default function TrialFiltersBar({
             >
               <FolderPlus className="w-4 h-4" />
             </button>
+
+            {onOpenVoiceScout && (
+              <button
+                type="button"
+                onClick={onOpenVoiceScout}
+                title="AI Voice Field Scout: Dictate notes, DAA, weed control % hands-free in the field"
+                className="px-3 py-2 rounded-lg bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-700 flex items-center gap-1.5 text-sm font-semibold transition shadow-2xs group"
+              >
+                <Mic className="w-4 h-4 text-purple-600 group-hover:scale-110 transition-transform animate-pulse" />
+                <span className="hidden sm:inline">Voice Scout</span>
+              </button>
+            )}
 
             <button
               type="button"

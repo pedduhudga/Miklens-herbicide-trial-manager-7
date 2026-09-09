@@ -32,6 +32,7 @@ import PhotoAnalyzerView from '../components/PhotoAnalyzerView.jsx';
 import { analyzePhoto, analyzePhotosBatch, identifyWeedFromPhoto as identifyWeedFromPhotoService, getAPIKeys, generateTextWithAI, parseHarvestTextLog } from '../services/multiProviderAI.js';
 import TrialCard from '../components/TrialCard.jsx';
 import FormulationQuickPeekModal from '../components/FormulationQuickPeekModal.jsx';
+import VoiceFieldScoutModal from '../components/VoiceFieldScoutModal.jsx';
 import { isFormulationEligibleForTrial, getTrialCalculatedEfficacy } from '../utils/formulationTrialUtils.js';
 import { calculateEffectiveControlDays } from '../utils/trialLifecycle.js';
 import TrialFiltersBar from '../components/trials/TrialFiltersBar.jsx';
@@ -277,6 +278,74 @@ export default function Trials({ onMenuClick }) {
   const [editingObsIdx, setEditingObsIdx] = useState(null);
   const [quickEditObs, setQuickEditObs] = useState(null); // { obsIdx, fieldKey, label, value }
   const [obsForm, setObsForm] = useState({ daa: '', date: toDatetimeLocal(new Date()), notes: '', weedDetails: [], weatherTemp: '', weatherHumidity: '', weatherWind: '', weatherRain: '', bbchStage: '', phytotoxicityPct: '', phytotoxicityNotes: '' });
+
+  // --- Voice Field Scout ---
+  const [isVoiceScoutOpen, setIsVoiceScoutOpen] = useState(false);
+
+  const handleApplyVoiceScout = useCallback((parsed) => {
+    if (!parsed) return;
+
+    let target = activeTrial;
+    if (!target && (parsed.trialName || parsed.formulation)) {
+      const q = (parsed.trialName || parsed.formulation).toLowerCase();
+      target = trials.find(t => 
+        (t.TrialName && t.TrialName.toLowerCase().includes(q)) ||
+        (t.FormulationName && t.FormulationName.toLowerCase().includes(q)) ||
+        (t.ID && String(t.ID).toLowerCase() === q)
+      );
+    }
+    if (!target && trials.length > 0) {
+      target = trials[0];
+    }
+
+    if (target) {
+      setActiveTrial(target);
+      const today = new Date().toISOString().split('T')[0];
+      const daaVal = parsed.daa !== null && parsed.daa !== undefined ? String(parsed.daa) : (target.Date ? String(calculateDAA(today, target.Date)) : '');
+      
+      const weedEntries = Object.entries(parsed.weedControl || {}).map(([species, ctrl]) => ({
+        species,
+        control: ctrl,
+        density: '',
+        height: ''
+      }));
+
+      const primaryField = getPrimaryObservationField(activeCategory);
+      const overallVal = parsed.efficacy !== null && parsed.efficacy !== undefined ? parsed.efficacy : (weedEntries.length > 0 ? weedEntries[0].control : '');
+
+      setObsForm(prev => ({
+        ...prev,
+        daa: daaVal,
+        date: today,
+        notes: parsed.notes ? (prev.notes ? `${prev.notes} | ${parsed.notes}` : parsed.notes) : prev.notes,
+        phytotoxicityPct: parsed.phytotoxicityPct ?? prev.phytotoxicityPct,
+        phytotoxicityNotes: parsed.cropInjury ? (prev.phytotoxicityNotes ? `${prev.phytotoxicityNotes} | ${parsed.cropInjury}` : parsed.cropInjury) : prev.phytotoxicityNotes,
+        bbchStage: parsed.bbch ? String(parsed.bbch) : prev.bbchStage,
+        weatherTemp: parsed.weather?.temp ? String(parsed.weather.temp) : prev.weatherTemp,
+        weatherHumidity: parsed.weather?.humidity ? String(parsed.weather.humidity) : prev.weatherHumidity,
+        weatherRain: parsed.weather?.rain ? String(parsed.weather.rain) : prev.weatherRain,
+        weatherWind: parsed.weather?.wind ? String(parsed.weather.wind) : prev.weatherWind,
+        weedDetails: weedEntries.length > 0 ? weedEntries : prev.weedDetails,
+        [primaryField]: overallVal !== '' ? overallVal : prev[primaryField]
+      }));
+
+      setEditingObsIdx(null);
+      setIsObsModalOpen(true);
+      window.dispatchEvent(new CustomEvent('app:toast', {
+        detail: {
+          msg: `Voice data applied to observation modal for ${target.TrialName || target.FormulationName || 'Trial'}!`,
+          type: 'success'
+        }
+      }));
+    } else {
+      window.dispatchEvent(new CustomEvent('app:toast', {
+        detail: {
+          msg: 'Voice dictation captured! Please select or create a trial to save the observation.',
+          type: 'info'
+        }
+      }));
+    }
+  }, [activeTrial, trials, activeCategory]);
 
   // --- Plot & Site Data collapsible ---
   const [plotDataOpen, setPlotDataOpen] = useState(false);
@@ -5809,6 +5878,7 @@ If none are present, write "None".`;
         <TrialFiltersBar
           search={search}
           setSearch={setSearch}
+          onOpenVoiceScout={() => setIsVoiceScoutOpen(true)}
           filterOwner={filterOwner}
           setFilterOwner={setFilterOwner}
           ownerOptions={ownerOptions}
@@ -10525,6 +10595,13 @@ If none are present, write "None".`;
           onApplyTrialFilter={(filterVal) => setFilterFormulation(filterVal)}
         />
       )}
+
+      <VoiceFieldScoutModal
+        isOpen={isVoiceScoutOpen}
+        onClose={() => setIsVoiceScoutOpen(false)}
+        onApply={handleApplyVoiceScout}
+        currentTrial={activeTrial}
+      />
 
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
       <input ref={harvestFileRef} type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />

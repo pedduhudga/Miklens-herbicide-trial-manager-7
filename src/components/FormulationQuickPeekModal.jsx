@@ -1,8 +1,9 @@
 import React, { useMemo } from 'react';
-import { X, FlaskConical, ExternalLink, Filter, Layers, DollarSign, Trophy, ArrowRight, Edit } from 'lucide-react';
+import { X, FlaskConical, ExternalLink, Filter, Layers, DollarSign, Trophy, ArrowRight, Edit, AlertTriangle, ShieldAlert, Sparkles, Droplets, Info } from 'lucide-react';
 import { safeJsonParse } from '../utils/helpers.js';
 import { calculateFormulationCost } from '../utils/costUtils.js';
 import { getCategoryConfig } from '../utils/categoryConfig.js';
+import { analyzeFormulationSynergy } from '../utils/hracSynergy.js';
 import { useNavigate } from 'react-router-dom';
 
 export default function FormulationQuickPeekModal({
@@ -52,6 +53,10 @@ export default function FormulationQuickPeekModal({
       ings
     };
   }, [formulation, allTrials, ingredientsList]);
+
+  const synergy = useMemo(() => {
+    return analyzeFormulationSynergy(stats.ings);
+  }, [stats.ings]);
 
   if (!isOpen || !formulation) return null;
 
@@ -118,19 +123,84 @@ export default function FormulationQuickPeekModal({
             </div>
             <div className="bg-slate-50 rounded-xl border border-slate-100 divide-y divide-slate-100 overflow-hidden">
               {stats.ings.length > 0 ? (
-                stats.ings.map((ing, i) => (
-                  <div key={i} className="px-3 py-2 flex justify-between items-center text-xs">
-                    <span className="font-medium text-slate-700">{ing.name}</span>
-                    <span className="font-mono font-bold text-slate-600 bg-white px-2 py-0.5 rounded border border-slate-200/60">
-                      {ing.quantity ?? ing.qty} {ing.unit || 'ml'}
-                    </span>
-                  </div>
-                ))
+                stats.ings.map((ing, i) => {
+                  const act = (synergy.activeIngredients || []).find(a => a.name.toLowerCase() === (ing.name || '').toLowerCase());
+                  return (
+                    <div key={i} className="px-3 py-2 flex justify-between items-center text-xs">
+                      <div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-medium text-slate-700">{ing.name}</span>
+                          {act && act.hracGroup !== 'Unknown' && (
+                            <span className="text-[10px] font-mono px-1.5 py-0.2 bg-purple-100 text-purple-700 font-bold rounded" title={act.targetSite}>
+                              HRAC {act.hracGroup}
+                            </span>
+                          )}
+                        </div>
+                        {act && act.chemicalFamily && (
+                          <div className="text-[10px] text-slate-400">{act.chemicalFamily} • {act.systemicity}</div>
+                        )}
+                      </div>
+                      <span className="font-mono font-bold text-slate-600 bg-white px-2 py-0.5 rounded border border-slate-200/60 shrink-0">
+                        {ing.quantity ?? ing.qty} {ing.unit || 'ml'}
+                      </span>
+                    </div>
+                  );
+                })
               ) : (
                 <div className="p-3 text-center text-slate-400">No ingredients specified</div>
               )}
             </div>
           </div>
+
+          {/* HRAC MOA & Synergy Engine Summary */}
+          {synergy.uniqueHracGroups?.length > 0 && (
+            <div className="p-3 bg-purple-50/50 border border-purple-100 rounded-xl space-y-1">
+              <div className="flex items-center justify-between text-[11px] font-bold text-purple-900">
+                <span className="flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                  HRAC Mode of Action Profile
+                </span>
+                <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full font-mono">
+                  {synergy.uniqueHracGroups.length > 1 ? `${synergy.uniqueHracGroups.length}-Site Dual MOA` : 'Single Site'}
+                </span>
+              </div>
+              <p className="text-[11px] text-purple-800 leading-snug">{synergy.moaSummary}</p>
+            </div>
+          )}
+
+          {/* Antagonism Warning Banner */}
+          {synergy.hasAntagonism && (
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl space-y-1.5 animate-fade-in">
+              <div className="flex items-center gap-1.5 text-rose-800 font-bold text-xs">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>Agrochemical Antagonism Warning</span>
+              </div>
+              {synergy.antagonismWarnings.map((w, idx) => (
+                <div key={idx} className="text-[11px] text-rose-700 leading-relaxed bg-white/70 p-2 rounded-lg border border-rose-100">
+                  <span className="font-bold text-rose-900">{w.actives.join(' + ')}: </span>
+                  {w.description}
+                  <div className="mt-1 text-[10px] font-semibold text-emerald-800 bg-emerald-50/60 p-1.5 rounded border border-emerald-100">
+                    💡 Tip: {w.recommendation}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Adjuvant Optimization */}
+          {synergy.adjuvantRecommendations?.length > 0 && (
+            <div className="p-3 bg-sky-50/60 border border-sky-100 rounded-xl space-y-1">
+              <div className="flex items-center gap-1 text-[11px] font-bold text-sky-900">
+                <Droplets className="w-3.5 h-3.5 text-sky-600" />
+                <span>Adjuvant & Surfactant Optimizer</span>
+              </div>
+              <ul className="list-disc list-inside text-[11px] text-sky-800 space-y-0.5">
+                {synergy.adjuvantRecommendations.map((rec, rIdx) => (
+                  <li key={rIdx}>{rec}</li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {formulation.Notes && (
             <div className="p-3 bg-emerald-50/50 border border-emerald-100 rounded-xl text-slate-600 text-[11px] leading-relaxed">
