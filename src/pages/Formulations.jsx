@@ -85,6 +85,7 @@ function FormulationCard({
               )}
             </div>
 
+            <div className="flex items-center gap-1.5 flex-wrap">
               {/* Efficacy / Kill Rate Badge */}
               <span
                 className={`text-[10px] px-2 py-0.5 rounded-full font-bold border inline-flex items-center gap-1 ${ratingBadge.colorClass}`}
