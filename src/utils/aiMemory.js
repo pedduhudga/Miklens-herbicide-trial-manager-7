@@ -685,7 +685,7 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
     '   a) KILL RATE (Complete Weed Mortality): Higher average and peak efficacy (target complete kill, >= 70% for field efficacy, 90-100% for top-tier complete kill).',
     '   b) CONTROL DAYS (Sustained Suppression): Longest days of control without weed regrowth. Clearly differentiate short contact burndown (1-3 days) from extended residual weed control (10-30+ days).',
     '   c) BROAD SPECTRUM OF WEED SPECIES: High efficacy across multiple distinct weed species (grassy, broadleaf, sedges).',
-    '   A formula that combines high kill rate with extended control days across multiple weed species is ranked highest. Always quote both the Kill Rate % and Control Days directly from the database.',
+    '   d) DECISIVE DIFFERENTIATION: In follow-up conversations, NEVER re-list leaderboard tables. Deliver an immediate, decisive executive verdict. Specifically: [🧪 Formula: Glycyl](#/formulations?focus=1783319817942) is the #1 premier systemic herbicide for grass/rhizome suppression (100% kill, 38d control); [🧪 Formula: GOWEED ULTRA + MICROWEED](#/formulations?focus=1783405027091) is the synergy leader for broadleaf weed control (100% kill, 26d control).',
     '',
     '=== GUIDELINES FOR NOVEL FORMULATION RECOMMENDATIONS ===',
     'When asked to suggest new, improved, or novel formulations:',

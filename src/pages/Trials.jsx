@@ -35,6 +35,7 @@ import TrialCard from '../components/TrialCard.jsx';
 import FormulationQuickPeekModal from '../components/FormulationQuickPeekModal.jsx';
 import VoiceFieldScoutModal from '../components/VoiceFieldScoutModal.jsx';
 import { isFormulationEligibleForTrial, getTrialCalculatedEfficacy } from '../utils/formulationTrialUtils.js';
+import { findDuplicateTrial } from '../utils/formulationDuplicateUtils.js';
 import { calculateEffectiveControlDays } from '../utils/trialLifecycle.js';
 import TrialFiltersBar from '../components/trials/TrialFiltersBar.jsx';
 import TrialTimelineView from '../components/trials/TrialTimelineView.jsx';
@@ -4791,19 +4792,43 @@ Rules:
   const handleDuplicateConfirm = useCallback(async () => {
     if (!duplicateModal) return;
     const trial = duplicateModal;
-    setDuplicateModal(null);
     const formMatch = eligibleFormulations.find(f => f.Name === duplicateFormulation) || formulations.find(f => f.Name === duplicateFormulation);
     if (!formMatch || !isFormulationEligibleForTrial(formMatch)) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Please select an approved formulation from the list to start the trial.', type: 'error' } }));
       return;
     }
+
+    const proposedDosage = duplicateDosage.trim() !== '' ? duplicateDosage.trim() : (trial.Dosage || '');
+    const activeCat = trial.Category || activeCategory || 'herbicide';
+
+    // Duplicate Trial Check: Avoid redundant field plots with identical formulation + dosage + target
+    const existingDuplicateTrial = findDuplicateTrial(
+      {
+        formulationName: formMatch.Name,
+        formulationId: formMatch.ID,
+        dosage: proposedDosage,
+        targetWeed: trial.WeedTarget || trial.WeedSpecies || trial.Target || ''
+      },
+      trials,
+      activeCat,
+      trial.ID
+    );
+
+    if (existingDuplicateTrial) {
+      const proceed = window.confirm(
+        `⚠️ DUPLICATE TRIAL PARAMETERS DETECTED!\n\nA field trial with formulation "${formMatch.Name}" @ ${proposedDosage || 'N/A'} on target "${trial.WeedTarget || trial.WeedSpecies || 'Default Target'}" already exists (Trial ID: ${existingDuplicateTrial.ID || 'N/A'}).\n\nDuplicating exact identical treatments leads to redundant plots and resource waste.\n\nDo you want to proceed anyway?`
+      );
+      if (!proceed) return;
+    }
+
+    setDuplicateModal(null);
     const payload = {
       ...trial,
       ID: undefined,
       FormulationName: formMatch.Name,
       FormulationID: formMatch.ID,
       Date: duplicateDate || toDatetimeLocal(new Date()),
-      Dosage: duplicateDosage.trim() !== '' ? duplicateDosage.trim() : (trial.Dosage || ''),
+      Dosage: proposedDosage,
       IsCompleted: false, ControlFinalized: false,
       FinalizationDate: '', FinalControlDuration: '',
       PhotoURLs: '[]', WeedPhotosJSON: '[]',
@@ -4819,7 +4844,7 @@ Rules:
     } catch(e) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Duplicate failed', type: 'error' } }));
     }
-  }, [duplicateModal, duplicateFormulation, duplicateDate, duplicateDosage, formulations, eligibleFormulations, trials, getAppState, updateState]);
+  }, [duplicateModal, duplicateFormulation, duplicateDate, duplicateDosage, formulations, eligibleFormulations, trials, activeCategory, getAppState, updateState]);
 
   const handleQuickRate = useCallback(async (trial, rating) => {
     const newRating = trial.Result === rating ? '' : rating;
@@ -6586,6 +6611,34 @@ If none are present, write "None".`;
                 className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400"
               />
             </div>
+            {/* Live Duplicate Warning */}
+            {(() => {
+              const proposedDosage = duplicateDosage.trim() !== '' ? duplicateDosage.trim() : (duplicateModal.Dosage || '');
+              const formMatch = eligibleFormulations.find(f => f.Name === duplicateFormulation) || formulations.find(f => f.Name === duplicateFormulation);
+              if (!formMatch) return null;
+              const dupTrial = findDuplicateTrial(
+                {
+                  formulationName: formMatch.Name,
+                  formulationId: formMatch.ID,
+                  dosage: proposedDosage,
+                  targetWeed: duplicateModal.WeedTarget || duplicateModal.WeedSpecies || duplicateModal.Target || ''
+                },
+                trials,
+                duplicateModal.Category || activeCategory || 'herbicide',
+                duplicateModal.ID
+              );
+              if (!dupTrial) return null;
+              return (
+                <div className="p-2.5 bg-amber-50 border border-amber-300 rounded-xl text-amber-900 text-xs flex items-start gap-2">
+                  <span className="text-base leading-none">⚠️</span>
+                  <div>
+                    <span className="font-bold block">Duplicate Treatment Detected!</span>
+                    Trial #{dupTrial.ID} already tests <strong>{formMatch.Name}</strong> @ {proposedDosage || 'N/A'}. Consider testing a different dosage or target to avoid redundant plots.
+                  </div>
+                </div>
+              );
+            })()}
+
             <p className="text-xs text-slate-400 bg-slate-50 rounded-lg p-2 border">Location, weed species and other settings will be copied. Photos, observations and results will be cleared.</p>
             <div className="flex gap-2 justify-end">
               <button onClick={() => setDuplicateModal(null)} className="px-4 py-2 text-sm rounded-lg border text-slate-600 hover:bg-slate-50">Cancel</button>

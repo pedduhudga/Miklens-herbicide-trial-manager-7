@@ -6,6 +6,7 @@ import { _callGeminiApiWithRetries } from '../services/ai.js';
 import { DEFAULT_GEMINI_MODEL } from '../utils/aiConstants.js';
 import { useAppState } from '../hooks/useAppState.jsx';
 import { addFormulation, validateCategoryDataOperation } from '../services/dataLayer.js';
+import { findDuplicateFormulation } from '../utils/formulationDuplicateUtils.js';
 
 const STRATEGY_OPTIONS = [
   { id: 'max_efficacy', label: 'Maximum Efficacy & Knockdown', icon: Zap, desc: 'High-potency synergistic blend for resistant or heavy infestations' },
@@ -157,6 +158,19 @@ Provide a brief scientific commentary explaining the mode of action.`;
     if (isViewer) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Viewer role cannot save formulations.', type: 'error' } }));
       return;
+    }
+
+    // Check if identical formula already exists
+    const duplicate = findDuplicateFormulation(
+      candidate.Ingredients,
+      state.formulations || [],
+      activeCategory
+    );
+    if (duplicate) {
+      const proceed = window.confirm(
+        `⚠️ DUPLICATE RECIPE WARNING!\n\nThis candidate has the EXACT same ingredients and quantities as existing formulation "${duplicate.Name}" (${duplicate.Code || 'No Code'}).\n\nSaving duplicates will lead to redundant field trials.\n\nDo you still want to save this candidate as a new formulation?`
+      );
+      if (!proceed) return;
     }
 
     const nowISO = new Date().toISOString();

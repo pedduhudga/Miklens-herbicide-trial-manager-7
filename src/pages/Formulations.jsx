@@ -25,6 +25,7 @@ import {
   isFormulationEligibleForTrial 
 } from '../utils/formulationTrialUtils.js';
 import { analyzeFormulationSynergy } from '../utils/hracSynergy.js';
+import { findDuplicateFormulation, detectAllDuplicateFormulations } from '../utils/formulationDuplicateUtils.js';
 
 function FormulationCard({
   form,
@@ -139,6 +140,24 @@ function FormulationCard({
                   title="Agrochemical antagonism detected! Click to view details and recommendations"
                 >
                   ⚠️ Antagonism Risk
+                </span>
+              )}
+
+              {/* Exact Duplicate Recipe Badge */}
+              {form._duplicates && form._duplicates.length > 0 && (
+                <span
+                  className="text-[10px] px-2 py-0.5 rounded-full font-extrabold bg-amber-100 text-amber-900 border border-amber-300 inline-flex items-center gap-1 shadow-2xs cursor-pointer hover:bg-amber-200 transition"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const dup = form._duplicates[0];
+                    window.dispatchEvent(new CustomEvent('app:toast', {
+                      detail: { msg: `Identical ingredients & quantity to "${dup.Name}" (${dup.Code || 'No Code'}). Avoid redundant trials!`, type: 'warning' }
+                    }));
+                    onQuickPeek && onQuickPeek(form);
+                  }}
+                  title={`Duplicate formula: exact same recipe as ${form._duplicates.map(d => `"${d.Name}"`).join(', ')}`}
+                >
+                  ⚠️ Duplicate Recipe ({form._duplicates[0].Name})
                 </span>
               )}
 
@@ -591,6 +610,19 @@ export default function Formulations({ onMenuClick }) {
     setIsModalOpen(true);
   };
 
+  // Live duplicate detection inside formulation modal
+  const duplicateFormMatch = useMemo(() => {
+    if (!isModalOpen) return null;
+    const clean = (ingredients || []).filter(i => i && i.name && i.name.trim() !== '' && i.quantity !== '' && !isNaN(parseFloat(i.quantity)));
+    if (clean.length === 0) return null;
+    return findDuplicateFormulation(
+      clean,
+      state.formulations || [],
+      state.activeCategory || 'herbicide',
+      editingForm ? editingForm.ID : null
+    );
+  }, [isModalOpen, ingredients, state.formulations, state.activeCategory, editingForm]);
+
   const handleAddIngredientRow = () => {
     setIngredients([...ingredients, { name: '', quantity: '', unit: 'ml' }]);
   };
@@ -640,6 +672,14 @@ export default function Formulations({ onMenuClick }) {
     if (cleanIngs.length === 0) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'At least one ingredient is required', type: 'error' } }));
       return;
+    }
+
+    // Flag duplicate recipe to prevent redundant field trials
+    if (duplicateFormMatch) {
+      const proceed = window.confirm(
+        `⚠️ DUPLICATE FORMULA DETECTED!\n\nThis recipe has the EXACT same ingredients and quantities as existing formula "${duplicateFormMatch.Name}" (${duplicateFormMatch.Code || 'No Code'}).\n\nSaving exact duplicates leads to redundant, wasted field trials.\n\nDo you want to proceed anyway with duplicate recipe?`
+      );
+      if (!proceed) return;
     }
 
     // Use a numeric timestamp string so sort always works correctly
@@ -727,17 +767,20 @@ export default function Formulations({ onMenuClick }) {
 
   const activeCategory = state.activeCategory || 'herbicide';
 
-  // Pre-calculate trial performance metrics for each formulation
+  // Pre-calculate trial performance metrics and duplicate recipes for each formulation
   const formulationsWithStats = useMemo(() => {
     const rawForms = (state.formulations || []).filter(
       f => f.Category === activeCategory || (!f.Category && activeCategory === 'herbicide')
     );
+
+    const duplicateLookup = detectAllDuplicateFormulations(rawForms, activeCategory);
 
     return rawForms.map(form => {
       const stats = getFormulationTrialStats(form, state.trials, state.projects, activeCategory);
       const parsedIngs = safeJsonParse(form.IngredientsJSON, []);
       const realCost = calculateFormulationCost(parsedIngs, state.ingredients || []);
       const costVal = realCost > 0 ? realCost : parseFloat(form.EstimatedCost || 0);
+      const formDuplicates = duplicateLookup.get(String(form.ID || form.id)) || [];
 
       return {
         ...form,
@@ -748,6 +791,7 @@ export default function Formulations({ onMenuClick }) {
         _avgScore: stats.avgEfficacy,
         _costVal: costVal,
         _parsedIngs: parsedIngs,
+        _duplicates: formDuplicates
       };
     });
   }, [state.formulations, state.trials, state.projects, state.ingredients, activeCategory]);
@@ -764,6 +808,8 @@ export default function Formulations({ onMenuClick }) {
       list = list.filter(f => (f._stats?.avgCtrlDays ?? 0) >= 10);
     } else if (performanceFilter === 'broad-spectrum') {
       list = list.filter(f => (f._stats?.targetCount ?? 0) >= 2);
+    } else if (performanceFilter === 'duplicates') {
+      list = list.filter(f => f._duplicates && f._duplicates.length > 0);
     }
 
     list.sort((a, b) => {
@@ -927,6 +973,17 @@ export default function Formulations({ onMenuClick }) {
           >
             🌿 Broad Spectrum (2+ Weeds)
           </button>
+          <button
+            type="button"
+            onClick={() => setPerformanceFilter('duplicates')}
+            className={`px-3 py-1.5 rounded-xl font-semibold transition shrink-0 flex items-center gap-1 shadow-2xs ${
+              performanceFilter === 'duplicates'
+                ? 'bg-amber-600 text-white'
+                : 'bg-white border border-amber-300 text-amber-800 hover:bg-amber-50'
+            }`}
+          >
+            ⚠️ Duplicate Recipes ({formulationsWithStats.filter(f => f._duplicates?.length > 0).length})
+          </button>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -950,27 +1007,22 @@ export default function Formulations({ onMenuClick }) {
                   CURRENCY_SYMBOL={CURRENCY_SYMBOL}
                   isSelectedForCompare={isSelectedForCompare}
                   isHighlighted={highlightFormId === form.ID}
-                  onQuickPeek={setQuickPeekForm}
+                  onQuickPeek={() => setQuickPeekForm(form)}
                   onToggleCompare={toggleCompareSelection}
-                  onViewLinkedTrials={setViewingLinkedTrialsForm}
-                  onLaunchTrial={handleLaunchTrial}
-                  onAiOptimize={handleAskAIForFormulation}
-                  onExportDossier={handleExportDossier}
-                  onEdit={handleOpenModal}
-                  onDuplicate={(f) => handleOpenModal(f, true)}
-                  onShare={handleOpenShareModal}
-                  onDelete={handleDelete}
+                  onViewLinkedTrials={() => setViewingLinkedTrialsForm(form)}
+                  onLaunchTrial={() => handleLaunchTrial(form)}
+                  onAiOptimize={() => handleAskAIForFormulation(form)}
+                  onExportDossier={() => handleExportDossier(form)}
+                  onEdit={() => handleOpenModal(form)}
+                  onDuplicate={() => handleOpenModal(form, true)}
+                  onShare={(e) => handleOpenShareModal(e, form)}
+                  onDelete={() => handleDelete(form.ID)}
                 />
               );
             })
           ) : (
-            <div className="col-span-full p-12 text-center text-slate-500 bg-white rounded-2xl shadow-xs border border-slate-200">
-              <p className="text-sm font-semibold text-slate-700">
-                {searchTerm ? `No formulations matching "${searchTerm}".` : 'No formulations found in this category.'}
-              </p>
-              <p className="text-xs text-slate-400 mt-1">
-                Create a new formulation or use the AI Recipe Wizard to generate one.
-              </p>
+            <div className="col-span-full py-12 text-center text-slate-400 bg-white rounded-2xl border border-dashed">
+              <p>No formulations found matching criteria.</p>
             </div>
           )}
         </div>
@@ -1011,6 +1063,26 @@ export default function Formulations({ onMenuClick }) {
         title={editingForm && !name.includes('(Copy)') ? 'Edit Formulation' : 'New Formulation'}
       >
         <form onSubmit={handleSave} className="space-y-6">
+          {/* Live Duplicate Warning Banner */}
+          {duplicateFormMatch && (
+            <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-xl text-amber-900 flex items-start gap-2.5 animate-in fade-in">
+              <span className="text-lg shrink-0">⚠️</span>
+              <div className="text-xs space-y-1">
+                <p className="font-extrabold text-amber-950">
+                  DUPLICATE FORMULA DETECTED!
+                </p>
+                <p className="text-slate-700">
+                  This recipe has the exact same ingredients and quantities as existing formula{' '}
+                  <strong className="text-slate-900">"{duplicateFormMatch.Name}"</strong>{' '}
+                  ({duplicateFormMatch.Code || 'No Code'}).
+                </p>
+                <p className="text-[11px] text-amber-800 font-semibold">
+                  💡 Hint: To avoid redundant, wasteful trials, adjust quantities/actives or launch a new trial under the existing formulation instead.
+                </p>
+              </div>
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1">Formulation Name</label>
             <input

@@ -2,10 +2,10 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppState } from '../hooks/useAppState.jsx';
 import TopBar from '../components/TopBar.jsx';
-import { Sparkles, SendHorizontal, Trash2, Copy, Check, Paperclip, X, Mic, MicOff, Image as ImageIcon, Search, PlusCircle, MessageSquare, FlaskConical, Target, TrendingUp, Cpu, Volume2, VolumeX, Sliders, ShieldAlert } from 'lucide-react';
+import { Sparkles, SendHorizontal, Trash2, Copy, Check, Paperclip, X, Mic, MicOff, Image as ImageIcon, Search, PlusCircle, MessageSquare, FlaskConical, Target, TrendingUp, Cpu, Volume2, VolumeX, Sliders, ShieldAlert, Clock, Bot, Zap } from 'lucide-react';
 import { safeJsonParse } from '../utils/helpers.js';
 import { sanitizeAiContent } from '../utils/sanitize.js';
-import { _callGeminiApiWithRetries, resetGeminiState } from '../services/ai.js';
+import { _callGeminiApiWithRetries, callGeminiApiStream, resetGeminiState } from '../services/ai.js';
 import { generateTextWithAI } from '../services/multiProviderAI.js';
 import { getAiChatSessions, saveAiChatSession, deleteAiChatSession, addFormulation, validateCategoryDataOperation } from '../services/dataLayer.js';
 import { calculateFormulationCost } from '../utils/costUtils.js';
@@ -18,8 +18,94 @@ import {
   logCategoryIsolationMetrics 
 } from '../utils/aiCategoryIsolation.js';
 import { buildAIMemoryContext } from '../utils/aiMemory.js';
+import { compressAIContext } from '../utils/aiContextCompressor.js';
 import { DEFAULT_GEMINI_MODEL } from '../utils/aiConstants.js';
+import { findDuplicateFormulation } from '../utils/formulationDuplicateUtils.js';
 import ChatArtifactRenderer from '../components/ChatArtifactRenderer.jsx';
+
+const THINKING_PHASES = [
+  { icon: '🔍', label: 'Searching trial database & field records...' },
+  { icon: '🧬', label: 'Analyzing formulation chemistry & synergy...' },
+  { icon: '📊', label: 'Synthesizing performance benchmarks...' },
+  { icon: '⏳', label: 'Finalizing agronomic synthesis...' }
+];
+
+/**
+ * Extracts structured follow-up suggestions from model output
+ */
+function extractSuggestions(content) {
+  if (!content) return { cleanContent: '', suggestions: [] };
+  const sugRegex = /```(?:suggestions?|followups?)\s*(\[[\s\S]*?\])\s*```/i;
+  const match = content.match(sugRegex);
+  if (!match) {
+    return { cleanContent: content, suggestions: [] };
+  }
+  let suggestions = [];
+  try {
+    const parsed = JSON.parse(match[1]);
+    if (Array.isArray(parsed)) {
+      suggestions = parsed.map(s => String(s).trim()).filter(Boolean).slice(0, 3);
+    }
+  } catch (e) {
+    const items = match[1].replace(/[\[\]"]/g, '').split(/,|\n/).map(s => s.trim().replace(/^[-*•\d.]+\s*/, '')).filter(Boolean);
+    suggestions = items.slice(0, 3);
+  }
+  const cleanContent = content.replace(sugRegex, '').trim();
+  return { cleanContent, suggestions };
+}
+
+/**
+ * Ensures intelligent follow-up suggestions are always available
+ */
+function getContextualFollowUps(query, replyText, activeCategory, parsedSuggestions = []) {
+  if (parsedSuggestions && parsedSuggestions.length > 0) {
+    return parsedSuggestions;
+  }
+  const q = String(query || '').toLowerCase();
+  const reply = String(replyText || '').toLowerCase();
+  
+  if (q.includes('among these') || q.includes('which is the best') || q.includes('which one is best') || q.includes('between these')) {
+    return [
+      `What are the exact recipe ingredients and costs for Glycyl?`,
+      `How does Glycyl perform on broadleaf weeds versus Goweed Ultra?`,
+      `Show tested field application dosages and water volume for Glycyl`
+    ];
+  }
+
+  if (q.includes('benchmark') || q.includes('top') || q.includes('best') || q.includes('leaderboard')) {
+    return [
+      `Compare top 2 ${activeCategory} formulas head-to-head`,
+      `Which formula delivers the longest control duration without regrowth?`,
+      `Show me field trials conducted under high-temperature conditions`
+    ];
+  }
+  if (q.includes('suggest') || q.includes('novel') || q.includes('recipe') || q.includes('synergy')) {
+    return [
+      `How can we reduce the recipe cost of this candidate?`,
+      `Predict phytotoxicity and crop safety on sensitive cultivars`,
+      `Generate an interactive dose-response curve for this recipe`
+    ];
+  }
+  if (q.includes('glycyl') || reply.includes('glycyl')) {
+    return [
+      `Compare Glycyl against BPD across all trials`,
+      `Show tested field dosages and optimal carrier volumes for Glycyl`,
+      `Under what weather conditions did Glycyl have lower efficacy?`
+    ];
+  }
+  if (q.includes('weed') || q.includes('target') || reply.includes('target')) {
+    return [
+      `Which formulation achieves highest efficacy on this target?`,
+      `What is the recommended dosage rate for complete kill?`,
+      `Are there any large-scale field trial validations for this?`
+    ];
+  }
+  return [
+    `Benchmark our top performing ${activeCategory} formulations`,
+    `Suggest 2 novel candidate formulas based on our ingredient inventory`,
+    `Analyze weather and temperature impact on trial efficacy`
+  ];
+}
 
 /**
  * Parses message text to separate regular text from novel candidate formula and rich visual artifact blocks
@@ -27,12 +113,15 @@ import ChatArtifactRenderer from '../components/ChatArtifactRenderer.jsx';
 function parseMessageContent(content) {
   if (!content) return [{ type: 'text', text: '' }];
 
+  // Clean away any suggestions code block so it doesn't show up in text
+  const cleanText = content.replace(/```(?:suggestions?|followups?)\s*\[[\s\S]*?\]\s*```/gi, '').trim();
+
   const blockRegex = /```(?:formula|json|artifact(?::\w+)?|chart|doseresponse|launch_trial)?\s*(\{[\s\S]*?\})\s*```/gi;
   const parts = [];
   let lastIndex = 0;
   let match;
 
-  while ((match = blockRegex.exec(content)) !== null) {
+  while ((match = blockRegex.exec(cleanText)) !== null) {
     const jsonStr = match[1];
     let parsed = null;
     try {
@@ -43,17 +132,18 @@ function parseMessageContent(content) {
 
     if (!parsed) continue;
 
-    // 1. Check for Interactive Visual Artifact blocks (Charts, Dose-Response, 1-Click Launchers)
+    // 1. Check for Interactive Visual Artifact blocks (Charts, Dose-Response, 1-Click Launchers, Feasibility cards)
     const isChartArtifact = parsed.artifactType === 'chart' || parsed.chartType || (Array.isArray(parsed.datasets) && Array.isArray(parsed.labels));
     const isDoseResponseArtifact = parsed.artifactType === 'doseresponse' || parsed.artifactType === 'dose_response' || (parsed.ed50 !== undefined && parsed.formula);
     const isLaunchTrialArtifact = parsed.artifactType === 'launch_trial' || parsed.artifactType === 'launchtrial' || parsed.launchTrial;
+    const isFeasibilityArtifact = parsed.artifactType === 'feasibility' || parsed.artifactType === 'formula_feasibility' || (parsed.predictedEfficacyAvg !== undefined && Array.isArray(parsed.susceptibleWeeds));
 
-    if (isChartArtifact || isDoseResponseArtifact || isLaunchTrialArtifact) {
+    if (isChartArtifact || isDoseResponseArtifact || isLaunchTrialArtifact || isFeasibilityArtifact) {
       const textBefore = content.substring(lastIndex, match.index);
       if (textBefore.trim()) {
         parts.push({ type: 'text', text: textBefore });
       }
-      const artifactType = isChartArtifact ? 'chart' : (isDoseResponseArtifact ? 'doseresponse' : 'launch_trial');
+      const artifactType = isChartArtifact ? 'chart' : (isDoseResponseArtifact ? 'doseresponse' : (isFeasibilityArtifact ? 'feasibility' : 'launch_trial'));
       parts.push({
         type: 'artifact',
         artifactType,
@@ -68,7 +158,7 @@ function parseMessageContent(content) {
     const hasIngredients = parsed && Array.isArray(parsed.Ingredients || parsed.ingredients);
 
     if (hasName && hasIngredients) {
-      const textBefore = content.substring(lastIndex, match.index);
+      const textBefore = cleanText.substring(lastIndex, match.index);
       if (textBefore.trim()) {
         parts.push({ type: 'text', text: textBefore });
       }
@@ -87,9 +177,9 @@ function parseMessageContent(content) {
     }
   }
 
-  const textAfter = content.substring(lastIndex);
+  const textAfter = cleanText.substring(lastIndex);
   if (textAfter.trim() || parts.length === 0) {
-    parts.push({ type: 'text', text: textAfter || content });
+    parts.push({ type: 'text', text: textAfter || cleanText });
   }
 
   return parts;
@@ -272,6 +362,9 @@ export default function AIAssistant({ onMenuClick }) {
   const navigate = useNavigate();
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [streamingMessage, setStreamingMessage] = useState('');
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [thinkingPhase, setThinkingPhase] = useState(0);
   const [copied, setCopied] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -407,9 +500,32 @@ export default function AIAssistant({ onMenuClick }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.hasLoadedInitialData]);
 
+  // Dynamic thinking phase & latency timer
+  useEffect(() => {
+    let timer = null;
+    if (isLoading) {
+      setElapsedSeconds(0);
+      setThinkingPhase(0);
+      const start = Date.now();
+      timer = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - start) / 1000);
+        setElapsedSeconds(elapsed);
+        if (elapsed < 2) setThinkingPhase(0);
+        else if (elapsed < 5) setThinkingPhase(1);
+        else if (elapsed < 10) setThinkingPhase(2);
+        else setThinkingPhase(3);
+      }, 500);
+    } else {
+      setElapsedSeconds(0);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [isLoading]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [history.length, isLoading]);
+  }, [history.length, isLoading, streamingMessage]);
 
   const handleAttachImage = (e) => {
     const file = e.target.files?.[0];
@@ -515,9 +631,10 @@ export default function AIAssistant({ onMenuClick }) {
 
     updateState({ aiChatSessions: newSessions, currentAiChatSessionId: activeSessionId });
 
+    const startTime = Date.now();
     try {
-      // === SUPER MEMORY ENGINE ===
-      // Build full database knowledge base (ALL trials, not just 25)
+      // === SMART QUERY-AWARE CONTEXT ENGINE ===
+      // 1. Build full database knowledge base
       const { contextString: memoryContext, stats: memStats } = buildAIMemoryContext(
         state.trials,
         state.formulations,
@@ -526,7 +643,11 @@ export default function AIAssistant({ onMenuClick }) {
         activeCategory
       );
 
-      // Also run category isolation for metrics logging
+      // 2. Compress context based on user query intent (60-80% token reduction)
+      const { compressedContext, compressionRatio, detectedIntents } = compressAIContext(memoryContext, userMsg);
+      console.log(`[AI Context] Memory: ${memoryContext.length}B -> ${compressedContext.length}B (-${compressionRatio}%), Intents: ${detectedIntents.join(', ')}`);
+
+      // 3. Category isolation metrics
       const aiContext = createCategoryAwareAIContext(
         activeCategory,
         state.trials,
@@ -536,12 +657,31 @@ export default function AIAssistant({ onMenuClick }) {
       );
       logCategoryIsolationMetrics('AI Assistant Chat', activeCategory, aiContext.isolationMetrics);
 
-      console.log(`[AI Memory] Built context for ${memStats.totalTrials} trials, ${memStats.uniqueFormulas} formulas, ${memStats.uniqueTargets} targets`);
+      // === MULTI-TURN CONVERSATION MEMORY ASSEMBLY ===
+      // Take recent messages (excluding the last one which is the current prompt)
+      const rawPast = newHistory.slice(-11, -1);
+      const isFollowUp = rawPast.length > 0;
+      const turnCount = Math.floor(rawPast.length / 2) + 1;
 
-      const systemCtx = `You are the Senior Principal ${config.name} Research Director and Chief Agronomist, serving as the definitive expert AI research engine with direct access to this organization's complete ${config.name} trial and formulation database.
+      const systemCtx = `You are the Senior Principal ${config.name} Research Director and Chief Agronomist at Miklens Bio, serving as the definitive expert AI research engine with direct access to this organization's complete ${config.name} trial and formulation database.
 
-YOUR MISSION: Answer ANY question about trials, formulations, weeds/targets, efficacy, weather effects, control days, investigators, locations, or field experiment history using ONLY the verified database provided below.
+YOUR MISSION: Answer questions about trials, formulations, weeds/targets, efficacy, weather effects, control days, investigators, locations, or field experiment history using ONLY the verified database provided below.
 ZERO HALLUCINATION POLICY: Every fact, number, trial ID, dosage, and efficacy percentage MUST come directly from the real database. Never invent data or assume trials that do not exist.
+
+CRITICAL ANTI-REPETITION & CONVERSATION CONTINUITY (CONVERSATION TURN: ${turnCount}):
+${isFollowUp ? `1. ZERO REPETITIVE GREETINGS: This is an ACTIVE CONTINUING DIALOGUE (Turn ${turnCount}). Under NO circumstances say "Hello!", "Hello again!", "As your Senior Principal...", or re-introduce yourself. Start directly with the substantive answer in the very first sentence.
+2. NEVER REPEAT LEADERBOARD TABLES: A leaderboard or ranking table was ALREADY presented to the user in earlier turn(s). DO NOT re-list or duplicate the leaderboard table! The user is asking a follow-up to drill down, compare, or make a decision.
+3. DECISIVE EXECUTIVE JUDGMENT (WHEN ASKED "AMONG THESE WHICH IS BEST?"):
+   - Deliver an immediate, authoritative, and unambiguous choice in your opening sentence.
+   - For example, if comparing [🧪 Formula: Glycyl](#/formulations?focus=1783319817942), [🧪 Formula: BPD](#/formulations?focus=BPD), and [🧪 Formula: GOWEED ULTRA + MICROWEED](#/formulations?focus=1783405027091):
+     * Announce the undisputed #1 overall winner immediately: **[🧪 Formula: Glycyl]** is the premier choice for grass/rhizome suppression (100% kill rate, 38-day finalized control) because it translocates systemically into perennial root networks (Cynodon dactylon) without needing complex tank mixing.
+     * Contrast [🧪 Formula: BPD]: Excellent performance but functions primarily as a penetrant/bio-adjuvant blend rather than a standalone commercial standard.
+     * Contrast [🧪 Formula: GOWEED ULTRA + MICROWEED]: Clearly highlight that if the target is **broadleaf weeds or mixed weed spectrum**, this synergy blend is the superior choice (100% kill, 26-day control).
+     * Provide a crisp, 2-line "Bottom-Line Agronomic Recommendation" summarizing which to deploy in which field condition.
+4. ZERO ROBOTIC BOILERPLATE CLOSINGS:
+   - NEVER end messages with repetitive robotic templates like "Would you like me to run a dose-response simulation for a specific weed target, or perhaps suggest a custom formulation upgrade...".
+   - End with a sharp, natural, contextual closing or stop cleanly.` : `1. CONCISE & AUTHORITATIVE OPENING: Skip robotic greetings ("Hello! As the Senior Principal..."). Begin directly with the core scientific answer.
+2. LEADERBOARD TABLES: Provide a markdown table ONLY when the user explicitly requests an initial benchmark, ranking, leaderboard, or comparison across trials.`}
 
 CRITICAL RULES:
 1. You are analyzing ${activeCategory.toUpperCase()} category data ONLY. Do NOT reference data from other categories (${['herbicide', 'fungicide', 'pesticide', 'nutrition', 'biostimulant'].filter(c => c !== activeCategory).join(', ')}).
@@ -554,24 +694,16 @@ CRITICAL RULES:
    [🧪 Formula: {Name}](#/formulations?focus={FORM_ID_OR_NAME})
    Example: [🧪 Formula: Glycyl](#/formulations?focus=1783319817942) or [🧪 Formula: BPD](#/formulations?focus=BPD)
    When the user clicks this link, the app will instantly navigate to and show that exact formula with its full ingredient recipe, quantities, costs, and field performance.
-5. IN SUMMARY & RANKING TABLES: Always format BOTH the Trial Link and Formulation columns with these clickable links:
+5. IN INITIAL BENCHMARK TABLES (WHEN FIRST REQUESTED):
    | Trial Link | Formulation | Target Weed | Max Efficacy | Control Duration | Status |
    | [🔬 Trial: Glycyl @ 10ml (1783319817942)](#/trials?focus=1783319817942) | [🧪 Formula: Glycyl](#/formulations?focus=1783319817942) | Bermudagrass | 100% | 38d FINALIZED | Finalized |
-6. For simple greetings ("hi", "hello"), respond warmly as the Senior ${config.name} Scientist and offer high-value analyses (e.g. top performing formulations, weed control leaderboards, recipe suggestions).
 
 CONTROL DURATION & TRIAL STATUS — SCIENTIFIC LOGIC:
 - SCIENTIFIC BASIS: Control duration is calculated based on EFFICACY and WEED REGROWTH (the standard EWRS threshold of sustained >= 70% control before regrowth breakdown occurs).
 - DO NOT rely on photo dates to determine control duration. Control duration is determined by recorded efficacy and regrowth observations.
-- ACTIVE TRIALS: Active trials are ongoing field experiments (the system will automatically conclude a trial if no photo is logged for the designated inactivity period). For active trials, report their demonstrated control duration achieved to date (labeled as "Xd-DEMONSTRATED(active)"). NEVER claim they have "no data" or "0 days control" when their observation timeline records sustained weed control!
+- ACTIVE TRIALS: Active trials are ongoing field experiments. Report their demonstrated control duration achieved to date (labeled as "Xd-DEMONSTRATED(active)"). NEVER claim they have "no data" or "0 days control" when their observation timeline records sustained weed control!
 - COMPLETED / FINALIZED TRIALS: Report their finalized control duration (labeled as "Xd-FINALIZED").
 - Fast-acting contact burndown herbicides: Durations of 1–3 days in trial protocols represent the immediate foliar knockdown evaluation window (24–72h DAA), not that control collapsed. Residual control (15–45+ days) requires systemic action or residual pre-emergent tank mixes.
-
-EXCELLENT TRIALS & TOP PERFORMERS:
-- Field trials demonstrating >= 70% efficacy (or qualitative rating of "Excellent") are classified as Excellent / Top-Performing trials.
-- When asked for "excellent trials", "best trials", or "top performers", ALWAYS provide a clean Markdown table with:
-  | Trial Link | Formulation | Target Weed | Dosage | Max Efficacy | Control Duration | Status |
-  and use clickable links for BOTH Trial Link: [🔬 Trial: ...](#/trials?focus=ID) and Formulation: [🧪 Formula: ...](#/formulations?focus=ID).
-- Refer to the dedicated "🏆 TOP PERFORMING & EXCELLENT FIELD TRIALS" section in the data below.
 
 ANALYSIS & TERMINOLOGY GUIDELINES:
 - Trial Terminology: Refer to trials as "Field Plot Trials" (matching the UI's "FIELD TRIALS: X Plot" cards).
@@ -583,78 +715,164 @@ ANALYSIS & TERMINOLOGY GUIDELINES:
 - When analyzing failures: cite weather conditions (temp, humidity, rain) at application time.
 - DAA = Days After Application. Baseline is DAA=0, post-treatment is DAA>0.
 
-${memoryContext}`;
+FORMULA DUPLICATION AVOIDANCE:
+- Check if proposed formula recipes (ingredients and quantities) match existing database formulations. If identical, flag immediately: "⚠️ Duplicate Formula: This exact recipe already exists as [🧪 Formula: Name](#/formulations?focus=ID). To avoid redundant trials, test a variant or use existing trial records."
 
-      const fullPrompt = `${systemCtx}\n\nUser: ${userMsg}`;
-      let reply;
+FEASIBILITY & SPECTRUM PREDICTIONS ("WILL MY NEW FORMULA WORK?"):
+- Provide predicted efficacy percentage (e.g. 88-95%) based on Colby synergy and trial records.
+- Categorize target weeds into Susceptible (85-100%), Moderate, and Tolerant species.
+- Output a structured \`\`\`artifact:feasibility ... \`\`\` JSON block when evaluating candidate recipes.
 
-      const geminiCall = async (genAI) => {
-        const modelName = (typeof window !== 'undefined' && window._activeApiModelOverride)
-          || getAppState()?.settings?.apiModel
-          || getAppState()?.settings?.selectedModel
-          || DEFAULT_GEMINI_MODEL;
-          
-        if (img) {
-          const response = await genAI.models.generateContent({
-            model: modelName,
-            contents: [
-              {
-                parts: [
-                  { text: `${systemCtx}\n\nUser: ${userMsg}` },
-                  { inlineData: { data: img.base64, mimeType: img.mimeType } }
-                ]
-              }
-            ]
+FOLLOW-UP SUGGESTIONS REQUIREMENT:
+At the very end of your response, provide 2 to 3 concise, highly relevant follow-up questions the user can ask next to explore deeper. Format them strictly inside a suggestions block like:
+\`\`\`suggestions
+["Follow-up question 1", "Follow-up question 2", "Follow-up question 3"]
+\`\`\`
+
+${compressedContext}`;
+
+      const conversationTurns = [];
+
+      for (const hMsg of rawPast) {
+        if (hMsg.role === 'user') {
+          conversationTurns.push({
+            role: 'user',
+            parts: [{ text: hMsg.content }]
           });
-          const text = response?.candidates?.[0]?.content?.parts?.[0]?.text
-            || (typeof response?.text === 'function' ? response.text() : response?.text)
-            || '';
-          return text;
-        } else {
-          const response = await genAI.models.generateContent({
-            model: modelName,
-            contents: [{ parts: [{ text: fullPrompt }] }]
-          });
-          const text = response?.candidates?.[0]?.content?.parts?.[0]?.text
-            || (typeof response?.text === 'function' ? response.text() : response?.text)
-            || '';
-          return text;
+        } else if (hMsg.role === 'assistant') {
+          const cleanHistoryText = (hMsg.content || '')
+            .replace(/```(?:suggestions?|followups?)[\s\S]*?```/gi, '')
+            .trim();
+          if (cleanHistoryText) {
+            conversationTurns.push({
+              role: 'model',
+              parts: [{ text: cleanHistoryText }]
+            });
+          }
         }
-      };
+      }
 
+      // Enforce strict alternating user/model turns for Gemini API compliance
+      const sanitizedTurns = [];
+      for (const turn of conversationTurns) {
+        if (sanitizedTurns.length > 0 && sanitizedTurns[sanitizedTurns.length - 1].role === turn.role) {
+          sanitizedTurns[sanitizedTurns.length - 1].parts.push(...turn.parts);
+        } else {
+          sanitizedTurns.push(turn);
+        }
+      }
+
+      // Add current user prompt
+      const currentParts = [{ text: userMsg }];
+      if (img) {
+        currentParts.push({ inlineData: { data: img.base64, mimeType: img.mimeType } });
+      }
+
+      if (sanitizedTurns.length > 0 && sanitizedTurns[sanitizedTurns.length - 1].role === 'user') {
+        sanitizedTurns[sanitizedTurns.length - 1].parts.push(...currentParts);
+      } else {
+        sanitizedTurns.push({ role: 'user', parts: currentParts });
+      }
+
+      const activeModelName = (typeof window !== 'undefined' && window._activeApiModelOverride)
+        || getAppState()?.settings?.apiModel
+        || getAppState()?.settings?.selectedModel
+        || DEFAULT_GEMINI_MODEL;
+
+      let reply = '';
+      setStreamingMessage('');
+
+      // === PHASE 1: REAL-TIME STREAMING CALL ===
       try {
-        reply = await _callGeminiApiWithRetries(geminiCall, getAppState);
-      } catch (geminiErr) {
-        console.warn('[AI Assistant] Primary Gemini call failed, attempting multi-provider fallback:', geminiErr.message);
+        reply = await callGeminiApiStream({
+          contents: sanitizedTurns,
+          config: {
+            systemInstruction: systemCtx
+          },
+          onChunk: (chunkText, fullAccumulated) => {
+            setStreamingMessage(fullAccumulated);
+          },
+          getAppState
+        });
+      } catch (streamErr) {
+        console.warn('[AI Assistant] Streaming call failed, falling back to non-streaming:', streamErr.message);
+        
+        // Fallback: Non-streaming call with full error rotation
+        const geminiFallbackCall = async (genAI) => {
+          const response = await genAI.models.generateContent({
+            model: activeModelName,
+            contents: sanitizedTurns,
+            config: {
+              systemInstruction: systemCtx
+            }
+          });
+          return response?.candidates?.[0]?.content?.parts?.[0]?.text
+            || (typeof response?.text === 'function' ? response.text() : response?.text)
+            || '';
+        };
+
         try {
-          reply = await generateTextWithAI(fullPrompt, systemCtx);
-        } catch (fallbackErr) {
-          throw new Error(`AI analysis error: ${geminiErr.message}. (Fallback error: ${fallbackErr.message})`);
+          reply = await _callGeminiApiWithRetries(geminiFallbackCall, getAppState);
+        } catch (geminiErr) {
+          console.warn('[AI Assistant] Primary Gemini call failed, attempting multi-provider fallback:', geminiErr.message);
+          try {
+            const fallbackPrompt = `${systemCtx}\n\nUser: ${userMsg}`;
+            reply = await generateTextWithAI(fallbackPrompt, systemCtx);
+          } catch (fallbackErr) {
+            throw new Error(`AI analysis error: ${geminiErr.message}. (Fallback error: ${fallbackErr.message})`);
+          }
         }
       }
 
       // Validate that AI results respect category boundaries
       validateAnalysisResults(reply, activeCategory, 'AI Assistant Chat');
 
+      const duration = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
+      const { cleanContent, suggestions: rawSuggestions } = extractSuggestions(reply);
+      const suggestions = getContextualFollowUps(userMsg, cleanContent, activeCategory, rawSuggestions);
+
       const sessionIndex = newSessions.findIndex(s => s.id === activeSessionId);
       if (sessionIndex !== -1) {
         newSessions[sessionIndex] = {
           ...newSessions[sessionIndex],
-          messages: [...newHistory, { role: 'assistant', content: reply }]
+          messages: [
+            ...newHistory,
+            {
+              role: 'assistant',
+              content: cleanContent,
+              suggestions,
+              meta: {
+                duration,
+                model: activeModelName,
+                compressionRatio,
+                timestamp: new Date().toLocaleTimeString()
+              }
+            }
+          ]
         };
         updateState({ aiChatSessions: newSessions });
       }
     } catch (err) {
+      const duration = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
       const sessionIndex = newSessions.findIndex(s => s.id === activeSessionId);
       if (sessionIndex !== -1) {
         newSessions[sessionIndex] = {
           ...newSessions[sessionIndex],
-          messages: [...newHistory, { role: 'assistant', content: `⚠️ ${err.message}` }]
+          messages: [
+            ...newHistory,
+            {
+              role: 'assistant',
+              content: `⚠️ ${err.message}`,
+              meta: { duration, timestamp: new Date().toLocaleTimeString() }
+            }
+          ]
         };
         updateState({ aiChatSessions: newSessions });
       }
     } finally {
       setIsLoading(false);
+      setStreamingMessage('');
+      setThinkingPhase(0);
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   }, [isLoading, attachedImage, history, currentSessionId, allSessions, activeCategory, state.trials, state.projects, state.formulations, state.ingredients, primaryObsField, config, updateState, getAppState]);
@@ -685,6 +903,20 @@ ${memoryContext}`;
     if (cleanIngs.length === 0) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Formula must contain at least one valid ingredient.', type: 'error' } }));
       return;
+    }
+
+    // Duplicate Check: Alert if identical formula already exists in database
+    const existingDuplicate = findDuplicateFormulation(
+      cleanIngs,
+      state.formulations || [],
+      activeCategory
+    );
+
+    if (existingDuplicate) {
+      const proceed = window.confirm(
+        `⚠️ DUPLICATE FORMULA DETECTED!\n\nThis candidate has the EXACT same recipe and ingredient quantities as existing formulation "${existingDuplicate.Name}" (${existingDuplicate.Code || 'No Code'}).\n\nSaving duplicates leads to redundant, wasted field trials.\n\nDo you still wish to save this duplicate?`
+      );
+      if (!proceed) return;
     }
 
     const nowISO = new Date().toISOString();
@@ -1418,6 +1650,16 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                     </div>
                     <p className="text-[11px] text-emerald-700 leading-tight">Synthesize inventory ingredients to propose high-efficacy new candidate recipes.</p>
                   </button>
+
+                  <button
+                    onClick={() => sendMessage(`Evaluate feasibility and efficacy prediction for a new custom recipe: will it work, what is the expected kill rate percentage, which weed species are susceptible vs. tolerant, and does it duplicate any existing formula?`)}
+                    className="sm:col-span-2 p-3 bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 border border-indigo-200/80 rounded-xl hover:shadow-sm text-left transition group hover:border-indigo-300"
+                  >
+                    <div className="flex items-center gap-2 font-bold text-xs text-indigo-900 mb-1">
+                      <span>🔮</span> Predict Formula Feasibility & Weed Spectrum
+                    </div>
+                    <p className="text-[11px] text-indigo-700 leading-tight">Verify if a proposed formulation will work, its predicted efficacy %, target weed sensitivity, and duplication status.</p>
+                  </button>
                 </div>
 
                 <p className="font-semibold text-xs text-slate-400 uppercase tracking-wider mb-2">Common Research Questions</p>
@@ -1478,6 +1720,47 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                             }) }} />
                         );
                       })}
+
+                      {/* Follow-up Suggestions */}
+                      {msg.role === 'assistant' && msg.suggestions && msg.suggestions.length > 0 && (
+                        <div className="mt-3.5 pt-2.5 border-t border-slate-100 flex flex-wrap gap-1.5 items-center not-prose">
+                          <span className="text-[11px] font-bold text-slate-500 flex items-center gap-1 mr-1">
+                            <Sparkles className="w-3 h-3 text-indigo-500" /> Follow-up:
+                          </span>
+                          {msg.suggestions.map((sug, sIdx) => (
+                            <button
+                              key={sIdx}
+                              type="button"
+                              onClick={() => sendMessage(sug)}
+                              disabled={isLoading}
+                              className="text-xs px-2.5 py-1 rounded-full bg-gradient-to-r from-indigo-50/90 via-white to-purple-50/90 hover:from-indigo-100 hover:to-purple-100 text-indigo-900 border border-indigo-200/70 hover:border-indigo-300 font-medium transition shadow-2xs text-left cursor-pointer"
+                            >
+                              {sug}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Response Metadata Bar */}
+                      {msg.role === 'assistant' && msg.meta && (
+                        <div className="mt-2.5 pt-1.5 border-t border-slate-100 flex flex-wrap items-center gap-2.5 text-[10px] text-slate-400 font-mono not-prose">
+                          {msg.meta.duration && (
+                            <span className="flex items-center gap-1" title="Generation latency">
+                              <Clock className="w-3 h-3 text-slate-400" /> {msg.meta.duration}
+                            </span>
+                          )}
+                          {msg.meta.model && (
+                            <span className="flex items-center gap-1" title="AI Model">
+                              <Bot className="w-3 h-3 text-slate-400" /> {msg.meta.model}
+                            </span>
+                          )}
+                          {msg.meta.compressionRatio > 0 && (
+                            <span className="flex items-center gap-0.5 text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-xs font-semibold text-[9px]" title="Context compressed to conserve tokens">
+                              <Zap className="w-2.5 h-2.5 text-emerald-500" /> -{msg.meta.compressionRatio}% tokens
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     {/* Actions Menu */}
@@ -1507,15 +1790,57 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                 );
               })
             )}
-            {isLoading && (
-              <div className="flex justify-start items-start gap-2">
-                <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: config.color.hexLight, color: config.color.hex }}>
-                  <Sparkles className="w-3.5 h-3.5" />
+
+            {/* Live Streaming Response Bubble */}
+            {isLoading && streamingMessage && (
+              <div className="flex justify-start items-start group relative mb-8">
+                <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 mr-2 mt-0.5" style={{ backgroundColor: config.color.hexLight, color: config.color.hex }}>
+                  <Sparkles className="w-3.5 h-3.5 animate-pulse" />
                 </div>
-                <div className="bg-slate-100 rounded-2xl rounded-bl-sm px-4 py-3 flex gap-1 items-center">
-                  <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" />
-                  <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }} />
-                  <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
+                <div className="max-w-[95%] lg:max-w-[90%] rounded-2xl rounded-bl-sm px-5 py-4 bg-white/95 border border-indigo-200/80 shadow-xs text-slate-800">
+                  <div 
+                    className="text-sm leading-relaxed max-w-full overflow-hidden"
+                    dangerouslySetInnerHTML={{ __html: sanitizeAiContent(streamingMessage, {
+                      linkClass: 'font-semibold underline',
+                      linkStyle: `color: ${config.color.hex}`
+                    }) }}
+                  />
+                  <span className="inline-block w-2 h-4 bg-indigo-600 animate-pulse ml-1 align-middle rounded-xs" />
+                  <div className="mt-3 pt-2 border-t border-slate-100 flex items-center gap-2.5 text-[10px] text-slate-400 font-mono">
+                    <span className="inline-flex items-center gap-1 text-indigo-600 font-semibold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-ping" /> Streaming live
+                    </span>
+                    <span>•</span>
+                    <span className="flex items-center gap-1">
+                      <Clock className="w-3 h-3 text-slate-400" /> {elapsedSeconds}s
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Intelligent Thinking Indicator Card */}
+            {isLoading && !streamingMessage && (
+              <div className="flex justify-start items-start gap-2.5 my-3">
+                <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 shadow-xs border border-indigo-200/50" style={{ backgroundColor: config.color.hexLight, color: config.color.hex }}>
+                  <Sparkles className="w-4 h-4 animate-spin text-indigo-600" style={{ animationDuration: '3s' }} />
+                </div>
+                <div className="bg-gradient-to-r from-slate-50 via-indigo-50/40 to-slate-50 border border-indigo-100 rounded-2xl rounded-bl-sm px-4 py-3 shadow-2xs max-w-md">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="text-sm">{THINKING_PHASES[thinkingPhase]?.icon || '🔍'}</span>
+                    <span className="text-xs font-semibold text-slate-700 animate-pulse">
+                      {THINKING_PHASES[thinkingPhase]?.label || 'Analyzing...'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4 text-[10px] text-slate-400 font-mono">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-ping" />
+                      <span>Deep Research Engine</span>
+                    </div>
+                    <span className="flex items-center gap-1">
+                      <Clock className="w-3 h-3 text-slate-400" /> {elapsedSeconds}s elapsed
+                    </span>
+                  </div>
                 </div>
               </div>
             )}

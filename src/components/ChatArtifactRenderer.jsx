@@ -260,6 +260,187 @@ function InChatLaunchTrialWidget({ data }) {
 }
 
 /**
+ * Interactive New Formula Feasibility & Weed Spectrum Predictor Widget
+ */
+function InChatFeasibilityWidget({ data }) {
+  const navigate = useNavigate();
+  const formulaName = data.formulaName || data.name || 'Candidate Formulation';
+  const predictedAvg = Number(data.predictedEfficacyAvg || data.efficacy || 85);
+  const predictedMin = Number(data.predictedEfficacyMin || Math.max(30, predictedAvg - 6));
+  const predictedMax = Number(data.predictedEfficacyMax || Math.min(99, predictedAvg + 5));
+  const confidence = data.confidence || 'Moderate';
+  const rating = data.overallRating || (predictedAvg >= 88 ? 'Superior Efficacy Expected' : predictedAvg >= 75 ? 'Standard Commercial Efficacy' : 'Sub-lethal / High Risk');
+  const isDuplicate = !!data.isDuplicate;
+  const duplicateName = data.duplicateOf || '';
+  const duplicateId = data.duplicateId || '';
+  
+  const susceptible = Array.isArray(data.susceptibleWeeds) ? data.susceptibleWeeds : [];
+  const moderate = Array.isArray(data.moderateWeeds) ? data.moderateWeeds : [];
+  const tolerant = Array.isArray(data.tolerantWeeds) ? data.tolerantWeeds : [];
+
+  const handleLaunchTrial = () => {
+    navigate('/trials', {
+      state: {
+        newTrialWithFormulation: {
+          name: formulaName,
+          dosage: data.dosage || 'Standard Rate',
+          targetWeed: susceptible[0] ? susceptible[0].split('(')[0].trim() : 'Bermuda Grass',
+          notes: `Predicted Efficacy: ${predictedMin}–${predictedMax}% (${rating}). Grounded by AI Feasibility Engine.`
+        }
+      }
+    });
+  };
+
+  return (
+    <div className="my-3 p-4 bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl border border-indigo-500/30 shadow-xl max-w-full text-xs">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-2 mb-3 pb-2.5 border-b border-white/10">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-emerald-400">
+            <FlaskConical className="w-4 h-4" />
+          </div>
+          <div>
+            <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block">
+              AI Efficacy & Weed Spectrum Prediction
+            </span>
+            <h4 className="font-extrabold text-sm text-white flex items-center gap-2">
+              {formulaName}
+            </h4>
+          </div>
+        </div>
+        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/10 text-indigo-200 border border-white/10">
+          Confidence: {confidence}
+        </span>
+      </div>
+
+      {/* Duplicate Warning Badge if recipe exists */}
+      {isDuplicate && (
+        <div className="mb-3 p-2.5 bg-amber-500/20 border border-amber-400/40 rounded-xl text-amber-200 flex items-start gap-2">
+          <span className="text-base leading-none">⚠️</span>
+          <div className="text-[11px] leading-tight">
+            <strong className="text-amber-100">Duplicate Formula Detected:</strong> This exact recipe matches existing formula{' '}
+            <button
+              type="button"
+              onClick={() => navigate(`/formulations?focus=${encodeURIComponent(duplicateId || duplicateName)}`)}
+              className="font-bold underline text-amber-300 hover:text-white"
+            >
+              "{duplicateName}"
+            </button>. Avoid redundant field plots!
+          </div>
+        </div>
+      )}
+
+      {/* Efficacy Gauge Strip */}
+      <div className="p-3 bg-white/5 rounded-xl border border-white/10 mb-3 space-y-2">
+        <div className="flex justify-between items-end">
+          <div>
+            <span className="text-[10px] text-slate-400 font-bold uppercase">Predicted Weed Kill Rate</span>
+            <div className="text-2xl font-black tracking-tight text-white flex items-baseline gap-1.5">
+              <span className={predictedAvg >= 88 ? 'text-emerald-400' : predictedAvg >= 75 ? 'text-teal-300' : 'text-amber-400'}>
+                {predictedMin}–{predictedMax}%
+              </span>
+              <span className="text-xs font-semibold text-slate-400">(Avg: {predictedAvg}%)</span>
+            </div>
+          </div>
+          <div className="text-right">
+            <span className="text-[10px] text-slate-400 block font-semibold">Agronomic Verdict</span>
+            <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${
+              predictedAvg >= 88 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
+              predictedAvg >= 75 ? 'bg-teal-500/20 text-teal-300 border border-teal-500/30' :
+              'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+            }`}>
+              {rating}
+            </span>
+          </div>
+        </div>
+
+        {/* Progress bar */}
+        <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all duration-500 ${
+              predictedAvg >= 88 ? 'bg-gradient-to-r from-teal-400 to-emerald-400' :
+              predictedAvg >= 75 ? 'bg-gradient-to-r from-cyan-400 to-teal-400' :
+              'bg-gradient-to-r from-amber-500 to-rose-400'
+            }`}
+            style={{ width: `${Math.min(100, Math.max(5, predictedAvg))}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Weed Sensitivity Spectrum */}
+      <div className="space-y-2 mb-3">
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+          Target Weed Spectrum Breakdown
+        </span>
+
+        {/* Susceptible (High Control >85%) */}
+        {susceptible.length > 0 && (
+          <div className="bg-emerald-950/40 border border-emerald-500/30 rounded-xl p-2.5">
+            <div className="flex items-center gap-1.5 text-emerald-400 font-bold text-[11px] mb-1">
+              <span>🟢 High Knockdown / Susceptible (85–100% Control):</span>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {susceptible.map((w, i) => (
+                <span key={i} className="text-[10px] bg-emerald-900/60 text-emerald-200 border border-emerald-700/50 px-2 py-0.5 rounded-md font-medium">
+                  {w}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Moderate / Suppression */}
+        {moderate.length > 0 && (
+          <div className="bg-amber-950/30 border border-amber-500/30 rounded-xl p-2.5">
+            <div className="flex items-center gap-1.5 text-amber-400 font-bold text-[11px] mb-1">
+              <span>🟡 Moderate / Suppression (60–84% Control):</span>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {moderate.map((w, i) => (
+                <span key={i} className="text-[10px] bg-amber-900/50 text-amber-200 border border-amber-700/40 px-2 py-0.5 rounded-md font-medium">
+                  {w}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Tolerant / Requires Partner */}
+        {tolerant.length > 0 && (
+          <div className="bg-rose-950/30 border border-rose-500/30 rounded-xl p-2.5">
+            <div className="flex items-center gap-1.5 text-rose-400 font-bold text-[11px] mb-1">
+              <span>🔴 Tolerant / Resistant (Requires Tank-Mix Partner):</span>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {tolerant.map((w, i) => (
+                <span key={i} className="text-[10px] bg-rose-900/40 text-rose-200 border border-rose-700/40 px-2 py-0.5 rounded-md font-medium">
+                  {w}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Action Footer */}
+      <div className="pt-2 border-t border-white/10 flex items-center justify-between gap-3">
+        <span className="text-[10px] text-slate-400 italic">
+          {data.groundingTrialsCount ? `Grounded in ${data.groundingTrialsCount} historical plot trials` : 'Calculated via Colby synergy & HRAC mode-of-action models'}
+        </span>
+        <button
+          type="button"
+          onClick={handleLaunchTrial}
+          className="px-3.5 py-1.5 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-slate-950 font-extrabold rounded-lg shadow transition flex items-center gap-1.5 shrink-0"
+        >
+          <Rocket className="w-3.5 h-3.5" />
+          <span>Launch Field Plot</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
  * Main Artifact Dispatcher: Parses and renders specialized interactive in-chat widgets
  */
 export default function ChatArtifactRenderer({ artifactType, data }) {
@@ -274,7 +455,11 @@ export default function ChatArtifactRenderer({ artifactType, data }) {
     case 'launch_trial':
     case 'launchtrial':
       return <InChatLaunchTrialWidget data={data} />;
+    case 'feasibility':
+    case 'formula_feasibility':
+      return <InChatFeasibilityWidget data={data} />;
     default:
       return null;
   }
 }
+

@@ -213,6 +213,111 @@ export function callGeminiApi(description, apiCallFunction, getAppState) {
 }
 
 /**
+ * Executes a streaming Gemini API call with automatic retry, key rotation, and model fallback.
+ * Calls onChunk(chunkText, fullAccumulatedText) as tokens arrive in real-time.
+ */
+export async function callGeminiApiStream({ contents, config, onChunk, getAppState, retries = 0 }) {
+  const genAI = getGenAIClient(getAppState);
+  if (!genAI) {
+    throw new Error('NO_API_KEY: No Google Gemini API key configured. Please add one in Settings.');
+  }
+
+  const currentModel = getActiveApiModel(getAppState);
+  const currentBlockKey = getGeminiQuotaBlockKey(currentModel, getAppState);
+  const blockedModels = (typeof window !== 'undefined' ? window._geminiBlockedModels : {}) || {};
+
+  if (blockedModels[currentBlockKey] && Date.now() < blockedModels[currentBlockKey]) {
+    console.warn(`[AI Stream] Model ${currentModel} is temporarily blocked due to rate limiting. Rotating...`);
+    if (rotateApiModel(getAppState)) {
+      return callGeminiApiStream({ contents, config, onChunk, getAppState, retries: retries + 1 });
+    }
+  }
+
+  let fullText = '';
+  try {
+    const stream = await genAI.models.generateContentStream({
+      model: currentModel,
+      contents,
+      config
+    });
+
+    for await (const chunk of stream) {
+      let chunkText = '';
+      if (typeof chunk?.text === 'string') {
+        chunkText = chunk.text;
+      } else if (typeof chunk?.text === 'function') {
+        chunkText = chunk.text();
+      } else if (chunk?.candidates?.[0]?.content?.parts) {
+        chunkText = chunk.candidates[0].content.parts.map(p => p.text || '').join('');
+      }
+
+      if (chunkText) {
+        fullText += chunkText;
+        if (typeof onChunk === 'function') {
+          try {
+            onChunk(chunkText, fullText);
+          } catch (callbackErr) {
+            console.warn('[AI Stream] Error in onChunk callback:', callbackErr);
+          }
+        }
+      }
+    }
+
+    return fullText;
+  } catch (error) {
+    // If we already received substantial text before connection dropped, return it
+    if (fullText && fullText.length > 50) {
+      console.warn('[AI Stream] Stream interrupted after receiving partial text:', error);
+      return fullText;
+    }
+
+    const errorMsg = String(error?.message || '').toLowerCase();
+    const status = error?.status || error?.statusCode || (errorMsg.includes('429') ? 429 : 0);
+
+    // Handle Quota / Rate Limiting (429)
+    if (status === 429 || errorMsg.includes('quota') || errorMsg.includes('resource_exhausted')) {
+      console.warn(`[AI Stream] Rate limit hit on ${currentModel}. Backing off and rotating...`);
+      blockedModels[currentBlockKey] = Date.now() + 60000;
+      if (typeof window !== 'undefined') {
+        window._geminiBlockedModels = blockedModels;
+        try {
+          localStorage.setItem('ai_blocked_models', JSON.stringify(blockedModels));
+        } catch (e) {}
+      }
+
+      if (retries < 3) {
+        if (rotateApiKey(getAppState) || rotateApiModel(getAppState)) {
+          await new Promise(res => setTimeout(res, 1000));
+          return callGeminiApiStream({ contents, config, onChunk, getAppState, retries: retries + 1 });
+        }
+      }
+      throw new Error('QUOTA_EXCEEDED: All Gemini models and API keys have reached rate limits. Please try again in a few moments.');
+    }
+
+    // Handle Model Overloaded (503)
+    if (status === 503 || errorMsg.includes('overloaded') || errorMsg.includes('unavailable')) {
+      if (retries < 2) {
+        await new Promise(res => setTimeout(res, 2000 * (retries + 1)));
+        return callGeminiApiStream({ contents, config, onChunk, getAppState, retries: retries + 1 });
+      }
+      if (rotateApiModel(getAppState)) {
+        return callGeminiApiStream({ contents, config, onChunk, getAppState, retries: retries + 1 });
+      }
+    }
+
+    // Handle 404 / Model Deprecated
+    if (status === 404 || errorMsg.includes('not found') || errorMsg.includes('deprecated')) {
+      console.warn(`[AI Stream] Model ${currentModel} not found or deprecated. Rotating...`);
+      if (rotateApiModel(getAppState)) {
+        return callGeminiApiStream({ contents, config, onChunk, getAppState, retries: retries + 1 });
+      }
+    }
+
+    throw error;
+  }
+}
+
+/**
  * Enhanced AI analysis wrapper that ensures category isolation.
  */
 export async function analyzeWithCategoryContext(analysisType, data, category, getAppState) {
