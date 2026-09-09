@@ -119,13 +119,30 @@ export async function analyzePlantPhenotype(imageSource, options = {}) {
     calculatedDesiccationRate = Math.round((necroticPixels / totalFoliage) * 100);
   }
 
+  let heatmapDataUrl = null;
+  if (options.generateHeatmap) {
+    try {
+      heatmapDataUrl = generatePhenotypeHeatmap(img, { sampleStep });
+    } catch (e) {
+      // In headless test environments canvas/document may be mocked
+    }
+  }
+
+  const roundedDesiccation = Math.min(Math.max(calculatedDesiccationRate, 0), 100);
+  const roundedGreenPct = parseFloat(greenCanopyPct.toFixed(1));
+  const roundedNecroticPct = parseFloat(necroticPct.toFixed(1));
+
   return {
     totalSampled,
     greenPixels,
     necroticPixels,
-    greenCanopyPct: parseFloat(greenCanopyPct.toFixed(1)),
-    necroticPct: parseFloat(necroticPct.toFixed(1)),
-    calculatedDesiccationRate: Math.min(Math.max(calculatedDesiccationRate, 0), 100),
+    totalFoliagePixels: totalFoliage,
+    greenCanopyPct: roundedGreenPct,
+    necroticPct: roundedNecroticPct,
+    necrosisPct: roundedNecroticPct,
+    calculatedDesiccationRate: roundedDesiccation,
+    estimatedWeedControlPct: roundedDesiccation,
+    heatmapDataUrl,
     confidence: totalFoliage > (totalSampled * 0.1) ? 'High' : 'Moderate (Low canopy coverage)'
   };
 }

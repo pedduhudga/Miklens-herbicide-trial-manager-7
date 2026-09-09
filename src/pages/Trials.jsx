@@ -10601,6 +10601,7 @@ If none are present, write "None".`;
         onClose={() => setIsVoiceScoutOpen(false)}
         onApply={handleApplyVoiceScout}
         currentTrial={activeTrial}
+        knownFormulations={formulations}
       />
 
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />

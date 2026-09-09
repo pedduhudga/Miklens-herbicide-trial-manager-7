@@ -38,8 +38,11 @@ describe('phenotyping - Digital Plant Phenotyping & Desiccation Engine', () => {
 
     expect(result.greenPixels).toBe(50);
     expect(result.necroticPixels).toBe(50);
+    expect(result.totalFoliagePixels).toBe(100);
     expect(result.greenCanopyPct).toBe(50);
     expect(result.necroticPct).toBe(50);
+    expect(result.necrosisPct).toBe(50);
     expect(result.calculatedDesiccationRate).toBe(50);
+    expect(result.estimatedWeedControlPct).toBe(50);
   });
 });

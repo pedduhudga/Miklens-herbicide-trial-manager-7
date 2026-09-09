@@ -5,53 +5,53 @@
 
 export const HRAC_DATABASE = {
   // Group 1: ACCase Inhibitors (Graminicides / Grass killers)
-  'clethodim': { group: 'HRAC 1', wssa: 'Group 1', name: 'ACCase Inhibitors', class: 'Graminicide' },
-  'haloxyfop': { group: 'HRAC 1', wssa: 'Group 1', name: 'ACCase Inhibitors', class: 'Graminicide' },
-  'quizalofop': { group: 'HRAC 1', wssa: 'Group 1', name: 'ACCase Inhibitors', class: 'Graminicide' },
-  'fenoxaprop': { group: 'HRAC 1', wssa: 'Group 1', name: 'ACCase Inhibitors', class: 'Graminicide' },
-  'propaquizafop': { group: 'HRAC 1', wssa: 'Group 1', name: 'ACCase Inhibitors', class: 'Graminicide' },
+  'clethodim': { group: 'HRAC 1', hracGroup: '1', wssa: 'Group 1', name: 'ACCase Inhibitors', class: 'Graminicide', chemicalFamily: 'Cyclohexanedione', systemicity: 'Foliar Systemic', targetSite: 'Inhibition of acetyl CoA carboxylase (ACCase)' },
+  'haloxyfop': { group: 'HRAC 1', hracGroup: '1', wssa: 'Group 1', name: 'ACCase Inhibitors', class: 'Graminicide', chemicalFamily: 'Aryloxyphenoxypropionate', systemicity: 'Foliar Systemic', targetSite: 'Inhibition of acetyl CoA carboxylase (ACCase)' },
+  'quizalofop': { group: 'HRAC 1', hracGroup: '1', wssa: 'Group 1', name: 'ACCase Inhibitors', class: 'Graminicide', chemicalFamily: 'Aryloxyphenoxypropionate', systemicity: 'Foliar Systemic', targetSite: 'Inhibition of acetyl CoA carboxylase (ACCase)' },
+  'fenoxaprop': { group: 'HRAC 1', hracGroup: '1', wssa: 'Group 1', name: 'ACCase Inhibitors', class: 'Graminicide', chemicalFamily: 'Aryloxyphenoxypropionate', systemicity: 'Foliar Systemic', targetSite: 'Inhibition of acetyl CoA carboxylase (ACCase)' },
+  'propaquizafop': { group: 'HRAC 1', hracGroup: '1', wssa: 'Group 1', name: 'ACCase Inhibitors', class: 'Graminicide', chemicalFamily: 'Aryloxyphenoxypropionate', systemicity: 'Foliar Systemic', targetSite: 'Inhibition of acetyl CoA carboxylase (ACCase)' },
 
   // Group 2: ALS Inhibitors
-  'imazethapyr': { group: 'HRAC 2', wssa: 'Group 2', name: 'ALS Inhibitors', class: 'Systemic' },
-  'halosulfuron': { group: 'HRAC 2', wssa: 'Group 2', name: 'ALS Inhibitors', class: 'Systemic Sedge Killer' },
-  'metsulfuron': { group: 'HRAC 2', wssa: 'Group 2', name: 'ALS Inhibitors', class: 'Systemic Broadleaf' },
-  'pyrazosulfuron': { group: 'HRAC 2', wssa: 'Group 2', name: 'ALS Inhibitors', class: 'Systemic' },
-  'bispyribac': { group: 'HRAC 2', wssa: 'Group 2', name: 'ALS Inhibitors', class: 'Systemic' },
+  'imazethapyr': { group: 'HRAC 2', hracGroup: '2', wssa: 'Group 2', name: 'ALS Inhibitors', class: 'Systemic', chemicalFamily: 'Imidazolinone', systemicity: 'Systemic (Xylem & Phloem)', targetSite: 'Inhibition of acetolactate synthase (ALS)' },
+  'halosulfuron': { group: 'HRAC 2', hracGroup: '2', wssa: 'Group 2', name: 'ALS Inhibitors', class: 'Systemic Sedge Killer', chemicalFamily: 'Sulfonylurea', systemicity: 'Systemic (Xylem & Phloem)', targetSite: 'Inhibition of acetolactate synthase (ALS)' },
+  'metsulfuron': { group: 'HRAC 2', hracGroup: '2', wssa: 'Group 2', name: 'ALS Inhibitors', class: 'Systemic Broadleaf', chemicalFamily: 'Sulfonylurea', systemicity: 'Systemic (Xylem & Phloem)', targetSite: 'Inhibition of acetolactate synthase (ALS)' },
+  'pyrazosulfuron': { group: 'HRAC 2', hracGroup: '2', wssa: 'Group 2', name: 'ALS Inhibitors', class: 'Systemic', chemicalFamily: 'Sulfonylurea', systemicity: 'Systemic (Xylem & Phloem)', targetSite: 'Inhibition of acetolactate synthase (ALS)' },
+  'bispyribac': { group: 'HRAC 2', hracGroup: '2', wssa: 'Group 2', name: 'ALS Inhibitors', class: 'Systemic', chemicalFamily: 'Pyrimidinyl-benzoate', systemicity: 'Systemic (Xylem & Phloem)', targetSite: 'Inhibition of acetolactate synthase (ALS)' },
 
   // Group 3: Microtubule Assembly Inhibitors (Pre-emergent)
-  'pendimethalin': { group: 'HRAC 3', wssa: 'Group 3', name: 'Microtubule Inhibitors', class: 'Pre-emergent Residual' },
-  'trifluralin': { group: 'HRAC 3', wssa: 'Group 3', name: 'Microtubule Inhibitors', class: 'Pre-emergent' },
+  'pendimethalin': { group: 'HRAC 3', hracGroup: '3', wssa: 'Group 3', name: 'Microtubule Inhibitors', class: 'Pre-emergent Residual', chemicalFamily: 'Dinitroaniline', systemicity: 'Soil Residual', targetSite: 'Microtubule assembly inhibition' },
+  'trifluralin': { group: 'HRAC 3', hracGroup: '3', wssa: 'Group 3', name: 'Microtubule Inhibitors', class: 'Pre-emergent', chemicalFamily: 'Dinitroaniline', systemicity: 'Soil Residual', targetSite: 'Microtubule assembly inhibition' },
 
   // Group 4: Synthetic Auxins (Broadleaf killers)
-  '2,4-d': { group: 'HRAC 4', wssa: 'Group 4', name: 'Synthetic Auxins', class: 'Systemic Broadleaf' },
-  'dicamba': { group: 'HRAC 4', wssa: 'Group 4', name: 'Synthetic Auxins', class: 'Systemic Broadleaf' },
-  'triclopyr': { group: 'HRAC 4', wssa: 'Group 4', name: 'Synthetic Auxins', class: 'Woody Broadleaf' },
-  'mcpa': { group: 'HRAC 4', wssa: 'Group 4', name: 'Synthetic Auxins', class: 'Systemic Broadleaf' },
+  '2,4-d': { group: 'HRAC 4', hracGroup: '4', wssa: 'Group 4', name: 'Synthetic Auxins', class: 'Systemic Broadleaf', chemicalFamily: 'Phenoxy-carboxylic acid', systemicity: 'Systemic (Symplastic)', targetSite: 'Synthetic auxin action (IAA mimic)' },
+  'dicamba': { group: 'HRAC 4', hracGroup: '4', wssa: 'Group 4', name: 'Synthetic Auxins', class: 'Systemic Broadleaf', chemicalFamily: 'Benzoic acid', systemicity: 'Systemic (Symplastic)', targetSite: 'Synthetic auxin action (IAA mimic)' },
+  'triclopyr': { group: 'HRAC 4', hracGroup: '4', wssa: 'Group 4', name: 'Synthetic Auxins', class: 'Woody Broadleaf', chemicalFamily: 'Pyridine-carboxylic acid', systemicity: 'Systemic (Symplastic)', targetSite: 'Synthetic auxin action (IAA mimic)' },
+  'mcpa': { group: 'HRAC 4', hracGroup: '4', wssa: 'Group 4', name: 'Synthetic Auxins', class: 'Systemic Broadleaf', chemicalFamily: 'Phenoxy-carboxylic acid', systemicity: 'Systemic (Symplastic)', targetSite: 'Synthetic auxin action (IAA mimic)' },
 
   // Group 5: Photosystem II Inhibitors (PS II Serine 264)
-  'atrazine': { group: 'HRAC 5', wssa: 'Group 5', name: 'Photosystem II Inhibitors', class: 'Broadleaf & Grass' },
-  'metribuzin': { group: 'HRAC 5', wssa: 'Group 5', name: 'Photosystem II Inhibitors', class: 'Residual Broadleaf' },
-  'simazine': { group: 'HRAC 5', wssa: 'Group 5', name: 'Photosystem II Inhibitors', class: 'Pre-emergent' },
+  'atrazine': { group: 'HRAC 5', hracGroup: '5', wssa: 'Group 5', name: 'Photosystem II Inhibitors', class: 'Broadleaf & Grass', chemicalFamily: 'Triazine', systemicity: 'Xylem-mobile Systemic', targetSite: 'Inhibition of photosynthesis at photosystem II' },
+  'metribuzin': { group: 'HRAC 5', hracGroup: '5', wssa: 'Group 5', name: 'Photosystem II Inhibitors', class: 'Residual Broadleaf', chemicalFamily: 'Triazinone', systemicity: 'Xylem-mobile Systemic', targetSite: 'Inhibition of photosynthesis at photosystem II' },
+  'simazine': { group: 'HRAC 5', hracGroup: '5', wssa: 'Group 5', name: 'Photosystem II Inhibitors', class: 'Pre-emergent', chemicalFamily: 'Triazine', systemicity: 'Xylem-mobile Systemic', targetSite: 'Inhibition of photosynthesis at photosystem II' },
 
   // Group 9: EPSP Synthase Inhibitors (Broad-spectrum systemic)
-  'glyphosate': { group: 'HRAC 9', wssa: 'Group 9', name: 'Inhibition of EPSP Synthase', class: 'Non-selective Systemic' },
+  'glyphosate': { group: 'HRAC 9', hracGroup: '9', wssa: 'Group 9', name: 'Inhibition of EPSP Synthase', class: 'Non-selective Systemic', chemicalFamily: 'Organophosphorus', systemicity: 'Foliar Systemic Translocation', targetSite: 'Inhibition of EPSP synthase' },
 
   // Group 10: Glutamine Synthetase Inhibitors (Broad-spectrum contact)
-  'glufosinate': { group: 'HRAC 10', wssa: 'Group 10', name: 'Glutamine Synthetase Inhibitors', class: 'Broad-spectrum Knockdown' },
+  'glufosinate': { group: 'HRAC 10', hracGroup: '10', wssa: 'Group 10', name: 'Glutamine Synthetase Inhibitors', class: 'Broad-spectrum Knockdown', chemicalFamily: 'Phosphinic acid', systemicity: 'Contact Knockdown', targetSite: 'Inhibition of glutamine synthetase' },
 
   // Group 14: PPO Inhibitors (Cell Membrane Disruptors)
-  'oxyfluorfen': { group: 'HRAC 14', wssa: 'Group 14', name: 'PPO Inhibitors', class: 'Contact Burn / Pre-emergent' },
-  'carfentrazone': { group: 'HRAC 14', wssa: 'Group 14', name: 'PPO Inhibitors', class: 'Fast Desiccant' },
-  'flumioxazin': { group: 'HRAC 14', wssa: 'Group 14', name: 'PPO Inhibitors', class: 'Residual Knockdown' },
+  'oxyfluorfen': { group: 'HRAC 14', hracGroup: '14', wssa: 'Group 14', name: 'PPO Inhibitors', class: 'Contact Burn / Pre-emergent', chemicalFamily: 'Diphenylether', systemicity: 'Contact Membrane Disruptor', targetSite: 'Inhibition of protoporphyrinogen oxidase (PPO)' },
+  'carfentrazone': { group: 'HRAC 14', hracGroup: '14', wssa: 'Group 14', name: 'PPO Inhibitors', class: 'Fast Desiccant', chemicalFamily: 'Triazolinone', systemicity: 'Contact Membrane Disruptor', targetSite: 'Inhibition of protoporphyrinogen oxidase (PPO)' },
+  'flumioxazin': { group: 'HRAC 14', hracGroup: '14', wssa: 'Group 14', name: 'PPO Inhibitors', class: 'Residual Knockdown', chemicalFamily: 'N-phenylphthalimide', systemicity: 'Contact / Residual', targetSite: 'Inhibition of protoporphyrinogen oxidase (PPO)' },
 
   // Group 22: Photosystem I Electron Diverters (Bipyridyliums)
-  'paraquat': { group: 'HRAC 22', wssa: 'Group 22', name: 'Photosystem I Diverters', class: 'Ultra-fast Contact Desiccant' },
-  'diquat': { group: 'HRAC 22', wssa: 'Group 22', name: 'Photosystem I Diverters', class: 'Contact Desiccant' },
+  'paraquat': { group: 'HRAC 22', hracGroup: '22', wssa: 'Group 22', name: 'Photosystem I Diverters', class: 'Ultra-fast Contact Desiccant', chemicalFamily: 'Bipyridylium', systemicity: 'Ultra-fast Contact Desiccant', targetSite: 'Photosystem I electron diversion' },
+  'diquat': { group: 'HRAC 22', hracGroup: '22', wssa: 'Group 22', name: 'Photosystem I Diverters', class: 'Contact Desiccant', chemicalFamily: 'Bipyridylium', systemicity: 'Ultra-fast Contact Desiccant', targetSite: 'Photosystem I electron diversion' },
 
   // Group 27: HPPD Inhibitors (Bleachers)
-  'mesotrione': { group: 'HRAC 27', wssa: 'Group 27', name: 'HPPD Inhibitors (Pigment)', class: 'Systemic Bleacher' },
-  'tembotrione': { group: 'HRAC 27', wssa: 'Group 27', name: 'HPPD Inhibitors (Pigment)', class: 'Systemic Bleacher' },
-  'topramezone': { group: 'HRAC 27', wssa: 'Group 27', name: 'HPPD Inhibitors (Pigment)', class: 'Systemic Bleacher' }
+  'mesotrione': { group: 'HRAC 27', hracGroup: '27', wssa: 'Group 27', name: 'HPPD Inhibitors (Pigment)', class: 'Systemic Bleacher', chemicalFamily: 'Triketone', systemicity: 'Foliar & Root Systemic', targetSite: 'Inhibition of 4-hydroxyphenylpyruvate dioxygenase (HPPD)' },
+  'tembotrione': { group: 'HRAC 27', hracGroup: '27', wssa: 'Group 27', name: 'HPPD Inhibitors (Pigment)', class: 'Systemic Bleacher', chemicalFamily: 'Triketone', systemicity: 'Foliar & Root Systemic', targetSite: 'Inhibition of 4-hydroxyphenylpyruvate dioxygenase (HPPD)' },
+  'topramezone': { group: 'HRAC 27', hracGroup: '27', wssa: 'Group 27', name: 'HPPD Inhibitors (Pigment)', class: 'Systemic Bleacher', chemicalFamily: 'Pyrazolone', systemicity: 'Foliar & Root Systemic', targetSite: 'Inhibition of 4-hydroxyphenylpyruvate dioxygenase (HPPD)' }
 };
 
 /**
@@ -79,10 +79,17 @@ export function analyzeFormulationSynergy(ingredients = []) {
   if (!Array.isArray(ingredients) || ingredients.length === 0) {
     return {
       hracGroups: [],
+      uniqueHracGroups: [],
+      detectedMoas: [],
+      activeIngredients: [],
       multiSiteScore: 'Single / Unknown',
+      moaSummary: 'No active ingredients recorded.',
       antagonismAlerts: [],
+      hasAntagonism: false,
+      antagonismWarnings: [],
       synergies: [],
       adjuvantTips: [],
+      adjuvantRecommendations: [],
       isMultiMoa: false
     };
   }
@@ -90,15 +97,24 @@ export function analyzeFormulationSynergy(ingredients = []) {
   const detectedMoas = [];
   const activeNames = [];
 
-  ingredients.forEach(ing => {
-    const name = (ing.name || ing.Name || '').trim();
-    if (name) {
-      activeNames.push(name.toLowerCase());
-      const hrac = identifyHrac(name);
+  const activeIngredients = ingredients.map(ing => {
+    const rawName = (ing.name || ing.Name || '').trim();
+    const hrac = identifyHrac(rawName);
+    if (rawName) {
+      activeNames.push(rawName.toLowerCase());
       if (hrac && !detectedMoas.some(m => m.group === hrac.group)) {
         detectedMoas.push(hrac);
       }
     }
+    return {
+      name: rawName,
+      quantity: ing.quantity ?? ing.qty ?? '',
+      unit: ing.unit || 'ml',
+      hracGroup: hrac ? (hrac.hracGroup || hrac.group.replace('HRAC ', '')) : 'Unknown',
+      chemicalFamily: hrac?.chemicalFamily || 'Organic Compound',
+      systemicity: hrac?.systemicity || 'Contact / Systemic',
+      targetSite: hrac?.targetSite || hrac?.name || 'Herbicide Active Ingredient'
+    };
   });
 
   const hracGroups = detectedMoas.map(m => m.group);
@@ -120,7 +136,9 @@ export function analyzeFormulationSynergy(ingredients = []) {
     antagonismAlerts.push({
       severity: 'high',
       title: 'Graminicide & Auxin Antagonism',
-      description: 'Tank-mixing Group 1 (ACCase graminicides) with Group 4 (Synthetic Auxins e.g. 2,4-D) can reduce grass uptake & translocation by 15–30%. Recommend staggering applications or increasing graminicide rate by 20%.'
+      actives: ['Group 1 (ACCase Graminicide)', 'Group 4 (Synthetic Auxin)'],
+      description: 'Tank-mixing Group 1 (ACCase graminicides) with Group 4 (Synthetic Auxins e.g. 2,4-D) can reduce grass uptake & translocation by 15–30%. Recommend staggering applications or increasing graminicide rate by 20%.',
+      recommendation: 'Stagger applications by 48-72 hours or increase the graminicide rate by 20% to prevent antagonism.'
     });
   }
 
@@ -164,13 +182,33 @@ export function analyzeFormulationSynergy(ingredients = []) {
     });
   }
 
+  const antagonismWarnings = antagonismAlerts.map(a => ({
+    actives: a.actives || ['Group 1 (Graminicide)', 'Group 4 (Synthetic Auxin)'],
+    description: a.description,
+    recommendation: a.recommendation || 'Stagger tank-mix application or elevate graminicide rate by 15-20%.'
+  }));
+
+  const adjuvantRecommendations = adjuvantTips.map(t => `${t.name}: ${t.purpose}`);
+
+  const moaSummary = isMultiMoa 
+    ? `Combines ${hracGroups.join(' + ')} across distinct biochemical pathways, delivering comprehensive weed spectrum and multi-site resistance defense.`
+    : (hracGroups.length === 1 
+      ? `Single Mode of Action (${hracGroups[0]}). Recommend rotating with complementary MoA classes to delay resistance development.`
+      : 'Standard formulation profile.');
+
   return {
     hracGroups,
+    uniqueHracGroups: hracGroups,
     detectedMoas,
+    activeIngredients,
     multiSiteScore,
+    moaSummary,
     isMultiMoa,
     antagonismAlerts,
+    hasAntagonism: antagonismAlerts.length > 0,
+    antagonismWarnings,
     synergies,
-    adjuvantTips
+    adjuvantTips,
+    adjuvantRecommendations
   };
 }

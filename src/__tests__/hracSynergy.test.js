@@ -44,8 +44,26 @@ describe('hracSynergy - Mode of Action & Chemical Interaction Engine', () => {
 
     expect(analysis.hracGroups).toContain('HRAC 9');
     expect(analysis.hracGroups).toContain('HRAC 14');
+    expect(analysis.uniqueHracGroups).toContain('HRAC 9');
     expect(analysis.multiSiteScore).toContain('Dual MOA');
     expect(analysis.synergies.length).toBeGreaterThan(0);
     expect(analysis.adjuvantTips.some(t => t.name.includes('Ammonium Sulfate'))).toBe(true);
+    expect(analysis.adjuvantRecommendations.some(r => r.includes('Ammonium Sulfate'))).toBe(true);
+  });
+
+  it('provides rich active ingredient metadata for modal and UI cards', () => {
+    const mix = [
+      { name: 'Clethodim 240 EC', quantity: 30, unit: 'ml' },
+      { name: '2,4-D Amine Salt', quantity: 50, unit: 'ml' }
+    ];
+
+    const analysis = analyzeFormulationSynergy(mix);
+    expect(analysis.hasAntagonism).toBe(true);
+    expect(analysis.antagonismWarnings.length).toBeGreaterThan(0);
+    expect(analysis.antagonismWarnings[0].recommendation).toBeDefined();
+    expect(analysis.activeIngredients.length).toBe(2);
+    expect(analysis.activeIngredients[0].hracGroup).toBe('1');
+    expect(analysis.activeIngredients[0].chemicalFamily).toBe('Cyclohexanedione');
+    expect(analysis.moaSummary).toBeDefined();
   });
 });

@@ -38,6 +38,21 @@ describe('voiceParser - Hands-Free Voice Field Scout Parser', () => {
     expect(parseVoiceObservation(poorSpeech).result).toBe('Poor');
   });
 
+  it('extracts DAA, phytotoxicity, and weedControl dictionary', () => {
+    const speech = "Plot 3 at 14 DAA, Bermudagrass, 90% control, crop injury 5 percent, leaf scorch, BBCH 14, 28 degrees";
+    const parsed = parseVoiceObservation(speech, {
+      knownTargets: ['Bermudagrass']
+    });
+
+    expect(parsed.plot).toBe('3');
+    expect(parsed.daa).toBe(14);
+    expect(parsed.efficacy).toBe(90);
+    expect(parsed.phytotoxicityPct).toBe(5);
+    expect(parsed.cropInjury.toLowerCase()).toContain('leaf scorch');
+    expect(parsed.bbch).toBe(14);
+    expect(parsed.weedControl['Bermudagrass']).toBe(90);
+  });
+
   it('handles empty or malformed voice inputs gracefully', () => {
     const empty = parseVoiceObservation('');
     expect(empty.plot).toBe('');

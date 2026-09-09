@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, Check, X, Sparkles, Volume2, AlertCircle, RefreshCw } from 'lucide-react';
+import { Mic, MicOff, Check, X, Sparkles, Volume2, AlertCircle, RefreshCw, Clock, Thermometer, ShieldAlert } from 'lucide-react';
 import { isSpeechRecognitionSupported, createSpeechRecognizer, parseVoiceObservation } from '../utils/voiceParser.js';
 
 export default function VoiceFieldScoutModal({
   isOpen,
   onClose,
   onApply,
+  currentTrial = null,
   knownFormulations = [],
   knownTargets = []
 }) {
@@ -18,13 +19,21 @@ export default function VoiceFieldScoutModal({
 
   const supported = isSpeechRecognitionSupported();
 
+  const effectiveFormulations = (knownFormulations && knownFormulations.length > 0)
+    ? knownFormulations
+    : (currentTrial ? [currentTrial.FormulationName, currentTrial.FormulationID].filter(Boolean) : []);
+
+  const effectiveTargets = (knownTargets && knownTargets.length > 0)
+    ? knownTargets
+    : (currentTrial ? [currentTrial.WeedSpecies, currentTrial.TargetWeed, currentTrial.Target, currentTrial.DiseaseTarget, currentTrial.PestTarget].filter(Boolean) : []);
+
   // Reset state on open
   useEffect(() => {
     if (isOpen) {
       setTranscript('');
       setManualText('');
       setErrorMsg('');
-      const initial = parseVoiceObservation('', { knownFormulations, knownTargets });
+      const initial = parseVoiceObservation('', { knownFormulations: effectiveFormulations, knownTargets: effectiveTargets });
       setParsedData(initial);
       if (supported) {
         startListening();
@@ -47,7 +56,7 @@ export default function VoiceFieldScoutModal({
       const rec = createSpeechRecognizer({
         onResult: ({ transcript: text }) => {
           setTranscript(text);
-          const parsed = parseVoiceObservation(text, { knownFormulations, knownTargets });
+          const parsed = parseVoiceObservation(text, { knownFormulations: effectiveFormulations, knownTargets: effectiveTargets });
           setParsedData(parsed);
         },
         onError: (err) => {
@@ -96,7 +105,7 @@ export default function VoiceFieldScoutModal({
     const val = e.target.value;
     setManualText(val);
     setTranscript(val);
-    const parsed = parseVoiceObservation(val, { knownFormulations, knownTargets });
+    const parsed = parseVoiceObservation(val, { knownFormulations: effectiveFormulations, knownTargets: effectiveTargets });
     setParsedData(parsed);
   };
 
@@ -126,7 +135,9 @@ export default function VoiceFieldScoutModal({
                   100% Free AI
                 </span>
               </div>
-              <p className="text-xs text-slate-500">Hands-free natural speech observation logger</p>
+              <p className="text-xs text-slate-500">
+                {currentTrial ? `Scouting: ${currentTrial.TrialName || currentTrial.FormulationName || 'Active Trial'}` : 'Hands-free natural speech observation logger'}
+              </p>
             </div>
           </div>
           <button 
@@ -166,7 +177,7 @@ export default function VoiceFieldScoutModal({
               )}
             </p>
             <p className="text-[11px] text-slate-400 mt-0.5 text-center px-4">
-              e.g. "Plot 4, Goweed Ultra at 40 ml, Bermudagrass, 95 percent kill, dry sunny"
+              e.g. "Plot 4, 14 DAA, Bermudagrass 95 percent kill, 32 degrees sunny"
             </p>
           </div>
 
@@ -184,7 +195,7 @@ export default function VoiceFieldScoutModal({
               {transcript && (
                 <button
                   type="button"
-                  onClick={() => { setTranscript(''); setParsedData(parseVoiceObservation('')); }}
+                  onClick={() => { setTranscript(''); setParsedData(parseVoiceObservation('', { knownFormulations: effectiveFormulations, knownTargets: effectiveTargets })); }}
                   className="text-[10px] text-slate-400 hover:text-slate-600 flex items-center gap-1"
                 >
                   <RefreshCw className="w-3 h-3" /> Clear
@@ -221,33 +232,53 @@ export default function VoiceFieldScoutModal({
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <div className="p-2 bg-white rounded-xl border border-slate-200/60 shadow-2xs">
-                <div className="text-[10px] uppercase font-bold text-slate-400">Plot #</div>
+                <div className="text-[10px] uppercase font-bold text-slate-400">Plot / DAA</div>
                 <div className="text-xs font-black text-slate-800 truncate">
-                  {parsedData?.plot ? `Plot ${parsedData.plot}` : '—'}
+                  {parsedData?.plot ? `Plot ${parsedData.plot}` : (parsedData?.daa !== null && parsedData?.daa !== undefined ? `${parsedData.daa} DAA` : '—')}
                 </div>
               </div>
 
               <div className="p-2 bg-white rounded-xl border border-slate-200/60 shadow-2xs">
                 <div className="text-[10px] uppercase font-bold text-slate-400">Kill Rate</div>
                 <div className="text-xs font-black text-emerald-700 truncate">
-                  {parsedData?.efficacy !== null ? `${parsedData.efficacy}%` : '—'}
+                  {parsedData?.efficacy !== null && parsedData?.efficacy !== undefined ? `${parsedData.efficacy}%` : '—'}
                 </div>
               </div>
 
               <div className="p-2 bg-white rounded-xl border border-slate-200/60 shadow-2xs">
-                <div className="text-[10px] uppercase font-bold text-slate-400">Dosage</div>
+                <div className="text-[10px] uppercase font-bold text-slate-400">Dosage / Rate</div>
                 <div className="text-xs font-bold text-slate-800 truncate">
                   {parsedData?.dosage || '—'}
                 </div>
               </div>
 
               <div className="p-2 bg-white rounded-xl border border-slate-200/60 shadow-2xs">
-                <div className="text-[10px] uppercase font-bold text-slate-400">Target</div>
+                <div className="text-[10px] uppercase font-bold text-slate-400">Target Weed</div>
                 <div className="text-xs font-bold text-slate-800 truncate">
                   {parsedData?.target || '—'}
                 </div>
               </div>
             </div>
+
+            {(parsedData?.weather?.temp || parsedData?.weather?.rain || parsedData?.phytotoxicityPct !== null) && (
+              <div className="flex flex-wrap gap-2 pt-1 text-[11px]">
+                {parsedData?.weather?.temp && (
+                  <span className="px-2 py-0.5 bg-white border border-slate-200 rounded-lg text-slate-600 flex items-center gap-1 font-medium">
+                    <Thermometer className="w-3 h-3 text-amber-500" /> {parsedData.weather.temp}°C {parsedData.weather.rain || ''}
+                  </span>
+                )}
+                {parsedData?.phytotoxicityPct !== null && (
+                  <span className="px-2 py-0.5 bg-rose-50 border border-rose-200 rounded-lg text-rose-800 flex items-center gap-1 font-semibold">
+                    <ShieldAlert className="w-3 h-3 text-rose-600" /> Phyto: {parsedData.phytotoxicityPct}% {parsedData.cropInjury ? `(${parsedData.cropInjury})` : ''}
+                  </span>
+                )}
+                {parsedData?.bbch && (
+                  <span className="px-2 py-0.5 bg-indigo-50 border border-indigo-200 rounded-lg text-indigo-800 font-semibold">
+                    BBCH {parsedData.bbch}
+                  </span>
+                )}
+              </div>
+            )}
 
             {parsedData?.notes && (
               <div className="p-2 bg-white rounded-xl border border-slate-200/60 text-[11px] text-slate-600">
@@ -269,7 +300,7 @@ export default function VoiceFieldScoutModal({
             <button
               type="button"
               onClick={handleApply}
-              disabled={!parsedData?.efficacy && !parsedData?.notes && !parsedData?.plot}
+              disabled={parsedData?.efficacy === null && !parsedData?.notes && !parsedData?.plot && parsedData?.daa === null}
               className="flex-1 py-2.5 px-4 rounded-xl font-bold text-white bg-emerald-600 hover:bg-emerald-700 transition flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Check className="w-4 h-4" />

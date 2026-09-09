@@ -57,13 +57,18 @@ export function parseVoiceObservation(text, options = {}) {
     return {
       rawText: '',
       plot: '',
+      daa: null,
       formulation: '',
       dosage: '',
       target: '',
       efficacy: null,
       result: '',
+      weedControl: {},
+      phytotoxicityPct: null,
+      cropInjury: '',
+      bbch: null,
       notes: '',
-      weather: { temp: '', rain: '' }
+      weather: { temp: '', rain: '', humidity: '', wind: '' }
     };
   }
 
@@ -77,7 +82,14 @@ export function parseVoiceObservation(text, options = {}) {
     plot = plotMatch[1].toUpperCase();
   }
 
-  // 2. Extract Efficacy Percentage: e.g. "95 percent", "95%", "95 pct kill", "kill rate 90"
+  // 2. Extract DAA (Days After Application): e.g. "at 14 DAA", "7 daa", "day 7", "14 days after application"
+  let daa = null;
+  const daaMatch = lower.match(/\b(?:at\s*)?(\d{1,3})\s*(?:daa\b|days?\s*after\s*application\b)|(?:day\s*(\d{1,3}))\b/i);
+  if (daaMatch) {
+    daa = parseInt(daaMatch[1] || daaMatch[2], 10);
+  }
+
+  // 3. Extract Efficacy Percentage: e.g. "95 percent", "95%", "95 pct kill", "kill rate 90"
   let efficacy = null;
   const directPct = lower.match(/\b(\d{1,3})\s*(?:%|percent\b|pct\b)/i);
   const keywordEff = lower.match(/\b(?:efficacy|kill|control|mortality)\s*(?:is|at|of|:)?\s*(\d{1,3})\b/i);
@@ -90,7 +102,31 @@ export function parseVoiceObservation(text, options = {}) {
     if (val >= 0 && val <= 100) efficacy = val;
   }
 
-  // 3. Derive Result rating (agronomic EWRS standard)
+  // 4. Extract Phytotoxicity / Crop Injury: e.g. "phytotoxicity 5%", "crop injury 10%"
+  let phytotoxicityPct = null;
+  let cropInjury = '';
+  const phytoMatch = lower.match(/\b(?:phytotoxicity|crop\s*injury|leaf\s*scorch|injury)\s*(?:is|at|of|:)?\s*(\d{1,3})\s*(?:%|percent\b)?/i);
+  if (phytoMatch) {
+    const pVal = parseInt(phytoMatch[1], 10);
+    if (pVal >= 0 && pVal <= 100) phytotoxicityPct = pVal;
+  }
+
+  const injuryTerms = ['leaf scorch', 'chlorosis', 'stunting', 'epinasty', 'necrosis', 'yellowing', 'leaf burn', 'cupping'];
+  for (const term of injuryTerms) {
+    if (lower.includes(term)) {
+      cropInjury = term.charAt(0).toUpperCase() + term.slice(1);
+      break;
+    }
+  }
+
+  // 5. Extract BBCH Stage: e.g. "bbch 14", "bbch stage 21", "stage 14"
+  let bbch = null;
+  const bbchMatch = lower.match(/\bbbch\s*(?:stage\b)?\s*(\d{1,2})\b/i);
+  if (bbchMatch) {
+    bbch = parseInt(bbchMatch[1], 10);
+  }
+
+  // 6. Derive Result rating (agronomic EWRS standard)
   let result = '';
   if (lower.includes('excellent')) {
     result = 'Excellent';
@@ -107,15 +143,15 @@ export function parseVoiceObservation(text, options = {}) {
     else result = 'Poor';
   }
 
-  // 4. Extract Dosage: e.g. "at 40 ml", "@ 2.5 ml/l", "10 ml/L", "2 l/ha", "5 grams"
+  // 7. Extract Dosage: e.g. "at 40 ml", "@ 2.5 ml/l", "10 ml/L", "2 l/ha", "5 grams"
   let dosage = '';
   const doseMatch = lower.match(/\b(?:at|@)?\s*(\d+(?:\.\d+)?)\s*(ml\/l|ml|l\/ha|litres?|liters?|gm|g|kg|kg\/ha)\b/i);
   if (doseMatch) {
     dosage = `${doseMatch[1]} ${doseMatch[2]}`;
   }
 
-  // 5. Extract Weather Info: temperature & rainfall
-  const weather = { temp: '', rain: '' };
+  // 8. Extract Weather Info: temperature, rainfall, humidity, wind
+  const weather = { temp: '', rain: '', humidity: '', wind: '' };
   const tempMatch = lower.match(/\b(\d{1,2})\s*(?:°?c|degrees|deg|celsius)\b/i);
   if (tempMatch) {
     weather.temp = tempMatch[1];
@@ -125,7 +161,16 @@ export function parseVoiceObservation(text, options = {}) {
   else if (lower.includes('rainy') || lower.includes('wet') || lower.includes('raining')) weather.rain = 'rain';
   else if (lower.includes('cloudy') || lower.includes('overcast')) weather.rain = 'cloudy';
 
-  // 6. Match Formulation & Target Species
+  const humMatch = lower.match(/\b(?:humidity|rh)\s*(?:is|at|of|:)?\s*(\d{1,3})\s*(?:%|percent\b)?/i) || lower.match(/\b(\d{1,3})\s*%\s*humidity\b/i);
+  if (humMatch) {
+    weather.humidity = humMatch[1];
+  }
+  const windMatch = lower.match(/\b(?:wind|windspeed)\s*(?:is|at|of|:)?\s*(\d{1,3})\s*(?:km\/h|kmh|mph|m\/s)?\b/i);
+  if (windMatch) {
+    weather.wind = windMatch[1];
+  }
+
+  // 9. Match Formulation & Target Species
   let formulation = '';
   let target = '';
 
@@ -151,16 +196,26 @@ export function parseVoiceObservation(text, options = {}) {
     }
   }
 
-  // 7. Clean up Notes: remove matched phrases to leave natural observations
+  // 10. Weed Control Map
+  const weedControl = {};
+  if (target && efficacy !== null) {
+    weedControl[target] = efficacy;
+  }
+
+  // 11. Clean up Notes: remove matched phrases to leave natural observations
   let notes = raw;
   const phrasesToRemove = [
     plotMatch ? plotMatch[0] : null,
+    daaMatch ? daaMatch[0] : null,
     directPct ? directPct[0] : null,
     doseMatch ? doseMatch[0] : null,
     tempMatch ? tempMatch[0] : null,
+    humMatch ? humMatch[0] : null,
+    windMatch ? windMatch[0] : null,
+    bbchMatch ? bbchMatch[0] : null,
     formulation ? new RegExp(formulation, 'i') : null,
     target ? new RegExp(target, 'i') : null,
-    /\b(?:kill|control|efficacy|percent|pct|degrees|celsius|plot)\b/gi,
+    /\b(?:kill|control|efficacy|percent|pct|degrees|celsius|plot|daa)\b/gi,
   ].filter(Boolean);
 
   for (const p of phrasesToRemove) {
@@ -175,11 +230,16 @@ export function parseVoiceObservation(text, options = {}) {
   return {
     rawText: raw,
     plot,
+    daa,
     formulation,
     dosage,
     target,
     efficacy,
     result,
+    weedControl,
+    phytotoxicityPct,
+    cropInjury,
+    bbch,
     notes,
     weather
   };

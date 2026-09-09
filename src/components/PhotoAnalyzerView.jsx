@@ -823,14 +823,15 @@ export default function PhotoAnalyzerView({
                   type="button"
                   disabled={!phenotypeResult}
                   onClick={() => {
-                    if (phenotypeResult && onApplyValue) {
-                      onApplyValue(phenotypeResult.estimatedWeedControlPct);
+                    const killVal = phenotypeResult?.estimatedWeedControlPct ?? phenotypeResult?.calculatedDesiccationRate;
+                    if (killVal !== undefined && killVal !== null && onApplyValue) {
+                      onApplyValue(killVal);
                       onClose();
                     }
                   }}
                   className="flex-1 py-2 px-3 text-xs font-bold bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white rounded-xl shadow transition"
                 >
-                  Apply Phenotype Kill ({phenotypeResult ? phenotypeResult.estimatedWeedControlPct : 0}%)
+                  Apply Phenotype Kill ({phenotypeResult ? (phenotypeResult.estimatedWeedControlPct ?? phenotypeResult.calculatedDesiccationRate ?? 0) : 0}%)
                 </button>
               ) : (
                 onApplyValue && localResults && localResults.length > 0 && (
