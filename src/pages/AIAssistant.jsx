@@ -196,11 +196,11 @@ function CandidateFormulaCard({ formula, config, onSave, isSaved, isViewer, onRe
 
 const CATEGORY_PROMPTS = {
   herbicide: [
-    'Which formula gave the best weed control and how many days of control did it provide?',
+    'Which formula is best based on highest kill rate, longest control days, and broad-spectrum weed control?',
+    'Rank all formulas by longest control days and complete kill rate across weed species.',
     'Rank the top 5 formulas for Bermuda Grass — show average efficacy and control days for each.',
     'Why did the same formula show different results on different dates? Compare weather conditions.',
     'Which weed species is the hardest to control? Show all formulas tried and their outcomes.',
-    'Show me all trials done by each investigator and compare their average efficacy results.',
   ],
   fungicide: [
     'Which fungicide formula has the highest average disease control across all trials?',

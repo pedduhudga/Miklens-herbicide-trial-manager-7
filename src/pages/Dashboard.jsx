@@ -13,6 +13,7 @@ import {
   Thermometer, Droplets, Wind, CloudRain, Sprout, Filter, Grid3x3
 } from 'lucide-react';
 import { getCategoryConfig } from '../utils/categoryConfig.js';
+import { getTrialCalculatedEfficacy } from '../utils/formulationTrialUtils.js';
 
 function StatCard({ icon: Icon, label, value, sub, color = 'emerald', onClick }) {
   const colors = {
@@ -187,11 +188,10 @@ export default function Dashboard({ onMenuClick }) {
     return Array.from(s).sort();
   }, [trials, catConfig.targetField]);
 
-  // ── Top Formulations (filtered by year/target/location)
+  // ── Top Formulations (Ranked by Best Kill Rate & Control Days)
   const topFormulationsFiltered = useMemo(() => {
     let filtered = trials;
     const tField = catConfig.targetField || 'WeedSpecies';
-    const mKey = catConfig.primaryMetric.key;
     if (fYear) filtered = filtered.filter(t => {
       const d = new Date(t.Date || t.CreatedAt || '');
       return !isNaN(d) && String(d.getFullYear()) === fYear;
@@ -199,27 +199,43 @@ export default function Dashboard({ onMenuClick }) {
     if (fTarget) filtered = filtered.filter(t => String(t[tField] || '').toLowerCase().includes(fTarget.toLowerCase()));
     if (fLocation) filtered = filtered.filter(t => String(t.Location || '').toLowerCase().includes(fLocation.toLowerCase()));
 
-    const counts = {};
-    const efficacies = {};
+    const formulaMap = {};
     filtered.forEach(t => {
       const name = t.FormulationName;
       if (!name) return;
-      counts[name] = (counts[name] || 0) + 1;
-      const wce = parseFloat(t[mKey] || t.FinalWCE || t.WCE || 0);
-      if (isFinite(wce) && wce > 0) {
-        if (!efficacies[name]) efficacies[name] = [];
-        efficacies[name].push(wce);
+      if (!formulaMap[name]) {
+        formulaMap[name] = { name, count: 0, efficacies: [], ctrlDays: [] };
+      }
+      formulaMap[name].count++;
+
+      const eff = getTrialCalculatedEfficacy(t, activeCategory);
+      if (eff !== null && eff > 0) {
+        formulaMap[name].efficacies.push(eff);
+      }
+
+      const isFinalized = t.IsCompleted === true || t.IsCompleted === 'true' || t.ControlFinalized === true;
+      if (isFinalized) {
+        if (t.FinalControlDuration && !isNaN(parseInt(t.FinalControlDuration, 10))) {
+          formulaMap[name].ctrlDays.push(parseInt(t.FinalControlDuration, 10));
+        } else if (t.Date && t.FinalizationDate) {
+          const diff = Math.max(0, Math.round((new Date(t.FinalizationDate) - new Date(t.Date)) / 86400000));
+          if (diff > 0) formulaMap[name].ctrlDays.push(diff);
+        }
       }
     });
-    return Object.entries(counts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 8)
-      .map(([name, count]) => {
-        const effs = efficacies[name] || [];
-        const avgEff = effs.length ? Math.round(effs.reduce((a, b) => a + b, 0) / effs.length) : null;
-        return { name, count, avgEff };
-      });
-  }, [trials, fYear, fTarget, fLocation, catConfig.targetField, catConfig.primaryMetric.key]);
+
+    return Object.values(formulaMap)
+      .map(item => {
+        const avgEff = item.efficacies.length ? Math.round(item.efficacies.reduce((a, b) => a + b, 0) / item.efficacies.length) : null;
+        const avgDays = item.ctrlDays.length ? Math.round(item.ctrlDays.reduce((a, b) => a + b, 0) / item.ctrlDays.length) : null;
+        const effScore = avgEff !== null ? avgEff : 0;
+        const daysScore = avgDays !== null ? Math.min(100, (avgDays / 30) * 100) : 10;
+        const compositeScore = Math.round(effScore * 0.5 + daysScore * 0.5);
+        return { name: item.name, count: item.count, avgEff, avgDays, compositeScore };
+      })
+      .sort((a, b) => b.compositeScore - a.compositeScore || b.count - a.count)
+      .slice(0, 8);
+  }, [trials, fYear, fTarget, fLocation, catConfig.targetField, activeCategory]);
 
   // ── Recent Trials
   const recentTrials = useMemo(() =>
@@ -377,12 +393,12 @@ export default function Dashboard({ onMenuClick }) {
             </div>
           </div>
 
-          {/* ── Top Formulations This Season (with filters) ────────── */}
+          {/* ── Top Formulations This Season (Ranked by Kill Rate & Control Longevity) ────────── */}
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
               <div>
-                <h3 className="font-bold text-slate-800 flex items-center gap-2"><BarChart3 className="w-4 h-4" style={{ color: catConfig.color.hex }} /> Top Formulations This Season</h3>
-                <p className="text-xs text-slate-400 mt-0.5">Ranked by number of trials. Filter by year, {catConfig.targetLabel.toLowerCase()}, or location.</p>
+                <h3 className="font-bold text-slate-800 flex items-center gap-2"><BarChart3 className="w-4 h-4" style={{ color: catConfig.color.hex }} /> Top Formulations (Kill Rate & Control Days)</h3>
+                <p className="text-xs text-slate-400 mt-0.5">Ranked by combined agronomic performance (Kill % and Sustained Control Days). Filter by year, {catConfig.targetLabel.toLowerCase()}, or location.</p>
               </div>
               <div className="flex flex-wrap gap-2 items-center">
                 <div className="flex items-center gap-1 text-xs text-slate-500"><Filter className="w-3 h-3" /></div>
@@ -406,17 +422,18 @@ export default function Dashboard({ onMenuClick }) {
             </div>
             {topFormulationsFiltered.length > 0 ? (
               <div className="space-y-2">
-                {topFormulationsFiltered.map(({ name, count, avgEff }) => (
+                {topFormulationsFiltered.map(({ name, count, avgEff, avgDays, compositeScore }) => (
                   <div key={name} className="flex items-center gap-3">
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between text-xs mb-1">
                         <span className="font-semibold text-slate-700 truncate">{name}</span>
-                        <span className="text-slate-500 shrink-0 ml-2">
-                          {count} trial{count !== 1 ? 's' : ''}
-                          {avgEff !== null && <span className="font-bold ml-1" style={{ color: catConfig.color.hex }}>· {avgEff}% {catConfig.primaryMetric.key}</span>}
+                        <span className="text-slate-500 shrink-0 ml-2 flex items-center gap-1.5">
+                          <span>{count} trial{count !== 1 ? 's' : ''}</span>
+                          {avgEff !== null && <span className="font-bold text-emerald-600">· {avgEff}% Kill</span>}
+                          {avgDays !== null && <span className="font-bold text-amber-600">· ⏳ {avgDays}d Control</span>}
                         </span>
                       </div>
-                      <MiniBar value={count} max={maxFormulationCount} color="bg-emerald-400" />
+                      <MiniBar value={compositeScore} max={100} color="bg-emerald-500" />
                     </div>
                   </div>
                 ))}

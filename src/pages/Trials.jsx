@@ -744,7 +744,8 @@ export default function Trials({ onMenuClick }) {
     sortBy,
     user,
     filterOwner,
-    registeredUsers: state.users || []
+    registeredUsers: state.users || [],
+    activeCategory
   });
 
   const [displayLimit, setDisplayLimit] = useState(36);

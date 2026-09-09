@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { safeJsonParse } from '../utils/helpers.js';
+import { getTrialCalculatedEfficacy } from '../utils/formulationTrialUtils.js';
 
 const fuzzyMatch = (text, query) => {
   if (!text) return false;
@@ -30,7 +31,8 @@ export function useTrialsFilter(trials, {
   sortBy,
   user,
   filterOwner,
-  registeredUsers = []
+  registeredUsers = [],
+  activeCategory = 'herbicide'
 }) {
   return useMemo(() => {
     let list = [...trials];
@@ -141,8 +143,53 @@ export function useTrialsFilter(trials, {
       return 0;
     };
 
+    // Helper to extract control days from trial
+    const getTrialControlDays = (t) => {
+      if (t.FinalControlDuration && !isNaN(parseInt(t.FinalControlDuration, 10))) {
+        return parseInt(t.FinalControlDuration, 10);
+      }
+      if (t.Date && t.FinalizationDate) {
+        const diff = Math.round((new Date(t.FinalizationDate) - new Date(t.Date)) / 86400000);
+        if (diff > 0) return diff;
+      }
+      const obs = safeJsonParse(t.EfficacyDataJSON, []);
+      if (Array.isArray(obs) && obs.length > 0) {
+        const daas = obs.map(o => Number(o.daa ?? o.day ?? o.DAA ?? 0)).filter(d => !isNaN(d) && d > 0);
+        if (daas.length > 0) return Math.max(...daas);
+      }
+      return 0;
+    };
+
     // Sort order mapping
     list.sort((a, b) => {
+      if (sortBy === 'best') {
+        const effA = getTrialCalculatedEfficacy(a, activeCategory) ?? 0;
+        const effB = getTrialCalculatedEfficacy(b, activeCategory) ?? 0;
+        const daysA = getTrialControlDays(a);
+        const daysB = getTrialControlDays(b);
+        const scoreA = effA * 0.5 + Math.min(100, (daysA / 30) * 100) * 0.5;
+        const scoreB = effB * 0.5 + Math.min(100, (daysB / 30) * 100) * 0.5;
+        if (scoreB !== scoreA) return scoreB - scoreA;
+        return new Date(b.Date || 0) - new Date(a.Date || 0);
+      }
+      if (sortBy === 'kill-rate') {
+        const effA = getTrialCalculatedEfficacy(a, activeCategory) ?? -1;
+        const effB = getTrialCalculatedEfficacy(b, activeCategory) ?? -1;
+        if (effB !== effA) return effB - effA;
+        const daysA = getTrialControlDays(a);
+        const daysB = getTrialControlDays(b);
+        if (daysB !== daysA) return daysB - daysA;
+        return new Date(b.Date || 0) - new Date(a.Date || 0);
+      }
+      if (sortBy === 'control-days') {
+        const daysA = getTrialControlDays(a);
+        const daysB = getTrialControlDays(b);
+        if (daysB !== daysA) return daysB - daysA;
+        const effA = getTrialCalculatedEfficacy(a, activeCategory) ?? -1;
+        const effB = getTrialCalculatedEfficacy(b, activeCategory) ?? -1;
+        if (effB !== effA) return effB - effA;
+        return new Date(b.Date || 0) - new Date(a.Date || 0);
+      }
       if (sortBy === 'date-desc') {
         const dateDiff = new Date(b.Date || 0) - new Date(a.Date || 0);
         if (dateDiff !== 0) return dateDiff;
@@ -192,6 +239,7 @@ export function useTrialsFilter(trials, {
     filterDateEnd,
     sortBy,
     user,
-    filterOwner
+    filterOwner,
+    activeCategory
   ]);
 }

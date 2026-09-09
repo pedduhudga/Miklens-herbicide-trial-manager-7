@@ -243,8 +243,11 @@ export default function TrialFiltersBar({
           <select
             value={sortBy}
             onChange={e => setSortBy(e.target.value)}
-            className="text-sm border rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
+            className="text-sm border rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400 font-medium"
           >
+            <option value="best">🏆 Best (High Kill & Long Control)</option>
+            <option value="kill-rate">⚡ Highest Kill Rate / Efficacy</option>
+            <option value="control-days">⏳ Longest Control Days</option>
             <option value="date-desc">Newest First</option>
             <option value="date-asc">Oldest First</option>
             <option value="name">By Formulation</option>

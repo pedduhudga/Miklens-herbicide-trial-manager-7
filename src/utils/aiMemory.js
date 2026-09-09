@@ -286,20 +286,33 @@ function buildFormulaSummary(parsedTrials) {
     const finalizedTrials = trials.filter(t => t.isCompleted && t.finalizedControlDays !== null);
     const ctrlDaysArr = finalizedTrials.map(t => t.finalizedControlDays).filter(d => d > 0);
 
+    const avgEff = avg(efficacies);
+    const maxEff = efficacies.length ? Math.max(...efficacies) : null;
+    const avgCtrlDays = avg(ctrlDaysArr);
+    const maxCtrlDays = ctrlDaysArr.length ? Math.max(...ctrlDaysArr) : null;
+    const targets = [...new Set(trials.map(t => t.target).filter(Boolean))];
+
+    // Composite Agronomic Score: 45% Kill Rate, 45% Sustained Control Days (normalized to 30d), 10% Broad Spectrum target count
+    const effScore = avgEff !== null ? avgEff : 0;
+    const dayScore = avgCtrlDays !== null ? Math.min((avgCtrlDays / 30) * 100, 100) : 0;
+    const specScore = Math.min((targets.length / 4) * 100, 100);
+    const agronomicScore = (effScore * 0.45) + (dayScore * 0.45) + (specScore * 0.10);
+
     return {
       formula, dosage, trialCount: trials.length,
       finalizedCount: finalizedTrials.length,
       activeCount: trials.filter(t => !t.isCompleted).length,
-      targets: [...new Set(trials.map(t => t.target).filter(Boolean))],
-      avgEfficacy: avg(efficacies),
+      targets,
+      avgEfficacy: avgEff,
       minEfficacy: efficacies.length ? Math.min(...efficacies) : null,
-      maxEfficacy: efficacies.length ? Math.max(...efficacies) : null,
-      avgFinalizedCtrlDays: avg(ctrlDaysArr),
-      maxFinalizedCtrlDays: ctrlDaysArr.length ? Math.max(...ctrlDaysArr) : null,
+      maxEfficacy: maxEff,
+      avgFinalizedCtrlDays: avgCtrlDays,
+      maxFinalizedCtrlDays: maxCtrlDays,
+      agronomicScore,
       resultBreakdown: resultCounts,
       locations: [...new Set(trials.map(t => t.location).filter(Boolean))]
     };
-  }).sort((a, b) => (b.avgEfficacy || 0) - (a.avgEfficacy || 0));
+  }).sort((a, b) => (b.agronomicScore || 0) - (a.agronomicScore || 0));
 }
 
 function buildTrialIndex(parsedTrials, projectMap) {
@@ -467,9 +480,10 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
         const perfSummary = fStats.total > 0
           ? [
               `Trial Scope: ${trialScopeStr}`,
-              `Field Performance: ${tierStr} | Avg Efficacy: ${fStats.avgEfficacy}% | Peak Efficacy: ${fStats.peakEfficacy}% | Win Rate: ${fStats.winRate}%`,
-              `Control Duration: ${ctrlStr}`,
-              `Tested Target Spectrum: [${targetsDetail}]`,
+              `Field Performance: ${tierStr} | Avg Efficacy (Kill Rate): ${fStats.avgEfficacy}% | Peak Efficacy: ${fStats.peakEfficacy}% | Win Rate: ${fStats.winRate}%`,
+              `Control Duration: ${ctrlStr}${fStats.maxCtrlDays ? ` (Max: ${fStats.maxCtrlDays}d)` : ''}`,
+              `Agronomic Composite Score: ${(fStats.agronomicScore ?? 0).toFixed(1)}/100 (Dual Key: Kill Rate + Sustained Control Days + Broad Spectrum)`,
+              `Tested Target Spectrum: [${targetsDetail}] (${fStats.targetCount} weed species)`,
               `Tested Field Dosages: [${dosagesDetail}]`,
               `Est. Recipe Cost: Rs. ${cost.toFixed(2)}/L`
             ].join('\n    - ')
@@ -524,12 +538,13 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
   ).join('\n');
 
   const forSumStr = formulaSums.map(f =>
-    '  ' + f.formula + ' @' + f.dosage + ' | trials:' + f.trialCount + '(fin:' + f.finalizedCount + ',act:' + f.activeCount + ')' +
-    ' | avgEff:' + (f.avgEfficacy !== null ? f.avgEfficacy + '%' : '?') +
+    '  ' + f.formula + ' @' + f.dosage + ' | Agronomic Score: ' + (f.agronomicScore ? f.agronomicScore.toFixed(1) : '?') + '/100' +
+    ' | Kill Rate(avgEff):' + (f.avgEfficacy !== null ? f.avgEfficacy + '%' : '?') +
     ' | maxEff:' + (f.maxEfficacy !== null ? f.maxEfficacy + '%' : '?') +
-    ' | avgCtrlDays(finalized-only):' + (f.avgFinalizedCtrlDays !== null ? f.avgFinalizedCtrlDays + 'd' : 'no-finalized-data') +
-    ' | maxCtrlDays(finalized-only):' + (f.maxFinalizedCtrlDays !== null ? f.maxFinalizedCtrlDays + 'd' : '?') +
-    ' | targets:[' + f.targets.slice(0, 5).join(', ') + ']'
+    ' | Control Days(avgFinalized):' + (f.avgFinalizedCtrlDays !== null ? f.avgFinalizedCtrlDays + 'd' : 'no-finalized-data') +
+    ' | maxCtrlDays:' + (f.maxFinalizedCtrlDays !== null ? f.maxFinalizedCtrlDays + 'd' : '?') +
+    ' | targets:[' + f.targets.join(', ') + '] (' + f.targets.length + ' weed species)' +
+    ' | trials:' + f.trialCount + '(fin:' + f.finalizedCount + ',act:' + f.activeCount + ')'
   ).join('\n');
 
   const contextString = [
@@ -576,6 +591,12 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
     '5. TESTED FIELD DOSAGES: When asked for the optimal dosage of a formula, cite the exact rates listed under "Tested Field Dosages" for that formula in the database (e.g. "X ml/L with Y% avg eff"). Recommend an appropriate carrier volume (typically 400–500 L/ha water) based on agronomic standards.',
     '6. RECIPE & UNIT ANOMALY DETECTION: Present the current recipe from the database cleanly in bullet points. If any liquid active ingredient has a recorded quantity < 1 with unit "ml" (such as 0.100 ml or 0.200 ml), alert the user to the likely unit notation typo in data entry (likely intended as Litres or hundreds of ml).',
     '7. REALISTIC INGREDIENT UPGRADES: When suggesting recipe upgrades, base all proposed ingredients strictly on the INGREDIENT INVENTORY & FIELD SYNERGY MATRIX. Compare the formula\'s estimated cost per liter against cheaper database benchmarks, and propose realistic adjustments (cost reduction, penetration enhancers, or film-formers) grounded in real inventory components.',
+    '8. AGRONOMIC CRITERIA FOR "BEST" FORMULATION (HIGHEST CONTROL DAYS & COMPLETE KILL RATE):',
+    '   When the user asks which formulation is "best", performs best, or to compare options, evaluate strictly against these three core agronomic pillars:',
+    '   a) KILL RATE (Complete Weed Mortality): Higher average and peak efficacy (target complete kill, 90-100%).',
+    '   b) CONTROL DAYS (Sustained Suppression): Longest days of control without weed regrowth. Clearly differentiate short contact burndown (1-3 days) from extended residual weed control (10-30+ days).',
+    '   c) BROAD SPECTRUM OF WEED SPECIES: High efficacy across multiple distinct weed species (grassy, broadleaf, sedges).',
+    '   A formula that combines high kill rate with extended control days across multiple weed species is ranked highest. Always quote both the Kill Rate % and Control Days (from finalized trials) directly from the database.',
     '',
     '=== GUIDELINES FOR NOVEL FORMULATION RECOMMENDATIONS ===',
     'When asked to suggest new, improved, or novel formulations:',

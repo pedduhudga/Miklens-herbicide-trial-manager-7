@@ -85,14 +85,33 @@ function FormulationCard({
               )}
             </div>
 
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {/* Efficacy / Rating Badge */}
+              {/* Efficacy / Kill Rate Badge */}
               <span
                 className={`text-[10px] px-2 py-0.5 rounded-full font-bold border inline-flex items-center gap-1 ${ratingBadge.colorClass}`}
               >
                 <span className={`w-1.5 h-1.5 rounded-full ${ratingBadge.dotColor}`} />
                 {ratingBadge.label}
               </span>
+
+              {/* Control Duration Badge */}
+              {stats?.avgCtrlDays !== null && stats?.avgCtrlDays > 0 && (
+                <span
+                  className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-50 text-amber-700 border border-amber-200/80 inline-flex items-center gap-0.5 shadow-2xs"
+                  title={`Average sustained control duration: ${stats.avgCtrlDays} days`}
+                >
+                  ⏳ {stats.avgCtrlDays}d Control
+                </span>
+              )}
+
+              {/* Weed Spectrum Badge */}
+              {stats?.targetCount > 1 && (
+                <span
+                  className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-teal-50 text-teal-700 border border-teal-200/80 inline-flex items-center gap-0.5 shadow-2xs"
+                  title={`Demonstrated control on ${stats.targetCount} weed species`}
+                >
+                  🌿 {stats.targetCount} Weeds
+                </span>
+              )}
 
               {isShared && (
                 <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 flex items-center gap-0.5">
@@ -285,19 +304,37 @@ function FormulationCard({
 
       {/* Card Bottom: Clean Metrics + 2 Primary Action Buttons */}
       <div className="mt-4 pt-3.5 border-t border-slate-100 space-y-3">
-        {/* KPI Strip */}
-        <div className="grid grid-cols-2 gap-2 bg-slate-50/70 p-2.5 rounded-xl border border-slate-100">
+        {/* KPI Strip: Kill Rate, Control Longevity, Recipe Cost, Field Plots */}
+        <div className="grid grid-cols-2 gap-2.5 bg-slate-50/70 p-2.5 rounded-xl border border-slate-100 text-xs">
           <div>
             <span className="text-[10px] font-bold text-slate-400 block uppercase tracking-wider">
-              Est. Recipe Cost
+              Kill Rate
             </span>
-            <p className="font-extrabold text-sm text-emerald-700 leading-tight mt-0.5">
-              {CURRENCY_SYMBOL}{form._costVal.toFixed(2)}{' '}
-              <span className="text-[10px] text-slate-400 font-normal">/ L</span>
+            <p className="font-extrabold text-xs text-slate-800 leading-tight mt-0.5">
+              {stats?.avgEfficacy !== null ? `${stats.avgEfficacy}% Complete Kill` : 'Untested'}
             </p>
           </div>
 
           <div className="text-right">
+            <span className="text-[10px] font-bold text-slate-400 block uppercase tracking-wider">
+              Control Longevity
+            </span>
+            <p className="font-bold text-xs text-amber-700 leading-tight mt-0.5">
+              {stats?.avgCtrlDays !== null ? `${stats.avgCtrlDays} Days Sustained` : (stats?.total > 0 ? 'Fast Burndown' : 'No data')}
+            </p>
+          </div>
+
+          <div className="pt-1.5 border-t border-slate-200/60">
+            <span className="text-[10px] font-bold text-slate-400 block uppercase tracking-wider">
+              Est. Recipe Cost
+            </span>
+            <p className="font-extrabold text-xs text-emerald-700 leading-tight mt-0.5">
+              {CURRENCY_SYMBOL}{form._costVal.toFixed(2)}{' '}
+              <span className="text-[9px] text-slate-400 font-normal">/ L</span>
+            </p>
+          </div>
+
+          <div className="text-right pt-1.5 border-t border-slate-200/60">
             <span className="text-[10px] font-bold text-slate-400 block uppercase tracking-wider">
               Field Trials
             </span>
@@ -357,7 +394,8 @@ export default function Formulations({ onMenuClick }) {
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [sharingFormulation, setSharingFormulation] = useState(null);
   const [viewingLinkedTrialsForm, setViewingLinkedTrialsForm] = useState(null);
-  const [sortBy, setSortBy] = useState('newest'); // 'newest' | 'efficacy' | 'trials' | 'cost'
+  const [sortBy, setSortBy] = useState('best'); // 'best' | 'control-days' | 'efficacy' | 'spectrum' | 'trials' | 'cost' | 'newest'
+  const [performanceFilter, setPerformanceFilter] = useState('all'); // 'all' | 'high-kill' | 'long-control' | 'broad-spectrum'
   const [selectedForCompare, setSelectedForCompare] = useState(new Set());
   const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
   const [isGeneratorModalOpen, setIsGeneratorModalOpen] = useState(false);
@@ -621,12 +659,42 @@ export default function Formulations({ onMenuClick }) {
       f => !searchTerm || f.Name.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
+    // Performance quick filters
+    if (performanceFilter === 'high-kill') {
+      list = list.filter(f => (f._stats?.avgEfficacy ?? 0) >= 90);
+    } else if (performanceFilter === 'long-control') {
+      list = list.filter(f => (f._stats?.avgCtrlDays ?? 0) >= 10);
+    } else if (performanceFilter === 'broad-spectrum') {
+      list = list.filter(f => (f._stats?.targetCount ?? 0) >= 2);
+    }
+
     list.sort((a, b) => {
-      if (sortBy === 'efficacy') {
+      if (sortBy === 'best') {
+        const scoreA = a._stats?.agronomicScore ?? -1;
+        const scoreB = b._stats?.agronomicScore ?? -1;
+        if (scoreB !== scoreA) return scoreB - scoreA;
+        const ctrlA = a._stats?.avgCtrlDays ?? -1;
+        const ctrlB = b._stats?.avgCtrlDays ?? -1;
+        if (ctrlB !== ctrlA) return ctrlB - ctrlA;
+        return (b._stats?.avgEfficacy ?? -1) - (a._stats?.avgEfficacy ?? -1);
+      }
+      if (sortBy === 'control-days') {
+        const ctrlA = a._stats?.avgCtrlDays ?? -1;
+        const ctrlB = b._stats?.avgCtrlDays ?? -1;
+        if (ctrlB !== ctrlA) return ctrlB - ctrlA;
+        return (b._stats?.avgEfficacy ?? -1) - (a._stats?.avgEfficacy ?? -1);
+      }
+      if (sortBy === 'efficacy' || sortBy === 'kill-rate') {
         const scoreA = a._stats?.avgEfficacy ?? -1;
         const scoreB = b._stats?.avgEfficacy ?? -1;
         if (scoreB !== scoreA) return scoreB - scoreA;
-        return (b._trialsCount || 0) - (a._trialsCount || 0);
+        return (b._stats?.avgCtrlDays ?? -1) - (a._stats?.avgCtrlDays ?? -1);
+      }
+      if (sortBy === 'spectrum') {
+        const specA = a._stats?.targetCount ?? 0;
+        const specB = b._stats?.targetCount ?? 0;
+        if (specB !== specA) return specB - specA;
+        return (b._stats?.agronomicScore ?? -1) - (a._stats?.agronomicScore ?? -1);
       }
       if (sortBy === 'trials') {
         return (b._trialsCount || 0) - (a._trialsCount || 0);
@@ -641,7 +709,7 @@ export default function Formulations({ onMenuClick }) {
     });
 
     return list;
-  }, [formulationsWithStats, searchTerm, sortBy]);
+  }, [formulationsWithStats, searchTerm, sortBy, performanceFilter]);
 
   const formulationsToCompare = useMemo(() => {
     return (state.formulations || []).filter(f => selectedForCompare.has(f.ID));
@@ -676,10 +744,13 @@ export default function Formulations({ onMenuClick }) {
                 onChange={e => setSortBy(e.target.value)}
                 className="bg-transparent font-semibold outline-none cursor-pointer text-slate-800"
               >
-                <option value="newest">Sort: Newest First</option>
-                <option value="efficacy">Sort: Highest Efficacy ⭐</option>
-                <option value="trials">Sort: Most Tested 🔬</option>
-                <option value="cost">Sort: Cost (Low to High) ₹</option>
+                <option value="best">Sort: Best (Long Control & High Kill) 🏆</option>
+                <option value="control-days">Sort: Longest Control Days ⏳</option>
+                <option value="efficacy">Sort: Highest Kill Rate ⚡</option>
+                <option value="spectrum">Sort: Broadest Weed Spectrum 🌿</option>
+                <option value="trials">Sort: Most Field Tested 🔬</option>
+                <option value="cost">Sort: Lowest Cost 💰</option>
+                <option value="newest">Sort: Newest First 📅</option>
               </select>
             </div>
 
@@ -710,6 +781,54 @@ export default function Formulations({ onMenuClick }) {
               </button>
             )}
           </div>
+        </div>
+
+        {/* Quick Agronomic Performance Filter Chips */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
+          <button
+            type="button"
+            onClick={() => setPerformanceFilter('all')}
+            className={`px-3 py-1.5 rounded-xl font-semibold transition shrink-0 shadow-2xs ${
+              performanceFilter === 'all'
+                ? 'bg-slate-900 text-white'
+                : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            All Formulas ({formulationsWithStats.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setPerformanceFilter('high-kill')}
+            className={`px-3 py-1.5 rounded-xl font-semibold transition shrink-0 flex items-center gap-1 shadow-2xs ${
+              performanceFilter === 'high-kill'
+                ? 'bg-emerald-600 text-white'
+                : 'bg-white border border-slate-200 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700'
+            }`}
+          >
+            ⚡ High Kill Rate (90%+)
+          </button>
+          <button
+            type="button"
+            onClick={() => setPerformanceFilter('long-control')}
+            className={`px-3 py-1.5 rounded-xl font-semibold transition shrink-0 flex items-center gap-1 shadow-2xs ${
+              performanceFilter === 'long-control'
+                ? 'bg-amber-600 text-white'
+                : 'bg-white border border-slate-200 text-slate-600 hover:bg-amber-50 hover:text-amber-700'
+            }`}
+          >
+            ⏳ Long Residual (10d+ Control)
+          </button>
+          <button
+            type="button"
+            onClick={() => setPerformanceFilter('broad-spectrum')}
+            className={`px-3 py-1.5 rounded-xl font-semibold transition shrink-0 flex items-center gap-1 shadow-2xs ${
+              performanceFilter === 'broad-spectrum'
+                ? 'bg-teal-600 text-white'
+                : 'bg-white border border-slate-200 text-slate-600 hover:bg-teal-50 hover:text-teal-700'
+            }`}
+          >
+            🌿 Broad Spectrum (2+ Weeds)
+          </button>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

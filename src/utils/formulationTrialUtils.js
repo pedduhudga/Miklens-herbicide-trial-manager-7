@@ -253,6 +253,16 @@ export function getFormulationTrialStats(formulation, allTrials = [], allProject
     item.avgEff = item.effs.length > 0 ? Math.round(item.effs.reduce((a, b) => a + b, 0) / item.effs.length) : null;
   });
 
+  const maxCtrlDays = ctrlDaysList.length > 0 ? Math.max(...ctrlDaysList) : null;
+  const targetCount = Object.keys(targetMap).length;
+
+  // Composite agronomic performance score (0 - 100):
+  // 45% Kill Rate (Efficacy), 45% Sustained Control Longevity (normalized to 30 days max benchmark), 10% Weed Spectrum Diversity
+  const effScore = avgEff !== null ? avgEff : (winRate > 0 ? winRate * 0.75 : 0);
+  const ctrlScore = avgCtrlDays !== null ? Math.min(100, Math.round((avgCtrlDays / 30) * 100)) : (avgEff ? 15 : 0);
+  const specScore = Math.min(100, targetCount * 25);
+  const agronomicScore = Math.round(effScore * 0.45 + ctrlScore * 0.45 + specScore * 0.10);
+
   return {
     linkedTrials,
     total,
@@ -265,6 +275,9 @@ export function getFormulationTrialStats(formulation, allTrials = [], allProject
     avgEfficacy: avgEff,
     peakEfficacy: peakEff,
     avgCtrlDays,
+    maxCtrlDays,
+    targetCount,
+    agronomicScore,
     targetMap,
     dosageMap
   };
