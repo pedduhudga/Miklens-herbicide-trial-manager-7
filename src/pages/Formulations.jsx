@@ -20,7 +20,8 @@ import AiFormulaGeneratorModal from '../components/AiFormulaGeneratorModal.jsx';
 import { exportFormulationDossier } from '../services/formulationDossier.js';
 import { 
   getFormulationTrialStats, 
-  getEfficacyRatingBadge 
+  getEfficacyRatingBadge,
+  isFormulationEligibleForTrial 
 } from '../utils/formulationTrialUtils.js';
 
 function FormulationCard({
@@ -369,8 +370,12 @@ function FormulationCard({
           <button
             type="button"
             onClick={() => onLaunchTrial(form)}
-            className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition flex items-center justify-center gap-1.5 active:scale-95 shadow-xs"
-            title="Launch new trial with this formulation"
+            className={`py-2 px-3 rounded-xl font-bold text-xs transition flex items-center justify-center gap-1.5 active:scale-95 shadow-xs ${
+              isFormulationEligibleForTrial(form)
+                ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-500 border border-slate-200/80'
+            }`}
+            title={isFormulationEligibleForTrial(form) ? "Launch new trial with this formulation" : "Complete formulation recipe to launch trials"}
           >
             <Rocket className="w-3.5 h-3.5" />
             Launch Trial
@@ -418,6 +423,12 @@ export default function Formulations({ onMenuClick }) {
   };
 
   const handleLaunchTrial = (form) => {
+    if (!isFormulationEligibleForTrial(form)) {
+      window.dispatchEvent(new CustomEvent('app:toast', { 
+        detail: { msg: 'This formulation cannot be linked to a trial yet. Please complete the formulation recipe first.', type: 'warning' } 
+      }));
+      return;
+    }
     navigate('/trials', {
       state: {
         newTrialWithFormulation: {

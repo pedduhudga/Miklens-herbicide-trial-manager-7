@@ -32,6 +32,7 @@ import PhotoAnalyzerView from '../components/PhotoAnalyzerView.jsx';
 import { analyzePhoto, analyzePhotosBatch, identifyWeedFromPhoto as identifyWeedFromPhotoService, getAPIKeys, generateTextWithAI, parseHarvestTextLog } from '../services/multiProviderAI.js';
 import TrialCard from '../components/TrialCard.jsx';
 import FormulationQuickPeekModal from '../components/FormulationQuickPeekModal.jsx';
+import { isFormulationEligibleForTrial } from '../utils/formulationTrialUtils.js';
 import TrialFiltersBar from '../components/trials/TrialFiltersBar.jsx';
 import TrialTimelineView from '../components/trials/TrialTimelineView.jsx';
 import TrialKanbanBoard from '../components/trials/TrialKanbanBoard.jsx';
@@ -181,6 +182,11 @@ export default function Trials({ onMenuClick }) {
   const trials = (state.trials || []).filter(t => t.Category === activeCategory || (!t.Category && activeCategory === 'herbicide'));
   const formulations = (state.formulations || []).filter(f => f.Category === activeCategory || (!f.Category && activeCategory === 'herbicide'));
   const projects = (state.projects || []).filter(p => p.Category === activeCategory || (!p.Category && activeCategory === 'herbicide'));
+
+  // Formulations strictly eligible to be linked to new trials (at least 3 ingredients)
+  const eligibleFormulations = useMemo(() => {
+    return formulations.filter(isFormulationEligibleForTrial);
+  }, [formulations]);
 
   // Memoized project lookup for TrialCard and groupings
   const projectMap = useMemo(() => {
@@ -433,19 +439,34 @@ export default function Trials({ onMenuClick }) {
   // Handle incoming request to create a new trial with a formulation pre-selected
   useEffect(() => {
     if (location.state?.newTrialWithFormulation) {
-      const { id, name, code } = location.state.newTrialWithFormulation;
+      const data = location.state.newTrialWithFormulation;
+      const id = data.id || data.formId;
+      const name = data.name || data.formName || data.code;
+      const match = formulations.find(f => (id && f.ID === id) || (name && f.Name.trim().toLowerCase() === name.trim().toLowerCase()));
+
+      if (match && !isFormulationEligibleForTrial(match)) {
+        window.dispatchEvent(new CustomEvent('app:toast', { 
+          detail: { msg: 'This formulation cannot be linked to a new trial. Please select an approved formulation.', type: 'warning' } 
+        }));
+        navigate(location.pathname, { replace: true, state: {} });
+        return;
+      }
+
       const initial = emptyForm(activeCategory);
       setFormData({
         ...initial,
-        FormulationID: id || '',
-        FormulationName: name || code || '',
-        TrialName: `${name || code || 'New'} Trial`
+        FormulationID: match ? match.ID : (id || ''),
+        FormulationName: match ? match.Name : (name || ''),
+        TrialName: `${match?.Name || name || 'New'} Trial`,
+        ...(data.target ? { TargetWeed: data.target, WeedSpecies: data.target } : {}),
+        ...(data.crop ? { Crop: data.crop } : {}),
+        ...(data.dosage ? { Dosage: data.dosage } : {})
       });
       setEditingTrial(null);
       setIsModalOpen(true);
       navigate(location.pathname, { replace: true, state: {} });
     }
-  }, [location.state, activeCategory, navigate, location.pathname]);
+  }, [location.state, activeCategory, navigate, location.pathname, formulations]);
 
   // --- Card 3-dot menus ---
   const [openCardMenu, setOpenCardMenu] = useState(null);
@@ -997,13 +1018,29 @@ export default function Trials({ onMenuClick }) {
     }
     const trimmedFormName = (formData.FormulationName || '').trim();
     if (!trimmedFormName) {
-      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Linked Formulation / Product is mandatory. Please select or enter a formulation name.', type: 'error' } }));
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Linked Formulation / Product is mandatory. Please select an approved formulation from the list.', type: 'error' } }));
       return;
     }
     const formMatch = formulations.find(f => 
       (formData.FormulationID && f.ID === formData.FormulationID) ||
       f.Name.trim().toLowerCase() === trimmedFormName.toLowerCase()
     );
+
+    // Strict validation for new trials: must strictly link to an eligible database formulation
+    if (!isEdit) {
+      if (!formMatch) {
+        window.dispatchEvent(new CustomEvent('app:toast', { 
+          detail: { msg: 'A linked formulation is mandatory to start a new trial. Please select an approved formulation from the list.', type: 'error' } 
+        }));
+        return;
+      }
+      if (!isFormulationEligibleForTrial(formMatch)) {
+        window.dispatchEvent(new CustomEvent('app:toast', { 
+          detail: { msg: 'Please select a valid, complete formulation from the list to start a trial.', type: 'error' } 
+        }));
+        return;
+      }
+    }
 
     let dateUpdatedAt = isEdit ? editingTrial.DateUpdatedAt : new Date().toISOString();
     if (isEdit && editingTrial.Date !== formData.Date) {
@@ -4598,12 +4635,16 @@ Rules:
     if (!duplicateModal) return;
     const trial = duplicateModal;
     setDuplicateModal(null);
-    const formMatch = formulations.find(f => f.Name === duplicateFormulation);
+    const formMatch = eligibleFormulations.find(f => f.Name === duplicateFormulation) || formulations.find(f => f.Name === duplicateFormulation);
+    if (!formMatch || !isFormulationEligibleForTrial(formMatch)) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Please select an approved formulation from the list to start the trial.', type: 'error' } }));
+      return;
+    }
     const payload = {
       ...trial,
       ID: undefined,
-      FormulationName: duplicateFormulation,
-      FormulationID: formMatch ? formMatch.ID : (trial.FormulationID || ''),
+      FormulationName: formMatch.Name,
+      FormulationID: formMatch.ID,
       Date: duplicateDate || toDatetimeLocal(new Date()),
       Dosage: duplicateDosage.trim() !== '' ? duplicateDosage.trim() : (trial.Dosage || ''),
       IsCompleted: false, ControlFinalized: false,
@@ -4617,11 +4658,11 @@ Rules:
       const result = await addTrial(payload, getAppState);
       const newTrial = { ...payload, ID: result.ID || result.id || Date.now().toString() };
       updateState({ trials: [newTrial, ...trials] });
-      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Duplicated as "${duplicateFormulation}"`, type: 'success' } }));
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Duplicated as "${formMatch.Name}"`, type: 'success' } }));
     } catch(e) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Duplicate failed', type: 'error' } }));
     }
-  }, [duplicateModal, duplicateFormulation, duplicateDate, duplicateDosage, formulations, trials, getAppState, updateState]);
+  }, [duplicateModal, duplicateFormulation, duplicateDate, duplicateDosage, formulations, eligibleFormulations, trials, getAppState, updateState]);
 
   const handleQuickRate = useCallback(async (trial, rating) => {
     const newRating = trial.Result === rating ? '' : rating;
@@ -6364,17 +6405,9 @@ If none are present, write "None".`;
                 onChange={e => setDuplicateFormulation(e.target.value)}
                 className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
               >
-                <option value="">— Select formulation —</option>
-                {formulations.map(f => <option key={f.ID} value={f.Name}>{f.Name}</option>)}
+                <option value="">— Select approved formulation —</option>
+                {eligibleFormulations.map(f => <option key={f.ID} value={f.Name}>{f.Name}</option>)}
               </select>
-              <p className="text-xs text-slate-400 mt-1">Or type a custom name:</p>
-              <input
-                type="text"
-                value={duplicateFormulation}
-                onChange={e => setDuplicateFormulation(e.target.value)}
-                placeholder="Custom formulation name..."
-                className="w-full mt-1 px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400"
-              />
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Date</label>
@@ -6434,17 +6467,41 @@ If none are present, write "None".`;
                 value={formData.FormulationName || ''} 
                 onChange={e => {
                   const val = e.target.value;
-                  const match = formulations.find(f => f.Name.trim().toLowerCase() === val.trim().toLowerCase());
+                  const pool = editingTrial ? formulations : eligibleFormulations;
+                  const match = pool.find(f => f.Name.trim().toLowerCase() === val.trim().toLowerCase());
                   setFormData(prev => ({
                     ...prev,
                     FormulationName: val,
-                    FormulationID: match ? match.ID : prev.FormulationID
+                    FormulationID: match ? match.ID : ''
                   }));
                 }} 
-                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" 
+                className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 ${
+                  !editingTrial && formData.FormulationName && !eligibleFormulations.some(f => f.Name.trim().toLowerCase() === formData.FormulationName.trim().toLowerCase())
+                    ? 'border-amber-400 focus:ring-amber-400'
+                    : 'focus:ring-emerald-400'
+                }`}
                 placeholder="Select or type formulation name..." 
               />
-              <datalist id="form-list">{formulations.map(f => <option key={f.ID} value={f.Name} />)}</datalist>
+              <datalist id="form-list">
+                {(editingTrial ? formulations : eligibleFormulations).map(f => (
+                  <option key={f.ID} value={f.Name} />
+                ))}
+              </datalist>
+              {!editingTrial && (
+                formData.FormulationName && eligibleFormulations.some(f => f.Name.trim().toLowerCase() === formData.FormulationName.trim().toLowerCase()) ? (
+                  <p className="text-[11px] text-emerald-600 font-semibold mt-1 flex items-center gap-1">
+                    ✓ Approved formulation linked
+                  </p>
+                ) : formData.FormulationName ? (
+                  <p className="text-[11px] text-amber-600 font-medium mt-1">
+                    Please select an approved formulation from the list.
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Select an approved formulation to start this trial.
+                  </p>
+                )
+              )}
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Project (Layout Group)</label>

@@ -12,7 +12,8 @@ import { exportFormulationDossier } from '../services/formulationDossier.js';
 import { 
   getFormulationTrialStats, 
   getTrialCalculatedEfficacy, 
-  getTrialTargetSpecies 
+  getTrialTargetSpecies,
+  isFormulationEligibleForTrial 
 } from '../utils/formulationTrialUtils.js';
 
 export default function LinkedTrialsModal({ isOpen, onClose, formulation, allTrials = [], allProjects = [], allIngredients = [], activeCategory = 'herbicide' }) {
@@ -157,6 +158,12 @@ export default function LinkedTrialsModal({ isOpen, onClose, formulation, allTri
             </span>
             <button
               onClick={() => {
+                if (!isFormulationEligibleForTrial(formulation)) {
+                  window.dispatchEvent(new CustomEvent('app:toast', { 
+                    detail: { msg: 'This formulation cannot be linked to a trial yet. Please complete the formulation recipe first.', type: 'warning' } 
+                  }));
+                  return;
+                }
                 onClose();
                 navigate('/trials', {
                   state: {
@@ -168,7 +175,11 @@ export default function LinkedTrialsModal({ isOpen, onClose, formulation, allTri
                   }
                 });
               }}
-              className="py-1.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition flex items-center gap-1.5 shadow-xs"
+              className={`py-1.5 px-3 rounded-xl font-bold text-xs transition flex items-center gap-1.5 shadow-xs ${
+                isFormulationEligibleForTrial(formulation)
+                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                  : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
+              }`}
             >
               🌿 Launch Microplot Trial
             </button>

@@ -353,3 +353,35 @@ export function getEfficacyRatingBadge(avgEff, fallbackResult = null) {
   };
 }
 
+/**
+ * Counts the number of distinct valid ingredients in a formulation.
+ *
+ * @param {Object} formulation - Formulation record
+ * @returns {number} Count of valid ingredients
+ */
+export function getFormulationIngredientsCount(formulation) {
+  if (!formulation) return 0;
+  const raw = formulation.IngredientsJSON || formulation.Ingredients || formulation.ingredients;
+  const ings = safeJsonParse(raw, Array.isArray(raw) ? raw : []);
+  if (!Array.isArray(ings)) return 0;
+  return ings.filter(i => {
+    if (!i) return false;
+    if (typeof i === 'string') return i.trim().length > 0;
+    const name = i.name || i.Name || i.ingredient || i.Ingredient;
+    return typeof name === 'string' && name.trim().length > 0;
+  }).length;
+}
+
+/**
+ * Checks if a formulation is valid and strictly eligible to be linked to any new trial.
+ * Internal rule: Formulation must exist and have at least 3 ingredients.
+ * Note: Never mention the 3 ingredients requirement in user-facing UI messages!
+ *
+ * @param {Object} formulation - Formulation record
+ * @returns {boolean} True if strictly eligible
+ */
+export function isFormulationEligibleForTrial(formulation) {
+  if (!formulation) return false;
+  return getFormulationIngredientsCount(formulation) >= 3;
+}
+

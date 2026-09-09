@@ -28,6 +28,7 @@ import { safeJsonParse } from '../utils/helpers.js';
 import { compressImage } from '../utils/imageCompression.js';
 import { validateEfficacyData, AnalysisEngine } from '../utils/analysisUtils.js';
 import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryValue, calculateEfficacy } from '../utils/categoryConfig.js';
+import { isFormulationEligibleForTrial } from '../utils/formulationTrialUtils.js';
 import { performANOVA, performTwoWayANOVA, performTukeyHSD } from '../utils/statsUtils.js';
 import { EPPO_CODES, BBCH_STAGES, lookupEPPO } from '../utils/eppoBBCHData.js';
 import { exportToARM, importARMCSV } from '../services/armExporter.js';
@@ -890,6 +891,11 @@ export default function LargeScaleTrials({ onMenuClick }) {
       return;
     }
     if (!duplicateModal) return;
+    const formMatch = state.formulations?.find(f => f.Name === duplicateFormulation);
+    if (!formMatch || !isFormulationEligibleForTrial(formMatch)) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Please select an approved formulation from the list.', type: 'error' } }));
+      return;
+    }
     const isCompleted = duplicateModal.IsCompleted === true || duplicateModal.IsCompleted === 'true';
     const payload = {
       ...duplicateModal,
@@ -2261,6 +2267,13 @@ Rules:
  
     const formMatch = state.formulations?.find(f => f.Name === subTrialForm.FormulationName);
     const isEdit = !!editingSubTrial;
+
+    if (!isEdit) {
+      if (!formMatch || !isFormulationEligibleForTrial(formMatch)) {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'A linked approved formulation is mandatory to create a sub-trial spot. Please select from the list.', type: 'error' } }));
+        return;
+      }
+    }
  
     const payload = {
       ...(isEdit ? editingSubTrial : {}),
@@ -4486,7 +4499,7 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
                 className="w-full px-3 py-2 border rounded-lg focus:outline-none bg-white text-xs"
               >
                 <option value="">-- Choose Formulation --</option>
-                {state.formulations?.map(f => <option key={f.ID} value={f.Name}>{f.Name}</option>)}
+                {(editingSubTrial ? state.formulations : state.formulations?.filter(isFormulationEligibleForTrial))?.map(f => <option key={f.ID} value={f.Name}>{f.Name}</option>)}
               </select>
             </div>
             <div>
@@ -5142,8 +5155,8 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
                 onChange={e => setDuplicateFormulation(e.target.value)}
                 className="w-full px-3 py-2 border rounded-lg bg-white"
               >
-                <option value="">-- Choose Formulation --</option>
-                {state.formulations?.map(f => <option key={f.ID} value={f.Name}>{f.Name}</option>)}
+                <option value="">-- Choose Approved Formulation --</option>
+                {state.formulations?.filter(isFormulationEligibleForTrial).map(f => <option key={f.ID} value={f.Name}>{f.Name}</option>)}
               </select>
             </div>
             <div>
