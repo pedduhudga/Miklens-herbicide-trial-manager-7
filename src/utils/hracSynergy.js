@@ -51,7 +51,18 @@ export const HRAC_DATABASE = {
   // Group 27: HPPD Inhibitors (Bleachers)
   'mesotrione': { group: 'HRAC 27', hracGroup: '27', wssa: 'Group 27', name: 'HPPD Inhibitors (Pigment)', class: 'Systemic Bleacher', chemicalFamily: 'Triketone', systemicity: 'Foliar & Root Systemic', targetSite: 'Inhibition of 4-hydroxyphenylpyruvate dioxygenase (HPPD)' },
   'tembotrione': { group: 'HRAC 27', hracGroup: '27', wssa: 'Group 27', name: 'HPPD Inhibitors (Pigment)', class: 'Systemic Bleacher', chemicalFamily: 'Triketone', systemicity: 'Foliar & Root Systemic', targetSite: 'Inhibition of 4-hydroxyphenylpyruvate dioxygenase (HPPD)' },
-  'topramezone': { group: 'HRAC 27', hracGroup: '27', wssa: 'Group 27', name: 'HPPD Inhibitors (Pigment)', class: 'Systemic Bleacher', chemicalFamily: 'Pyrazolone', systemicity: 'Foliar & Root Systemic', targetSite: 'Inhibition of 4-hydroxyphenylpyruvate dioxygenase (HPPD)' }
+  'topramezone': { group: 'HRAC 27', hracGroup: '27', wssa: 'Group 27', name: 'HPPD Inhibitors (Pigment)', class: 'Systemic Bleacher', chemicalFamily: 'Pyrazolone', systemicity: 'Foliar & Root Systemic', targetSite: 'Inhibition of 4-hydroxyphenylpyruvate dioxygenase (HPPD)' },
+
+  // Miklens Formulation Actives & Bio-Rational Desiccants
+  'glycyl': { group: 'HRAC 9', hracGroup: '9', wssa: 'Group 9', name: 'Inhibition of EPSP Synthase (Glycyl)', class: 'Non-selective Systemic', chemicalFamily: 'Organophosphorus', systemicity: 'Foliar Systemic Translocation', targetSite: 'Inhibition of EPSP synthase' },
+  'bpd': { group: 'HRAC 22', hracGroup: '22', wssa: 'Group 22', name: 'Photosystem I Diverters (BPD)', class: 'Ultra-fast Contact Desiccant', chemicalFamily: 'Bipyridylium / Contact', systemicity: 'Ultra-fast Contact Desiccant', targetSite: 'Photosystem I electron diversion' },
+  'pelargonic': { group: 'Bio-Desiccant', hracGroup: 'Bio', wssa: 'Bio-Burndown', name: 'Fatty Acid Cell Membrane Disruptor', class: 'Bio-Contact Knockdown', chemicalFamily: 'Carboxylic Acid', systemicity: 'Contact Cuticle Burndown', targetSite: 'Rapid disruption of plant cuticle & cellular membranes' },
+
+  // Adjuvants, Synergists & Penetrants
+  'surfactant': { group: 'Adjuvant', hracGroup: 'Adj', wssa: 'Adjuvant', name: 'Non-Ionic Surfactant', class: 'Surface Tension Reducer', chemicalFamily: 'Alkoxylate / Surfactant', systemicity: 'Foliar Wetting Agent', targetSite: 'Reduces surface tension and enhances droplet spread' },
+  'organosilicone': { group: 'Adjuvant', hracGroup: 'Adj', wssa: 'Adjuvant', name: 'Organosilicone Super-Spreader', class: 'Stomatal Infiltrator', chemicalFamily: 'Siloxane Polyether', systemicity: 'Stomatal Flooding Aid', targetSite: 'Facilitates direct stomatal cuticular infiltration' },
+  'penetrant': { group: 'Adjuvant', hracGroup: 'Adj', wssa: 'Adjuvant', name: 'Cuticular Penetration Enhancer', class: 'Bio-Penetrant', chemicalFamily: 'Esterified Bio-Oil', systemicity: 'Cuticular Translocation Aid', targetSite: 'Dissolves epicuticular wax layers for accelerated active uptake' },
+  'microweed': { group: 'Adjuvant', hracGroup: 'Adj', wssa: 'Adjuvant', name: 'Bio-Rational Penetrant & Synergist', class: 'Synergy Catalyst', chemicalFamily: 'Bio-adjuvant Complex', systemicity: 'Active Translocation Enhancer', targetSite: 'Accelerates foliar absorption and prevents spray bounce' }
 };
 
 /**

@@ -18,6 +18,7 @@ import {
   isTrialLinkedToFormulation,
   getFormulationTrialStats
 } from './formulationTrialUtils.js';
+import { identifyHrac } from './hracSynergy.js';
 
 function avg(arr) {
   if (!arr || arr.length === 0) return null;
@@ -394,19 +395,48 @@ function buildTrialIndex(parsedTrials, projectMap) {
 }
 
 function buildIngredientSynergySummary(parsedTrials, catFormulations, catIngredients) {
-  if (!catIngredients || catIngredients.length === 0) return 'No ingredients recorded.';
-
   const formMap = new Map();
-  catFormulations.forEach(f => {
-    const ings = safeJsonParse(f.IngredientsJSON || f.Ingredients || f.ingredients, []);
-    formMap.set(String(f.Name || '').toLowerCase().trim(), Array.isArray(ings) ? ings : []);
+  const allKnownIngMap = new Map();
+
+  // 1. Seed from explicit ingredients collection
+  (catIngredients || []).forEach(ing => {
+    const rawName = (ing.Name || ing.name || '').trim();
+    if (!rawName) return;
+    const cleanKey = rawName.toLowerCase();
+    allKnownIngMap.set(cleanKey, {
+      name: rawName,
+      cost: ing.Cost || ing.pricePerUnit || ing.PricePerUnit || 'N/A',
+      unit: ing.Unit || ing.unit || 'ml',
+      isInventory: true
+    });
   });
 
-  const ingStats = catIngredients.map(ing => {
-    const name = (ing.Name || ing.name || '').trim();
-    const cleanName = name.toLowerCase();
-    const cost = ing.Cost || ing.pricePerUnit || ing.PricePerUnit || 'N/A';
-    const unit = ing.Unit || ing.unit || 'ml';
+  // 2. Also harvest ingredients used in existing formulations to ensure zero data omission
+  (catFormulations || []).forEach(f => {
+    const ings = safeJsonParse(f.IngredientsJSON || f.Ingredients || f.ingredients, []);
+    const fIngs = Array.isArray(ings) ? ings : [];
+    formMap.set(String(f.Name || '').toLowerCase().trim(), fIngs);
+
+    fIngs.forEach(item => {
+      const rawName = (item.name || item.Name || '').trim();
+      if (!rawName) return;
+      const cleanKey = rawName.toLowerCase();
+      if (!allKnownIngMap.has(cleanKey)) {
+        allKnownIngMap.set(cleanKey, {
+          name: rawName,
+          cost: 'N/A',
+          unit: item.unit || 'ml',
+          isInventory: false
+        });
+      }
+    });
+  });
+
+  if (allKnownIngMap.size === 0) return 'No ingredients recorded in inventory or formulations.';
+
+  const ingStats = Array.from(allKnownIngMap.values()).map(ing => {
+    const cleanName = ing.name.toLowerCase();
+    const hracInfo = identifyHrac(ing.name);
 
     const matchedFormNames = [];
     formMap.forEach((ingList, fName) => {
@@ -418,25 +448,97 @@ function buildIngredientSynergySummary(parsedTrials, catFormulations, catIngredi
     const trials = parsedTrials.filter(t => matchedFormNames.includes(String(t.formulation || '').toLowerCase().trim()));
     const effs = trials.map(t => t.finalEfficacy).filter(e => e !== null);
     const winCount = trials.filter(t => t.result === 'Excellent' || t.result === 'Good').length;
+    const ctrlDays = trials.map(t => t.effectiveControlDays).filter(d => d !== null && d > 0);
 
     return {
-      name,
-      cost,
-      unit,
+      name: ing.name,
+      cost: ing.cost,
+      unit: ing.unit,
+      isInventory: ing.isInventory,
+      hrac: hracInfo,
       formulaCount: matchedFormNames.length,
       trialCount: trials.length,
       winRate: trials.length > 0 ? Math.round((winCount / trials.length) * 100) : null,
       avgEff: avg(effs),
+      maxEff: effs.length ? Math.max(...effs) : null,
+      avgCtrlDays: avg(ctrlDays),
       targets: [...new Set(trials.map(t => t.target).filter(Boolean))]
     };
   });
 
+  // Sort by trial performance (efficacy and usage)
+  ingStats.sort((a, b) => (b.avgEff || 0) - (a.avgEff || 0) || (b.trialCount || 0) - (a.trialCount || 0));
+
   return ingStats.map(s => {
+    const hracBadge = s.hrac 
+      ? ` [${s.hrac.group}: ${s.hrac.name} (${s.hrac.class || 'Active'}, ${s.hrac.systemicity || 'Systemic'})]` 
+      : ' [Bio/Chemical Co-Active or Adjuvant]';
+    const costStr = s.cost !== 'N/A' ? ` | Cost: Rs.${s.cost}/${s.unit}` : '';
     const perf = s.trialCount > 0 
-      ? ` | tested in ${s.trialCount} trial(s) across ${s.formulaCount} formula(s) -> avgEff: ${s.avgEff ?? '?'}% (winRate: ${s.winRate}%) | targets:[${s.targets.slice(0, 4).join(', ')}]`
-      : ' | in-stock in inventory (untested in recorded trials)';
-    return `* ${s.name} (Cost: Rs.${s.cost}/${s.unit})${perf}`;
+      ? ` | Tested in ${s.trialCount} trial(s) across ${s.formulaCount} formula(s) -> avgEff: ${s.avgEff ?? '?'}% (peak: ${s.maxEff ?? '?'}%, winRate: ${s.winRate}%)${s.avgCtrlDays ? `, avgCtrl: ${s.avgCtrlDays}d` : ''} | targets: [${s.targets.slice(0, 5).join(', ')}]`
+      : ' | Available in catalog/inventory (untested as single active)';
+    return `* ${s.name}${hracBadge}${costStr}${perf}`;
   }).join('\n');
+}
+
+function buildMultiIngredientSynergyBenchmarks(catFormulations, parsedTrials) {
+  const multiActives = (catFormulations || []).filter(f => {
+    const ings = safeJsonParse(f.IngredientsJSON || f.Ingredients || f.ingredients, []);
+    return Array.isArray(ings) && ings.length >= 2;
+  });
+
+  if (multiActives.length === 0) return 'No multi-ingredient formulations currently recorded.';
+
+  return multiActives.map(f => {
+    const fName = String(f.Name || '').toLowerCase().trim();
+    const trials = parsedTrials.filter(t => String(t.formulation || '').toLowerCase().trim() === fName);
+    const effs = trials.map(t => t.finalEfficacy).filter(e => e !== null);
+    const ctrlDays = trials.map(t => t.effectiveControlDays).filter(d => d !== null && d > 0);
+    const targets = [...new Set(trials.map(t => t.target).filter(Boolean))];
+    const ings = safeJsonParse(f.IngredientsJSON || f.Ingredients || f.ingredients, []);
+    const recipeStr = (Array.isArray(ings) ? ings : []).map(i => `${i.name || i.Name}: ${i.quantity ?? i.qty}${i.unit || 'ml'}`).join(' + ');
+
+    return `* [🧪 Formula: ${f.Name}](#/formulations?focus=${encodeURIComponent(f.ID || f.Code || f.Name)}) (Code: ${f.Code || 'N/A'})
+    - Recipe: [${recipeStr}]
+    - Trial Results (${trials.length} trials): Kill Rate: ${avg(effs) !== null ? avg(effs) + '%' : 'N/A'} (Peak: ${effs.length ? Math.max(...effs) + '%' : 'N/A'}) | Control Duration: ${avg(ctrlDays) !== null ? avg(ctrlDays) + ' days' : 'under eval'}
+    - Tested Spectrum: [${targets.slice(0, 6).join(', ')}]
+    - Mode of Action / Synergy Notes: ${f.ModeOfAction || f.Notes || 'Synergistic multi-site knockdown and systemic translocation'}`;
+  }).join('\n\n');
+}
+
+function buildWeedTargetCoverageMatrix(parsedTrials) {
+  const targetMap = new Map();
+  parsedTrials.forEach(t => {
+    if (!t.target) return;
+    if (!targetMap.has(t.target)) {
+      targetMap.set(t.target, []);
+    }
+    targetMap.get(t.target).push(t);
+  });
+
+  if (targetMap.size === 0) return 'No weed target data recorded.';
+
+  const targets = Array.from(targetMap.entries()).map(([targetName, trials]) => {
+    const effs = trials.map(t => t.finalEfficacy).filter(e => e !== null);
+    const ctrlDays = trials.map(t => t.effectiveControlDays).filter(d => d !== null && d > 0);
+    
+    // Find best performing trial
+    const sorted = [...trials].sort((a, b) => (b.finalEfficacy || 0) - (a.finalEfficacy || 0) || (b.effectiveControlDays || 0) - (a.effectiveControlDays || 0));
+    const bestTrial = sorted[0];
+
+    return {
+      target: targetName,
+      trialCount: trials.length,
+      avgEff: avg(effs),
+      maxEff: effs.length ? Math.max(...effs) : null,
+      maxCtrlDays: ctrlDays.length ? Math.max(...ctrlDays) : null,
+      bestFormula: bestTrial ? `${bestTrial.formulation} @ ${bestTrial.dosage} (${bestTrial.finalEfficacy}% eff, ${bestTrial.effectiveControlDays || 0}d)` : 'N/A'
+    };
+  }).sort((a, b) => b.trialCount - a.trialCount);
+
+  return targets.map(t => 
+    `* ${t.target} (${t.trialCount} trials) | Avg Kill: ${t.avgEff !== null ? t.avgEff + '%' : 'N/A'} | Max Kill: ${t.maxEff !== null ? t.maxEff + '%' : 'N/A'} | Max Control: ${t.maxCtrlDays ? t.maxCtrlDays + 'd' : 'N/A'} | Benchmark Winner: ${t.bestFormula}`
+  ).join('\n');
 }
 
 /**
@@ -445,10 +547,10 @@ function buildIngredientSynergySummary(parsedTrials, catFormulations, catIngredi
  */
 export function buildAIMemoryContext(trials, formulations, projects, ingredients, categoryId) {
   const primaryObsField = getPrimaryObservationField(categoryId);
-  const catTrials = (trials || []).filter(t => (t.Category || 'herbicide') === categoryId);
-  const catFormulations = (formulations || []).filter(f => (f.Category || 'herbicide') === categoryId);
-  const catProjects = (projects || []).filter(p => (p.Category || 'herbicide') === categoryId);
-  const catIngredients = (ingredients || []).filter(i => (i.Category || 'herbicide') === categoryId);
+  const catTrials = (trials || []).filter(t => (t.Category || 'herbicide').toLowerCase() === categoryId.toLowerCase());
+  const catFormulations = (formulations || []).filter(f => (f.Category || 'herbicide').toLowerCase() === categoryId.toLowerCase());
+  const catProjects = (projects || []).filter(p => (p.Category || 'herbicide').toLowerCase() === categoryId.toLowerCase());
+  const catIngredients = (ingredients || []).filter(i => (i.Category || 'herbicide').toLowerCase() === categoryId.toLowerCase());
 
   const projectMap = {};
   const largeScaleProjectIds = new Set();
@@ -480,6 +582,8 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
   const trialIndex = buildTrialIndex(parsedTrials, projectMap);
   const ingredientSynergy = buildIngredientSynergySummary(parsedTrials, catFormulations, catIngredients);
   const excellentTrialsList = buildExcellentTrialsList(parsedTrials, catFormulations);
+  const multiIngredientSynergyBenchmarks = buildMultiIngredientSynergyBenchmarks(catFormulations, parsedTrials);
+  const targetCoverageMatrix = buildWeedTargetCoverageMatrix(parsedTrials);
 
   const finalizedTrials = parsedTrials.filter(t => t.isCompleted);
   const activeTrials = parsedTrials.filter(t => !t.isCompleted);
@@ -632,6 +736,12 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
     '=== INGREDIENT INVENTORY & FIELD SYNERGY MATRIX ===',
     ingredientSynergy,
     '',
+    '=== 🧬 HISTORICAL MULTI-INGREDIENT SYNERGY BENCHMARKS ===',
+    multiIngredientSynergyBenchmarks,
+    '',
+    '=== 🎯 WEED TARGET SPECIES TRIAL COVERAGE MATRIX ===',
+    targetCoverageMatrix,
+    '',
     '=== FORMULATION KNOWLEDGE BASE ===',
     formulationsCtx,
     '',
@@ -678,9 +788,9 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
     '   { "artifactType": "doseresponse", "formula": "Glycyl", "target": "Bermudagrass", "ed50": 10, "currentDosage": 10, "unit": "ml/L" }',
     '   ```',
     '6. TESTED FIELD DOSAGES: When asked for the optimal dosage of a formula, cite the exact rates listed under "Tested Field Dosages" for that formula in the database (e.g. "X ml/L with Y% avg eff"). Recommend an appropriate carrier volume (typically 400–500 L/ha water) based on agronomic standards.',
-    '6. RECIPE & UNIT ANOMALY DETECTION: Present the current recipe from the database cleanly in bullet points. If any liquid active ingredient has a recorded quantity < 1 with unit "ml" (such as 0.100 ml or 0.200 ml), alert the user to the likely unit notation typo in data entry (likely intended as Litres or hundreds of ml).',
-    '7. REALISTIC INGREDIENT UPGRADES: When suggesting recipe upgrades, base all proposed ingredients strictly on the INGREDIENT INVENTORY & FIELD SYNERGY MATRIX. Compare the formula\'s estimated cost per liter against cheaper database benchmarks, and propose realistic adjustments (cost reduction, penetration enhancers, or film-formers) grounded in real inventory components.',
-    '8. AGRONOMIC CRITERIA FOR "BEST" FORMULATION (HIGHEST CONTROL DAYS & COMPLETE KILL RATE):',
+    '7. RECIPE & UNIT ANOMALY DETECTION: Present the current recipe from the database cleanly in bullet points. If any liquid active ingredient has a recorded quantity < 1 with unit "ml" (such as 0.100 ml or 0.200 ml), alert the user to the likely unit notation typo in data entry (likely intended as Litres or hundreds of ml).',
+    '8. REALISTIC INGREDIENT UPGRADES: When suggesting recipe upgrades, base all proposed ingredients strictly on the INGREDIENT INVENTORY & FIELD SYNERGY MATRIX. Compare the formula\'s estimated cost per liter against cheaper database benchmarks, and propose realistic adjustments (cost reduction, penetration enhancers, or film-formers) grounded in real inventory components.',
+    '9. AGRONOMIC CRITERIA FOR "BEST" FORMULATION (HIGHEST CONTROL DAYS & COMPLETE KILL RATE):',
     '   When the user asks which formulation is "best", performs best, or to compare options, evaluate strictly against these three core agronomic pillars:',
     '   a) KILL RATE (Complete Weed Mortality): Higher average and peak efficacy (target complete kill, >= 70% for field efficacy, 90-100% for top-tier complete kill).',
     '   b) CONTROL DAYS (Sustained Suppression): Longest days of control without weed regrowth. Clearly differentiate short contact burndown (1-3 days) from extended residual weed control (10-30+ days).',
@@ -688,24 +798,27 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
     '   d) DECISIVE DIFFERENTIATION: In follow-up conversations, NEVER re-list leaderboard tables. Deliver an immediate, decisive executive verdict. Specifically: [🧪 Formula: Glycyl](#/formulations?focus=1783319817942) is the #1 premier systemic herbicide for grass/rhizome suppression (100% kill, 38d control); [🧪 Formula: GOWEED ULTRA + MICROWEED](#/formulations?focus=1783405027091) is the synergy leader for broadleaf weed control (100% kill, 26d control).',
     '',
     '=== GUIDELINES FOR NOVEL FORMULATION RECOMMENDATIONS ===',
-    'When asked to suggest new, improved, or novel formulations:',
-    '1. Cross-reference the INGREDIENT INVENTORY above to select realistic, available ingredients.',
-    '2. Combine complementary modes of action (e.g. fast contact knockdown + systemic residual control, or active + penetration enhancer / surfactant).',
-    '3. Cite expected synergy and compare predicted efficacy against the existing trial benchmarks.',
-    '4. CRITICAL: Whenever you recommend a new candidate formulation, ALWAYS enclose its exact recipe in a ```formula code block formatted like this so the user can save it in 1 click:',
+    'When asked to suggest new, improved, or novel candidate formulations based on historical trial results and inventory synergy:',
+    '1. FULL HISTORICAL BENCHMARK SYNTHESIS: Thoroughly synthesize our complete database of ' + stats.totalTrials + ' trials. Note which single actives and multi-actives achieved 90-100% kill (e.g. Glycyl with 100% kill on Cynodon dactylon, Goweed Ultra + Microweed with 100% kill on broadleaves, BPD for rapid contact desiccation) and identify weed target gaps (e.g. resistant Cyperus rotundus sedges, mixed-flora escapes).',
+    '2. DUAL/TRIPLE HRAC MODE-OF-ACTION COMPLEMENTARITY: Select realistic actives from the INGREDIENT INVENTORY & FIELD SYNERGY MATRIX. Combine complementary HRAC MoAs: e.g. pairing an ultra-systemic broad-spectrum translocator (HRAC 9 EPSP or HRAC 1 ACCase / HRAC 2 ALS) with a rapid cell-membrane disruptor (HRAC 14 PPO or Bio-desiccant) plus a bio-penetrant/surfactant to accelerate stomatal and cuticular uptake.',
+    '3. ANTAGONISM & DUPLICATION CHECK: Verify that proposed actives do not exhibit known chemical antagonism (e.g. ACCase + Auxin antagonism). Strictly ensure the recipe is 100% novel and does not duplicate an existing recipe in the FORMULATION KNOWLEDGE BASE.',
+    '4. EXACT RECIPE QUANTITIES & DOSAGE: Cite precise quantities in ml/L or gm/L, carrier spray volume (e.g. 400-500 L/ha water), and application timing.',
+    '5. PREDICTED EFFICACY & SPECTRUM: State the calculated Colby synergy kill rate % (e.g. 94-97%) and break down target weeds into Susceptible (85-100%), Moderate, and Tolerant.',
+    '6. MANDATORY 1-CLICK SAVEABLE ```formula CODE BLOCKS: For EACH candidate formulation suggested, you MUST provide a separate ```formula code block formatted like this so the agronomist can save it directly into the database in 1 click:',
     '```formula',
     '{',
     '  "name": "Suggested Formula Name",',
+    '  "code": "CAND-01",',
     '  "category": "' + categoryId + '",',
     '  "notes": "Brief description of agronomic positioning and mode of action.",',
-    '  "dosage": "Suggested application rate (e.g. 40 ml/L or 2 L/ha)",',
-    '  "target": "Target species or pathogens",',
+    '  "dosage": "Suggested application rate (e.g. 35 ml/L in 400 L/ha water)",',
+    '  "targetSpecs": "Susceptible: Bermudagrass, Cyperus rotundus, Parthenium; Moderate: Amaranthus",',
     '  "ingredients": [',
-    '    { "name": "Ingredient A", "quantity": 400, "unit": "ml" },',
-    '    { "name": "Ingredient B", "quantity": 100, "unit": "ml" }',
+    '    { "name": "Ingredient A", "quantity": 300, "unit": "ml" },',
+    '    { "name": "Ingredient B", "quantity": 50, "unit": "ml" }',
     '  ],',
-    '  "predictedEfficacy": 94,',
-    '  "synergyRationale": "Explanation of biochemical synergy and why this formula will perform well."',
+    '  "predictedEfficacy": 95,',
+    '  "rationale": "Detailed scientific rationale explaining the biochemical MoA synergy, stomatal infiltration, and systemic translocation overcoming single-active resistance."',
     '}',
     '```'
   ].join('\n');

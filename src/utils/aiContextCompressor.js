@@ -80,7 +80,7 @@ export function analyzeUserQuery(query = '') {
   const isFollowUpDecision = /\b(among these|between these|which is the best|which one is best|which one should i choose|pick one|which is better|which one would you recommend|who wins|which one)\b/i.test(q);
 
   // Novel formulation / Recipe creation / Chemistry synergy
-  const isNovelFormula = /\b(novel|suggest|new formula|new recipe|candidate|invent|create|synergy|ingredients?|upgrade recipe)\b/i.test(q);
+  const isNovelFormula = /\b(novel|suggest|new formula|new recipe|candidate|invent|create|synergy|ingredients?|upgrade recipe|potential candidate)\b/i.test(q);
 
   // Failure / Weather / Anomalies
   const isWeatherOrFailure = /\b(fail|failure|weather|rain|temperature|humidity|poor|inconsistent|variable|low efficacy)\b/i.test(q);
@@ -92,7 +92,7 @@ export function analyzeUserQuery(query = '') {
   const isGreetingOrMeta = /^(hi|hello|hey|greetings|help|who are you|what can you do)\b/i.test(q) && q.length < 35;
 
   // General "all" request
-  const requestsAll = /\b(all trials|everything|full database|entire dataset|complete index)\b/i.test(q);
+  const requestsAll = /\b(all\s+(historical\s+)?(herbicide\s+|fungicide\s+|pesticide\s+)?trials?|all\s+(historical\s+)?results?|everything|full\s+database|entire\s+dataset|complete\s+index|based on all|complete\s+(formula|trial|database|dataset|history)|all\s+trials)\b/i.test(q);
 
   return {
     rawQuery: query,
@@ -152,6 +152,16 @@ function filterTrialIndex(trialIndexText, queryAnalysis) {
   // If user is asking a follow-up decision ("among these which is the best"):
   if (queryAnalysis.isFollowUpDecision) {
     return lines.slice(0, 5).join('\n');
+  }
+
+  // If user is asking for novel formulation candidate design:
+  // Provide all trials with high efficacy or excellent results across all targets (up to 80 trials)
+  if (queryAnalysis.isNovelFormula) {
+    const highEffTrials = lines.filter(line => /100%eff|[89]\d%eff|result:Excellent/i.test(line));
+    if (highEffTrials.length > 0) {
+      return highEffTrials.slice(0, 80).join('\n');
+    }
+    return lines.slice(0, 80).join('\n');
   }
 
   // Default: return top 25 trials to keep context concise
@@ -228,7 +238,7 @@ export function compressAIContext(contextString, userQuery, options = {}) {
   // 4. TOP PERFORMING TRIALS: Include for benchmark, top performers, or default general questions
   const topTrialsKey = Object.keys(sections).find(k => k.includes('TOP PERFORMING'));
   if (topTrialsKey && sections[topTrialsKey]) {
-    if (analysis.isBenchmark || !analysis.mentionsTrialExplicitly) {
+    if (analysis.isBenchmark || analysis.isNovelFormula || !analysis.mentionsTrialExplicitly) {
       includedSections.push(`=== ${topTrialsKey} ===\n${sections[topTrialsKey]}`);
       if (analysis.isBenchmark) detectedIntents.push('benchmark_or_top');
     }
@@ -244,11 +254,29 @@ export function compressAIContext(contextString, userQuery, options = {}) {
     }
   }
 
+  // 5b. HISTORICAL MULTI-INGREDIENT SYNERGY BENCHMARKS:
+  const multiKey = Object.keys(sections).find(k => k.includes('HISTORICAL MULTI-INGREDIENT SYNERGY BENCHMARKS'));
+  if (multiKey && sections[multiKey]) {
+    if (analysis.isNovelFormula || analysis.formulaMentions.length > 0 || analysis.isBenchmark) {
+      includedSections.push(`=== ${multiKey} ===\n${sections[multiKey]}`);
+      detectedIntents.push('multi_ingredient_synergy');
+    }
+  }
+
+  // 5c. WEED TARGET SPECIES TRIAL COVERAGE MATRIX:
+  const targetCovKey = Object.keys(sections).find(k => k.includes('WEED TARGET SPECIES TRIAL COVERAGE MATRIX'));
+  if (targetCovKey && sections[targetCovKey]) {
+    if (analysis.isNovelFormula || analysis.targetMentions.length > 0 || analysis.isBenchmark) {
+      includedSections.push(`=== ${targetCovKey} ===\n${sections[targetCovKey]}`);
+      detectedIntents.push('target_coverage_matrix');
+    }
+  }
+
   // 6. FORMULATION KNOWLEDGE BASE:
   const formBaseKey = Object.keys(sections).find(k => k.includes('FORMULATION KNOWLEDGE BASE'));
   if (formBaseKey && sections[formBaseKey]) {
-    // If specific formulas mentioned, filter formulation blocks
-    if (analysis.formulaMentions.length > 0 && !analysis.isBenchmark) {
+    // If specific formulas mentioned (and not asking for novel formula or benchmark), filter formulation blocks
+    if (analysis.formulaMentions.length > 0 && !analysis.isBenchmark && !analysis.isNovelFormula) {
       const rawText = sections[formBaseKey];
       const blocks = rawText.split(/\n(?=[A-Z0-9_-]+\s*\(Code:|\bName:)/i);
       const matchedBlocks = blocks.filter(b => 
