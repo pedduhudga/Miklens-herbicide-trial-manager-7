@@ -188,11 +188,14 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                         break;
                     }
 
-                    // SAFETY: Check if we've been processing for too long (processing one item shouldn't exceed 1 minute)
+                    // SAFETY: Check if we've been stuck without progress for too long
                     if (Date.now() - _lastSyncAttempt > SYNC_STUCK_TIMEOUT) {
                         console.warn('[HighTechSync] [WARN] Processing timeout detected. Breaking to prevent hang.');
                         break;
                     }
+
+                    // Refresh activity timestamp on active progress
+                    _lastSyncAttempt = Date.now();
 
                     const itemStartTime = Date.now();
                     const itemLabel = item.action ? `Action: ${item.action}` : (item.photo?.fileName || item.id);
