@@ -1664,11 +1664,8 @@ function triggerDrivePermissions() {
 function getImageBase64(data) {
   try {
     const imageUrl = data.imageUrl;
-    if (!imageUrl) return { success: false, message: 'No image URL provided' };
-    
-    // Extract file ID from Google Drive URL
-    let fileId = getFileIdFromUrl(imageUrl);
-    if (!fileId) return { success: false, message: 'Invalid Google Drive URL format' };
+    let fileId = data.fileId || (imageUrl ? getFileIdFromUrl(imageUrl) : null);
+    if (!fileId) return { success: false, message: 'Invalid or missing Google Drive file ID' };
     
     Logger.log('Fetching image with file ID: ' + fileId);
     const file = DriveApp.getFileById(fileId);

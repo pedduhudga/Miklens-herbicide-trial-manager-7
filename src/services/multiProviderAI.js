@@ -1,6 +1,7 @@
 import { getCategoryConfig } from '../utils/categoryConfig.js';
 import { resolvePhotoSrc } from '../utils/photoUtils.js';
 import { DEFAULT_GEMINI_MODEL, GEMINI_FALLBACK_MODELS } from '../utils/aiConstants.js';
+import { apiCall } from './db.js';
 
 // Provider order = fallback priority (first = tried first).
 // Free tier limits per Google AI Studio / Groq free plan.
@@ -356,9 +357,13 @@ function parseAIJson(text) {
 
 function getDriveFileId(url) {
   if (typeof url !== 'string') return null;
-  if (!url.includes('drive.google.com')) return null;
+  if (url.startsWith('data:')) return null;
   const m = url.match(/(?:[?&]id=|\/d\/)([a-zA-Z0-9_-]{10,})/);
-  return m ? m[1] : null;
+  if (m) return m[1];
+  if (/^[a-zA-Z0-9_-]{25,50}$/.test(url.trim())) {
+    return url.trim();
+  }
+  return null;
 }
 
 function encodeImageViaCanvas(src) {
@@ -386,52 +391,123 @@ function encodeImageViaCanvas(src) {
       }
     };
     img.onerror = () => reject(new Error('Image failed to load: ' + String(src || '').slice(0, 80)));
-    img.crossOrigin = 'anonymous';
+    if (typeof src === 'string' && src.startsWith('http')) {
+      img.crossOrigin = 'anonymous';
+    }
     img.src = src;
   });
 }
 
 async function imageToBase64(dataUrlOrUrl) {
+  if (!dataUrlOrUrl) throw new Error('No image URL or data provided');
+
+  // If already pure base64 (without data: prefix)
+  if (typeof dataUrlOrUrl === 'string' && !dataUrlOrUrl.startsWith('http') && !dataUrlOrUrl.startsWith('data:') && dataUrlOrUrl.length > 200) {
+    return dataUrlOrUrl;
+  }
+
   // Already a data URL — encode via canvas to normalise format/size
   if (typeof dataUrlOrUrl === 'string' && dataUrlOrUrl.startsWith('data:')) {
     return encodeImageViaCanvas(dataUrlOrUrl);
   }
 
-  // Google Drive URLs: try Apps Script proxy or fail cleanly
+  // Google Drive URLs or File IDs: try high-speed CDN with CORS, Apps Script proxy, or local state cache
   const driveId = getDriveFileId(dataUrlOrUrl);
   if (driveId) {
+    // 1. Google User Content and Thumbnail CDN endpoints that send Access-Control-Allow-Origin: *
+    const cdnCandidates = [
+      `https://lh3.googleusercontent.com/d/${driveId}=w1200`,
+      `https://drive.google.com/thumbnail?id=${driveId}&sz=w1200`,
+      `https://lh3.googleusercontent.com/d/${driveId}=w800`,
+      `https://drive.google.com/thumbnail?id=${driveId}&sz=w800`,
+    ];
+
+    // Attempt 1: Fetch via CORS -> Blob -> FileReader -> Canvas resize
+    for (const url of cdnCandidates) {
+      try {
+        const resp = await fetch(url, { mode: 'cors' });
+        if (resp.ok) {
+          const blob = await resp.blob();
+          if (blob && blob.size > 100) {
+            const dataUrl = await new Promise((res, rej) => {
+              const reader = new FileReader();
+              reader.onloadend = () => res(reader.result);
+              reader.onerror = rej;
+              reader.readAsDataURL(blob);
+            });
+            const b64 = await encodeImageViaCanvas(dataUrl);
+            if (b64) return b64;
+          }
+        }
+      } catch (_) {}
+    }
+
+    // Attempt 2: Image object with crossOrigin='anonymous'
+    for (const url of cdnCandidates) {
+      try {
+        const b64 = await encodeImageViaCanvas(url);
+        if (b64) return b64;
+      } catch (_) {}
+    }
+
+    // Attempt 3: Apps Script proxy using authenticated apiCall
     try {
-      let scriptUrl = null;
       if (typeof window !== 'undefined') {
         const state = window.__getAppState ? window.__getAppState() : (window.getAppState ? window.getAppState() : null);
-        scriptUrl = state?.settings?.scriptUrl;
-        if (!scriptUrl) {
-          try {
-            const raw = localStorage.getItem('settings');
-            if (raw) scriptUrl = JSON.parse(raw).scriptUrl;
-          } catch (_) {}
-        }
-      }
-      if (scriptUrl) {
-        const resp = await fetch(scriptUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: 'getImageBase64', imageUrl: dataUrlOrUrl })
-        });
-        if (resp.ok) {
-          const json = await resp.json();
-          if (json?.success && json?.base64) {
-            return encodeImageViaCanvas(`data:image/jpeg;base64,${json.base64}`);
+        if (state?.settings?.scriptUrl) {
+          const result = await apiCall(
+            'getImageBase64',
+            { imageUrl: `https://drive.google.com/uc?export=view&id=${driveId}`, fileId: driveId },
+            false,
+            () => state
+          );
+          if (result?.success && result?.base64) {
+            return await encodeImageViaCanvas(`data:image/jpeg;base64,${result.base64}`);
           }
         }
       }
-    } catch (e) {
-      console.warn('[AI] Apps Script getImageBase64 failed:', e.message);
+    } catch (appsScriptErr) {
+      console.warn('[AI] Apps Script getImageBase64 failed:', appsScriptErr.message);
     }
-    throw new Error('DRIVE_URL_NO_BASE64');
+
+    // Attempt 4: Check if trial photos in app state have cached base64
+    try {
+      if (typeof window !== 'undefined') {
+        const state = window.__getAppState ? window.__getAppState() : (window.getAppState ? window.getAppState() : null);
+        if (state?.trials) {
+          for (const t of state.trials) {
+            let photos = [];
+            try { photos = typeof t.PhotoURLs === 'string' ? JSON.parse(t.PhotoURLs) : (t.PhotoURLs || []); } catch (_) {}
+            const match = photos.find(p => p && (p.driveId === driveId || (typeof p.url === 'string' && p.url.includes(driveId))));
+            if (match && typeof match.fileData === 'string' && match.fileData.startsWith('data:image')) {
+              return await encodeImageViaCanvas(match.fileData);
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
+    // Attempt 5: CORS proxy fallback (images.weserv.nl)
+    try {
+      const proxyUrl = `https://images.weserv.nl/?url=${encodeURIComponent(`https://drive.google.com/uc?export=view&id=${driveId}`)}&output=jpg&w=1024`;
+      const resp = await fetch(proxyUrl, { mode: 'cors' });
+      if (resp.ok) {
+        const blob = await resp.blob();
+        const dataUrl = await new Promise((res, rej) => {
+          const reader = new FileReader();
+          reader.onloadend = () => res(reader.result);
+          reader.onerror = rej;
+          reader.readAsDataURL(blob);
+        });
+        const b64 = await encodeImageViaCanvas(dataUrl);
+        if (b64) return b64;
+      }
+    } catch (_) {}
+
+    throw new Error('DRIVE_IMAGE_UNAVAILABLE: Could not retrieve image from Google Drive. Please ensure the file or folder is accessible.');
   }
 
-  // Regular remote URL — try fetch
+  // Regular remote URL — try fetch with CORS
   try {
     const response = await fetch(dataUrlOrUrl, { mode: 'cors' });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -442,10 +518,10 @@ async function imageToBase64(dataUrlOrUrl) {
       reader.onerror = rej;
       reader.readAsDataURL(blob);
     });
-    return encodeImageViaCanvas(dataUrl);
+    return await encodeImageViaCanvas(dataUrl);
   } catch (fetchErr) {
     console.warn('[AI] fetch failed, trying img load:', fetchErr.message);
-    return encodeImageViaCanvas(dataUrlOrUrl);
+    return await encodeImageViaCanvas(dataUrlOrUrl);
   }
 }
 
@@ -489,12 +565,6 @@ async function callGemini(provider, imageData, context, apiKey) {
 }
 
 async function callGroq(provider, imageData, context, apiKey) {
-  // Groq requires base64 — Drive URLs are CORS-blocked, skip immediately
-  if (getDriveFileId(imageData)) {
-    const e = new Error('Drive images cannot be fetched for Groq (CORS). Use Gemini instead.');
-    e.status = 400;
-    throw e;
-  }
   const base64 = await imageToBase64(imageData);
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 25000);
@@ -536,12 +606,6 @@ async function callGroq(provider, imageData, context, apiKey) {
 }
 
 async function callPixtral(provider, imageData, context, apiKey) {
-  // Pixtral requires base64 — Drive URLs are CORS-blocked, skip immediately
-  if (getDriveFileId(imageData)) {
-    const e = new Error('Drive images cannot be fetched for Pixtral (CORS). Use Gemini instead.');
-    e.status = 400;
-    throw e;
-  }
   const base64 = await imageToBase64(imageData);
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 25000);
@@ -600,13 +664,13 @@ function isNonRetryable(err) {
   const msg = err.message || '';
   if (msg.includes('Unable to process input image')) return true;
   if (msg.includes('Invalid API Key') || msg.includes('invalid_api_key')) return true;
-  if (msg.includes('DRIVE_URL_NO_BASE64') || msg.includes('Drive images cannot be fetched')) return true;
+  if (msg.includes('DRIVE_IMAGE_UNAVAILABLE') || msg.includes('DRIVE_URL_NO_BASE64') || msg.includes('Drive images cannot be fetched')) return true;
   return false;
 }
 
 function isDriveSkip(err) {
   const msg = err.message || '';
-  return msg.includes('DRIVE_URL_NO_BASE64') || msg.includes('Drive images cannot be fetched');
+  return msg.includes('DRIVE_IMAGE_UNAVAILABLE') || msg.includes('DRIVE_URL_NO_BASE64') || msg.includes('Drive images cannot be fetched');
 }
 
 // 429 = quota exceeded for this key, skip to next key but don't retry
@@ -627,6 +691,21 @@ export async function analyzePhoto(imageData, context = {}, onProgress = null) {
     validateAIAnalysisCategory(context.category, 'multiProvider photo analysis');
     console.log(`[MultiProvider AI] Category isolation enforced: analyzing ${context.category} photo`);
   }
+
+  // Pre-convert image to base64 once so all providers and retries use the fast in-memory base64!
+  let base64Image = null;
+  try {
+    if (onProgress) onProgress('Preparing photo for AI analysis...');
+    base64Image = await imageToBase64(imageData);
+  } catch (err) {
+    console.warn('[AI] Failed to prepare photo base64:', err.message);
+    return {
+      success: false,
+      error: `Could not load photo: ${err.message || 'Image inaccessible'}. Please check your connection or Google Drive permissions.`
+    };
+  }
+  imageData = base64Image;
+
   
   let usage = loadUsage();
   const delay = ms => new Promise(res => setTimeout(res, ms));
@@ -790,14 +869,8 @@ Return a JSON object with this exact structure:
 }
 JSON ONLY. Do not write any conversational text or explanation. Only output the JSON object.`;
 
-  const driveId = getDriveFileId(imageDataUrl);
-  let imagePart;
-  if (driveId) {
-    imagePart = { fileData: { mimeType: 'image/jpeg', fileUri: `https://drive.google.com/uc?export=download&id=${driveId}` } };
-  } else {
-    const base64 = await imageToBase64(imageDataUrl);
-    imagePart = { inlineData: { mimeType: 'image/jpeg', data: base64 } };
-  }
+  const base64 = await imageToBase64(imageDataUrl);
+  const imagePart = { inlineData: { mimeType: 'image/jpeg', data: base64 } };
 
   const models = GEMINI_FALLBACK_MODELS;
   let lastError = null;
