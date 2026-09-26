@@ -1,4 +1,4 @@
-﻿import { getCategoryConfig } from '../utils/categoryConfig.js';
+import { getCategoryConfig } from '../utils/categoryConfig.js';
 import { resolvePhotoSrc } from '../utils/photoUtils.js';
 import { DEFAULT_GEMINI_MODEL, GEMINI_FALLBACK_MODELS } from '../utils/aiConstants.js';
 import { apiCall } from './db.js';
@@ -111,7 +111,7 @@ function getAPIKeys(providerId) {
     }
   }
   if (isMistral) {
-    const raw = extractKeyStr(settings?.mistralApiKey);
+    const raw = extractKeyStr(settings?.mistralApiKey) || extractKeyStr(settings?.pixtralApiKey);
     if (raw) keys.push(raw);
     if (Array.isArray(settings?.mistralApiKeys)) {
       settings.mistralApiKeys.forEach(k => {
@@ -126,6 +126,13 @@ function getAPIKeys(providerId) {
   if (lsBase) {
     const raw = extractKeyStr(lsBase);
     if (raw) keys.push(raw);
+  }
+  if (isMistral) {
+    const lsPix = localStorage.getItem('AI_KEY_PIXTRAL');
+    if (lsPix) {
+      const rawPix = extractKeyStr(lsPix);
+      if (rawPix) keys.push(rawPix);
+    }
   }
   for (let i = 1; i <= 5; i++) {
     const k = localStorage.getItem(`AI_KEY_${baseId.toUpperCase()}_${i}`);

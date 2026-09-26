@@ -8,7 +8,7 @@ import {
   fbSaveUserSettings,
   fbSaveGlobalQRSettings,
 } from "../services/firebaseDB.js";
-import { DEFAULT_GEMINI_MODEL } from "../utils/aiConstants.js";
+import { DEFAULT_GEMINI_MODEL, AVAILABLE_GEMINI_MODELS } from "../utils/aiConstants.js";
 
 import {
   Link,
@@ -159,7 +159,8 @@ export default function Settings({ onMenuClick }) {
   // Derived state for aiKeys from settings with localStorage fallbacks
   const aiKeys = {
     gemini: s.geminiApiKey || localStorage.getItem("AI_KEY_GEMINI") || "",
-    pixtral: s.mistralApiKey || localStorage.getItem("AI_KEY_PIXTRAL") || "",
+    mistral: s.mistralApiKey || localStorage.getItem("AI_KEY_MISTRAL") || localStorage.getItem("AI_KEY_PIXTRAL") || "",
+    pixtral: s.mistralApiKey || localStorage.getItem("AI_KEY_MISTRAL") || localStorage.getItem("AI_KEY_PIXTRAL") || "",
   };
 
   const saveAiKey = (provider, key) => {
@@ -169,12 +170,12 @@ export default function Settings({ onMenuClick }) {
     }
     if (provider === "gemini") {
       updateSettings({ geminiApiKey: key });
-    } else if (provider === "pixtral") {
+    } else if (provider === "mistral" || provider === "pixtral") {
       updateSettings({ mistralApiKey: key });
+      localStorage.setItem("AI_KEY_MISTRAL", key);
     }
-    toast(
-      `${provider.charAt(0).toUpperCase() + provider.slice(1)} API key saved`,
-    );
+    const label = provider === "mistral" || provider === "pixtral" ? "Mistral" : provider.charAt(0).toUpperCase() + provider.slice(1);
+    toast(`${label} API key saved`);
   };
 
   const groqKeysList = (() => {
@@ -621,27 +622,17 @@ export default function Settings({ onMenuClick }) {
                 }
                 className="w-full border rounded-md shadow-sm p-2 bg-white text-sm font-medium"
               >
-                <optgroup label="Gemini 3 Generation — September 2026 (100% Free Tier)">
-                  <option value="gemini-3.8-flash">
-                    Gemini 3.8 Flash 🚀 Frontier GA (Sept 2026) · Best Vision · 1500 RPD
-                  </option>
-                  <option value="gemini-3.7-flash">
-                    Gemini 3.7 Flash ⚡ High-Efficiency Workhorse · 1500 RPD
-                  </option>
-                  <option value="gemini-3.5-flash">
-                    Gemini 3.5 Flash 🌟 Production Stable · 1500 RPD
-                  </option>
-                  <option value="gemini-3.5-flash-lite">
-                    Gemini 3.5 Flash-Lite 💨 Ultra-Fast Batch Scanning · 1500 RPD (30 RPM)
-                  </option>
-                  <option value="gemini-3.1-pro-preview">
-                    Gemini 3.1 Pro Preview 🧠 Deep Scientific Reasoning · 50 RPD
-                  </option>
+                <optgroup label="Active Gemini Models (Google AI Studio Free Tier)">
+                  {AVAILABLE_GEMINI_MODELS.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name} — {model.description}
+                    </option>
+                  ))}
                 </optgroup>
               </select>
               <p className="text-xs text-gray-500 mt-1">
-                Recommended: <b>Gemini 3.8 Flash</b> (newest GA frontier) or{" "}
-                <b>Gemini 3.5 Flash-Lite</b> (fastest throughput, 30 RPM). 100% Free Tier.
+                Recommended: <b>Gemini 3.5 Flash-Lite</b> (best free-tier throughput, 1000 RPD / 15 RPM) or{" "}
+                <b>Gemini 3.8 Flash</b> (newest GA frontier reasoning &amp; vision).
               </p>
             </div>
             <div>
@@ -846,10 +837,10 @@ export default function Settings({ onMenuClick }) {
             <label className="block text-sm font-medium text-gray-700 flex items-center justify-between">
               <span className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-orange-500"></span>
-                Groq API Keys (Llama 3.2 Vision)
+                Groq API Keys (Qwen 3.8 Vision)
               </span>
               <span className="text-xs text-gray-500">
-                · 1000 calls/day free per key
+                · 500 calls/day free per key
               </span>
             </label>
 
@@ -918,9 +909,9 @@ export default function Settings({ onMenuClick }) {
           <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
             <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-              Gemini API Key (Flash/Pro)
+              Gemini API Key (Flash-Lite / Flash)
               <span className="text-xs text-gray-500">
-                · 1000 calls/day free
+                · Free Tier (up to 1000 calls/day)
               </span>
             </label>
             <div className="flex gap-2">
@@ -948,13 +939,13 @@ export default function Settings({ onMenuClick }) {
             </p>
           </div>
 
-          {/* Pixtral API Key */}
+          {/* Mistral API Key */}
           <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
             <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-purple-500"></span>
-              Pixtral/Mistral API Key
+              Mistral AI API Key (Mistral Medium 3.5)
               <span className="text-xs text-gray-500">
-                · 10000 calls/day free tier
+                · Multimodal Vision model
               </span>
             </label>
             <div className="flex gap-2">
@@ -962,10 +953,10 @@ export default function Settings({ onMenuClick }) {
                 type="password"
                 name="mistral_photo_api_key_field"
                 autoComplete="new-password"
-                value={isAdminUser ? aiKeys.pixtral : (aiKeys.pixtral ? "••••••••••••••••••••" : "")}
-                onChange={(e) => isAdminUser && saveAiKey("pixtral", e.target.value)}
+                value={isAdminUser ? aiKeys.mistral : (aiKeys.mistral ? "••••••••••••••••••••" : "")}
+                onChange={(e) => isAdminUser && saveAiKey("mistral", e.target.value)}
                 disabled={!isAdminUser}
-                placeholder={aiKeys.pixtral ? "••••••••••••" : "Not Configured"}
+                placeholder={aiKeys.mistral ? "••••••••••••" : "Not Configured"}
                 className="flex-1 px-3 py-2 text-sm border rounded-lg outline-none focus:ring-2 focus:ring-purple-400 disabled:bg-slate-100 disabled:text-slate-400"
               />
             </div>
@@ -984,9 +975,7 @@ export default function Settings({ onMenuClick }) {
 
           <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
             <p className="text-xs text-amber-800">
-              <strong>Priority Order:</strong> Groq → Gemini Flash → Gemini Pro
-              → Pixtral. The app automatically rotates to the next provider if
-              one fails or hits quota.
+              <strong>Priority Order:</strong> Gemini 3 Generation (3.8 Flash → 3.5 Flash → 3.5 Flash-Lite) → Gemini 2.5 Flash (Legacy) → Groq (Qwen 3.8 Vision) → Mistral (Medium 3.5). The app automatically rotates to the next provider if one fails or hits quota.
             </p>
           </div>
         </div>

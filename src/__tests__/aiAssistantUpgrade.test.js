@@ -155,14 +155,14 @@ describe('Streaming & Key Rotation Service', () => {
       settings: {
         apiKeys: ['mock-test-key-123'],
         currentApiKeyIndex: 0,
-        apiModel: 'gemini-2.0-flash'
+        apiModel: 'gemini-3.5-flash-lite'
       }
     });
 
     // Provide client getter mock if window isn't set
     let accumulated = '';
     const stream = await mockGenAI.models.generateContentStream({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-3.5-flash-lite',
       contents: [{ role: 'user', parts: [{ text: 'Hello' }] }]
     });
 
