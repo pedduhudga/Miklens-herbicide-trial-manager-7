@@ -1,58 +1,60 @@
-export const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
+export const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
 
 export const AVAILABLE_GEMINI_MODELS = [
-  // ── Gemini 3 Generation (September 2026 Active Lineup — 100% Free Tier) ────
+  // ── Gemini 2.5 Generation (Current Production Lineup — Google AI Studio Free Tier) ──
   {
-    id: "gemini-3.8-flash",
-    name: "Gemini 3.8 Flash",
-    description: "Frontier GA (Sept 2026). Supreme multimodal reasoning, agentic vision & weed/pathology ID (1500 RPD, 15 RPM free).",
+    id: "gemini-2.5-flash",
+    name: "Gemini 2.5 Flash",
+    description: "Latest frontier GA. Supreme multimodal reasoning, agentic vision & weed/pathology ID (500 RPD, 10 RPM free).",
     tier: "free_accessible",
     isDefault: true
   },
   {
-    id: "gemini-3.8-flash-lite",
-    name: "Gemini 3.8 Flash-Lite",
-    description: "Frontier Fast GA. Ultra-low latency high-throughput photo scanning (1500 RPD, 30 RPM free).",
+    id: "gemini-2.5-flash-lite",
+    name: "Gemini 2.5 Flash-Lite",
+    description: "Ultra-low latency, high-throughput photo scanning (1500 RPD, 30 RPM free).",
     tier: "free_accessible"
   },
   {
-    id: "gemini-3.7-flash",
-    name: "Gemini 3.7 Flash",
-    description: "Stable GA (Aug 2026). High-efficiency workhorse model for fast multimodal crop plot analysis (1500 RPD, 15 RPM free).",
-    tier: "free_accessible"
-  },
-  {
-    id: "gemini-3.5-flash",
-    name: "Gemini 3.5 Flash",
-    description: "Stable Production. High intelligence and robust vision understanding (1500 RPD, 15 RPM free).",
-    tier: "free_accessible"
-  },
-  {
-    id: "gemini-3.5-flash-lite",
-    name: "Gemini 3.5 Flash-Lite",
-    description: "Ultra-Fast GA. Highest throughput, lowest latency for high-volume photo batch scanning (1500 RPD, 30 RPM free).",
-    tier: "free_accessible"
-  },
-  {
-    id: "gemini-3.1-pro-preview",
-    name: "Gemini 3.1 Pro Preview",
+    id: "gemini-2.5-pro",
+    name: "Gemini 2.5 Pro",
     description: "Deep Reasoning. Complex agronomic synthesis, comprehensive trial reports & statistical insights (50 RPD, 5 RPM free).",
     tier: "free_accessible"
   },
+  // ── Gemini 2.0 Generation (Stable Fallback) ──────────────────────────────────────
   {
-    id: "gemini-2.5-flash",
-    name: "Gemini 2.5 Flash",
-    description: "Reliable fallback generation for multimodal vision and analysis.",
+    id: "gemini-2.0-flash",
+    name: "Gemini 2.0 Flash",
+    description: "Stable GA. High-efficiency workhorse model for fast multimodal crop plot analysis (1500 RPD, 15 RPM free).",
+    tier: "free_accessible"
+  },
+  {
+    id: "gemini-2.0-flash-lite",
+    name: "Gemini 2.0 Flash-Lite",
+    description: "Highest throughput, lowest latency for high-volume photo batch scanning (30 RPM free).",
+    tier: "free_accessible"
+  },
+  // ── Gemini 1.5 Generation (Legacy Reliable Fallback) ─────────────────────────────
+  {
+    id: "gemini-1.5-flash",
+    name: "Gemini 1.5 Flash",
+    description: "Proven stable production model for multimodal vision and analysis (1500 RPD, 15 RPM free).",
+    tier: "free_accessible"
+  },
+  {
+    id: "gemini-1.5-flash-8b",
+    name: "Gemini 1.5 Flash 8B",
+    description: "Ultra-fast, lightweight fallback for high-volume batch analysis (4000 RPD, 15 RPM free).",
     tier: "free_accessible"
   }
 ];
 
 export const GEMINI_FALLBACK_MODELS = [
-  "gemini-3.8-flash",
-  "gemini-3.8-flash-lite",
-  "gemini-3.7-flash",
-  "gemini-3.5-flash",
-  "gemini-3.5-flash-lite",
-  "gemini-3.1-pro-preview",
-  "gemini-2.5-flash"
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
+  "gemini-2.5-pro",
+  "gemini-2.0-flash",
+  "gemini-2.0-flash-lite",
+  "gemini-1.5-flash",
+  "gemini-1.5-flash-8b"
 ];

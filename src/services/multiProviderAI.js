@@ -7,48 +7,17 @@ import { apiCall } from './db.js';
 // Free tier limits per Google AI Studio / Groq free plan.
 // All Gemini models support: Text + Image + Video + Audio + PDF inputs.
 const PROVIDERS = [
-  // ── Gemini 3 Generation (Active Production Lineup — Google AI Studio Free Tier) ──
-  {
-    id: 'gemini-3.8-flash',
-    name: 'Gemini 3.8 Flash',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent',
-    dailyLimit: 1500,
-  },
-  {
-    id: 'gemini-3.8-flash-lite',
-    name: 'Gemini 3.8 Flash-Lite',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash-lite:generateContent',
-    dailyLimit: 1500,
-  },
-  {
-    id: 'gemini-3.7-flash',
-    name: 'Gemini 3.7 Flash',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent',
-    dailyLimit: 1500,
-  },
-  {
-    id: 'gemini-3.5-flash',
-    name: 'Gemini 3.5 Flash',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent',
-    dailyLimit: 1500,
-  },
-  {
-    id: 'gemini-3.5-flash-lite',
-    name: 'Gemini 3.5 Flash-Lite',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent',
-    dailyLimit: 1500,
-  },
-  {
-    id: 'gemini-3.1-pro-preview',
-    name: 'Gemini 3.1 Pro Preview',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent',
-    dailyLimit: 50,
-  },
-  // ── Gemini 2.5 Generation (Reliable Fallback) ──────────────────────────────────
+  // ── Gemini 2.5 Generation (Current Production Lineup — Google AI Studio Free Tier) ──
   {
     id: 'gemini-2.5-flash',
     name: 'Gemini 2.5 Flash',
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+    dailyLimit: 500,
+  },
+  {
+    id: 'gemini-2.5-flash-lite',
+    name: 'Gemini 2.5 Flash-Lite',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent',
     dailyLimit: 1500,
   },
   {
@@ -56,6 +25,32 @@ const PROVIDERS = [
     name: 'Gemini 2.5 Pro',
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent',
     dailyLimit: 50,
+  },
+  // ── Gemini 2.0 Generation (Stable Fallback) ────────────────────────────────────
+  {
+    id: 'gemini-2.0-flash',
+    name: 'Gemini 2.0 Flash',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
+    dailyLimit: 1500,
+  },
+  {
+    id: 'gemini-2.0-flash-lite',
+    name: 'Gemini 2.0 Flash-Lite',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent',
+    dailyLimit: 1500,
+  },
+  // ── Gemini 1.5 Generation (Legacy Reliable Fallback) ──────────────────────────
+  {
+    id: 'gemini-1.5-flash',
+    name: 'Gemini 1.5 Flash',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent',
+    dailyLimit: 1500,
+  },
+  {
+    id: 'gemini-1.5-flash-8b',
+    name: 'Gemini 1.5 Flash 8B',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-8b:generateContent',
+    dailyLimit: 4000,
   },
   // ── Groq (ultra-fast inference, vision support) ──────────────────────────
   {
@@ -526,11 +521,14 @@ async function imageToBase64(dataUrlOrUrl) {
 }
 
 async function callGemini(provider, imageData, context, apiKey) {
-  const base64 = await imageToBase64(imageData);
+  // imageData is already base64 (pre-converted in analyzePhoto)
+  const base64 = typeof imageData === 'string' && !imageData.startsWith('http') && !imageData.startsWith('data:')
+    ? imageData
+    : await imageToBase64(imageData);
   const imagePart = { inlineData: { mimeType: 'image/jpeg', data: base64 } };
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 25000);
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
 
   try {
     const response = await fetch(`${provider.endpoint}?key=${apiKey}`, {
@@ -545,19 +543,26 @@ async function callGemini(provider, imageData, context, apiKey) {
           ]
         }],
         generationConfig: {
-          responseMimeType: "application/json"
+          responseMimeType: 'application/json',
+          temperature: 0.1,
+          maxOutputTokens: 1024,
         }
       })
     });
     if (!response.ok) {
-      const err = await response.text();
-      const e = new Error(`Gemini ${response.status}: ${err.slice(0, 200)}`);
+      let errText = '';
+      try { errText = await response.text(); } catch (_) {}
+      const e = new Error(`Gemini ${response.status}: ${errText.slice(0, 300)}`);
       e.status = response.status;
       throw e;
     }
     const data = await response.json();
+    // Handle safety blocks
+    if (data.promptFeedback?.blockReason) {
+      throw new Error(`Gemini blocked: ${data.promptFeedback.blockReason}`);
+    }
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) throw new Error('Empty Gemini response');
+    if (!text) throw new Error('Empty Gemini response — model may be overloaded');
     return parseAIJson(text);
   } finally {
     clearTimeout(timeoutId);
@@ -565,9 +570,12 @@ async function callGemini(provider, imageData, context, apiKey) {
 }
 
 async function callGroq(provider, imageData, context, apiKey) {
-  const base64 = await imageToBase64(imageData);
+  // imageData is already base64 (pre-converted in analyzePhoto)
+  const base64 = typeof imageData === 'string' && !imageData.startsWith('http') && !imageData.startsWith('data:')
+    ? imageData
+    : await imageToBase64(imageData);
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 25000);
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
 
   try {
     const response = await fetch(provider.endpoint, {
@@ -586,13 +594,14 @@ async function callGroq(provider, imageData, context, apiKey) {
             { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } }
           ]
         }],
-        temperature: 0.2,
-        max_tokens: 500
+        temperature: 0.1,
+        max_tokens: 1024
       })
     });
     if (!response.ok) {
-      const err = await response.text();
-      const e = new Error(`Groq ${response.status}: ${err.slice(0, 200)}`);
+      let errText = '';
+      try { errText = await response.text(); } catch (_) {}
+      const e = new Error(`Groq ${response.status}: ${errText.slice(0, 200)}`);
       e.status = response.status;
       throw e;
     }
@@ -606,9 +615,12 @@ async function callGroq(provider, imageData, context, apiKey) {
 }
 
 async function callPixtral(provider, imageData, context, apiKey) {
-  const base64 = await imageToBase64(imageData);
+  // imageData is already base64 (pre-converted in analyzePhoto)
+  const base64 = typeof imageData === 'string' && !imageData.startsWith('http') && !imageData.startsWith('data:')
+    ? imageData
+    : await imageToBase64(imageData);
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 25000);
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
 
   try {
     const response = await fetch(provider.endpoint, {
@@ -626,11 +638,15 @@ async function callPixtral(provider, imageData, context, apiKey) {
             { type: 'text', text: buildPrompt(context) },
             { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } }
           ]
-        }]
+        }],
+        temperature: 0.1,
+        max_tokens: 1024
       })
     });
     if (!response.ok) {
-      const e = new Error(`Pixtral ${response.status}`);
+      let errText = '';
+      try { errText = await response.text(); } catch (_) {}
+      const e = new Error(`Pixtral ${response.status}: ${errText.slice(0, 200)}`);
       e.status = response.status;
       throw e;
     }
@@ -657,14 +673,16 @@ async function callProvider(provider, imageData, context, apiKey) {
  * @param {function} onProgress - optional (message: string) => void
  * @returns {{ success: boolean, data?: object, provider?: string, error?: string }}
  */
-// Errors where retrying the same image/key will never help
+// Errors where retrying the same image/key will NEVER help — skip to next provider immediately
 function isNonRetryable(err) {
   const s = err.status;
-  if (s === 400 || s === 401 || s === 403) return true;
+  // 400 bad request, 401/403 auth, 404 model not found, 503 service unavailable / model doesn't exist
+  if (s === 400 || s === 401 || s === 403 || s === 404 || s === 503) return true;
   const msg = err.message || '';
   if (msg.includes('Unable to process input image')) return true;
   if (msg.includes('Invalid API Key') || msg.includes('invalid_api_key')) return true;
   if (msg.includes('DRIVE_IMAGE_UNAVAILABLE') || msg.includes('DRIVE_URL_NO_BASE64') || msg.includes('Drive images cannot be fetched')) return true;
+  if (msg.includes('MODEL_NOT_FOUND') || msg.includes('is not found') || msg.includes('does not exist')) return true;
   return false;
 }
 
@@ -673,9 +691,9 @@ function isDriveSkip(err) {
   return msg.includes('DRIVE_IMAGE_UNAVAILABLE') || msg.includes('DRIVE_URL_NO_BASE64') || msg.includes('Drive images cannot be fetched');
 }
 
-// 429 = quota exceeded for this key, skip to next key but don't retry
+// 429 = rate/quota limit hit for this key — skip key, try next
 function isQuotaError(err) {
-  return err.status === 429 || (err.message || '').includes('429');
+  return err.status === 429 || (err.message || '').includes('429') || (err.message || '').includes('RESOURCE_EXHAUSTED');
 }
 
 export async function analyzePhoto(imageData, context = {}, onProgress = null) {
@@ -684,7 +702,7 @@ export async function analyzePhoto(imageData, context = {}, onProgress = null) {
     return { success: false, error: 'Photo has no valid URL or image data. Re-upload the photo and try again.' };
   }
   imageData = resolved;
-  
+
   // Validate category isolation if category is provided in context
   if (context.category) {
     const { validateAIAnalysisCategory } = await import('../utils/aiCategoryIsolation.js');
@@ -692,7 +710,7 @@ export async function analyzePhoto(imageData, context = {}, onProgress = null) {
     console.log(`[MultiProvider AI] Category isolation enforced: analyzing ${context.category} photo`);
   }
 
-  // Pre-convert image to base64 once so all providers and retries use the fast in-memory base64!
+  // Pre-convert image to base64 ONCE — all providers reuse this in-memory copy
   let base64Image = null;
   try {
     if (onProgress) onProgress('Preparing photo for AI analysis...');
@@ -701,15 +719,15 @@ export async function analyzePhoto(imageData, context = {}, onProgress = null) {
     console.warn('[AI] Failed to prepare photo base64:', err.message);
     return {
       success: false,
-      error: `Could not load photo: ${err.message || 'Image inaccessible'}. Please check your connection or Google Drive permissions.`
+      error: `Could not load photo: ${err.message || 'Image inaccessible'}. Please check your internet connection or Google Drive sharing permissions.`
     };
   }
   imageData = base64Image;
 
-  
   let usage = loadUsage();
   const delay = ms => new Promise(res => setTimeout(res, ms));
-  let imageErrorCount = 0; // track how many providers say image is bad
+  let imageErrorCount = 0; // track how many providers say the image itself is bad
+  let providersAttempted = 0;
 
   for (const provider of PROVIDERS) {
     const keys = getAPIKeys(provider.id);
@@ -721,30 +739,43 @@ export async function analyzePhoto(imageData, context = {}, onProgress = null) {
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
           if (onProgress) onProgress(`Trying ${provider.name}${attempt > 1 ? ' (retry)' : ''}...`);
+          providersAttempted++;
           const result = await callProvider(provider, imageData, context, keys[ki]);
           usage = incrementUsage(provider, ki, usage);
+          if (providersAttempted > 1) {
+            console.log(`[AI] Succeeded with fallback provider: ${provider.name}`);
+          }
           return { success: true, provider: provider.name, data: result };
         } catch (err) {
-          console.warn(`[AI] ${provider.name} key ${ki + 1} attempt ${attempt} failed:`, err.message);
+          console.warn(`[AI] ${provider.name} key ${ki + 1} attempt ${attempt} failed (${err.status || 'net'}): ${err.message?.slice(0, 120)}`);
+
           if (isNonRetryable(err)) {
+            // Bad image errors — count them; auth/model errors — just skip
             if (!isDriveSkip(err) && (err.status === 400 || (err.message || '').includes('Unable to process input image'))) {
               imageErrorCount++;
             }
-            break; // skip to next provider/key
+            break; // next provider/key — no point retrying
           }
-          if (isQuotaError(err)) break; // 429 — skip this key, try next
+
+          if (isQuotaError(err)) {
+            // Brief pause before skipping to the next key (rate limit)
+            await delay(500);
+            break;
+          }
+
+          // Transient network error — wait before the one allowed retry
           if (attempt < 2) await delay(2000);
         }
       }
     }
   }
 
-  // If every provider said bad image, give a clear user-facing message
+  // If every provider that tried said the image was bad, surface that clearly
   if (imageErrorCount >= 3) {
     return { success: false, error: 'Image could not be processed by any AI provider. Try re-capturing or cropping the photo and try again.' };
   }
 
-  return { success: false, error: 'All AI providers exhausted. Check your API keys in Settings.' };
+  return { success: false, error: 'All AI providers exhausted or quota reached. Check your API keys in Settings, or try again later.' };
 }
 
 /**
