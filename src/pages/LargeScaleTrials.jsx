@@ -1009,14 +1009,22 @@ export default function LargeScaleTrials({ onMenuClick }) {
       }, getAppState);
 
       const driveUrl = uploadResult?.url || uploadResult?.fileUrl || null;
-      const currentPhotos = safeJsonParse(targetTrial.PhotoURLs, []).filter(p => p.tempId !== tempId);
+      const driveFileId = uploadResult?.id || (driveUrl ? getDriveFileId(driveUrl) : null);
+      const latestTrial = (getAppState().trials || []).find(t => t.ID === targetTrial.ID) || targetTrial;
+      const currentPhotos = safeJsonParse(latestTrial.PhotoURLs, []).filter(p => p.tempId !== tempId);
       const finalEntry = driveUrl
-        ? { url: driveUrl, date: photoDate, label: photoEntry.label, identifications: [] }
-        : { ...photoEntry, tempId: undefined };
-      currentPhotos.push(finalEntry);
+        ? { url: driveUrl, driveId: driveFileId, date: photoDate, label: photoEntry.label, identifications: [], aiStatus: 'pending' }
+        : { ...photoEntry, tempId: undefined, aiStatus: 'pending' };
+      const isDup = currentPhotos.some(p => 
+        (driveUrl && p.url === driveUrl) ||
+        (driveFileId && (p.driveId === driveFileId || p.fileId === driveFileId))
+      );
+      if (!isDup) {
+        currentPhotos.push(finalEntry);
+      }
 
-      const updatedTrial = { ...targetTrial, PhotoURLs: JSON.stringify(currentPhotos) };
-      updateState({ trials: state.trials.map(t => t.ID === updatedTrial.ID ? updatedTrial : t) });
+      const updatedTrial = { ...latestTrial, PhotoURLs: JSON.stringify(currentPhotos) };
+      updateState({ trials: (getAppState().trials || []).map(t => t.ID === updatedTrial.ID ? updatedTrial : t) });
       if (selectedSubTrialId === targetTrial.ID) setSelectedSubTrialId(updatedTrial.ID);
 
       await updateTrial({ ID: updatedTrial.ID, PhotoURLs: updatedTrial.PhotoURLs }, getAppState);

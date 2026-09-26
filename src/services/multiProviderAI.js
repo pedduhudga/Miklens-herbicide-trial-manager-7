@@ -6,40 +6,60 @@ import { DEFAULT_GEMINI_MODEL, GEMINI_FALLBACK_MODELS } from '../utils/aiConstan
 // Free tier limits per Google AI Studio / Groq free plan.
 // All Gemini models support: Text + Image + Video + Audio + PDF inputs.
 const PROVIDERS = [
-  // ── Gemini 3 Generation (September 2026 GA — 100% Free Tier) ─────────────
+  // ── Gemini Live Production Endpoints (Google AI Studio Free Tier) ─────────────
   {
-    // GA Sept 2026 | Free: 1500 RPD, 15 RPM | Frontier multimodal reasoning & vision
+    id: 'gemini-2.5-flash',
+    name: 'Gemini 2.5 Flash',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+    dailyLimit: 1500,
+  },
+  {
+    id: 'gemini-2.0-flash',
+    name: 'Gemini 2.0 Flash',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
+    dailyLimit: 1500,
+  },
+  {
+    id: 'gemini-1.5-flash',
+    name: 'Gemini 1.5 Flash',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent',
+    dailyLimit: 1500,
+  },
+  {
+    id: 'gemini-1.5-pro',
+    name: 'Gemini 1.5 Pro',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent',
+    dailyLimit: 50,
+  },
+  // Future/Preview aliases mapped to live fast Gemini endpoints
+  {
     id: 'gemini-3.8-flash',
     name: 'Gemini 3.8 Flash',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
     dailyLimit: 1500,
   },
   {
-    // GA Aug 2026 | Free: 1500 RPD, 15 RPM | Workhorse model, compute efficient
     id: 'gemini-3.7-flash',
     name: 'Gemini 3.7 Flash',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
     dailyLimit: 1500,
   },
   {
-    // Production | Free: 1500 RPD, 15 RPM | Stable vision & crop diagnosis
     id: 'gemini-3.5-flash',
     name: 'Gemini 3.5 Flash',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
     dailyLimit: 1500,
   },
   {
-    // GA July 2026 | Free: 1500 RPD, 30 RPM | Ultra-fast high-volume batch scanning
     id: 'gemini-3.5-flash-lite',
     name: 'Gemini 3.5 Flash-Lite',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
     dailyLimit: 1500,
   },
   {
-    // Preview | Free: 50 RPD, 5 RPM | Deep reasoning for trial reports
     id: 'gemini-3.1-pro-preview',
     name: 'Gemini 3.1 Pro Preview',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent',
     dailyLimit: 50,
   },
   // ── Groq (ultra-fast inference, vision support) ──────────────────────────
@@ -383,9 +403,37 @@ async function imageToBase64(dataUrlOrUrl) {
     return encodeImageViaCanvas(dataUrlOrUrl);
   }
 
-  // Google Drive URLs can NEVER be fetched from browser (CORS block + 302 redirect)
-  // Callers that need base64 (Groq, Pixtral) must skip Drive URLs upstream.
-  if (getDriveFileId(dataUrlOrUrl)) {
+  // Google Drive URLs: try Apps Script proxy or fail cleanly
+  const driveId = getDriveFileId(dataUrlOrUrl);
+  if (driveId) {
+    try {
+      let scriptUrl = null;
+      if (typeof window !== 'undefined') {
+        const state = window.__getAppState ? window.__getAppState() : (window.getAppState ? window.getAppState() : null);
+        scriptUrl = state?.settings?.scriptUrl;
+        if (!scriptUrl) {
+          try {
+            const raw = localStorage.getItem('settings');
+            if (raw) scriptUrl = JSON.parse(raw).scriptUrl;
+          } catch (_) {}
+        }
+      }
+      if (scriptUrl) {
+        const resp = await fetch(scriptUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'getImageBase64', imageUrl: dataUrlOrUrl })
+        });
+        if (resp.ok) {
+          const json = await resp.json();
+          if (json?.success && json?.base64) {
+            return encodeImageViaCanvas(`data:image/jpeg;base64,${json.base64}`);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[AI] Apps Script getImageBase64 failed:', e.message);
+    }
     throw new Error('DRIVE_URL_NO_BASE64');
   }
 
@@ -408,41 +456,42 @@ async function imageToBase64(dataUrlOrUrl) {
 }
 
 async function callGemini(provider, imageData, context, apiKey) {
-  // For Google Drive URLs: use fileUri — Gemini API reads Drive files server-side (no CORS issue)
-  const driveId = getDriveFileId(imageData);
-  let imagePart;
-  if (driveId) {
-    imagePart = { fileData: { mimeType: 'image/jpeg', fileUri: `https://drive.google.com/uc?export=download&id=${driveId}` } };
-  } else {
-    const base64 = await imageToBase64(imageData);
-    imagePart = { inlineData: { mimeType: 'image/jpeg', data: base64 } };
-  }
+  const base64 = await imageToBase64(imageData);
+  const imagePart = { inlineData: { mimeType: 'image/jpeg', data: base64 } };
 
-  const response = await fetch(`${provider.endpoint}?key=${apiKey}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{
-        parts: [
-          { text: buildPrompt(context) },
-          imagePart
-        ]
-      }],
-      generationConfig: {
-        responseMimeType: "application/json"
-      }
-    })
-  });
-  if (!response.ok) {
-    const err = await response.text();
-    const e = new Error(`Gemini ${response.status}: ${err.slice(0, 200)}`);
-    e.status = response.status;
-    throw e;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 25000);
+
+  try {
+    const response = await fetch(`${provider.endpoint}?key=${apiKey}`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: buildPrompt(context) },
+            imagePart
+          ]
+        }],
+        generationConfig: {
+          responseMimeType: "application/json"
+        }
+      })
+    });
+    if (!response.ok) {
+      const err = await response.text();
+      const e = new Error(`Gemini ${response.status}: ${err.slice(0, 200)}`);
+      e.status = response.status;
+      throw e;
+    }
+    const data = await response.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) throw new Error('Empty Gemini response');
+    return parseAIJson(text);
+  } finally {
+    clearTimeout(timeoutId);
   }
-  const data = await response.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error('Empty Gemini response');
-  return parseAIJson(text);
 }
 
 async function callGroq(provider, imageData, context, apiKey) {
@@ -453,35 +502,43 @@ async function callGroq(provider, imageData, context, apiKey) {
     throw e;
   }
   const base64 = await imageToBase64(imageData);
-  const response = await fetch(provider.endpoint, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: provider.model,
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'text', text: buildPrompt(context) },
-          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } }
-        ]
-      }],
-      temperature: 0.2,
-      max_tokens: 500
-    })
-  });
-  if (!response.ok) {
-    const err = await response.text();
-    const e = new Error(`Groq ${response.status}: ${err.slice(0, 200)}`);
-    e.status = response.status;
-    throw e;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 25000);
+
+  try {
+    const response = await fetch(provider.endpoint, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: provider.model,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: buildPrompt(context) },
+            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } }
+          ]
+        }],
+        temperature: 0.2,
+        max_tokens: 500
+      })
+    });
+    if (!response.ok) {
+      const err = await response.text();
+      const e = new Error(`Groq ${response.status}: ${err.slice(0, 200)}`);
+      e.status = response.status;
+      throw e;
+    }
+    const data = await response.json();
+    const text = data.choices?.[0]?.message?.content;
+    if (!text) throw new Error('Empty Groq response');
+    return parseAIJson(text);
+  } finally {
+    clearTimeout(timeoutId);
   }
-  const data = await response.json();
-  const text = data.choices?.[0]?.message?.content;
-  if (!text) throw new Error('Empty Groq response');
-  return parseAIJson(text);
 }
 
 async function callPixtral(provider, imageData, context, apiKey) {
@@ -492,32 +549,40 @@ async function callPixtral(provider, imageData, context, apiKey) {
     throw e;
   }
   const base64 = await imageToBase64(imageData);
-  const response = await fetch(provider.endpoint, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: provider.model,
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'text', text: buildPrompt(context) },
-          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } }
-        ]
-      }]
-    })
-  });
-  if (!response.ok) {
-    const e = new Error(`Pixtral ${response.status}`);
-    e.status = response.status;
-    throw e;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 25000);
+
+  try {
+    const response = await fetch(provider.endpoint, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: provider.model,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: buildPrompt(context) },
+            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } }
+          ]
+        }]
+      })
+    });
+    if (!response.ok) {
+      const e = new Error(`Pixtral ${response.status}`);
+      e.status = response.status;
+      throw e;
+    }
+    const data = await response.json();
+    const text = data.choices?.[0]?.message?.content;
+    if (!text) throw new Error('Empty Pixtral response');
+    return parseAIJson(text);
+  } finally {
+    clearTimeout(timeoutId);
   }
-  const data = await response.json();
-  const text = data.choices?.[0]?.message?.content;
-  if (!text) throw new Error('Empty Pixtral response');
-  return parseAIJson(text);
 }
 
 async function callProvider(provider, imageData, context, apiKey) {

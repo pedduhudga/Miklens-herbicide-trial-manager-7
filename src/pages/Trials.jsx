@@ -596,7 +596,7 @@ export default function Trials({ onMenuClick }) {
   const [editedAiSummary, setEditedAiSummary] = useState('');
   const [syncingPhotos, setSyncingPhotos] = useState(false);
   const [syncingAllPhotos, setSyncingAllPhotos] = useState(false);
-  const [syncHealOnly, setSyncHealOnly] = useState(true);
+  const [syncHealOnly, setSyncHealOnly] = useState(false);
 
   // --- AI weed cover detection ---
   const [detectingCover, setDetectingCover] = useState(false);
@@ -2768,8 +2768,9 @@ export default function Trials({ onMenuClick }) {
 
     // Optimistically add a placeholder with tempId so the photo appears immediately
     const photoEntry = { tempId, fileData: dataUrl, date: photoDate, label: cameraMode === 'weed' ? 'Weed Photo' : 'Field Observation', tag: photoTag, identifications: [], aiStatus: 'pending', ...photoTagFields };
-    const photosOptimistic = [...safeJsonParse(targetTrial.PhotoURLs, []), photoEntry];
-    const optimisticTrial = { ...targetTrial, PhotoURLs: JSON.stringify(photosOptimistic) };
+    const currentLiveTrial = getAppState().trials.find(t => t.ID === targetTrial.ID) || targetTrial;
+    const photosOptimistic = [...safeJsonParse(currentLiveTrial.PhotoURLs, []), photoEntry];
+    const optimisticTrial = { ...currentLiveTrial, PhotoURLs: JSON.stringify(photosOptimistic) };
     updateState({ trials: getAppState().trials.map(t => t.ID === optimisticTrial.ID ? optimisticTrial : t) });
     if (activeTrial?.ID === targetTrial.ID) setActiveTrial(optimisticTrial);
 
@@ -2812,6 +2813,9 @@ export default function Trials({ onMenuClick }) {
     };
     updateState({ syncQueue: [...getAppState().syncQueue, onlineSyncItem] });
 
+    let driveUrl = null;
+    let driveFileId = null;
+
     try {
       // 1. Upload photo to Google Drive via dataLayer (works in Firebase + Sheet modes)
       const uploadResult = await uploadPhoto({
@@ -2827,8 +2831,9 @@ export default function Trials({ onMenuClick }) {
 
       if (uploadResult?._errType) {
         // Remove the optimistic placeholder from UI since upload failed
-        const rollback = safeJsonParse(targetTrial.PhotoURLs, []).filter(p => p.tempId !== tempId);
-        const rolledBack = { ...targetTrial, PhotoURLs: JSON.stringify(rollback) };
+        const freshTrial = getAppState().trials.find(t => t.ID === targetTrial.ID) || targetTrial;
+        const rollback = safeJsonParse(freshTrial.PhotoURLs, []).filter(p => p.tempId !== tempId);
+        const rolledBack = { ...freshTrial, PhotoURLs: JSON.stringify(rollback) };
         updateState({ trials: getAppState().trials.map(t => t.ID === rolledBack.ID ? rolledBack : t) });
         if (activeTrial?.ID === targetTrial.ID) setActiveTrial(rolledBack);
         const isConfig = uploadResult._errType === 'config';
@@ -2841,17 +2846,26 @@ export default function Trials({ onMenuClick }) {
         return;
       }
 
-      const driveUrl = uploadResult?.url || uploadResult?.fileUrl || null;
+      driveUrl = uploadResult?.url || uploadResult?.fileUrl || null;
+      driveFileId = uploadResult?.id || (driveUrl ? getDriveFileId(driveUrl) : null);
 
-      // 2. Replace placeholder with final Drive URL entry
-      const currentPhotos = safeJsonParse(targetTrial.PhotoURLs, []).filter(p => p.tempId !== tempId);
+      // 2. CRITICAL: Fetch the fresh latest trial from state! Do NOT use stale closure targetTrial!
+      const latestTrial = getAppState().trials.find(t => t.ID === targetTrial.ID) || targetTrial;
+      const currentPhotos = safeJsonParse(latestTrial.PhotoURLs, []).filter(p => p.tempId !== tempId);
       const finalEntry = driveUrl
-        ? { url: driveUrl, driveId: uploadResult?.id || getDriveFileId(driveUrl), date: photoDate, label: photoEntry.label, tag: photoTag, identifications: [], aiStatus: 'pending', ...photoTagFields }
-        : { ...photoEntry, tempId: undefined, aiStatus: 'pending' };
-      currentPhotos.push(finalEntry);
+        ? { url: driveUrl, driveId: driveFileId, date: photoDate, label: photoEntry.label, tag: photoTag, identifications: [], aiStatus: 'processing', ...photoTagFields }
+        : { ...photoEntry, tempId: undefined, aiStatus: 'processing' };
+      
+      const isAlreadyPresent = currentPhotos.some(p => 
+        (driveUrl && p.url === driveUrl) ||
+        (driveFileId && (p.driveId === driveFileId || p.fileId === driveFileId))
+      );
+      if (!isAlreadyPresent) {
+        currentPhotos.push(finalEntry);
+      }
 
       const updatedTrial = {
-        ...targetTrial,
+        ...latestTrial,
         PhotoURLs: JSON.stringify(currentPhotos),
         IsCompleted: false,
         ControlFinalized: false,
@@ -2863,16 +2877,20 @@ export default function Trials({ onMenuClick }) {
       updateState({ trials: getAppState().trials.map(t => t.ID === updatedTrial.ID ? updatedTrial : t) });
       if (activeTrial?.ID === targetTrial.ID) setActiveTrial(updatedTrial);
 
-      await updateTrial({
-        ID: updatedTrial.ID,
-        PhotoURLs: updatedTrial.PhotoURLs,
-        IsCompleted: false,
-        ControlFinalized: false,
-        FinalizationDate: '',
-        FinalControlDuration: '',
-        AutoFinalized: false,
-        IsLive: true
-      }, getAppState);
+      try {
+        await updateTrial({
+          ID: updatedTrial.ID,
+          PhotoURLs: updatedTrial.PhotoURLs,
+          IsCompleted: false,
+          ControlFinalized: false,
+          FinalizationDate: '',
+          FinalControlDuration: '',
+          AutoFinalized: false,
+          IsLive: true
+        }, getAppState);
+      } catch (saveErr) {
+        console.warn('Initial photo link save to backend:', saveErr);
+      }
 
       const daa = calculateDAA(photoDate, targetTrial.Date);
 
@@ -2928,21 +2946,33 @@ export default function Trials({ onMenuClick }) {
         );
       }
 
-      await updatePhotoAiStatus(targetTrial.ID, driveUrl || dataUrl, 'processing');
-      const result = await analyzePhoto(dataUrl, {
-        category: targetTrial.Category || activeCategory, // Ensure category context for AI analysis
+      const photoKeyToUpdate = driveUrl || dataUrl;
+      await updatePhotoAiStatus(targetTrial.ID, photoKeyToUpdate, 'processing');
+      
+      // Safety timeout for photo analysis (max 30s) so UI doesn't hang in "Analyzing"
+      const analyzePromise = analyzePhoto(dataUrl, {
+        category: targetTrial.Category || activeCategory,
         treatment: targetTrial.FormulationName,
         daa,
         rep: targetTrial.Replication || 1,
-        category: targetTrial.Category || activeCategory,
         photoTag: photoTag
       }, (msg) => {
         console.log(`[AI Status] ${msg}`);
       });
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('AI analysis timed out after 30s')), 30000)
+      );
+
+      let result;
+      try {
+        result = await Promise.race([analyzePromise, timeoutPromise]);
+      } catch (aiErr) {
+        result = { success: false, error: aiErr.message };
+      }
 
       if (result.success) {
-        await createObservationFromAI(targetTrial, daa, result.data, photoDate, driveUrl || dataUrl);
-        await updatePhotoAiStatus(targetTrial.ID, driveUrl || dataUrl, 'completed', '', result.data);
+        await createObservationFromAI(targetTrial, daa, result.data, photoDate, photoKeyToUpdate);
+        await updatePhotoAiStatus(targetTrial.ID, photoKeyToUpdate, 'completed', '', result.data);
         window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `AI complete! Logged ${result.data.weeds?.length || result.data.targets?.length || 0} targets at DAA ${daa}`, type: 'success' } }));
         // Auto-run cover detection in background
         detectWeedCoverAI(dataUrl).then(coverResult => {
@@ -2951,12 +2981,12 @@ export default function Trials({ onMenuClick }) {
           }
         }).catch(() => {});
       } else {
-        await updatePhotoAiStatus(targetTrial.ID, driveUrl || dataUrl, 'failed', result.error || 'AI analysis skipped');
-        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'AI analysis skipped: ' + result.error, type: 'warning' } }));
+        await updatePhotoAiStatus(targetTrial.ID, photoKeyToUpdate, 'failed', result.error || 'AI analysis skipped');
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'AI analysis: ' + (result.error || 'Skipped'), type: 'warning' } }));
       }
     } catch (e) {
       await updatePhotoAiStatus(targetTrial.ID, driveUrl || dataUrl, 'failed', e.message);
-      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Failed to save photo: ' + e.message, type: 'error' } }));
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Photo upload error: ' + e.message, type: 'error' } }));
     } finally {
       setAiGenRunning(false);
       updateState({ syncQueue: getAppState().syncQueue.filter(item => item.id !== `sync_${tempId}`) });
@@ -3514,8 +3544,9 @@ Rules:
   };
 
   const handleSyncPhotosFromDrive = async (targetTrial = null, healOnly = syncHealOnly) => {
-    const trial = targetTrial || activeTrial;
-    if (!trial) return;
+    const baseTrial = targetTrial || activeTrial;
+    if (!baseTrial) return;
+    const trial = getAppState().trials.find(t => t.ID === baseTrial.ID) || baseTrial;
 
     try {
       setSyncingPhotos(true);
@@ -3675,9 +3706,15 @@ Rules:
           healedCount++;
         }
 
-        // 3. If no broken photo could be healed, append as new photo
+        // 3. Append as new photo if this image is not already present in the trial
         if (!healed) {
-          if (!healOnly) {
+          const isAlreadyPresent = photoURLs.some(p => 
+            p.driveId === img.id || 
+            p.fileId === img.id || 
+            p.fileName === img.name ||
+            getDriveFileId(p.url || p.src) === img.id
+          );
+          if (!isAlreadyPresent) {
             photoURLs.push({
               url: webViewUrl,
               fileName: img.name,
@@ -4056,17 +4093,52 @@ Rules:
     const trial = currentTrials.find(t => t.ID === trialId);
     if (!trial) return;
     const photos = safeJsonParse(trial.PhotoURLs, []);
+    const targetDriveId = getDriveFileId(photoSrc);
+    let matched = false;
     const updatedPhotos = photos.map(p => {
       const src = resolvePhotoSrc(p);
-      if (src === photoSrc || p.tempId === photoSrc) {
-        const updated = { ...p, aiStatus: status, aiError: errorMsg };
+      const pDriveId = p.driveId || p.fileId || getDriveFileId(p.url || p.src || src);
+      const isMatch = (
+        (photoSrc && src === photoSrc) ||
+        (p.tempId && p.tempId === photoSrc) ||
+        (targetDriveId && pDriveId && targetDriveId === pDriveId) ||
+        (photoSrc && src && typeof photoSrc === 'string' && typeof src === 'string' && (photoSrc.includes(src) || src.includes(photoSrc)))
+      );
+      if (isMatch) {
+        matched = true;
+        let compactAiData = null;
         if (aiData) {
-          updated.aiData = aiData;
+          compactAiData = {
+            weeds: aiData.weeds || aiData.targets || [],
+            totalWeedCover: aiData.totalWeedCover ?? aiData.cover ?? null,
+            confidence: aiData.confidence || null,
+            notes: String(aiData.notes || aiData.efficacyAssessment || '').slice(0, 500)
+          };
         }
-        return updated;
+        return {
+          ...p,
+          aiStatus: status,
+          aiError: errorMsg || '',
+          ...(compactAiData ? { aiData: compactAiData } : {})
+        };
       }
       return p;
     });
+
+    // Fallback: If no exact match found and status is resolved, update the last photo that was processing/pending
+    if (!matched && updatedPhotos.length > 0 && (status === 'completed' || status === 'failed')) {
+      for (let i = updatedPhotos.length - 1; i >= 0; i--) {
+        if (updatedPhotos[i].aiStatus === 'processing' || updatedPhotos[i].aiStatus === 'pending') {
+          updatedPhotos[i] = {
+            ...updatedPhotos[i],
+            aiStatus: status,
+            aiError: errorMsg || ''
+          };
+          break;
+        }
+      }
+    }
+
     const patch = { ID: trial.ID, PhotoURLs: JSON.stringify(updatedPhotos) };
     const updatedTrial = { ...trial, ...patch };
     updateState({ trials: currentTrials.map(t => t.ID === trialId ? updatedTrial : t) });

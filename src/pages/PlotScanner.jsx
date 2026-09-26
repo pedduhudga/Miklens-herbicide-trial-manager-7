@@ -1018,13 +1018,24 @@ Rules:
           throw new Error(driveResult.message || "Upload failed");
 
         const driveUrl = driveResult?.url || driveResult?.fileUrl || null;
+        const driveFileId = driveResult?.id || (driveUrl ? getDriveFileId(driveUrl) : null);
         const finalEntry = driveUrl
-          ? { url: driveUrl, driveId: driveResult?.id || getDriveFileId(driveUrl), date: photoDate, label: photoLabel, tag: photoTagValue, identifications: [], aiStatus: 'pending' }
+          ? { url: driveUrl, driveId: driveFileId, date: photoDate, label: photoLabel, tag: photoTagValue, identifications: [], aiStatus: 'pending' }
           : { fileData: finalDataUrl, mimeType: finalMimeType, date: photoDate, label: photoLabel, tag: photoTagValue, identifications: [], aiStatus: 'pending' };
-        const finalList = existing.concat(finalEntry);
+        
+        // Fetch fresh trial from state to avoid overwriting photos added concurrently
+        const latestTrial = (getAppState().trials || []).find((t) => t.ID === trialId) || trial;
+        const currentList = safeJsonParse(latestTrial[photoKey], []);
+        const isDup = currentList.some(p => 
+          (driveUrl && p.url === driveUrl) ||
+          (driveFileId && (p.driveId === driveFileId || p.fileId === driveFileId))
+        );
+        if (!isDup) {
+          currentList.push(finalEntry);
+        }
         const persistedTrial = {
-          ...trial,
-          [photoKey]: JSON.stringify(finalList),
+          ...latestTrial,
+          [photoKey]: JSON.stringify(currentList),
         };
 
         updateState({
