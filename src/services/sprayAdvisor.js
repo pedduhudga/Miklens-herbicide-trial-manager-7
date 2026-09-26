@@ -37,9 +37,13 @@ async function fetchWeatherForecast(lat, lon, days = 3, startDate = null, endDat
   
   let url;
   if (startDate && endDate) {
-    const isPast = new Date(startDate) < new Date(new Date().setHours(0,0,0,0));
-    const baseUrl = isPast ? 'https://archive-api.open-meteo.com/v1/archive' : 'https://api.open-meteo.com/v1/forecast';
-    const hourly = isPast 
+    const todayMidnight = new Date();
+    todayMidnight.setHours(0, 0, 0, 0);
+    // Open-Meteo archive API only accepts date ranges that strictly end before today.
+    // If endDate is today or in the future, we MUST use the forecast API (which also supports up to 92 days of past history).
+    const isEntirelyPast = new Date(endDate) < todayMidnight;
+    const baseUrl = isEntirelyPast ? 'https://archive-api.open-meteo.com/v1/archive' : 'https://api.open-meteo.com/v1/forecast';
+    const hourly = isEntirelyPast 
       ? 'temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation' 
       : hourlyVars;
     url = `${baseUrl}?latitude=${lat}&longitude=${lon}&hourly=${hourly}&daily=${dailyVars}&start_date=${startDate}&end_date=${endDate}&timezone=auto&wind_speed_unit=kmh`;

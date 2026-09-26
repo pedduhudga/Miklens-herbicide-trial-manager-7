@@ -7,11 +7,11 @@ export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite";
 export const AVAILABLE_GEMINI_MODELS = [
   // ── Gemini 3 Generation (Current Active Lineup) ──────────────────────────────────
   {
-    id: "gemini-3.8-flash",
-    name: "Gemini 3.8 Flash",
-    description: "Latest GA (Sept 2026). Best reasoning, agentic vision & weed/pathology ID. Free: 5 RPM / 20 RPD.",
+    id: "gemini-3.5-flash-lite",
+    name: "Gemini 3.5 Flash-Lite",
+    description: "Best free-tier throughput (July 2026). Ultra-low latency, 1000 RPD / 15 RPM free. Recommended default.",
     tier: "free_accessible",
-    isDefault: false
+    isDefault: true
   },
   {
     id: "gemini-3.5-flash",
@@ -20,11 +20,11 @@ export const AVAILABLE_GEMINI_MODELS = [
     tier: "free_accessible"
   },
   {
-    id: "gemini-3.5-flash-lite",
-    name: "Gemini 3.5 Flash-Lite",
-    description: "Best free-tier throughput (July 2026). Ultra-low latency, 1000 RPD / 15 RPM free. Recommended default.",
+    id: "gemini-3.8-flash",
+    name: "Gemini 3.8 Flash",
+    description: "Latest GA (Sept 2026). Best reasoning, agentic vision & weed/pathology ID. Free: 5 RPM / 20 RPD.",
     tier: "free_accessible",
-    isDefault: true
+    isDefault: false
   },
   // ── Gemini 2.5 Generation (Legacy Fallback — retiring Oct 20, 2026) ──────────────
   {
@@ -36,8 +36,8 @@ export const AVAILABLE_GEMINI_MODELS = [
 ];
 
 export const GEMINI_FALLBACK_MODELS = [
-  "gemini-3.8-flash",
-  "gemini-3.5-flash",
   "gemini-3.5-flash-lite",
+  "gemini-3.5-flash",
+  "gemini-3.8-flash",
   "gemini-2.5-flash"
 ];

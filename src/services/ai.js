@@ -186,7 +186,7 @@ export async function _callGeminiApiWithRetries(apiCallFunction, getAppState, re
     }
 
     // Handle Model Overloaded (503)
-    if (status === 503 || errorMsg.includes('overloaded') || errorMsg.includes('unavailable')) {
+    if (status === 503 || errorMsg.includes('overloaded') || errorMsg.includes('unavailable') || errorMsg.includes('high demand')) {
       if (retries < 2) {
         await new Promise(res => setTimeout(res, 2000 * (retries + 1)));
         return _callGeminiApiWithRetries(apiCallFunction, getAppState, retries + 1);

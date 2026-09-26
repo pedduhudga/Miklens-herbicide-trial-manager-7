@@ -9,11 +9,11 @@ import { apiCall } from './db.js';
 const PROVIDERS = [
   // ── Gemini 3 Generation (Current Active Lineup — Google AI Studio Free Tier) ──
   {
-    // GA since Sept 2, 2026 — 5 RPM / 20 RPD free
-    id: 'gemini-3.8-flash',
-    name: 'Gemini 3.8 Flash',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent',
-    dailyLimit: 20,
+    // GA since July 2026 — 15 RPM / 1000 RPD free — best throughput & reliability
+    id: 'gemini-3.5-flash-lite',
+    name: 'Gemini 3.5 Flash-Lite',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent',
+    dailyLimit: 1000,
   },
   {
     // GA since May 2026 — high-throughput Flash
@@ -23,11 +23,11 @@ const PROVIDERS = [
     dailyLimit: 500,
   },
   {
-    // GA since July 2026 — 15 RPM / 1000 RPD free — best throughput
-    id: 'gemini-3.5-flash-lite',
-    name: 'Gemini 3.5 Flash-Lite',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent',
-    dailyLimit: 1000,
+    // GA since Sept 2, 2026 — 5 RPM / 20 RPD free — frontier reasoning & vision
+    id: 'gemini-3.8-flash',
+    name: 'Gemini 3.8 Flash',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent',
+    dailyLimit: 20,
   },
   // ── Gemini 2.5 Generation (Legacy Fallback — retiring Oct 20, 2026) ──────────────
   {
@@ -36,7 +36,7 @@ const PROVIDERS = [
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
     dailyLimit: 500,
   },
-  // ── Groq (Active vision model: qwen3.8-27b — llama-4 deprecated March 2026) ────
+  // ── Groq (Active vision model: qwen3.8-27b) ────
   {
     // Active | Free tier — vision-capable, 3 images/req, 131K context
     id: 'groq-qwen',
@@ -45,7 +45,7 @@ const PROVIDERS = [
     model: 'qwen/qwen3.8-27b',
     dailyLimit: 500,
   },
-  // ── Mistral (Active vision: mistral-medium-latest — pixtral-large-2411 retired 2026) ──
+  // ── Mistral (Active vision: mistral-medium-latest) ──
   {
     // Active | Vision-capable — replaces retired pixtral-large-2411
     id: 'mistral',
@@ -55,6 +55,22 @@ const PROVIDERS = [
     dailyLimit: 50,
   },
 ];
+
+// Track temporary provider/model outages (503 high demand, 404 deprecated)
+const providerBlockedUntil = {};
+
+function getOrderedProviders() {
+  const settings = getSettings();
+  const selectedModelId = settings.selectedModel || settings.apiModel || DEFAULT_GEMINI_MODEL;
+  
+  const providers = [...PROVIDERS];
+  const idx = providers.findIndex(p => p.id === selectedModelId);
+  if (idx > 0) {
+    const [selected] = providers.splice(idx, 1);
+    providers.unshift(selected);
+  }
+  return providers;
+}
 
 
 function getSettings() {
@@ -333,11 +349,59 @@ OUTPUT FORMAT - JSON ONLY (no extra text):
 }
 
 function parseAIJson(text) {
-  const match = text.match(/```json\n([\s\S]*?)\n```/) ||
-    text.match(/```\n([\s\S]*?)\n```/) ||
-    text.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('No JSON found in AI response');
-  return JSON.parse(match[1] || match[0]);
+  if (!text || typeof text !== 'string') {
+    throw new Error('Empty AI response');
+  }
+  const clean = text.trim();
+
+  // 1. Direct parse if already valid JSON string
+  try {
+    return JSON.parse(clean);
+  } catch (_) {}
+
+  // 2. Extract from markdown code fence (handles \r?\n and whitespace)
+  const fenceMatch = clean.match(/```(?:json)?[\r\n\s]+([\s\S]*?)[\r\n\s]+```/i);
+  if (fenceMatch && fenceMatch[1]) {
+    try {
+      return JSON.parse(fenceMatch[1].trim());
+    } catch (_) {}
+  }
+
+  // 3. Extract JSON object from { to }
+  const startIdx = clean.indexOf('{');
+  const endIdx = clean.lastIndexOf('}');
+  if (startIdx !== -1 && endIdx > startIdx) {
+    const candidate = clean.slice(startIdx, endIdx + 1);
+    try {
+      return JSON.parse(candidate);
+    } catch (_) {}
+  }
+
+  // 4. Try lenient JSON repair if truncated at token limit
+  if (startIdx !== -1) {
+    let candidate = clean.slice(startIdx).replace(/,\s*$/, '');
+    let openBraces = 0, openBrackets = 0, inString = false, escape = false;
+    for (let i = 0; i < candidate.length; i++) {
+      const char = candidate[i];
+      if (escape) { escape = false; continue; }
+      if (char === '\\') { escape = true; continue; }
+      if (char === '"') { inString = !inString; continue; }
+      if (!inString) {
+        if (char === '{') openBraces++;
+        else if (char === '}') openBraces--;
+        else if (char === '[') openBrackets++;
+        else if (char === ']') openBrackets--;
+      }
+    }
+    if (inString) candidate += '"';
+    while (openBrackets > 0) { candidate += ']'; openBrackets--; }
+    while (openBraces > 0) { candidate += '}'; openBraces--; }
+    try {
+      return JSON.parse(candidate);
+    } catch (_) {}
+  }
+
+  throw new Error(`No valid JSON found in AI response (${clean.slice(0, 80)}...)`);
 }
 
 function getDriveFileId(url) {
@@ -535,7 +599,7 @@ async function callGemini(provider, imageData, context, apiKey) {
         generationConfig: {
           responseMimeType: 'application/json',
           temperature: 0.1,
-          maxOutputTokens: 1024,
+          maxOutputTokens: 4096,
         }
       })
     });
@@ -585,7 +649,7 @@ async function callGroq(provider, imageData, context, apiKey) {
           ]
         }],
         temperature: 0.1,
-        max_tokens: 1024
+        max_tokens: 4096
       })
     });
     if (!response.ok) {
@@ -630,7 +694,7 @@ async function callMistral(provider, imageData, context, apiKey) {
           ]
         }],
         temperature: 0.1,
-        max_tokens: 1024
+        max_tokens: 4096
       })
     });
     if (!response.ok) {
@@ -676,6 +740,14 @@ function isNonRetryable(err) {
   return false;
 }
 
+// Model-level outage or deprecation (503 Service Unavailable / high demand, 404 not found)
+function isModelOutage(err) {
+  const s = err.status;
+  if (s === 503 || s === 404) return true;
+  const msg = (err.message || '').toLowerCase();
+  return msg.includes('high demand') || msg.includes('overloaded') || msg.includes('temporarily unavailable') || msg.includes('model_not_found') || msg.includes('is not found');
+}
+
 function isDriveSkip(err) {
   const msg = err.message || '';
   return msg.includes('DRIVE_IMAGE_UNAVAILABLE') || msg.includes('DRIVE_URL_NO_BASE64') || msg.includes('Drive images cannot be fetched');
@@ -719,11 +791,21 @@ export async function analyzePhoto(imageData, context = {}, onProgress = null) {
   let imageErrorCount = 0; // track how many providers say the image itself is bad
   let providersAttempted = 0;
 
-  for (const provider of PROVIDERS) {
+  const orderedProviders = getOrderedProviders();
+
+  for (const provider of orderedProviders) {
+    if (providerBlockedUntil[provider.id] && Date.now() < providerBlockedUntil[provider.id]) {
+      console.log(`[AI] Skipping ${provider.name} (cooling down from recent 503/high demand outage)`);
+      continue;
+    }
+
     const keys = getAPIKeys(provider.id);
     if (!keys.length) continue;
 
+    let skipProvider = false;
+
     for (let ki = 0; ki < keys.length; ki++) {
+      if (skipProvider) break;
       if (!hasQuota(provider, ki, usage)) continue;
 
       for (let attempt = 1; attempt <= 2; attempt++) {
@@ -739,12 +821,20 @@ export async function analyzePhoto(imageData, context = {}, onProgress = null) {
         } catch (err) {
           console.warn(`[AI] ${provider.name} key ${ki + 1} attempt ${attempt} failed (${err.status || 'net'}): ${err.message?.slice(0, 120)}`);
 
+          // 1. Model-level overload/outage (503/404) — NEVER retry remaining keys for this dead model!
+          if (isModelOutage(err)) {
+            console.warn(`[AI] ${provider.name} is experiencing service outage/overload (503/404). Cooling down for 60s and falling back to next provider.`);
+            providerBlockedUntil[provider.id] = Date.now() + 60000;
+            skipProvider = true;
+            break;
+          }
+
           if (isNonRetryable(err)) {
             // Bad image errors — count them; auth/model errors — just skip
             if (!isDriveSkip(err) && (err.status === 400 || (err.message || '').includes('Unable to process input image'))) {
               imageErrorCount++;
             }
-            break; // next provider/key — no point retrying
+            break; // next key
           }
 
           if (isQuotaError(err)) {
@@ -897,7 +987,14 @@ JSON ONLY. Do not write any conversational text or explanation. Only output the 
   let lastError = null;
 
   for (const model of models) {
+    if (providerBlockedUntil[model] && Date.now() < providerBlockedUntil[model]) {
+      continue;
+    }
+
+    let skipModel = false;
+
     for (const apiKey of geminiKeys) {
+      if (skipModel) break;
       try {
         const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
           method: 'POST',
@@ -909,21 +1006,38 @@ JSON ONLY. Do not write any conversational text or explanation. Only output the 
             ]}],
             generationConfig: {
               responseMimeType: "application/json",
-              temperature: 0.1
+              temperature: 0.1,
+              maxOutputTokens: 4096
             }
           })
         });
 
         if (!resp.ok) {
           const errText = await resp.text();
+          if (resp.status === 503 || resp.status === 404 || errText.includes('high demand') || errText.includes('overloaded')) {
+            console.warn(`[identifyWeedFromPhoto] Model ${model} returned ${resp.status} (high demand/overload). Cooling down for 60s and skipping to next model.`);
+            providerBlockedUntil[model] = Date.now() + 60000;
+            skipModel = true;
+            break;
+          }
           throw new Error(`Model ${model} returned HTTP ${resp.status}: ${errText}`);
         }
 
         const d = await resp.json();
         const txt = d?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        if (txt) {
+          try {
+            const parsed = parseAIJson(txt);
+            if (Array.isArray(parsed)) return parsed;
+            if (parsed && Array.isArray(parsed.identifications)) return parsed.identifications;
+            if (parsed && Array.isArray(parsed.weeds)) return parsed.weeds;
+            if (parsed && Array.isArray(parsed.targets)) return parsed.targets;
+          } catch (_) {}
+        }
+        
         const jsonMatch = txt.match(/\[.*\]/s);
         if (jsonMatch) {
-          return JSON.parse(jsonMatch[0]);
+          try { return JSON.parse(jsonMatch[0]); } catch (_) {}
         }
         
         if (txt.trim()) {
@@ -942,12 +1056,19 @@ JSON ONLY. Do not write any conversational text or explanation. Only output the 
 export async function generateTextWithAI(prompt, systemInstruction = '', onProgress = null) {
   let usage = loadUsage();
   const delay = ms => new Promise(res => setTimeout(res, ms));
+  const orderedProviders = getOrderedProviders();
 
-  for (const provider of PROVIDERS) {
+  for (const provider of orderedProviders) {
+    if (providerBlockedUntil[provider.id] && Date.now() < providerBlockedUntil[provider.id]) {
+      continue;
+    }
     const keys = getAPIKeys(provider.id);
     if (!keys.length) continue;
 
+    let skipProvider = false;
+
     for (let ki = 0; ki < keys.length; ki++) {
+      if (skipProvider) break;
       if (!hasQuota(provider, ki, usage)) continue;
 
       for (let attempt = 1; attempt <= 2; attempt++) {
@@ -958,7 +1079,10 @@ export async function generateTextWithAI(prompt, systemInstruction = '', onProgr
 
           if (provider.id.startsWith('gemini')) {
             const body = {
-              contents: [{ parts: [{ text: prompt }] }]
+              contents: [{ parts: [{ text: prompt }] }],
+              generationConfig: {
+                maxOutputTokens: 4096
+              }
             };
             if (systemInstruction) {
               body.systemInstruction = { parts: [{ text: systemInstruction }] };
@@ -991,7 +1115,8 @@ export async function generateTextWithAI(prompt, systemInstruction = '', onProgr
               body: JSON.stringify({
                 model: provider.model,
                 messages: messages,
-                temperature: 0.2
+                temperature: 0.2,
+                max_tokens: 4096
               })
             });
             if (!resp.ok) {
@@ -1010,6 +1135,11 @@ export async function generateTextWithAI(prompt, systemInstruction = '', onProgr
           }
         } catch (err) {
           console.warn(`[AI Text] ${provider.name} key ${ki + 1} attempt ${attempt} failed:`, err.message);
+          if (isModelOutage(err)) {
+            providerBlockedUntil[provider.id] = Date.now() + 60000;
+            skipProvider = true;
+            break;
+          }
           if (isNonRetryable(err)) break;
           if (isQuotaError(err)) break;
           if (attempt < 2) await delay(2000);

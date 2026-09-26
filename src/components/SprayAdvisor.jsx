@@ -14,7 +14,7 @@ import {
 export default function SprayAdvisor({ lat, lon, locationName = 'Current Location' }) {
   const [analysis, setAnalysis] = useState(null);
   const [extendedForecast, setExtendedForecast] = useState(null);
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(() => new Date().toLocaleDateString('en-CA'));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('current');
