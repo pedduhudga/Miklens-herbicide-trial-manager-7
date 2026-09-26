@@ -8,6 +8,7 @@ import pptxgen from 'pptxgenjs';
 import { formatPhotoDate, formatDate, formatDateTime, calculateDAA, parseCustomDate } from '../utils/dateUtils.js';
 import { getCategoryConfig, calculateEfficacy, getPrimaryObservationField, getObservationPrimaryValue } from '../utils/categoryConfig.js';
 import { validateEfficacyData } from '../utils/analysisUtils.js';
+import { getTrialCalculatedEfficacy } from '../utils/formulationTrialUtils.js';
 import {
   performANOVA,
   performTukeyHSD,
@@ -2511,92 +2512,133 @@ export function exportMultipleTrialsToCSV(trials, category = null) {
     }
   }
 
-  const firstTrial = preparedTrials[0];
   const uniqueCategories = [...new Set(preparedTrials.map(t => t.Category))];
-  const allSameCategory = uniqueCategories.length === 1;
+
+  // If multiple categories are present and no category was forced, export each category cleanly into its own file
+  if (uniqueCategories.length > 1 && !activeCategory) {
+    uniqueCategories.forEach(cat => {
+      exportMultipleTrialsToCSV(preparedTrials.filter(t => t.Category === cat), cat);
+    });
+    return;
+  }
+
   const mainCatId = activeCategory || uniqueCategories[0] || 'herbicide';
   const mainCatConfig = getCategoryConfig(mainCatId);
 
-  // Gather active specific fields collected by forms for these categories (excluding main headers and obsFields duplicates)
-  const specificFields = [];
-  uniqueCategories.forEach(catId => {
-    const config = getCategoryConfig(catId);
-    config.specificFields?.forEach(f => {
-      // Exclude primary target fields as they have dedicated targetLabel column, and yield/appMethod as they are in main headers
-      const isHandledInMainHeader = [
-        'WeedSpecies', 'DiseaseTarget', 'PestTarget', 'NutrientType', 'BiostimulantType',
-        'YieldValue', 'Yield', 'ApplicationMethod', 'CropStageAtApplication', 'CropStage'
-      ].includes(f.key);
-
-      const isAlsoInObs = config.observationFields?.some(obsF => obsF.key === f.key);
-
-      if (!isHandledInMainHeader && !isAlsoInObs && !specificFields.some(x => x.key === f.key)) {
-        specificFields.push(f);
-      }
-    });
-  });
-
-  // Gather active observation fields collected by form
-  const obsFields = [];
-  uniqueCategories.forEach(catId => {
-    const config = getCategoryConfig(catId);
-    config.observationFields?.forEach(f => {
-      const isWeatherOrNotes = ['weatherTempAtObs', 'weatherHumidityAtObs', 'weatherWindAtObs', 'weatherRainAtObs', 'weedDetails', 'phytotoxicityNotes'].includes(f.key);
-      if (!isWeatherOrNotes && !obsFields.some(x => x.key === f.key)) {
-        obsFields.push(f);
-      }
-    });
-  });
-
+  // 1. Identify pot trial usage
   const uniqueDesigns = [...new Set(preparedTrials.map(t => t.TrialDesign || t.Design || 'RCBD'))];
   const hasPotTrial = uniqueDesigns.some(d => d === 'PotTrial' || d === 'rcbd-pot');
 
-  const targetHeaderLabel = allSameCategory ? mainCatConfig.targetLabel : 'Target / Parameter';
-  const primaryMetricHeaderLabel = allSameCategory 
-    ? (mainCatConfig.primaryMetric?.label || 'Efficacy (%)') 
-    : 'Efficacy Metric (%)';
+  // 2. Identify if optional agricultural metadata exists in this set of trials
+  const hasVariety = mainCatId !== 'herbicide' || preparedTrials.some(t => t.Variety && t.Variety !== '—' && t.Variety !== '-');
+  const hasPreviousCrop = preparedTrials.some(t => t.PreviousCrop && t.PreviousCrop !== '—' && t.PreviousCrop !== '-');
+  const hasIrrigation = preparedTrials.some(t => t.IrrigationMethod && t.IrrigationMethod !== '—' && t.IrrigationMethod !== '-');
+  const hasPlantPopulation = preparedTrials.some(t => t.PlantPopulation && t.PlantPopulation !== '—' && t.PlantPopulation !== '-');
+  const hasYield = mainCatId === 'nutrition' || mainCatId === 'biostimulant' || preparedTrials.some(t => t.YieldValue || t.Yield);
+  const hasSoil = mainCatId === 'nutrition' || preparedTrials.some(t => t.SoilPH || t.SoilClay || t.SoilSand || t.SoilOC || t.SoilTexture || (t.SoilDataJSON && t.SoilDataJSON !== '{}'));
 
-  // Build clean, non-duplicated header with only collected fields
+  // 3. Category specific fields from mainCatConfig.specificFields
+  const targetKey = mainCatConfig.targetField || (
+    mainCatId === 'herbicide' ? 'WeedSpecies' :
+    mainCatId === 'fungicide' ? 'DiseaseTarget' :
+    mainCatId === 'pesticide' ? 'PestTarget' :
+    mainCatId === 'nutrition' ? 'NutrientType' : 'BiostimulantType'
+  );
+
+  const categorySpecificFields = (mainCatConfig.specificFields || []).filter(f => {
+    if (f.key === targetKey || f.key === 'WeedSpecies' || f.key === 'DiseaseTarget' || f.key === 'PestTarget' || f.key === 'NutrientType' || f.key === 'BiostimulantType') {
+      return false; // Handled in dedicated target column
+    }
+    if (f.key === 'YieldValue' || f.key === 'Yield') {
+      return false; // Handled in hasYield
+    }
+    if (mainCatConfig.observationFields?.some(obsF => obsF.key === f.key)) {
+      return false; // Handled in obs fields
+    }
+    return true;
+  });
+
+  // 4. Category observation fields from mainCatConfig.observationFields
+  const categoryObsFields = (mainCatConfig.observationFields || []).filter(f => {
+    const isWeatherOrNotes = [
+      'weatherTempAtObs', 'weatherHumidityAtObs', 'weatherWindAtObs', 'weatherRainAtObs',
+      'weatherTemp', 'weatherHumidity', 'weatherWind', 'weatherRain',
+      'weedDetails', 'phytotoxicityNotes'
+    ].includes(f.key);
+    return !isWeatherOrNotes;
+  });
+
+  // 5. Build clean, non-duplicated, 100% category-aware header
   const header = [
-    'Trial ID', 'Category', 'Formulation Name', 'Investigator', 'Trial Date', 'Location', 'GPS Lat/Lng', 'Dosage / Rate',
-    'Crop / Site', 'Variety', 'Previous Crop', 'Irrigation Method', 'Plant Population', 'Yield',
-    'Application Timing', 'BBCH Code',
-    'Soil pH', 'Soil Clay %', 'Soil Sand %', 'Soil OC %', 'Soil Texture',
-    'App Temp (°C)', 'App Humidity (%)', 'App Wind (km/h)', 'App Rain (mm)',
-    'Trial Design', 'Replication / Block ID', 'Plot #'
+    'Trial ID',
+    'Category',
+    'Formulation Name',
+    'Investigator',
+    'Trial Date',
+    'Location',
+    'GPS Lat/Lng',
+    'Dosage / Rate',
+    mainCatId === 'herbicide' ? 'Crop / Site Type' : 'Crop'
   ];
+
+  if (hasVariety) header.push('Variety');
+  if (hasPreviousCrop) header.push('Previous Crop');
+  if (hasIrrigation) header.push('Irrigation Method');
+  if (hasPlantPopulation) header.push('Plant Population');
+  if (hasYield) header.push('Yield');
+
+  header.push(
+    'Application Timing',
+    'Trial Design',
+    'Replication / Block ID',
+    'Plot #'
+  );
 
   if (hasPotTrial) {
     header.push('Pot Row', 'Pot Column', 'Pot Label', 'Pot Layout');
   }
 
-  header.push(targetHeaderLabel);
+  header.push('App Temp (°C)', 'App Humidity (%)', 'App Wind (km/h)', 'App Rain (mm)');
 
-  // Category specific fields
-  specificFields.forEach(f => {
+  if (hasSoil) {
+    header.push('Soil pH', 'Soil Clay %', 'Soil Sand %', 'Soil OC %', 'Soil Texture');
+  }
+
+  header.push(mainCatConfig.targetLabel || 'Target');
+
+  categorySpecificFields.forEach(f => {
     header.push(f.label);
   });
 
-  header.push(primaryMetricHeaderLabel, 'Overall Result', 'Finalized Status', 'DAA (Days)', 'Observation Date');
+  const metricLabel = `${mainCatConfig.primaryMetric?.label || 'Efficacy'} (${mainCatConfig.primaryMetric?.unit || '%'})`;
+  header.push(metricLabel, 'Overall Result', 'Finalized Status');
 
-  // Observation fields
-  obsFields.forEach(f => {
+  header.push('DAA (Days)', 'Observation Date');
+
+  categoryObsFields.forEach(f => {
     header.push(f.label);
   });
 
-  if (uniqueCategories.includes('herbicide')) {
+  if (mainCatId === 'herbicide') {
     header.push('Herbicide Species Detail');
   }
 
-  header.push('Phytotoxicity Notes', 'Obs Status', 'Obs Temp (°C)', 'Obs Humidity (%)', 'Obs Wind (km/h)', 'Obs Rain (mm)', 'Observation Notes');
+  header.push(
+    'Phytotoxicity Notes',
+    'Obs Status',
+    'Obs Temp (°C)',
+    'Obs Humidity (%)',
+    'Obs Wind (km/h)',
+    'Obs Rain (mm)',
+    'Observation Notes'
+  );
 
   const rows = [];
 
   preparedTrials.forEach(trial => {
-    const trialCat = trial.Category || 'herbicide';
+    const trialCat = trial.Category || mainCatId;
     const dataFields = getAllTrialDataFields(trial);
     const proj = getProjectForTrial(trial);
-    const trialConfig = getReportConfig(trial);
     const efficacy = validateEfficacy(safeJsonParse(trial.EfficacyDataJSON, []));
     const isCompletedStr = (trial.IsCompleted === true || trial.IsCompleted === 'true') ? 'Finalized' : 'Ongoing';
 
@@ -2608,15 +2650,29 @@ export function exportMultipleTrialsToCSV(trials, category = null) {
     const appRain = trial.Rain || weatherApp.precipitation || weatherApp.rain || '';
 
     const baseRow = [
-      trial.ID, trialCat.toUpperCase(), trial.FormulationName, trial.InvestigatorName, trial.Date, trial.Location, gpsStr, trial.Dosage,
-      dataFields.crop, dataFields.variety, dataFields.previousCrop, dataFields.irrigationMethod, dataFields.plantPopulation,
-      dataFields.yieldValue, dataFields.applicationTiming, dataFields.bbchCode,
-      dataFields.soil?.ph || trial.SoilPH || '', dataFields.soil?.clay || trial.SoilClay || '', dataFields.soil?.sand || trial.SoilSand || '', dataFields.soil?.organicCarbon || trial.SoilOC || '', dataFields.soil?.texture || trial.SoilTexture || '',
-      appTemp, appHum, appWind, appRain,
+      trial.ID,
+      trialCat.toUpperCase(),
+      trial.FormulationName || '—',
+      trial.InvestigatorName || '—',
+      trial.Date || '—',
+      trial.Location || '—',
+      gpsStr,
+      trial.Dosage || '—',
+      dataFields.crop || '—'
+    ];
+
+    if (hasVariety) baseRow.push(dataFields.variety || trial.Variety || '—');
+    if (hasPreviousCrop) baseRow.push(dataFields.previousCrop || trial.PreviousCrop || '—');
+    if (hasIrrigation) baseRow.push(dataFields.irrigationMethod || trial.IrrigationMethod || '—');
+    if (hasPlantPopulation) baseRow.push(dataFields.plantPopulation || trial.PlantPopulation || '—');
+    if (hasYield) baseRow.push(dataFields.yieldValue || trial.YieldValue || trial.Yield || '—');
+
+    baseRow.push(
+      dataFields.applicationTiming || trial.ApplicationTiming || '—',
       trial.ProjectID ? (trial.TrialDesign || trial.Design || 'RCBD') : 'Individual',
       trial.ProjectID ? (trial.Replication || trial.BlockID || 'R1') : '-',
       trial.PlotNumber || '-'
-    ];
+    );
 
     if (hasPotTrial) {
       baseRow.push(
@@ -2627,16 +2683,32 @@ export function exportMultipleTrialsToCSV(trials, category = null) {
       );
     }
 
-    baseRow.push(trialConfig.targetValue);
+    baseRow.push(appTemp, appHum, appWind, appRain);
 
-    // Push values for category specific fields
-    specificFields.forEach(f => {
+    if (hasSoil) {
+      baseRow.push(
+        dataFields.soil?.ph || trial.SoilPH || '',
+        dataFields.soil?.clay || trial.SoilClay || '',
+        dataFields.soil?.sand || trial.SoilSand || '',
+        dataFields.soil?.organicCarbon || trial.SoilOC || '',
+        dataFields.soil?.texture || trial.SoilTexture || ''
+      );
+    }
+
+    const targetVal = trial[targetKey] || trial.WeedSpecies || trial.DiseaseTarget || trial.PestTarget || trial.NutrientType || trial.BiostimulantType || proj?.[targetKey] || '—';
+    baseRow.push(targetVal);
+
+    categorySpecificFields.forEach(f => {
       const val = trial[f.key] ?? proj?.[f.key] ?? '';
       baseRow.push(val !== undefined && val !== null ? val : '');
     });
 
-    const primaryMetricVal = calcWCE(efficacy, trialCat, trial);
-    const primaryMetricStr = (primaryMetricVal !== null && primaryMetricVal !== undefined) ? `${primaryMetricVal}%` : 'Pending';
+    const calcEff = getTrialCalculatedEfficacy(trial, trialCat);
+    let primaryMetricStr = 'Pending';
+    if (calcEff !== null && calcEff !== undefined && !isNaN(calcEff)) {
+      const unit = mainCatConfig.primaryMetric?.unit || '%';
+      primaryMetricStr = unit ? `${calcEff}${unit}` : `${calcEff}`;
+    }
 
     const metadataRow = [
       primaryMetricStr,
@@ -2661,11 +2733,13 @@ export function exportMultipleTrialsToCSV(trials, category = null) {
       const baseObs = sortedObs.find(obs => (obs.daa ?? 0) === 0) || sortedObs[0];
       const baseVal = baseObs ? (getObservationPrimaryValue(trialCat, baseObs) ?? 0) : 0;
 
-      efficacy.forEach((obs, idx) => {
+      sortedObs.forEach((obs, idx) => {
         const obsDate = obs.date || '';
         const daa = obs.daa ?? idx * 7;
         const pVal = getObservationPrimaryValue(trialCat, obs) ?? 0;
-        const status = calculateStatus(trialCat, pVal, baseVal);
+        const prevObs = idx > 0 ? sortedObs[idx - 1] : null;
+        const prevVal = prevObs ? getObservationPrimaryValue(trialCat, prevObs) : null;
+        const status = calculateStatus(trialCat, pVal, baseVal, prevVal);
 
         const temp = obs.weatherTempAtObs ?? obs.weatherTemp ?? obs.temperature_2m ?? '';
         const hum = obs.weatherHumidityAtObs ?? obs.weatherHumidity ?? obs.relative_humidity_2m ?? '';
@@ -2676,8 +2750,7 @@ export function exportMultipleTrialsToCSV(trials, category = null) {
 
         const row = [...getPrefixRow(), daa, obsDate];
 
-        // Push category dynamic observation field values
-        obsFields.forEach(f => {
+        categoryObsFields.forEach(f => {
           let val = obs[f.key];
           if (val === undefined || val === null) {
             if (f.key === 'weedCover') val = obs.weedCover ?? obs.controlPct ?? obs.wce;
@@ -2690,24 +2763,23 @@ export function exportMultipleTrialsToCSV(trials, category = null) {
           row.push((val !== undefined && val !== null) ? val : '');
         });
 
-        if (uniqueCategories.includes('herbicide')) {
-          if (trialCat === 'herbicide') {
-            const details = obs.weedDetails?.length ? obs.weedDetails : [{ species: 'Total', cover: getObservationPrimaryValue(trialCat, obs) ?? '' }];
-            const speciesDetailStr = details.map(wd => `${wd.species || 'Total'}: ${wd.cover ?? ''}%`).join(' | ');
-            row.push(speciesDetailStr);
-          } else {
-            row.push('');
-          }
+        if (mainCatId === 'herbicide') {
+          const details = obs.weedDetails?.length ? obs.weedDetails : (
+            obs.weedCover !== undefined && obs.weedCover !== null
+              ? [{ species: targetVal || 'Total', cover: obs.weedCover }]
+              : []
+          );
+          const speciesDetailStr = details.map(wd => `${wd.species || 'Total'}: ${wd.cover ?? ''}%`).join(' | ');
+          row.push(speciesDetailStr);
         }
 
         row.push(phytoNotes, status, temp, hum, wind, rain, notes);
         rows.push(row);
       });
     } else {
-      // Empty observations row
       const row = [...getPrefixRow(), '', ''];
-      obsFields.forEach(() => row.push(''));
-      if (uniqueCategories.includes('herbicide')) {
+      categoryObsFields.forEach(() => row.push(''));
+      if (mainCatId === 'herbicide') {
         row.push('');
       }
       row.push('', '', '', '', '', '', '');
@@ -2724,10 +2796,9 @@ export function exportMultipleTrialsToCSV(trials, category = null) {
   let filename = 'Trials_Export.csv';
   if (preparedTrials.length === 1) {
     const trial = preparedTrials[0];
-    filename = `${trial.Category.toUpperCase()}_Trial_${safeName(trial.FormulationName)}_${trial.Date || 'nodate'}.csv`;
+    filename = `${mainCatId.toUpperCase()}_Trial_${safeName(trial.FormulationName)}_${trial.Date || 'nodate'}.csv`;
   } else {
-    const catPrefix = activeCategory ? activeCategory.toUpperCase() : 'ALL';
-    filename = `${catPrefix}_Trials_Export_${new Date().toISOString().split('T')[0]}.csv`;
+    filename = `${mainCatId.toUpperCase()}_Trials_Export_${new Date().toISOString().split('T')[0]}.csv`;
   }
 
   dlBlob(new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8' }), filename);
@@ -2759,42 +2830,111 @@ export function exportAllTrialsCSV(trials, projects = [], category = null) {
     }
   }
 
-  const firstTrial = preparedTrials[0];
-  const mainCatId = activeCatId || firstTrial.Category || 'herbicide';
-  const mainCatConfig = getCategoryConfig(mainCatId);
-  const allSameCategory = preparedTrials.every(t => t.Category === mainCatId);
+  const uniqueCategories = [...new Set(preparedTrials.map(t => t.Category))];
 
-  const targetLabel = allSameCategory ? mainCatConfig.targetLabel : 'Target / Parameter';
-  const metricLabel = allSameCategory ? (mainCatConfig.primaryMetric?.label || 'Efficacy (%)') : 'Primary Metric';
+  // If multiple categories and none specified, split into category CSVs
+  if (uniqueCategories.length > 1 && !activeCatId) {
+    uniqueCategories.forEach(cat => {
+      exportAllTrialsCSV(preparedTrials.filter(t => t.Category === cat), projects, cat);
+    });
+    return;
+  }
+
+  const mainCatId = activeCatId || uniqueCategories[0] || 'herbicide';
+  const mainCatConfig = getCategoryConfig(mainCatId);
+
+  const hasVariety = mainCatId !== 'herbicide' || preparedTrials.some(t => t.Variety && t.Variety !== '—' && t.Variety !== '-');
+  const hasYield = mainCatId === 'nutrition' || mainCatId === 'biostimulant' || preparedTrials.some(t => t.YieldValue || t.Yield);
+
+  const targetKey = mainCatConfig.targetField || (
+    mainCatId === 'herbicide' ? 'WeedSpecies' :
+    mainCatId === 'fungicide' ? 'DiseaseTarget' :
+    mainCatId === 'pesticide' ? 'PestTarget' :
+    mainCatId === 'nutrition' ? 'NutrientType' : 'BiostimulantType'
+  );
+
+  const categorySpecificFields = (mainCatConfig.specificFields || []).filter(f => {
+    if (f.key === targetKey || f.key === 'WeedSpecies' || f.key === 'DiseaseTarget' || f.key === 'PestTarget' || f.key === 'NutrientType' || f.key === 'BiostimulantType') {
+      return false;
+    }
+    if (f.key === 'YieldValue' || f.key === 'Yield') {
+      return false;
+    }
+    return true;
+  });
+
+  const targetLabel = mainCatConfig.targetLabel || 'Target';
+  const metricLabel = `${mainCatConfig.primaryMetric?.label || 'Efficacy'} (${mainCatConfig.primaryMetric?.unit || '%'})`;
 
   const header = [
     'Trial ID', 'Category', 'Formulation Name', 'Investigator', 'Trial Date', 'Location', 'Dosage',
-    'Crop / Site', 'Variety', 'Previous Crop', 'Irrigation Method', 'Plant Population',
-    'Yield', 'Application Timing', 'Growth Stage', 'BBCH Code',
-    targetLabel, metricLabel, 'Result', 'Status', 'Project Name', 'Replication',
-    'Plot #', 'Temp (°C)', 'Humidity (%)', 'Wind (km/h)', 'Rain (mm)',
-    'Observation Count', 'Photo Count'
+    mainCatId === 'herbicide' ? 'Crop / Site Type' : 'Crop'
   ];
+
+  if (hasVariety) header.push('Variety');
+  if (hasYield) header.push('Yield');
+
+  header.push(
+    'Application Timing', 'Trial Design', 'Replication', 'Plot #',
+    targetLabel
+  );
+
+  categorySpecificFields.forEach(f => {
+    header.push(f.label);
+  });
+
+  header.push(
+    metricLabel, 'Result', 'Status', 'Project Name',
+    'Temp (°C)', 'Humidity (%)', 'Wind (km/h)', 'Rain (mm)',
+    'Observation Count', 'Photo Count'
+  );
 
   const rows = preparedTrials.map(t => {
     const proj = projects.find(p => p.ID === t.ProjectID) || getProjectForTrial(t, { projects });
-    const tConfig = getReportConfig(t);
     const dataFields = getAllTrialDataFields(t, { projects });
     const efficacy = validateEfficacy(safeJsonParse(t.EfficacyDataJSON, []));
-    const metricVal = calcWCE(efficacy, t.Category, t);
-    const metricStr = (metricVal !== null && metricVal !== undefined) ? `${metricVal}%` : 'Pending';
+    
+    const calcEff = getTrialCalculatedEfficacy(t, mainCatId);
+    let metricStr = 'Pending';
+    if (calcEff !== null && calcEff !== undefined && !isNaN(calcEff)) {
+      const unit = mainCatConfig.primaryMetric?.unit || '%';
+      metricStr = unit ? `${calcEff}${unit}` : `${calcEff}`;
+    }
 
-    return [
-      t.ID, t.Category.toUpperCase(), t.FormulationName, t.InvestigatorName, t.Date, t.Location, t.Dosage,
-      dataFields.crop, dataFields.variety, dataFields.previousCrop, dataFields.irrigationMethod, dataFields.plantPopulation,
-      dataFields.yieldValue, dataFields.applicationTiming, dataFields.cropStage, dataFields.bbchCode,
-      tConfig.targetValue, metricStr, t.Result || 'Pending',
+    const row = [
+      t.ID, t.Category.toUpperCase(), t.FormulationName || '—', t.InvestigatorName || '—', t.Date || '—', t.Location || '—', t.Dosage || '—',
+      dataFields.crop || '—'
+    ];
+
+    if (hasVariety) row.push(dataFields.variety || t.Variety || '—');
+    if (hasYield) row.push(dataFields.yieldValue || t.YieldValue || t.Yield || '—');
+
+    const targetVal = t[targetKey] || t.WeedSpecies || t.DiseaseTarget || t.PestTarget || t.NutrientType || t.BiostimulantType || proj?.[targetKey] || '—';
+
+    row.push(
+      dataFields.applicationTiming || t.ApplicationTiming || '—',
+      t.ProjectID ? (t.TrialDesign || t.Design || 'RCBD') : 'Individual',
+      t.Replication || t.BlockID || '',
+      t.PlotNumber || '',
+      targetVal
+    );
+
+    categorySpecificFields.forEach(f => {
+      const val = t[f.key] ?? proj?.[f.key] ?? '';
+      row.push(val !== undefined && val !== null ? val : '');
+    });
+
+    row.push(
+      metricStr,
+      t.Result || 'Pending',
       (t.IsCompleted === true || t.IsCompleted === 'true') ? 'Finalized' : 'Ongoing',
-      proj?.Name || '', t.Replication || '', t.PlotNumber || '',
+      proj?.Name || '',
       t.Temperature || '', t.Humidity || '', t.Windspeed || '', t.Rain || '',
       efficacy.length,
-      safeJsonParse(t.PhotoURLs, []).length,
-    ];
+      safeJsonParse(t.PhotoURLs, []).length
+    );
+
+    return row;
   });
 
   const csv = [header, ...rows].map(r => r.map(c => {
@@ -2803,7 +2943,7 @@ export function exportAllTrialsCSV(trials, projects = [], category = null) {
     return `"${val.replace(/"/g, '""')}"`;
   }).join(',')).join('\n');
 
-  const catName = activeCatId ? activeCatId.toUpperCase() : 'ALL';
+  const catName = mainCatId ? mainCatId.toUpperCase() : 'ALL';
   dlBlob(new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8' }), `${catName}_Trials_Summary_${new Date().toISOString().split('T')[0]}.csv`);
   toast(`Exported ${preparedTrials.length} trials to CSV`, 'success');
 }
