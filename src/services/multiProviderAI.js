@@ -1,4 +1,4 @@
-import { getCategoryConfig } from '../utils/categoryConfig.js';
+﻿import { getCategoryConfig } from '../utils/categoryConfig.js';
 import { resolvePhotoSrc } from '../utils/photoUtils.js';
 import { DEFAULT_GEMINI_MODEL, GEMINI_FALLBACK_MODELS } from '../utils/aiConstants.js';
 import { apiCall } from './db.js';
@@ -7,75 +7,51 @@ import { apiCall } from './db.js';
 // Free tier limits per Google AI Studio / Groq free plan.
 // All Gemini models support: Text + Image + Video + Audio + PDF inputs.
 const PROVIDERS = [
-  // ── Gemini 2.5 Generation (Current Production Lineup — Google AI Studio Free Tier) ──
+  // ── Gemini 3 Generation (Current Active Lineup — Google AI Studio Free Tier) ──
+  {
+    // GA since Sept 2, 2026 — 5 RPM / 20 RPD free
+    id: 'gemini-3.8-flash',
+    name: 'Gemini 3.8 Flash',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent',
+    dailyLimit: 20,
+  },
+  {
+    // GA since May 2026 — high-throughput Flash
+    id: 'gemini-3.5-flash',
+    name: 'Gemini 3.5 Flash',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent',
+    dailyLimit: 500,
+  },
+  {
+    // GA since July 2026 — 15 RPM / 1000 RPD free — best throughput
+    id: 'gemini-3.5-flash-lite',
+    name: 'Gemini 3.5 Flash-Lite',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent',
+    dailyLimit: 1000,
+  },
+  // ── Gemini 2.5 Generation (Legacy Fallback — retiring Oct 20, 2026) ──────────────
   {
     id: 'gemini-2.5-flash',
     name: 'Gemini 2.5 Flash',
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
     dailyLimit: 500,
   },
+  // ── Groq (Active vision model: qwen3.8-27b — llama-4 deprecated March 2026) ────
   {
-    id: 'gemini-2.5-flash-lite',
-    name: 'Gemini 2.5 Flash-Lite',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent',
-    dailyLimit: 1500,
-  },
-  {
-    id: 'gemini-2.5-pro',
-    name: 'Gemini 2.5 Pro',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent',
-    dailyLimit: 50,
-  },
-  // ── Gemini 2.0 Generation (Stable Fallback) ────────────────────────────────────
-  {
-    id: 'gemini-2.0-flash',
-    name: 'Gemini 2.0 Flash',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
-    dailyLimit: 1500,
-  },
-  {
-    id: 'gemini-2.0-flash-lite',
-    name: 'Gemini 2.0 Flash-Lite',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent',
-    dailyLimit: 1500,
-  },
-  // ── Gemini 1.5 Generation (Legacy Reliable Fallback) ──────────────────────────
-  {
-    id: 'gemini-1.5-flash',
-    name: 'Gemini 1.5 Flash',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent',
-    dailyLimit: 1500,
-  },
-  {
-    id: 'gemini-1.5-flash-8b',
-    name: 'Gemini 1.5 Flash 8B',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-8b:generateContent',
-    dailyLimit: 4000,
-  },
-  // ── Groq (ultra-fast inference, vision support) ──────────────────────────
-  {
-    // Preview | Free: ~500 RPD | Best Groq vision model, 5 images/request
-    id: 'groq-maverick',
-    name: 'Groq LLaMA 4 Maverick',
+    // Active | Free tier — vision-capable, 3 images/req, 131K context
+    id: 'groq-qwen',
+    name: 'Groq Qwen 3.8 Vision',
     endpoint: 'https://api.groq.com/openai/v1/chat/completions',
-    model: 'meta-llama/llama-4-maverick-17b-128e-instruct',
+    model: 'qwen/qwen3.8-27b',
     dailyLimit: 500,
   },
+  // ── Mistral (Active vision: mistral-medium-latest — pixtral-large-2411 retired 2026) ──
   {
-    // Preview | Free: ~500 RPD | Lightweight fast vision
-    id: 'groq',
-    name: 'Groq LLaMA 4 Scout',
-    endpoint: 'https://api.groq.com/openai/v1/chat/completions',
-    model: 'meta-llama/llama-4-scout-17b-16e-instruct',
-    dailyLimit: 500,
-  },
-  // ── Mistral (last resort) ────────────────────────────────────────────────
-  {
-    // Free: ~50 RPD | Last resort fallback
-    id: 'pixtral',
-    name: 'Pixtral Large (Mistral)',
+    // Active | Vision-capable — replaces retired pixtral-large-2411
+    id: 'mistral',
+    name: 'Mistral Medium 3.5',
     endpoint: 'https://api.mistral.ai/v1/chat/completions',
-    model: 'pixtral-large-2411',
+    model: 'mistral-medium-latest',
     dailyLimit: 50,
   },
 ];
@@ -91,8 +67,9 @@ function getSettings() {
 function getAPIKeys(providerId) {
   const settings = getSettings();
   const isGemini = providerId.startsWith('gemini');
-  const isGroq = providerId === 'groq' || providerId === 'groq-maverick';
-  const baseId = isGemini ? 'gemini' : isGroq ? 'groq' : providerId;
+  const isGroq = providerId.startsWith('groq');
+  const isMistral = providerId === 'mistral' || providerId === 'pixtral';
+  const baseId = isGemini ? 'gemini' : isGroq ? 'groq' : isMistral ? 'mistral' : providerId;
 
   const keys = [];
 
@@ -133,9 +110,15 @@ function getAPIKeys(providerId) {
       });
     }
   }
-  if (baseId === 'pixtral') {
+  if (isMistral) {
     const raw = extractKeyStr(settings?.mistralApiKey);
     if (raw) keys.push(raw);
+    if (Array.isArray(settings?.mistralApiKeys)) {
+      settings.mistralApiKeys.forEach(k => {
+        const rawKey = extractKeyStr(k);
+        if (rawKey) keys.push(rawKey);
+      });
+    }
   }
 
   // Also check localStorage directly
@@ -614,7 +597,7 @@ async function callGroq(provider, imageData, context, apiKey) {
   }
 }
 
-async function callPixtral(provider, imageData, context, apiKey) {
+async function callMistral(provider, imageData, context, apiKey) {
   // imageData is already base64 (pre-converted in analyzePhoto)
   const base64 = typeof imageData === 'string' && !imageData.startsWith('http') && !imageData.startsWith('data:')
     ? imageData
@@ -646,13 +629,13 @@ async function callPixtral(provider, imageData, context, apiKey) {
     if (!response.ok) {
       let errText = '';
       try { errText = await response.text(); } catch (_) {}
-      const e = new Error(`Pixtral ${response.status}: ${errText.slice(0, 200)}`);
+      const e = new Error(`Mistral ${response.status}: ${errText.slice(0, 200)}`);
       e.status = response.status;
       throw e;
     }
     const data = await response.json();
     const text = data.choices?.[0]?.message?.content;
-    if (!text) throw new Error('Empty Pixtral response');
+    if (!text) throw new Error('Empty Mistral response');
     return parseAIJson(text);
   } finally {
     clearTimeout(timeoutId);
@@ -660,9 +643,9 @@ async function callPixtral(provider, imageData, context, apiKey) {
 }
 
 async function callProvider(provider, imageData, context, apiKey) {
-  if (provider.id === 'groq' || provider.id === 'groq-maverick') return callGroq(provider, imageData, context, apiKey);
+  if (provider.id.startsWith('groq')) return callGroq(provider, imageData, context, apiKey);
   if (provider.id.startsWith('gemini')) return callGemini(provider, imageData, context, apiKey);
-  if (provider.id === 'pixtral') return callPixtral(provider, imageData, context, apiKey);
+  if (provider.id === 'mistral' || provider.id === 'pixtral') return callMistral(provider, imageData, context, apiKey);
   throw new Error(`Unknown provider: ${provider.id}`);
 }
 
@@ -986,7 +969,7 @@ export async function generateTextWithAI(prompt, systemInstruction = '', onProgr
             }
             const data = await resp.json();
             responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-          } else if (provider.id === 'groq' || provider.id === 'groq-maverick' || provider.id === 'pixtral') {
+          } else if (provider.id.startsWith('groq') || provider.id === 'mistral') {
             const messages = [];
             if (systemInstruction) {
               messages.push({ role: 'system', content: systemInstruction });

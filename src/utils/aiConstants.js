@@ -1,60 +1,43 @@
-export const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
+// Verified active models as of September 2026 via official Google AI for Developers docs
+// and web research. gemini-3.8-flash = GA Sept 2 2026, gemini-3.5-flash = GA May 2026,
+// gemini-3.5-flash-lite = GA July 2026, gemini-2.5-flash = Legacy (retiring Oct 20, 2026)
+
+export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite";
 
 export const AVAILABLE_GEMINI_MODELS = [
-  // ── Gemini 2.5 Generation (Current Production Lineup — Google AI Studio Free Tier) ──
+  // ── Gemini 3 Generation (Current Active Lineup) ──────────────────────────────────
   {
-    id: "gemini-2.5-flash",
-    name: "Gemini 2.5 Flash",
-    description: "Latest frontier GA. Supreme multimodal reasoning, agentic vision & weed/pathology ID (500 RPD, 10 RPM free).",
+    id: "gemini-3.8-flash",
+    name: "Gemini 3.8 Flash",
+    description: "Latest GA (Sept 2026). Best reasoning, agentic vision & weed/pathology ID. Free: 5 RPM / 20 RPD.",
+    tier: "free_accessible",
+    isDefault: false
+  },
+  {
+    id: "gemini-3.5-flash",
+    name: "Gemini 3.5 Flash",
+    description: "Stable GA (May 2026). High-throughput multimodal crop plot analysis. Free: 500 RPD.",
+    tier: "free_accessible"
+  },
+  {
+    id: "gemini-3.5-flash-lite",
+    name: "Gemini 3.5 Flash-Lite",
+    description: "Best free-tier throughput (July 2026). Ultra-low latency, 1000 RPD / 15 RPM free. Recommended default.",
     tier: "free_accessible",
     isDefault: true
   },
+  // ── Gemini 2.5 Generation (Legacy Fallback — retiring Oct 20, 2026) ──────────────
   {
-    id: "gemini-2.5-flash-lite",
-    name: "Gemini 2.5 Flash-Lite",
-    description: "Ultra-low latency, high-throughput photo scanning (1500 RPD, 30 RPM free).",
-    tier: "free_accessible"
-  },
-  {
-    id: "gemini-2.5-pro",
-    name: "Gemini 2.5 Pro",
-    description: "Deep Reasoning. Complex agronomic synthesis, comprehensive trial reports & statistical insights (50 RPD, 5 RPM free).",
-    tier: "free_accessible"
-  },
-  // ── Gemini 2.0 Generation (Stable Fallback) ──────────────────────────────────────
-  {
-    id: "gemini-2.0-flash",
-    name: "Gemini 2.0 Flash",
-    description: "Stable GA. High-efficiency workhorse model for fast multimodal crop plot analysis (1500 RPD, 15 RPM free).",
-    tier: "free_accessible"
-  },
-  {
-    id: "gemini-2.0-flash-lite",
-    name: "Gemini 2.0 Flash-Lite",
-    description: "Highest throughput, lowest latency for high-volume photo batch scanning (30 RPM free).",
-    tier: "free_accessible"
-  },
-  // ── Gemini 1.5 Generation (Legacy Reliable Fallback) ─────────────────────────────
-  {
-    id: "gemini-1.5-flash",
-    name: "Gemini 1.5 Flash",
-    description: "Proven stable production model for multimodal vision and analysis (1500 RPD, 15 RPM free).",
-    tier: "free_accessible"
-  },
-  {
-    id: "gemini-1.5-flash-8b",
-    name: "Gemini 1.5 Flash 8B",
-    description: "Ultra-fast, lightweight fallback for high-volume batch analysis (4000 RPD, 15 RPM free).",
+    id: "gemini-2.5-flash",
+    name: "Gemini 2.5 Flash (Legacy)",
+    description: "Legacy fallback model. Retiring Oct 20, 2026. Use only as last resort. 500 RPD.",
     tier: "free_accessible"
   }
 ];
 
 export const GEMINI_FALLBACK_MODELS = [
-  "gemini-2.5-flash",
-  "gemini-2.5-flash-lite",
-  "gemini-2.5-pro",
-  "gemini-2.0-flash",
-  "gemini-2.0-flash-lite",
-  "gemini-1.5-flash",
-  "gemini-1.5-flash-8b"
+  "gemini-3.8-flash",
+  "gemini-3.5-flash",
+  "gemini-3.5-flash-lite",
+  "gemini-2.5-flash"
 ];
