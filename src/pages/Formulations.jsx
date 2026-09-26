@@ -7,7 +7,7 @@ import Modal from '../components/Modal.jsx';
 import { addFormulation, deleteFormulation, updateFormulation, validateCategoryDataOperation, addIngredient } from '../services/dataLayer.js';
 import { safeJsonParse } from '../utils/helpers.js';
 import { getCategoryConfig } from '../utils/categoryConfig.js';
-import { calculateFormulationCost, getFormulationCostDetails, findIngredientInLibrary, parseIngredientCost } from '../utils/costUtils.js';
+import { calculateFormulationCost, getFormulationCostDetails, findIngredientInLibrary, parseIngredientCost, convertQuantityToBase } from '../utils/costUtils.js';
 import { 
   Plus, X, Share2, Edit, Trash2, Copy, Sparkles, Layers, 
   ArrowUpDown, Scale, FileDown, Rocket, Wand2, MoreVertical, 
@@ -731,12 +731,14 @@ export default function Formulations({ onMenuClick }) {
       if (selectedLibIng) {
         const baseUnit = String(selectedLibIng.Unit || selectedLibIng.unit || '').toLowerCase().trim();
         if (baseUnit === 'l' || baseUnit === 'litre' || baseUnit === 'litres' || baseUnit === 'liter' || baseUnit === 'liters' || baseUnit === 'ml' || baseUnit === 'millilitre' || baseUnit === 'millilitres') {
-          newIngs[index].unit = 'ml';
+          newIngs[index].unit = newIngs[index].unit || 'ml';
         } else if (baseUnit === 'kg' || baseUnit === 'kilogram' || baseUnit === 'kilograms' || baseUnit === 'g' || baseUnit === 'gm' || baseUnit === 'gram' || baseUnit === 'grams') {
-          newIngs[index].unit = 'gm';
+          newIngs[index].unit = newIngs[index].unit || 'gm';
         } else {
-          newIngs[index].unit = selectedLibIng.Unit || selectedLibIng.unit || '';
+          newIngs[index].unit = newIngs[index].unit || selectedLibIng.Unit || selectedLibIng.unit || 'ml';
         }
+      } else if (!newIngs[index].unit) {
+        newIngs[index].unit = 'ml';
       }
     }
     setIngredients(newIngs);
@@ -864,8 +866,13 @@ export default function Formulations({ onMenuClick }) {
       const stats = getFormulationTrialStats(form, state.trials, state.projects, activeCategory);
       const parsedIngs = safeJsonParse(form.IngredientsJSON, []);
       const costDetails = getFormulationCostDetails(parsedIngs, state.ingredients || []);
-      const costVal = costDetails.costPerUnit > 0 ? costDetails.costPerUnit : parseFloat(form.EstimatedCost || 0);
-      const unitLabel = costDetails.unitLabel || '/ L';
+      const costVal = costDetails.totalCost > 0 ? costDetails.totalCost : parseFloat(form.EstimatedCost || 0);
+      let unitLabel = '';
+      if (costDetails.totalVolumeL > 0) {
+        unitLabel = costDetails.totalVolumeL === 1 ? '/ L' : `/ ${costDetails.totalVolumeL >= 1 ? costDetails.totalVolumeL.toFixed(1) + 'L' : (costDetails.totalVolumeL * 1000).toFixed(0) + 'ml'}`;
+      } else if (costDetails.totalWeightKg > 0) {
+        unitLabel = costDetails.totalWeightKg === 1 ? '/ kg' : `/ ${costDetails.totalWeightKg >= 1 ? costDetails.totalWeightKg.toFixed(1) + 'kg' : (costDetails.totalWeightKg * 1000).toFixed(0) + 'gm'}`;
+      }
       const formDuplicates = duplicateLookup.get(String(form.ID || form.id)) || [];
 
       return {
@@ -1243,6 +1250,11 @@ export default function Formulations({ onMenuClick }) {
                 const matchedLib = cleanName ? findIngredientInLibrary(cleanName, state.ingredients || []) : null;
                 const libCost = matchedLib ? parseIngredientCost(matchedLib) : 0;
                 const libUnit = matchedLib ? (matchedLib.Unit || matchedLib.unit || 'L') : '';
+                const rawQty = parseFloat(ing.quantity);
+                const hasValidQty = !isNaN(rawQty) && rawQty > 0;
+                const effectiveUnit = (ing.unit || libUnit || 'ml').trim();
+                const qtyInBase = hasValidQty && matchedLib ? convertQuantityToBase(rawQty, effectiveUnit, libUnit) : 0;
+                const lineCost = libCost * qtyInBase;
 
                 return (
                   <div key={index} className="bg-slate-50/90 p-2.5 rounded-xl border border-slate-200/80 space-y-1.5 transition-all">
@@ -1269,14 +1281,15 @@ export default function Formulations({ onMenuClick }) {
                           placeholder="Qty"
                         />
                       </div>
-                      <div className="w-20 shrink-0">
+                      <div className="w-24 shrink-0">
                         <input
                           type="text"
+                          list="unit-options-list"
                           required
                           value={ing.unit}
                           onChange={e => handleIngredientChange(index, 'unit', e.target.value)}
                           className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white font-mono"
-                          placeholder="Unit"
+                          placeholder="Unit (ml/L)"
                         />
                       </div>
                       <button
@@ -1295,10 +1308,15 @@ export default function Formulations({ onMenuClick }) {
                       {cleanName ? (
                         matchedLib ? (
                           libCost > 0 ? (
-                            <span className="text-emerald-700 font-medium inline-flex items-center gap-1">
+                            <span className="text-emerald-700 font-medium inline-flex items-center gap-1.5 flex-wrap">
                               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
-                              Library price: <strong>{CURRENCY_SYMBOL}{libCost.toFixed(2)} / {libUnit}</strong>
-                              {matchedLib.Name !== cleanName && (
+                              <span>Library: <strong>{CURRENCY_SYMBOL}{libCost.toFixed(2)} / {libUnit.toUpperCase()}</strong></span>
+                              {hasValidQty && (
+                                <span className="bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold">
+                                  Line Cost: {CURRENCY_SYMBOL}{lineCost.toFixed(2)}
+                                </span>
+                              )}
+                              {matchedLib.Name && matchedLib.Name.toLowerCase() !== cleanName.toLowerCase() && (
                                 <span className="text-slate-400 text-[10px]">({matchedLib.Name})</span>
                               )}
                             </span>
@@ -1340,6 +1358,13 @@ export default function Formulations({ onMenuClick }) {
             <datalist id="ingredient-lib-list">
               {state.ingredients.map(i => <option key={i.ID} value={i.Name} />)}
             </datalist>
+            <datalist id="unit-options-list">
+              <option value="ml" />
+              <option value="L" />
+              <option value="gm" />
+              <option value="kg" />
+              <option value="mg" />
+            </datalist>
           </div>
 
           {/* Real-time Estimated Cost Breakdown Strip */}
@@ -1353,20 +1378,19 @@ export default function Formulations({ onMenuClick }) {
                     <span className="text-sm font-bold text-emerald-900 block">Est. Recipe Cost:</span>
                     <span className="text-[11px] text-emerald-700">
                       {costDetails.totalVolumeL > 0 ? (
-                        <>Normalized per Liter • Total batch: {costDetails.totalVolumeL >= 1 ? `${costDetails.totalVolumeL.toFixed(3)} L` : `${(costDetails.totalVolumeL * 1000).toFixed(1)} ml`}</>
+                        <>Total recipe batch: {costDetails.totalVolumeL >= 1 ? `${costDetails.totalVolumeL.toFixed(3)} L` : `${(costDetails.totalVolumeL * 1000).toFixed(1)} ml`}{costDetails.totalVolumeL !== 1 ? ` • (Rate: ${CURRENCY_SYMBOL}${costDetails.costPerUnit.toFixed(2)} / L)` : ''}</>
                       ) : costDetails.totalWeightKg > 0 ? (
-                        <>Normalized per kg • Total batch: {costDetails.totalWeightKg >= 1 ? `${costDetails.totalWeightKg.toFixed(3)} kg` : `${(costDetails.totalWeightKg * 1000).toFixed(1)} gm`}</>
+                        <>Total recipe batch: {costDetails.totalWeightKg >= 1 ? `${costDetails.totalWeightKg.toFixed(3)} kg` : `${(costDetails.totalWeightKg * 1000).toFixed(1)} gm`}{costDetails.totalWeightKg !== 1 ? ` • (Rate: ${CURRENCY_SYMBOL}${costDetails.costPerUnit.toFixed(2)} / kg)` : ''}</>
                       ) : (
-                        <>Batch Cost</>
+                        <>Total recipe cost</>
                       )}
                       {' • '}{costDetails.pricedCount} of {costDetails.totalCount} ingredients priced
                     </span>
                   </div>
                   <div className="text-right">
-                    <span className="font-extrabold text-emerald-700 text-xl">
-                      {CURRENCY_SYMBOL}{costDetails.costPerUnit.toFixed(2)}
+                    <span className="font-extrabold text-emerald-700 text-2xl">
+                      {CURRENCY_SYMBOL}{costDetails.totalCost.toFixed(2)}
                     </span>
-                    <span className="text-xs text-emerald-600 font-semibold ml-1">{costDetails.unitLabel}</span>
                   </div>
                 </div>
 

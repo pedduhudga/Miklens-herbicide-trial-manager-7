@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { X, FlaskConical, ExternalLink, Filter, Layers, DollarSign, Trophy, ArrowRight, Edit, AlertTriangle, ShieldAlert, Sparkles, Droplets, Info } from 'lucide-react';
 import { safeJsonParse } from '../utils/helpers.js';
-import { calculateFormulationCost, getFormulationCostDetails, findIngredientInLibrary, parseIngredientCost } from '../utils/costUtils.js';
+import { calculateFormulationCost, getFormulationCostDetails, findIngredientInLibrary, parseIngredientCost, convertQuantityToBase } from '../utils/costUtils.js';
 import { getCategoryConfig } from '../utils/categoryConfig.js';
 import { analyzeFormulationSynergy } from '../utils/hracSynergy.js';
 import { useNavigate } from 'react-router-dom';
@@ -44,14 +44,20 @@ export default function FormulationQuickPeekModal({
 
     const ings = safeJsonParse(formulation.IngredientsJSON, []);
     const costDetails = getFormulationCostDetails(ings, ingredientsList);
-    const cost = costDetails.costPerUnit > 0 ? costDetails.costPerUnit : parseFloat(formulation.EstimatedCost || 0);
+    const cost = costDetails.totalCost > 0 ? costDetails.totalCost : parseFloat(formulation.EstimatedCost || 0);
+    let unitLabel = '';
+    if (costDetails.totalVolumeL > 0) {
+      unitLabel = costDetails.totalVolumeL === 1 ? '/ L' : `/ ${costDetails.totalVolumeL >= 1 ? costDetails.totalVolumeL.toFixed(1) + 'L' : (costDetails.totalVolumeL * 1000).toFixed(0) + 'ml'}`;
+    } else if (costDetails.totalWeightKg > 0) {
+      unitLabel = costDetails.totalWeightKg === 1 ? '/ kg' : `/ ${costDetails.totalWeightKg >= 1 ? costDetails.totalWeightKg.toFixed(1) + 'kg' : (costDetails.totalWeightKg * 1000).toFixed(0) + 'gm'}`;
+    }
 
     return {
       totalTrials: linked.length,
       winRate,
       avgEff,
       cost,
-      unitLabel: costDetails.unitLabel || '/ L',
+      unitLabel,
       ings
     };
   }, [formulation, allTrials, ingredientsList]);
@@ -133,6 +139,11 @@ export default function FormulationQuickPeekModal({
                   const libItem = findIngredientInLibrary(ing.name, ingredientsList);
                   const libCost = libItem ? parseIngredientCost(libItem) : 0;
                   const libUnit = libItem ? (libItem.Unit || libItem.unit || 'L') : '';
+                  const rawQty = parseFloat(ing.quantity ?? ing.qty ?? 0);
+                  const hasValidQty = !isNaN(rawQty) && rawQty > 0;
+                  const effectiveUnit = (ing.unit || libUnit || 'ml').trim();
+                  const qtyInBase = hasValidQty && libItem ? convertQuantityToBase(rawQty, effectiveUnit, libUnit) : 0;
+                  const lineCost = libCost * qtyInBase;
 
                   return (
                     <div key={i} className="px-3 py-2 flex justify-between items-center text-xs">
@@ -146,7 +157,12 @@ export default function FormulationQuickPeekModal({
                           )}
                           {libCost > 0 && (
                             <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
-                              ₹{libCost.toFixed(2)}/{libUnit}
+                              ₹{libCost.toFixed(2)}/{libUnit.toUpperCase()}
+                            </span>
+                          )}
+                          {lineCost > 0 && (
+                            <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded">
+                              Line: ₹{lineCost.toFixed(2)}
                             </span>
                           )}
                         </div>

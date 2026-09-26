@@ -74,8 +74,14 @@ export function parseIngredientCost(item) {
  * Converts a quantity from its used unit into the ingredient's library base unit.
  */
 export function convertQuantityToBase(usedQty, usedUnitStr, baseUnitStr) {
+  const numQty = parseFloat(usedQty);
+  if (isNaN(numQty) || numQty <= 0) return 0;
+
   const used = String(usedUnitStr || 'ml').toLowerCase().trim();
-  const base = String(baseUnitStr || 'L').toLowerCase().trim();
+  const base = String(baseUnitStr || 'l').toLowerCase().trim();
+
+  // If units match exactly (e.g. ml to ml, L to L, gm to gm, kg to kg)
+  if (used === base) return numQty;
 
   const isBaseL = ['l', 'litre', 'litres', 'liter', 'liters'].includes(base);
   const isBaseMl = ['ml', 'millilitre', 'millilitres', 'milliliter', 'milliliters', 'cc'].includes(base);
@@ -89,16 +95,34 @@ export function convertQuantityToBase(usedQty, usedUnitStr, baseUnitStr) {
   const isUsedGm = ['gm', 'g', 'gram', 'grams'].includes(used);
   const isUsedMg = ['mg', 'milligram', 'milligrams'].includes(used);
 
-  if (isBaseL && isUsedMl) return usedQty / 1000;
-  if (isBaseMl && isUsedL) return usedQty * 1000;
-  if (isBaseKg && isUsedGm) return usedQty / 1000;
-  if (isBaseKg && isUsedMg) return usedQty / 1000000;
-  if (isBaseGm && isUsedKg) return usedQty * 1000;
-  if (isBaseGm && isUsedMg) return usedQty / 1000;
-  if (isBaseMg && isUsedGm) return usedQty * 1000;
-  if (isBaseMg && isUsedKg) return usedQty * 1000000;
+  // Volume conversions
+  if (isBaseL && isUsedMl) return numQty / 1000;
+  if (isBaseL && isUsedL) return numQty;
+  if (isBaseMl && isUsedL) return numQty * 1000;
+  if (isBaseMl && isUsedMl) return numQty;
 
-  return usedQty;
+  // Weight conversions
+  if (isBaseKg && isUsedGm) return numQty / 1000;
+  if (isBaseKg && isUsedMg) return numQty / 1000000;
+  if (isBaseKg && isUsedKg) return numQty;
+  if (isBaseGm && isUsedKg) return numQty * 1000;
+  if (isBaseGm && isUsedMg) return numQty / 1000;
+  if (isBaseGm && isUsedGm) return numQty;
+  if (isBaseMg && isUsedGm) return numQty * 1000;
+  if (isBaseMg && isUsedKg) return numQty * 1000000;
+  if (isBaseMg && isUsedMg) return numQty;
+
+  // Cross volume/weight conversions assuming density ~ 1.0 (standard for aqueous agrochemical formulations)
+  if (isBaseL && isUsedGm) return numQty / 1000;
+  if (isBaseL && isUsedKg) return numQty;
+  if (isBaseMl && isUsedGm) return numQty;
+  if (isBaseMl && isUsedKg) return numQty * 1000;
+  if (isBaseKg && isUsedMl) return numQty / 1000;
+  if (isBaseKg && isUsedL) return numQty;
+  if (isBaseGm && isUsedMl) return numQty;
+  if (isBaseGm && isUsedL) return numQty * 1000;
+
+  return numQty;
 }
 
 /**
@@ -120,8 +144,9 @@ export function getFormulationCostDetails(formulationOrIngs, libraryIngredients 
 
   if (!Array.isArray(ingsList) || ingsList.length === 0) {
     return {
-      costPerUnit: 0,
+      totalCost: 0,
       totalBatchCost: 0,
+      costPerUnit: 0,
       totalVolumeL: 0,
       totalWeightKg: 0,
       unitLabel: '/ L',
@@ -138,6 +163,7 @@ export function getFormulationCostDetails(formulationOrIngs, libraryIngredients 
   const matchedIngredients = [];
   const unpricedIngredients = [];
   let validCount = 0;
+  let pricedCount = 0;
 
   ingsList.forEach(ing => {
     if (!ing || !ing.name) return;
@@ -145,16 +171,18 @@ export function getFormulationCostDetails(formulationOrIngs, libraryIngredients 
     if (!nameStr) return;
 
     validCount++;
-    const usedQty = parseFloat(ing.quantity);
-    const usedUnit = String(ing.unit || 'ml').toLowerCase().trim();
+    const rawQty = ing.quantity ?? ing.qty ?? '';
+    const usedQty = parseFloat(rawQty);
+    const hasValidQty = !isNaN(usedQty) && usedQty > 0;
+    const usedUnit = String(ing.unit || '').trim();
 
-    const isVolL = ['l', 'litre', 'litres', 'liter', 'liters'].includes(usedUnit);
-    const isVolMl = ['ml', 'millilitre', 'millilitres', 'milliliter', 'milliliters', 'cc'].includes(usedUnit);
-    const isWtKg = ['kg', 'kilogram', 'kilograms'].includes(usedUnit);
-    const isWtGm = ['gm', 'g', 'gram', 'grams'].includes(usedUnit);
-    const isWtMg = ['mg', 'milligram', 'milligrams'].includes(usedUnit);
+    const isVolL = ['l', 'litre', 'litres', 'liter', 'liters'].includes(usedUnit.toLowerCase());
+    const isVolMl = ['ml', 'millilitre', 'millilitres', 'milliliter', 'milliliters', 'cc'].includes(usedUnit.toLowerCase());
+    const isWtKg = ['kg', 'kilogram', 'kilograms'].includes(usedUnit.toLowerCase());
+    const isWtGm = ['gm', 'g', 'gram', 'grams'].includes(usedUnit.toLowerCase());
+    const isWtMg = ['mg', 'milligram', 'milligrams'].includes(usedUnit.toLowerCase());
 
-    if (!isNaN(usedQty) && usedQty > 0) {
+    if (hasValidQty) {
       if (isVolL) totalVolumeL += usedQty;
       else if (isVolMl) totalVolumeL += usedQty / 1000;
       else if (isWtKg) totalWeightKg += usedQty;
@@ -167,19 +195,26 @@ export function getFormulationCostDetails(formulationOrIngs, libraryIngredients 
       const baseCost = parseIngredientCost(libIng);
       const baseUnit = String(libIng.Unit || libIng.unit || 'L').trim();
 
-      if (baseCost > 0 && !isNaN(usedQty) && usedQty > 0) {
-        const qtyInBaseUnit = convertQuantityToBase(usedQty, usedUnit, baseUnit);
-        const lineCost = baseCost * qtyInBaseUnit;
-        totalBatchCost += lineCost;
+      if (baseCost > 0) {
+        pricedCount++;
+        let lineCost = 0;
+        let qtyInBaseUnit = 0;
+
+        if (hasValidQty) {
+          const effectiveUsedUnit = usedUnit || baseUnit;
+          qtyInBaseUnit = convertQuantityToBase(usedQty, effectiveUsedUnit, baseUnit);
+          lineCost = baseCost * qtyInBaseUnit;
+          totalBatchCost += lineCost;
+        }
 
         matchedIngredients.push({
           name: nameStr,
           libraryName: libIng.Name || libIng.name,
-          usedQty,
-          usedUnit,
+          usedQty: hasValidQty ? usedQty : 0,
+          usedUnit: usedUnit || baseUnit,
           baseCost,
           baseUnit,
-          lineCost
+          lineCost: Math.round(lineCost * 100) / 100
         });
       } else {
         unpricedIngredients.push({ name: nameStr, reason: 'Zero or missing cost in library' });
@@ -189,11 +224,7 @@ export function getFormulationCostDetails(formulationOrIngs, libraryIngredients 
     }
   });
 
-  // Per-liter or per-kg batch normalization
-  // If the recipe specifies volume:
-  // - If user entered 0.400 ml, 0.200 ml, etc. (total volume = 1 ml = 0.001 L), cost per Liter = batchCost / 0.001 L
-  // - If user entered 400 ml, 200 ml, etc. (total volume = 1000 ml = 1.0 L), cost per Liter = batchCost / 1.0 L
-  // - If user entered 0.4 L, 0.2 L, etc. (total volume = 1.0 L), cost per Liter = batchCost / 1.0 L
+  // Calculate rate per liter / per kg if batch volume / weight is present
   let costPerUnit = totalBatchCost;
   let unitLabel = '/ L';
 
@@ -206,12 +237,13 @@ export function getFormulationCostDetails(formulationOrIngs, libraryIngredients 
   }
 
   return {
-    costPerUnit: Math.round(costPerUnit * 100) / 100,
+    totalCost: Math.round(totalBatchCost * 100) / 100,
     totalBatchCost: Math.round(totalBatchCost * 100) / 100,
+    costPerUnit: Math.round(costPerUnit * 100) / 100,
     totalVolumeL,
     totalWeightKg,
     unitLabel,
-    pricedCount: matchedIngredients.length,
+    pricedCount,
     totalCount: validCount,
     matchedIngredients,
     unpricedIngredients
@@ -220,9 +252,9 @@ export function getFormulationCostDetails(formulationOrIngs, libraryIngredients 
 
 /**
  * Real-time formulation cost calculator linked with the ingredients library.
- * Returns cost per unit (per Liter by default).
+ * Returns the exact recipe cost calculated from ingredients and their units.
  */
 export function calculateFormulationCost(formulationOrIngs, libraryIngredients = []) {
   const details = getFormulationCostDetails(formulationOrIngs, libraryIngredients);
-  return details.costPerUnit;
+  return details.totalCost;
 }
