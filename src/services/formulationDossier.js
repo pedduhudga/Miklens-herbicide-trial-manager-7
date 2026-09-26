@@ -1,5 +1,5 @@
 import { safeJsonParse } from '../utils/helpers.js';
-import { calculateFormulationCost } from '../utils/costUtils.js';
+import { calculateFormulationCost, findIngredientInLibrary, parseIngredientCost, convertQuantityToBase } from '../utils/costUtils.js';
 import { getCategoryConfig } from '../utils/categoryConfig.js';
 import { 
   getFormulationTrialStats, 
@@ -143,21 +143,26 @@ export function exportFormulationDossier(formulation, allTrials = [], libraryIng
     </thead>
     <tbody>
       ${rawIngs.length > 0 ? rawIngs.map((ing, idx) => {
-        const libMatch = libraryIngredients.find(l => l.Name?.toLowerCase().trim() === ing.name?.toLowerCase().trim());
-        const unitCost = libMatch ? Number(libMatch.Cost || 0) : 0;
+        const libMatch = findIngredientInLibrary(ing.name, libraryIngredients);
+        const unitCost = libMatch ? parseIngredientCost(libMatch) : 0;
+        const libUnit = libMatch ? (libMatch.Unit || libMatch.unit || 'L') : '';
+        const usedQty = parseFloat(ing.quantity ?? ing.qty ?? 0) || 0;
+        const usedUnit = ing.unit || 'ml';
+        const qtyInBase = libMatch ? convertQuantityToBase(usedQty, usedUnit, libUnit) : 0;
+        const componentCost = unitCost > 0 ? unitCost * qtyInBase : 0;
         return `
           <tr>
             <td style="text-align: center; color: #64748b;">${idx + 1}</td>
             <td><strong>${ing.name || 'Unknown'}</strong></td>
-            <td>${ing.quantity ?? ing.qty ?? 0}</td>
-            <td>${ing.unit || 'ml'}</td>
-            <td>${unitCost > 0 ? `₹${unitCost.toFixed(2)} / ${libMatch.Unit || 'unit'}` : '<span style="color: #94a3b8;">Not listed</span>'}</td>
-            <td><strong>${unitCost > 0 ? `₹${((Number(ing.quantity ?? ing.qty) || 0) * (unitCost / (libMatch?.Unit?.toLowerCase() === 'l' ? 1000 : 1))).toFixed(2)}` : '—'}</strong></td>
+            <td>${usedQty}</td>
+            <td>${usedUnit}</td>
+            <td>${unitCost > 0 ? `₹${unitCost.toFixed(2)} / ${libUnit}` : '<span style="color: #94a3b8;">Not listed</span>'}</td>
+            <td><strong>${unitCost > 0 ? `₹${componentCost.toFixed(2)}` : '—'}</strong></td>
           </tr>
         `;
       }).join('') : `<tr><td colspan="6" style="text-align: center; color: #94a3b8; padding: 16px;">No recipe ingredients listed</td></tr>`}
       <tr style="background: #f1f5f9; font-weight: bold;">
-        <td colspan="5" style="text-align: right; padding-right: 14px;">Total Estimated Formulation Cost:</td>
+        <td colspan="5" style="text-align: right; padding-right: 14px;">Total Estimated Formulation Cost (Per Liter / kg):</td>
         <td style="color: #059669; font-size: 14px;">₹${calculatedCost.toFixed(2)}</td>
       </tr>
     </tbody>

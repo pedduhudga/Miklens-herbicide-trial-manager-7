@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { X, FlaskConical, ExternalLink, Filter, Layers, DollarSign, Trophy, ArrowRight, Edit, AlertTriangle, ShieldAlert, Sparkles, Droplets, Info } from 'lucide-react';
 import { safeJsonParse } from '../utils/helpers.js';
-import { calculateFormulationCost } from '../utils/costUtils.js';
+import { calculateFormulationCost, getFormulationCostDetails, findIngredientInLibrary, parseIngredientCost } from '../utils/costUtils.js';
 import { getCategoryConfig } from '../utils/categoryConfig.js';
 import { analyzeFormulationSynergy } from '../utils/hracSynergy.js';
 import { useNavigate } from 'react-router-dom';
@@ -43,13 +43,15 @@ export default function FormulationQuickPeekModal({
     const avgEff = effs.length > 0 ? Math.round(effs.reduce((a, b) => a + b, 0) / effs.length) : null;
 
     const ings = safeJsonParse(formulation.IngredientsJSON, []);
-    const cost = calculateFormulationCost(ings, ingredientsList);
+    const costDetails = getFormulationCostDetails(ings, ingredientsList);
+    const cost = costDetails.costPerUnit > 0 ? costDetails.costPerUnit : parseFloat(formulation.EstimatedCost || 0);
 
     return {
       totalTrials: linked.length,
       winRate,
       avgEff,
       cost,
+      unitLabel: costDetails.unitLabel || '/ L',
       ings
     };
   }, [formulation, allTrials, ingredientsList]);
@@ -111,7 +113,10 @@ export default function FormulationQuickPeekModal({
             </div>
             <div className="p-2 bg-slate-50 rounded-xl border border-slate-100">
               <div className="text-[10px] uppercase font-bold text-slate-400">Recipe Cost</div>
-              <div className="text-sm font-extrabold text-emerald-700">₹{stats.cost.toFixed(2)}</div>
+              <div className="text-sm font-extrabold text-emerald-700">
+                ₹{stats.cost.toFixed(2)}{' '}
+                <span className="text-[10px] text-slate-400 font-normal">{stats.unitLabel}</span>
+              </div>
             </div>
           </div>
 
@@ -125,6 +130,10 @@ export default function FormulationQuickPeekModal({
               {stats.ings.length > 0 ? (
                 stats.ings.map((ing, i) => {
                   const act = (synergy.activeIngredients || []).find(a => a.name.toLowerCase() === (ing.name || '').toLowerCase());
+                  const libItem = findIngredientInLibrary(ing.name, ingredientsList);
+                  const libCost = libItem ? parseIngredientCost(libItem) : 0;
+                  const libUnit = libItem ? (libItem.Unit || libItem.unit || 'L') : '';
+
                   return (
                     <div key={i} className="px-3 py-2 flex justify-between items-center text-xs">
                       <div>
@@ -133,6 +142,11 @@ export default function FormulationQuickPeekModal({
                           {act && act.hracGroup !== 'Unknown' && (
                             <span className="text-[10px] font-mono px-1.5 py-0.2 bg-purple-100 text-purple-700 font-bold rounded" title={act.targetSite}>
                               HRAC {act.hracGroup}
+                            </span>
+                          )}
+                          {libCost > 0 && (
+                            <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                              ₹{libCost.toFixed(2)}/{libUnit}
                             </span>
                           )}
                         </div>

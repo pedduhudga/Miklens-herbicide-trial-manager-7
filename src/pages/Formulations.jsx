@@ -4,14 +4,14 @@ import { useAppState } from '../hooks/useAppState.jsx';
 import { useAuth } from '../hooks/useAuth.js';
 import TopBar from '../components/TopBar.jsx';
 import Modal from '../components/Modal.jsx';
-import { addFormulation, deleteFormulation, updateFormulation, validateCategoryDataOperation } from '../services/dataLayer.js';
+import { addFormulation, deleteFormulation, updateFormulation, validateCategoryDataOperation, addIngredient } from '../services/dataLayer.js';
 import { safeJsonParse } from '../utils/helpers.js';
 import { getCategoryConfig } from '../utils/categoryConfig.js';
-import { calculateFormulationCost } from '../utils/costUtils.js';
+import { calculateFormulationCost, getFormulationCostDetails, findIngredientInLibrary, parseIngredientCost } from '../utils/costUtils.js';
 import { 
   Plus, X, Share2, Edit, Trash2, Copy, Sparkles, Layers, 
   ArrowUpDown, Scale, FileDown, Rocket, Wand2, MoreVertical, 
-  ChevronDown, Check 
+  ChevronDown, Check, AlertCircle 
 } from 'lucide-react';
 import AppSharingModal from '../components/AppSharingModal.jsx';
 import LinkedTrialsModal from '../components/LinkedTrialsModal.jsx';
@@ -388,7 +388,7 @@ function FormulationCard({
             </span>
             <p className="font-extrabold text-xs text-emerald-700 leading-tight mt-0.5">
               {CURRENCY_SYMBOL}{form._costVal.toFixed(2)}{' '}
-              <span className="text-[9px] text-slate-400 font-normal">/ L</span>
+              <span className="text-[9px] text-slate-400 font-normal">{form._unitLabel || '/ L'}</span>
             </p>
           </div>
 
@@ -584,7 +584,92 @@ export default function Formulations({ onMenuClick }) {
   const [ingredients, setIngredients] = useState([{ name: '', quantity: '', unit: 'ml' }]);
   const [dynamicFields, setDynamicFields] = useState({});
 
+  // Quick Add Ingredient Modal State (directly accessible from Formulation modal)
+  const [isQuickAddIngOpen, setIsQuickAddIngOpen] = useState(false);
+  const [quickIngName, setQuickIngName] = useState('');
+  const [quickIngCost, setQuickIngCost] = useState('');
+  const [quickIngUnit, setQuickIngUnit] = useState('L');
+  const [quickIngTargetIndex, setQuickIngTargetIndex] = useState(null);
+  const [isSavingQuickIng, setIsSavingQuickIng] = useState(false);
+
   const CURRENCY_SYMBOL = '₹';
+
+  const handleOpenQuickAddIngredient = (initialName = '', rowIndex = null) => {
+    setQuickIngName(initialName ? String(initialName).trim() : '');
+    setQuickIngCost('');
+    setQuickIngUnit('L');
+    setQuickIngTargetIndex(rowIndex);
+    setIsQuickAddIngOpen(true);
+  };
+
+  const handleSaveQuickIngredient = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const trimmedName = quickIngName.trim();
+    if (!trimmedName) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Ingredient name is required.', type: 'error' } }));
+      return;
+    }
+    const parsedCost = parseFloat(quickIngCost);
+    if (isNaN(parsedCost) || parsedCost < 0) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Please enter a valid price (e.g. 500).', type: 'error' } }));
+      return;
+    }
+
+    setIsSavingQuickIng(true);
+    const activeCategory = state.activeCategory || 'herbicide';
+    const newIngredientPayload = {
+      ID: Date.now().toString(),
+      Name: trimmedName,
+      Cost: parsedCost,
+      Unit: quickIngUnit || 'L',
+      Category: activeCategory,
+      CreatedAt: new Date().toISOString()
+    };
+
+    // 1. Optimistically update state.ingredients in-memory
+    const updatedIngredientsList = [...(state.ingredients || []), newIngredientPayload];
+    updateState({ ingredients: updatedIngredientsList });
+
+    // 2. Link directly to the active formulation recipe rows
+    const baseUnitLower = (quickIngUnit || 'L').toLowerCase();
+    const defaultRecipeUnit = ['kg', 'gm', 'g', 'gram', 'grams', 'mg'].includes(baseUnitLower) ? 'gm' : 'ml';
+
+    if (quickIngTargetIndex !== null && quickIngTargetIndex >= 0 && quickIngTargetIndex < ingredients.length) {
+      const updatedRows = [...ingredients];
+      updatedRows[quickIngTargetIndex] = {
+        ...updatedRows[quickIngTargetIndex],
+        name: trimmedName,
+        unit: updatedRows[quickIngTargetIndex].unit || defaultRecipeUnit
+      };
+      setIngredients(updatedRows);
+    } else {
+      const updatedRows = [...ingredients];
+      const lastRow = updatedRows[updatedRows.length - 1];
+      if (lastRow && !lastRow.name) {
+        lastRow.name = trimmedName;
+        lastRow.unit = defaultRecipeUnit;
+      } else {
+        updatedRows.push({ name: trimmedName, quantity: '', unit: defaultRecipeUnit });
+      }
+      setIngredients(updatedRows);
+    }
+
+    setIsQuickAddIngOpen(false);
+    setIsSavingQuickIng(false);
+
+    // 3. Persist to data layer / cloud database
+    try {
+      await addIngredient(newIngredientPayload, getAppState);
+      window.dispatchEvent(new CustomEvent('app:toast', {
+        detail: { msg: `Added "${trimmedName}" (${CURRENCY_SYMBOL}${parsedCost.toFixed(2)} / ${quickIngUnit}) to Ingredients Library!`, type: 'success' }
+      }));
+    } catch (err) {
+      console.error('Failed to save ingredient to library:', err);
+      window.dispatchEvent(new CustomEvent('app:toast', {
+        detail: { msg: 'Ingredient linked to recipe, but failed to save permanently to library.', type: 'warning' }
+      }));
+    }
+  };
 
   const handleOpenModal = (form = null, duplicate = false) => {
     const activeCategory = state.activeCategory || 'herbicide';
@@ -640,17 +725,17 @@ export default function Formulations({ onMenuClick }) {
     const newIngs = [...ingredients];
     newIngs[index][field] = value;
 
-    // Auto-fill unit if ingredient is selected from list
+    // Auto-fill unit if ingredient is selected or matched in library
     if (field === 'name') {
-      const selectedLibIng = state.ingredients.find(i => i.Name === value);
+      const selectedLibIng = findIngredientInLibrary(value, state.ingredients || []);
       if (selectedLibIng) {
-        const baseUnit = String(selectedLibIng.Unit || '').toLowerCase().trim();
+        const baseUnit = String(selectedLibIng.Unit || selectedLibIng.unit || '').toLowerCase().trim();
         if (baseUnit === 'l' || baseUnit === 'litre' || baseUnit === 'litres' || baseUnit === 'liter' || baseUnit === 'liters' || baseUnit === 'ml' || baseUnit === 'millilitre' || baseUnit === 'millilitres') {
           newIngs[index].unit = 'ml';
         } else if (baseUnit === 'kg' || baseUnit === 'kilogram' || baseUnit === 'kilograms' || baseUnit === 'g' || baseUnit === 'gm' || baseUnit === 'gram' || baseUnit === 'grams') {
           newIngs[index].unit = 'gm';
         } else {
-          newIngs[index].unit = selectedLibIng.Unit || '';
+          newIngs[index].unit = selectedLibIng.Unit || selectedLibIng.unit || '';
         }
       }
     }
@@ -778,8 +863,9 @@ export default function Formulations({ onMenuClick }) {
     return rawForms.map(form => {
       const stats = getFormulationTrialStats(form, state.trials, state.projects, activeCategory);
       const parsedIngs = safeJsonParse(form.IngredientsJSON, []);
-      const realCost = calculateFormulationCost(parsedIngs, state.ingredients || []);
-      const costVal = realCost > 0 ? realCost : parseFloat(form.EstimatedCost || 0);
+      const costDetails = getFormulationCostDetails(parsedIngs, state.ingredients || []);
+      const costVal = costDetails.costPerUnit > 0 ? costDetails.costPerUnit : parseFloat(form.EstimatedCost || 0);
+      const unitLabel = costDetails.unitLabel || '/ L';
       const formDuplicates = duplicateLookup.get(String(form.ID || form.id)) || [];
 
       return {
@@ -790,6 +876,8 @@ export default function Formulations({ onMenuClick }) {
         _largeCount: stats.fieldCount,
         _avgScore: stats.avgEfficacy,
         _costVal: costVal,
+        _unitLabel: unitLabel,
+        _costDetails: costDetails,
         _parsedIngs: parsedIngs,
         _duplicates: formDuplicates
       };
@@ -1124,71 +1212,191 @@ export default function Formulations({ onMenuClick }) {
 
           <div>
             <div className="flex justify-between items-center mb-2">
-              <label className="block text-sm font-semibold text-slate-700">Ingredients</label>
-              <button
-                type="button"
-                onClick={handleAddIngredientRow}
-                className="text-xs font-bold text-emerald-600 hover:text-emerald-700 bg-emerald-50 px-2 py-1 rounded"
-              >
-                + Add Row
-              </button>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700">Recipe Ingredients</label>
+                <span className="text-[11px] text-slate-400">Specify active components and quantities</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleOpenQuickAddIngredient('', null)}
+                  className="text-xs font-bold text-purple-700 hover:text-purple-800 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition"
+                  title="Add a new ingredient and its unit price directly into the ingredients library"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  + New Ingredient
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAddIngredientRow}
+                  className="text-xs font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Add Row
+                </button>
+              </div>
             </div>
 
-            <div className="space-y-2 max-h-60 overflow-y-auto p-1">
-              {ingredients.map((ing, index) => (
-                <div key={index} className="flex gap-2 items-center bg-slate-50 p-2 rounded-lg border">
-                  <div className="flex-1">
-                    <input
-                      type="text"
-                      list="ingredient-lib-list"
-                      required
-                      value={ing.name}
-                      onChange={e => handleIngredientChange(index, 'name', e.target.value)}
-                      className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
-                      placeholder="Ingredient name"
-                    />
+            <div className="space-y-2.5 max-h-72 overflow-y-auto p-1">
+              {ingredients.map((ing, index) => {
+                const cleanName = (ing.name || '').trim();
+                const matchedLib = cleanName ? findIngredientInLibrary(cleanName, state.ingredients || []) : null;
+                const libCost = matchedLib ? parseIngredientCost(matchedLib) : 0;
+                const libUnit = matchedLib ? (matchedLib.Unit || matchedLib.unit || 'L') : '';
+
+                return (
+                  <div key={index} className="bg-slate-50/90 p-2.5 rounded-xl border border-slate-200/80 space-y-1.5 transition-all">
+                    <div className="flex gap-2 items-center">
+                      <div className="flex-1 min-w-0">
+                        <input
+                          type="text"
+                          list="ingredient-lib-list"
+                          required
+                          value={ing.name}
+                          onChange={e => handleIngredientChange(index, 'name', e.target.value)}
+                          className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
+                          placeholder="Ingredient name (e.g. Pelargonic acid)"
+                        />
+                      </div>
+                      <div className="w-24 shrink-0">
+                        <input
+                          type="number"
+                          step="any"
+                          required
+                          value={ing.quantity}
+                          onChange={e => handleIngredientChange(index, 'quantity', e.target.value)}
+                          className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white font-mono"
+                          placeholder="Qty"
+                        />
+                      </div>
+                      <div className="w-20 shrink-0">
+                        <input
+                          type="text"
+                          required
+                          value={ing.unit}
+                          onChange={e => handleIngredientChange(index, 'unit', e.target.value)}
+                          className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white font-mono"
+                          placeholder="Unit"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveIngredientRow(index)}
+                        disabled={ingredients.length === 1}
+                        className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg disabled:opacity-20 shrink-0 transition"
+                        title="Remove ingredient"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    {/* Price and Library Status Strip */}
+                    <div className="flex items-center justify-between text-[11px] px-1">
+                      {cleanName ? (
+                        matchedLib ? (
+                          libCost > 0 ? (
+                            <span className="text-emerald-700 font-medium inline-flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+                              Library price: <strong>{CURRENCY_SYMBOL}{libCost.toFixed(2)} / {libUnit}</strong>
+                              {matchedLib.Name !== cleanName && (
+                                <span className="text-slate-400 text-[10px]">({matchedLib.Name})</span>
+                              )}
+                            </span>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <span className="text-amber-700 font-medium">⚠️ Cost missing (₹0.00 in library)</span>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenQuickAddIngredient(cleanName, index)}
+                                className="text-purple-700 font-bold hover:underline"
+                              >
+                                + Update Price
+                              </button>
+                            </div>
+                          )
+                        ) : (
+                          <div className="flex items-center justify-between w-full">
+                            <span className="text-amber-700 font-medium">
+                              Not listed in Ingredients library
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenQuickAddIngredient(cleanName, index)}
+                              className="font-bold text-purple-700 hover:text-purple-800 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-2 py-0.5 rounded text-[11px] transition inline-flex items-center gap-1"
+                            >
+                              <Plus className="w-3 h-3" />
+                              Save to Library & Set Price
+                            </button>
+                          </div>
+                        )
+                      ) : (
+                        <span className="text-slate-400 italic">Select from library or enter custom ingredient</span>
+                      )}
+                    </div>
                   </div>
-                  <div className="w-24">
-                    <input
-                      type="number"
-                      step="0.001"
-                      required
-                      value={ing.quantity}
-                      onChange={e => handleIngredientChange(index, 'quantity', e.target.value)}
-                      className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
-                      placeholder="Qty"
-                    />
-                  </div>
-                  <div className="w-20">
-                    <input
-                      type="text"
-                      required
-                      value={ing.unit}
-                      onChange={e => handleIngredientChange(index, 'unit', e.target.value)}
-                      className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
-                      placeholder="Unit"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveIngredientRow(index)}
-                    disabled={ingredients.length === 1}
-                    className="p-1 text-slate-400 hover:text-red-500 disabled:opacity-30"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
             <datalist id="ingredient-lib-list">
               {state.ingredients.map(i => <option key={i.ID} value={i.Name} />)}
             </datalist>
           </div>
 
-          <div className="bg-emerald-50 p-3 rounded-lg border border-emerald-100 flex justify-between items-center">
-            <span className="text-sm font-semibold text-emerald-800">Estimated Total Cost:</span>
-            <span className="font-bold text-emerald-700 text-lg">{CURRENCY_SYMBOL}{calculateEstimatedCost().toFixed(2)}</span>
-          </div>
+          {/* Real-time Estimated Cost Breakdown Strip */}
+          {(() => {
+            const costDetails = getFormulationCostDetails(ingredients, state.ingredients || []);
+            const hasUnpriced = costDetails.unpricedIngredients.length > 0;
+            return (
+              <div className="space-y-1.5">
+                <div className="bg-emerald-50 p-3.5 rounded-xl border border-emerald-200/80 flex justify-between items-center">
+                  <div>
+                    <span className="text-sm font-bold text-emerald-900 block">Est. Recipe Cost:</span>
+                    <span className="text-[11px] text-emerald-700">
+                      {costDetails.totalVolumeL > 0 ? (
+                        <>Normalized per Liter • Total batch: {costDetails.totalVolumeL >= 1 ? `${costDetails.totalVolumeL.toFixed(3)} L` : `${(costDetails.totalVolumeL * 1000).toFixed(1)} ml`}</>
+                      ) : costDetails.totalWeightKg > 0 ? (
+                        <>Normalized per kg • Total batch: {costDetails.totalWeightKg >= 1 ? `${costDetails.totalWeightKg.toFixed(3)} kg` : `${(costDetails.totalWeightKg * 1000).toFixed(1)} gm`}</>
+                      ) : (
+                        <>Batch Cost</>
+                      )}
+                      {' • '}{costDetails.pricedCount} of {costDetails.totalCount} ingredients priced
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="font-extrabold text-emerald-700 text-xl">
+                      {CURRENCY_SYMBOL}{costDetails.costPerUnit.toFixed(2)}
+                    </span>
+                    <span className="text-xs text-emerald-600 font-semibold ml-1">{costDetails.unitLabel}</span>
+                  </div>
+                </div>
+
+                {hasUnpriced && (
+                  <div className="p-2.5 bg-amber-50 border border-amber-200/80 rounded-xl text-xs text-amber-900 flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <span className="font-bold">Unpriced ingredients: </span>
+                      <span className="text-amber-800">
+                        {costDetails.unpricedIngredients.map((u, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => {
+                              const rowIndex = ingredients.findIndex(i => (i.name || '').trim().toLowerCase() === u.name.toLowerCase());
+                              handleOpenQuickAddIngredient(u.name, rowIndex >= 0 ? rowIndex : null);
+                            }}
+                            className="inline-flex items-center underline font-semibold text-amber-900 hover:text-amber-700 mr-2"
+                            title="Click to add price to library"
+                          >
+                            {u.name} (+ add price)
+                          </button>
+                        ))}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1">Notes (Optional)</label>
@@ -1214,6 +1422,85 @@ export default function Formulations({ onMenuClick }) {
               className="btn-primary px-6 py-2 rounded-xl"
             >
               Save Formulation
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Quick Add Ingredient to Library Modal */}
+      <Modal
+        isOpen={isQuickAddIngOpen}
+        onClose={() => setIsQuickAddIngOpen(false)}
+        title="Add New Ingredient to Library"
+      >
+        <form onSubmit={handleSaveQuickIngredient} className="space-y-4">
+          <div className="p-3 bg-purple-50/70 border border-purple-200/80 rounded-xl text-xs text-purple-900 leading-relaxed">
+            ✨ <strong>Quick Ingredient Creator:</strong> This ingredient and its unit price will be permanently saved to your <strong>{activeCategory}</strong> library and will automatically calculate recipe costs for all formulations.
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">
+              Ingredient Name <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              required
+              value={quickIngName}
+              onChange={e => setQuickIngName(e.target.value)}
+              className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-sm bg-white"
+              placeholder="e.g. Acetic acid, Capric Acid, Citronella oil"
+              autoFocus
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">
+                Unit Price ({CURRENCY_SYMBOL}) <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="number"
+                step="any"
+                min="0"
+                required
+                value={quickIngCost}
+                onChange={e => setQuickIngCost(e.target.value)}
+                className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-sm bg-white font-mono"
+                placeholder="e.g. 825.00"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">
+                Base Unit <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={quickIngUnit}
+                onChange={e => setQuickIngUnit(e.target.value)}
+                className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none bg-white text-sm"
+              >
+                <option value="L">L (Per Litre)</option>
+                <option value="kg">kg (Per Kilogram)</option>
+                <option value="ml">ml (Per Millilitre)</option>
+                <option value="gm">gm (Per Gram)</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="pt-3 flex justify-end gap-2 border-t">
+            <button
+              type="button"
+              onClick={() => setIsQuickAddIngOpen(false)}
+              className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl text-sm font-medium transition"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSavingQuickIng}
+              className="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-sm font-bold shadow-xs transition active:scale-95 disabled:opacity-50 flex items-center gap-1.5"
+            >
+              <Plus className="w-4 h-4" />
+              {isSavingQuickIng ? 'Saving to Library...' : 'Save & Link to Recipe'}
             </button>
           </div>
         </form>
