@@ -3104,7 +3104,14 @@ export default function Trials({ onMenuClick }) {
     const activePhotos = photos.filter(p => !p.deleted);
     const deletedPhoto = activePhotos[idx];
     
+    let deletedDriveId = null;
+    let deletedFileName = null;
+    let deletedUrl = null;
     if (deletedPhoto) {
+      deletedUrl = typeof deletedPhoto === 'string' ? deletedPhoto : (deletedPhoto.fileData || deletedPhoto.url);
+      deletedDriveId = deletedPhoto.driveId || deletedPhoto.fileId || getDriveFileId(deletedUrl);
+      deletedFileName = deletedPhoto.fileName || null;
+
       const rawIdx = photos.indexOf(deletedPhoto);
       if (rawIdx !== -1) {
         if (typeof photos[rawIdx] === 'string') {
@@ -3119,13 +3126,18 @@ export default function Trials({ onMenuClick }) {
       }
     }
 
+    // Accumulate into tombstone list DeletedPhotoDriveIDs so Drive sync NEVER restores this photo
+    const existingDeletedIds = safeJsonParse(activeTrial.DeletedPhotoDriveIDs, []);
+    const updatedDeletedDriveIds = Array.from(new Set([
+      ...existingDeletedIds,
+      deletedDriveId,
+      deletedFileName
+    ].filter(Boolean)));
+
     // Find and delete the corresponding AI-generated observation(s) linked to this photo
     let efficacyData = validateEfficacyData(safeJsonParse(activeTrial.EfficacyDataJSON, []), activeCategory, true);
-    if (deletedPhoto) {
-      const deletedUrl = typeof deletedPhoto === 'string' ? deletedPhoto : (deletedPhoto.fileData || deletedPhoto.url);
-      if (deletedUrl) {
-        efficacyData = efficacyData.filter(obs => obs.photoUrl !== deletedUrl);
-      }
+    if (deletedUrl) {
+      efficacyData = efficacyData.filter(obs => obs.photoUrl !== deletedUrl);
     }
 
     const resultRating = calculateResultRating(efficacyData, activeTrial?.IsControl === true || activeTrial?.IsControl === 'true', activeTrial?.Category || activeCategory, activeTrial);
@@ -3135,6 +3147,7 @@ export default function Trials({ onMenuClick }) {
     const updated = { 
       ...activeTrial, 
       PhotoURLs: JSON.stringify(photos),
+      DeletedPhotoDriveIDs: JSON.stringify(updatedDeletedDriveIds),
       EfficacyDataJSON: JSON.stringify(efficacyData),
       Result: resultRating,
       WeedSpecies: observedWeeds,
@@ -3144,10 +3157,18 @@ export default function Trials({ onMenuClick }) {
     updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
     setActiveTrial(updated);
     setAiSummary('');
+
+    // Attempt to trash the file in Google Drive if on Google Drive
+    if (deletedDriveId && navigator.onLine) {
+      apiCall('deletePhotoFromDrive', { fileId: deletedDriveId, url: deletedUrl }, false, getAppState)
+        .catch(err => console.warn('Could not trash photo in Drive:', err));
+    }
+
     try { 
       await updateTrial({ 
         ID: updated.ID, 
         PhotoURLs: updated.PhotoURLs, 
+        DeletedPhotoDriveIDs: updated.DeletedPhotoDriveIDs,
         EfficacyDataJSON: updated.EfficacyDataJSON,
         Result: updated.Result,
         WeedSpecies: updated.WeedSpecies,
@@ -3607,6 +3628,16 @@ Rules:
         return String(str).toLowerCase().replace(/[^a-z0-9]/g, '');
       };
 
+      // 1. Gather all tombstoned / user-deleted identifiers (Drive IDs and fileNames)
+      const deletedDriveIds = new Set(safeJsonParse(trial.DeletedPhotoDriveIDs, []));
+      photoURLs.forEach(p => {
+        if (p && typeof p === 'object' && p.deleted) {
+          const id = p.driveId || p.fileId || p.driveFileId || getDriveFileId(p.url || p.src || p.fileUrl);
+          if (id) deletedDriveIds.add(id);
+          if (p.fileName) deletedDriveIds.add(p.fileName);
+        }
+      });
+
       // Collect indices of broken/unavailable photos to heal sequentially
       const brokenPhotoIndices = [];
       photoURLs.forEach((p, idx) => {
@@ -3616,6 +3647,12 @@ Rules:
       });
 
       images.forEach(img => {
+        // STRICT SAFETY GUARD: If this photo was previously deleted by the user, DO NOT RESTORE IT!
+        if (deletedDriveIds.has(img.id) || (img.name && deletedDriveIds.has(img.name))) {
+          console.log(`[Drive Sync] Skipping user-deleted photo: ${img.name} (${img.id})`);
+          return;
+        }
+
         // Find if there is an existing entry matching this drive ID (even if broken or base64-removed)
         const existingPhoto = photoURLs.find(p => 
           p.driveId === img.id || 
@@ -3636,17 +3673,8 @@ Rules:
 
         if (existingPhoto) {
           if (existingPhoto.deleted) {
-            if (!healOnly) {
-              existingPhoto.deleted = false;
-              existingPhoto.url = webViewUrl;
-              existingPhoto.driveId = img.id;
-              existingPhoto.fileName = img.name;
-              existingPhoto.importedFrom = 'Drive';
-              if (!existingPhoto.date && photoDate) existingPhoto.date = photoDate;
-              healedCount++;
-            } else {
-              return; // Skip re-importing deleted photos
-            }
+            // Photo was marked deleted by the user — NEVER resurrect it!
+            return;
           } else if (isPhotoBroken(existingPhoto) || !existingPhoto.url || existingPhoto.url.includes('[base64-removed]')) {
             existingPhoto.url = webViewUrl;
             existingPhoto.driveId = img.id;
@@ -3706,8 +3734,8 @@ Rules:
           healedCount++;
         }
 
-        // 3. Append as new photo if this image is not already present in the trial
-        if (!healed) {
+        // 3. Append as new photo if this image is not already present and NOT in healOnly mode
+        if (!healed && !healOnly) {
           const isAlreadyPresent = photoURLs.some(p => 
             p.driveId === img.id || 
             p.fileId === img.id || 
@@ -3828,6 +3856,16 @@ Rules:
           if (images.length > 0) {
             images.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
 
+            // Gather all tombstoned / user-deleted identifiers
+            const deletedDriveIds = new Set(safeJsonParse(trial.DeletedPhotoDriveIDs, []));
+            photoURLs.forEach(p => {
+              if (p && typeof p === 'object' && p.deleted) {
+                const id = p.driveId || p.fileId || p.driveFileId || getDriveFileId(p.url || p.src || p.fileUrl);
+                if (id) deletedDriveIds.add(id);
+                if (p.fileName) deletedDriveIds.add(p.fileName);
+              }
+            });
+
             const brokenPhotoIndices = [];
             photoURLs.forEach((p, idx) => {
               if (isPhotoBroken(p) && !p.deleted) {
@@ -3839,6 +3877,11 @@ Rules:
             let localAdded = 0;
 
             images.forEach(img => {
+              // STRICT SAFETY GUARD: Never restore user-deleted photo
+              if (deletedDriveIds.has(img.id) || (img.name && deletedDriveIds.has(img.name))) {
+                return;
+              }
+
               const existingPhoto = photoURLs.find(p => 
                 p.driveId === img.id || 
                 p.fileId === img.id || 
@@ -3858,18 +3901,8 @@ Rules:
 
               if (existingPhoto) {
                 if (existingPhoto.deleted) {
-                  if (!healOnly) {
-                    existingPhoto.deleted = false;
-                    existingPhoto.url = webViewUrl;
-                    existingPhoto.driveId = img.id;
-                    existingPhoto.fileName = img.name;
-                    existingPhoto.importedFrom = 'Drive';
-                    if (!existingPhoto.date && photoDate) existingPhoto.date = photoDate;
-                    localHealed++;
-                    totalHealed++;
-                  } else {
-                    return; // Skip re-importing deleted photos
-                  }
+                  // Photo was marked deleted — NEVER resurrect it!
+                  return;
                 } else if (isPhotoBroken(existingPhoto) || !existingPhoto.url || existingPhoto.url.includes('[base64-removed]')) {
                   existingPhoto.url = webViewUrl;
                   existingPhoto.driveId = img.id;

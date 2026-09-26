@@ -10,6 +10,12 @@ export const AVAILABLE_GEMINI_MODELS = [
     isDefault: true
   },
   {
+    id: "gemini-3.8-flash-lite",
+    name: "Gemini 3.8 Flash-Lite",
+    description: "Frontier Fast GA. Ultra-low latency high-throughput photo scanning (1500 RPD, 30 RPM free).",
+    tier: "free_accessible"
+  },
+  {
     id: "gemini-3.7-flash",
     name: "Gemini 3.7 Flash",
     description: "Stable GA (Aug 2026). High-efficiency workhorse model for fast multimodal crop plot analysis (1500 RPD, 15 RPM free).",
@@ -32,13 +38,21 @@ export const AVAILABLE_GEMINI_MODELS = [
     name: "Gemini 3.1 Pro Preview",
     description: "Deep Reasoning. Complex agronomic synthesis, comprehensive trial reports & statistical insights (50 RPD, 5 RPM free).",
     tier: "free_accessible"
+  },
+  {
+    id: "gemini-2.5-flash",
+    name: "Gemini 2.5 Flash",
+    description: "Reliable fallback generation for multimodal vision and analysis.",
+    tier: "free_accessible"
   }
 ];
 
 export const GEMINI_FALLBACK_MODELS = [
   "gemini-3.8-flash",
+  "gemini-3.8-flash-lite",
   "gemini-3.7-flash",
   "gemini-3.5-flash",
   "gemini-3.5-flash-lite",
-  "gemini-3.1-pro-preview"
+  "gemini-3.1-pro-preview",
+  "gemini-2.5-flash"
 ];

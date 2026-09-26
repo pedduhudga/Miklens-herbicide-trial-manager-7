@@ -14,8 +14,10 @@ import {
   addTrial,
   deleteTrial,
   updateTrial,
-  uploadPhoto
+  uploadPhoto,
+  apiCall
 } from '../services/dataLayer.js';
+import { getDriveFileId } from '../utils/photoUtils.js';
 import {
   Plus, Trash2, MapPin, Calendar, Camera, Info, Sparkles, X,
   Compass, Map as MapIcon, RefreshCw, Layers, Thermometer, Wind, Droplets, CloudRain,
@@ -1632,7 +1634,15 @@ Rules:
     const photos = safeJsonParse(activeSubTrial.PhotoURLs, []);
     const activePhotos = photos.filter(p => !p.deleted);
     const deletedPhoto = activePhotos[idx];
+
+    let deletedDriveId = null;
+    let deletedFileName = null;
+    let deletedUrl = null;
     if (deletedPhoto) {
+      deletedUrl = typeof deletedPhoto === 'string' ? deletedPhoto : (deletedPhoto.fileData || deletedPhoto.url);
+      deletedDriveId = deletedPhoto.driveId || deletedPhoto.fileId || getDriveFileId(deletedUrl);
+      deletedFileName = deletedPhoto.fileName || null;
+
       const rawIdx = photos.indexOf(deletedPhoto);
       if (rawIdx !== -1) {
         if (typeof photos[rawIdx] === 'string') {
@@ -1647,28 +1657,40 @@ Rules:
       }
     }
 
+    const existingDeletedIds = safeJsonParse(activeSubTrial.DeletedPhotoDriveIDs, []);
+    const updatedDeletedDriveIds = Array.from(new Set([
+      ...existingDeletedIds,
+      deletedDriveId,
+      deletedFileName
+    ].filter(Boolean)));
+
     let efficacyData = validateEfficacyData(safeJsonParse(activeSubTrial.EfficacyDataJSON, []));
-    if (deletedPhoto) {
-      const deletedUrl = deletedPhoto.fileData || deletedPhoto.url || deletedPhoto;
-      if (deletedUrl) {
-        efficacyData = efficacyData.filter(obs => obs.photoUrl !== deletedUrl);
-      }
+    if (deletedUrl) {
+      efficacyData = efficacyData.filter(obs => obs.photoUrl !== deletedUrl);
     }
 
     const resultRating = 'Pending';
     const updated = {
       ...activeSubTrial,
       PhotoURLs: JSON.stringify(photos),
+      DeletedPhotoDriveIDs: JSON.stringify(updatedDeletedDriveIds),
       EfficacyDataJSON: JSON.stringify(efficacyData),
       Result: resultRating,
       AISummariesJSON: '{}'
     };
     updateState({ trials: state.trials.map(t => t.ID === updated.ID ? updated : t) });
     if (selectedSubTrialId === activeSubTrial.ID) setSelectedSubTrialId(updated.ID);
+
+    if (deletedDriveId && navigator.onLine) {
+      apiCall('deletePhotoFromDrive', { fileId: deletedDriveId, url: deletedUrl }, false, getAppState)
+        .catch(err => console.warn('Could not trash photo in Drive:', err));
+    }
+
     try {
       await updateTrial({
         ID: updated.ID,
         PhotoURLs: updated.PhotoURLs,
+        DeletedPhotoDriveIDs: updated.DeletedPhotoDriveIDs,
         EfficacyDataJSON: updated.EfficacyDataJSON,
         Result: updated.Result,
         AISummariesJSON: '{}'

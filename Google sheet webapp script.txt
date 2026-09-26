@@ -262,6 +262,18 @@ function executeAction(action, payload, auth) {
             return uploadPhotoChunk(parentFolderId, p);
         },
                 'getImageBase64': (p) => getImageBase64(p),
+        'deletePhotoFromDrive': (p) => {
+            const fileId = p.fileId || getFileIdFromUrl(p.url);
+            if (fileId) {
+                try {
+                    DriveApp.getFileById(fileId).setTrashed(true);
+                    return { success: true, message: 'File moved to trash in Drive' };
+                } catch (e) {
+                    return { success: false, message: e.message };
+                }
+            }
+            return { success: false, message: 'No fileId found' };
+        },
         // Projects
         'addProject': (p) => addRecord(ss, sheetsConfig.projects, p, auth),
         'updateProject': (p) => updateRecord(ss, sheetsConfig.projects, p, auth),
