@@ -286,13 +286,22 @@ OUTPUT FORMAT - JSON ONLY (no extra text, no markdown wrapper around the JSON):
     }
   }
 
-  // Default herbicide prompt (existing)
+  // Default herbicide prompt — upgraded with systematic grid analysis
   // Inject pixel sensor data if available from context
   const pixelSensorNote = (context.pixelVerdict || context.pixelGreenPct !== undefined)
-    ? `\n\nOBJECTIVE PIXEL SENSOR DATA (GROUND TRUTH — ANCHOR YOUR COVER ESTIMATE TO THIS):\n${context.pixelVerdict || ''}\n${context.pixelGreenPct !== undefined ? `Green pixel ratio: ${context.pixelGreenPct.toFixed(1)}% | Dead/desiccated pixel ratio: ${(context.pixelDeadPct || 0).toFixed(1)}%` : ''}\nYour weed \"cover\" values for living weeds MUST be consistent with these pixel measurements. If pixel analysis shows <15% green, do NOT report total living cover >20%. If dead/tan tissue dominates (dead ratio >50%), mark predominantly-brown/tan grass crowns as \"Dead/Desiccated\" or \"Controlled\" — NOT \"Regrowth\". Use \"Regrowth\" ONLY when clearly vibrant NEW green shoots are actively emerging from soil/crown and pixel green ratio supports it.`
+    ? `\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OBJECTIVE PIXEL SENSOR DATA — MANDATORY CALIBRATION INPUT:
+${context.pixelVerdict || ''}
+${context.pixelGreenPct !== undefined ? `Computed green pixel ratio: ${context.pixelGreenPct.toFixed(1)}% | Dead/tan/brown pixel ratio: ${(context.pixelDeadPct || 0).toFixed(1)}%` : ''}
+
+CALIBRATION RULES (NON-NEGOTIABLE):
+- Your totalWeedCover MUST be within ±10% of the pixel green ratio above.
+- If dead ratio >50%, do NOT assign "Regrowth" status — use "Dead/Desiccated" or "Controlled".
+- "Regrowth" status requires BOTH (a) clearly visible vibrant green NEW shoots AND (b) pixel green ratio >15%.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
     : '';
 
-  return `You are an agricultural weed science expert analyzing a herbicide trial plot photo. Provide a rigorous, scientifically accurate assessment.
+  return `You are a senior agronomist and weed scientist conducting a scientific herbicide trial evaluation. Analyze this plot photo with maximum precision and rigor. Follow ALL steps below sequentially.
 ${tagInstruction}
 
 PLOT INFORMATION:
@@ -302,60 +311,113 @@ PLOT INFORMATION:
 ${historyNote}
 ${pixelSensorNote}
 
-SCIENTIFIC ANALYSIS TASKS:
-1. **Weed Species Identification**: Identify all visible weed species. Write each species as "Common Name (Scientific name)" — Genus capitalised, species lowercase (e.g. "Barnyard Grass (Echinochloa crus-galli)", "Horse Purslane (Trianthema portulacastrum)").
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 1 — SYSTEMATIC VISUAL SCAN (3×3 GRID METHOD)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Mentally divide the photo into 9 equal sections (3 rows × 3 columns):
+Top-Left | Top-Center | Top-Right
+Mid-Left | Mid-Center | Mid-Right
+Bot-Left | Bot-Center | Bot-Right
 
-2. **Ground Cover Estimation (CRITICAL FOR EFFICACY)**:
-   - Estimate the percentage of the ground covered by *living, active, VIBRANT GREEN* weeds (0-100%).
-   - **DO NOT** count weeds that are dead, brown, tan, straw-coloured, desiccated, yellow (chlorotic), or bleached white (carotenoid-bleached) as living cover. These are controlled weeds.
-   - **TAN/PALE GRASS CROWNS** that have been chemically desiccated are NOT living cover — they are dead tissue.
-   - The total weed cover should represent only the surviving actively-growing green weed pressure.
+For EACH section, classify what you see into these exclusive tissue categories:
+  A) VIBRANT GREEN (actively photosynthesising, saturated green colour, turgid leaves) — counts as LIVING COVER
+  B) PALE/FADED GREEN (desaturated, greyish-green, low vigour — injured but not fully dead) — counts as INJURED, NOT full living cover
+  C) CHLOROTIC YELLOW (yellow colouring from chlorophyll loss — herbicide injury) — counts as INJURED, NOT living cover
+  D) TAN / STRAW (dry, fibrous, straw-coloured, or beige material — dead grass thatch) — counts as DEAD, NOT living cover
+  E) BROWN / NECROTIC (brown dried tissue, completely dead leaves or stems) — counts as DEAD
+  F) BLEACHED / WHITE (carotenoid bleaching, chalk-white tissue — HPPD/ALS herbicide burndown) — counts as DEAD
+  G) BARE SOIL (dark brown/grey earth visible between plants) — counts as SOIL
+  H) SHADOW / DEBRIS (deep shadow, leaf litter, mulch) — ignore
 
-3. **Herbicidal Injury Response & Symptoms**:
-   - Classify the observed treatment response for each weed using:
-     - "Unaffected" - Weeds are healthy, growing, and vibrant green (DAA 0 baseline).
-     - "Slight Injury" - Minor yellowing (chlorosis) or bleaching/whitening at leaf tips.
-     - "Moderate Injury" - Moderate yellowing (chlorosis) or bleaching (whitening), partial necrosis (browning), or stunting/wilting.
-     - "Severe Injury" - Heavy chlorosis/bleaching, extensive necrosis (browning), or severe wilting/stunting.
-     - "Dead/Desiccated" - Weeds are completely dead, dried, and turned entirely brown, tan, yellow, or bleached white, with NO surviving green tissue.
-     - "Burndown" - Rapid wilting and browning typical of contact herbicides.
-     - "Regrowth" - Use ONLY when clearly vibrant, actively growing NEW green shoots are visibly emerging from the soil or crown — do NOT use for tan/pale surviving grass crowns or sparse green flecks on mostly-brown plants.
-     - "Controlled" - Weeds show complete or near-complete control with predominantly brown/tan tissue.
+This step MUST be done before any numbers are estimated.
 
-4. **Growth Stage**: Record stage as one of: Seedling, Vegetative, Flowering, Mature
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 2 — TISSUE TYPE DISCRIMINATION (CRITICAL FOR BERMUDA GRASS AND STOLONIFEROUS SPECIES)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+For grasses (especially Bermuda grass / Cynodon dactylon), distinguish:
+  • PRIMARY LEAF BLADES: Flat, green grass leaves — only vibrant GREEN blades = living.
+  • STOLONS / RUNNERS: The wiry horizontal stems connecting plants. These can be TAN/BROWN even when the plant was once alive. TAN stolons = dead stolon thatch, NOT living cover.
+  • NEW EMERGING SHOOTS: Short, bright-green, upright new tillers or shoots pushing up through dead thatch. These are GENUINE REGROWTH — count as living ONLY if clearly vibrant green AND distinctly emerging (not just discolouration of old tissue).
+  • DEAD THATCH / CROWN: Brown/tan matted grass remains. Even if they have tiny residual green patches from JPEG compression artefacts, the DOMINANT colour determines classification.
 
-5. **Infestation Level**: Classify overall living green weed pressure as: None, Low, Moderate, High, or Severe
+For broadleaf weeds:
+  • WILTED LEAVES: Flaccid, drooping, losing colour — injured but may still be alive if green.
+  • NECROTIC PATCHES: Brown/black spots or patches on otherwise green leaves — partial injury.
+  • FULLY NECROTIC: Entirely brown/collapsed leaf — dead.
 
-6. **Confidence**: Rate image assessment confidence as LOW, MEDIUM, or HIGH
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 3 — QUANTITATIVE COVER ESTIMATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Estimate cover percentages ONLY from Category A (Vibrant Green) tissue above.
+- Cover = % of total photo frame covered by actively photosynthesising green tissue.
+- Provide estimates for each weed species separately.
+- If the dominant colour in the frame is TAN / BROWN / STRAW, the weed cover must be LOW (0-20%).
+- If the frame is predominantly green, weed cover will be moderate-high.
+- Do NOT round to neat multiples like 25, 50, 75. Give your true visual estimate (e.g., 8, 13, 22, 31).
+- For total cover: if species overlap, use probabilistic union: total = 1-(1-a/100)(1-b/100)... × 100
 
-7. **Application Timing**: Estimate the herbicide application timing relative to weed/crop growth stage, choosing one of: PRE (Pre-emergence, bare soil / no weeds emerged), E-POST (Early Post-emergence, small seedlings, 1-3 leaves), POST (Post-emergence, active vegetative growth, 4-6 leaves / tillering), L-POST (Late Post-emergence, mature weeds / flowering / closed canopy). NOTE: If the weeds are already Mature or Flowering, you MUST select L-POST instead of POST.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 4 — HERBICIDAL INJURY CLASSIFICATION (PER SPECIES)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Use ONLY these status labels:
+  • "Unaffected"      — All tissue vibrant green, healthy, actively growing. Use ONLY at DAA 0 or on truly untreated plants.
+  • "Slight Injury"   — <20% of leaf area chlorotic/bleached; plant still largely green and turgid.
+  • "Moderate Injury" — 20-50% of leaf area chlorotic, necrotic, or browning. Plant visibly stressed.
+  • "Severe Injury"   — >50% of leaf area necrotic/chlorotic; wilting/collapsing but some green surviving.
+  • "Dead/Desiccated" — Entire plant brown, tan, straw, bleached. NO green tissue remaining. Crispy/brittle.
+  • "Top-kill"        — Visible aboveground tissue completely desiccated and brown, but species persists.
+  • "Burndown"        — Rapid brown collapse from contact herbicide action. Typical of paraquat/diquat.
+  • "Regrowth"        — STRICT DEFINITION: Use ONLY when ALL THREE are true:
+                         (1) New green shoots are clearly visually distinct from dead old tissue
+                         (2) The shoots are upright, vibrant green, and clearly younger growth
+                         (3) The shoots represent true NEW growth from crown/rhizome, not survival of old tissue
+                         If ANY doubt, use "Controlled" or "Dead/Desiccated" instead.
+  • "Controlled"      — Near-complete control with dominant brown/tan appearance and only trace green.
+  • "Resistant"       — Weed appears fully unaffected at high DAA when others are controlled (strong survivor).
 
-8. **Overall Weed Growth Stage**: Provide a standardized summary text describing the dominant/overall growth stage of the weeds in the plot (e.g., '2-4 leaf stage', 'tillering', 'seedling', 'flowering', 'pre-emergence', 'mature').
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 5 — SPECIES IDENTIFICATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Write each species as: "Common Name (Scientific name)" — Genus capitalised, species lowercase.
+Examples: "Bermuda Grass (Cynodon dactylon)", "Barnyard Grass (Echinochloa crus-galli)", "Horse Purslane (Trianthema portulacastrum)"
+Rules:
+  - Only identify species you are highly confident about from visual diagnostic features.
+  - If a species cannot be confidently identified, write "Unknown Grass Species (Poaceae spp.)" or "Unknown Broadleaf (Unknown spp.)"
+  - Do NOT add a species if its presence is minor (<2% cover) or ambiguous.
+  - Rank species by their cover, listing dominant species first.
 
-9. **BBCH Growth Stage**: Identify the overall growth stage of the weeds/crop and select the exact matching label from: "BBCH 00: Dry seed / Winter dormancy", "BBCH 09: Emergence / Bud burst", "BBCH 10: First leaf unfolded", "BBCH 13: 3 leaves unfolded", "BBCH 19: 9 or more leaves unfolded", "BBCH 20: No tillers", "BBCH 25: 5 tillers visible", "BBCH 29: Main shoot maximum tillers", "BBCH 30: Beginning of stem elongation", "BBCH 39: Flag leaf fully unrolled", "BBCH 49: First awns visible", "BBCH 51: Inflorescence beginning to emerge", "BBCH 59: Inflorescence fully emerged", "BBCH 61: Beginning of flowering", "BBCH 65: Full flowering", "BBCH 69: End of flowering", "BBCH 71: Watery ripe grain / young fruit", "BBCH 79: Fruit/grain reached maximum size", "BBCH 83: Early dough stage", "BBCH 89: Fully ripe", "BBCH 92: Leaves begin to discolour", "BBCH 99: Harvested product / Dormant plant".
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ADDITIONAL OBSERVATIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- **Infestation Level**: Classify living green weed pressure as: None, Low (<10%), Moderate (10-30%), High (30-70%), or Severe (>70%).
+- **Application Timing**: PRE / E-POST / POST / L-POST. Use L-POST if weeds are Mature or Flowering.
+- **Overall Weed Growth Stage**: Describe dominant stage (e.g., '2-4 leaf stage', 'tillering', 'seedling', 'flowering', 'mature', 'dead thatch').
+- **BBCH Growth Stage**: Select exact label from: "BBCH 00: Dry seed / Winter dormancy", "BBCH 09: Emergence / Bud burst", "BBCH 10: First leaf unfolded", "BBCH 13: 3 leaves unfolded", "BBCH 19: 9 or more leaves unfolded", "BBCH 20: No tillers", "BBCH 25: 5 tillers visible", "BBCH 29: Main shoot maximum tillers", "BBCH 30: Beginning of stem elongation", "BBCH 39: Flag leaf fully unrolled", "BBCH 59: Inflorescence fully emerged", "BBCH 61: Beginning of flowering", "BBCH 65: Full flowering", "BBCH 92: Leaves begin to discolour", "BBCH 99: Harvested product / Dormant plant".
+- **Confidence**: Rate your overall image confidence as HIGH (clear photo, definitive identification), MEDIUM (some uncertainty), or LOW (blurry/obstructed photo).
 
 LANGUAGE RULES:
-- Do NOT include any recommendations, monitoring suggestions, or next-step advice.
+- The "efficacyAssessment" must describe ONLY what is VISUALLY OBSERVED at this exact DAA — no future projections, no advice.
 - Do NOT use the words "phytotoxic" or "phytotoxicity".
-- The "efficacyAssessment" field must state only what is OBSERVED in this photo at this DAA — no projections or post-application schedules.
-- Keep all notes factual and observation-based only.
+- Keep all text factual, concise, and observation-based.
+- Quantify wherever possible (e.g., "approximately 8% of the frame shows vibrant green leaf blades")
 
-OUTPUT FORMAT - JSON ONLY (no extra text):
+OUTPUT FORMAT — JSON ONLY (no markdown, no text before or after the JSON):
 {
   "weeds": [
-    {"species": "Common Name (Scientific name)", "cover": 25, "status": "Unaffected", "growthStage": "Vegetative", "notes": "Dense stand, no visible injury observed"}
+    {"species": "Common Name (Scientific name)", "cover": 8, "status": "Controlled", "growthStage": "Mature", "notes": "Predominantly tan/straw dead thatch with isolated green flecks; no active new shoot emergence observed."}
   ],
-  "totalWeedCover": 45,
-  "infestationLevel": "Moderate",
+  "totalWeedCover": 8,
+  "infestationLevel": "Low",
   "dominantSpecies": "Primary species name",
   "confidence": "HIGH",
-  "efficacyAssessment": "No herbicidal injury observed at DAA 0; baseline assessment.",
-  "notes": "Photo quality clear. Mixed infestation noted.",
-  "applicationTiming": "POST",
-  "overallWeedGrowthStage": "2-4 leaf stage",
-  "bbchStage": "Selected exact BBCH stage label"
+  "efficacyAssessment": "At DAA ${context.daa ?? 0}, the plot shows predominant brown/tan desiccation across the canopy. Living green tissue limited to isolated patches.",
+  "notes": "Dominant tissue colour: tan/brown (dead thatch). Green leaf blades visible only in isolated patches approx 8% of frame.",
+  "applicationTiming": "L-POST",
+  "overallWeedGrowthStage": "dead thatch",
+  "bbchStage": "BBCH 92: Leaves begin to discolour"
 }`;
 }
+
 
 function parseAIJson(text) {
   if (!text || typeof text !== 'string') {
