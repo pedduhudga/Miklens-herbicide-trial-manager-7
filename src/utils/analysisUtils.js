@@ -1,4 +1,4 @@
-import { isMixedWeedPlaceholder, canonicalizeWeedSpecies, normalizeLifecycleSafeStatus, upsertCoverCorrectionNote } from './weedUtils.js';
+import { isMixedWeedPlaceholder, canonicalizeWeedSpecies, normalizeLifecycleSafeStatus, upsertCoverCorrectionNote, getWeedBiology } from './weedUtils.js';
 import { safeJsonParse, extractMetricValue, formatSignificance, getPlotAreaHectares } from './helpers.js';
 import { getPrimaryObservationField, getObservationPrimaryValue, getCategoryConfig } from './categoryConfig.js';
 import { normalizeObservation } from './categoryObservationUtils.js';
