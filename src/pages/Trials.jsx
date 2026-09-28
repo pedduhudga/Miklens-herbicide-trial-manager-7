@@ -2430,6 +2430,44 @@ export default function Trials({ onMenuClick }) {
     } catch (e) {}
   };
 
+  const handleAutoReconcileTimeline = async () => {
+    const trialToReconcile = detailTrial || activeTrial;
+    if (!trialToReconcile) return;
+    const category = trialToReconcile.Category || activeCategory;
+    const rawEfficacy = safeJsonParse(trialToReconcile.EfficacyDataJSON, []);
+    const reconciled = validateEfficacyData(rawEfficacy, category, true);
+
+    const isControl = trialToReconcile.IsControl === true || trialToReconcile.IsControl === 'true';
+    const resultRating = calculateResultRating(reconciled, isControl, category, trialToReconcile);
+    const observedWeeds = getObservedWeedsList(reconciled);
+    const targetField = catConfig.targetField || 'WeedSpecies';
+
+    const updated = {
+      ...trialToReconcile,
+      EfficacyDataJSON: JSON.stringify(reconciled),
+      Result: resultRating,
+      WeedSpecies: observedWeeds,
+      [targetField]: observedWeeds
+    };
+
+    updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
+    if (activeTrial && activeTrial.ID === updated.ID) setActiveTrial(updated);
+    if (detailTrial && detailTrial.ID === updated.ID) setDetailTrial(updated);
+
+    try {
+      await updateTrial({
+        ID: updated.ID,
+        EfficacyDataJSON: updated.EfficacyDataJSON,
+        Result: updated.Result,
+        WeedSpecies: updated.WeedSpecies,
+        [targetField]: updated[targetField]
+      }, getAppState);
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'AI Reconciled: observation timeline & ratings automatically synchronized with field evidence!', type: 'success' } }));
+    } catch (e) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Failed to save reconciled data.', type: 'error' } }));
+    }
+  };
+
   // ── DETAIL TRIAL DERIVATIONS ──────────────────────────────────────
   const detailEfficacy = detailTrial ? validateEfficacyData(safeJsonParse(detailTrial.EfficacyDataJSON, []), activeCategory, true) : [];
   const detailPhotos = detailTrial ? safeJsonParse(detailTrial.PhotoURLs, []).filter(p => !p.deleted) : [];
@@ -7567,6 +7605,15 @@ If none are present, write "None".`;
                         {sorted.length >= 2 && !isViewer && (
                           <button onClick={() => generateAISummary()} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-gradient-to-r from-violet-500 to-purple-500 text-white rounded-lg hover:from-violet-600 hover:to-purple-600 shadow-sm">
                             <Sparkles className="w-3.5 h-3.5" />Generate AI Summary
+                          </button>
+                        )}
+                        {!isViewer && sorted.length > 0 && (
+                          <button 
+                            onClick={handleAutoReconcileTimeline} 
+                            title="Automatically reconcile conflicting weed cover, repair false regrowth, and sync ratings with field evidence"
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-teal-50 text-teal-700 border border-teal-200 rounded-lg hover:bg-teal-100 transition shadow-sm"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-teal-600" />AI Reconcile
                           </button>
                         )}
                         {detailTrial?.ProjectID && (

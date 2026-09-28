@@ -226,18 +226,23 @@ export function canonicalizeWeedSpecies (rawName) {
                     lower = 'suppressed';
                 }
 
-                // Strong regrowth refinement: substantial post-reduction rebound is regrowth, not top-kill.
+                // Strong regrowth refinement: substantial post-reduction rebound is regrowth, not top-kill,
+                // UNLESS the observation notes explicitly describe dead canopy, severe necrosis, desiccation, or high knockdown without genuine regrowth shoots.
+                const noteText = String(notes || '');
+                const severeDeadRx = /\b(severe herbicidal injury|extensive browning|high levels of weed knockdown|desiccated|desiccation|necrosis|necrotic|dead canopy|chlorotic|burndown|complete knockdown|dead thatch|top-kill)\b/i;
+                const hasSevereKnockdownNote = severeDeadRx.test(noteText);
+                const hasGenuineRegrowthNote = growthRx.test(noteText);
+
                 if (prev !== null && current !== null && current > 20 && current > (prev + 0.1)) {
-                    next = 'Regrowth';
-                    lower = 'regrowth';
+                    if (!hasSevereKnockdownNote || hasGenuineRegrowthNote) {
+                        next = 'Regrowth';
+                        lower = 'regrowth';
+                    }
                 }
 
                 // Status/notes consistency: regrowth cannot coexist with dead-only evidence.
-                // Exception: if cover clearly rebounded above prior (cover is ground truth over stale notes).
-                const noteText = String(notes || '');
-                const coverRebound = prev !== null && current !== null && current > (prev + 0.1);
-                if (lower === 'regrowth' && deadRx.test(noteText) && !growthRx.test(noteText) && !coverRebound) {
-                    next = bio.isPerennial ? 'Top-kill' : 'Controlled';
+                if (lower === 'regrowth' && (deadRx.test(noteText) || hasSevereKnockdownNote) && !hasGenuineRegrowthNote) {
+                    next = (current !== null && current > 0.1) ? 'Suppressed' : (bio.isPerennial ? 'Top-kill' : 'Controlled');
                 }
 
                 return next;
