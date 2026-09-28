@@ -287,6 +287,11 @@ OUTPUT FORMAT - JSON ONLY (no extra text, no markdown wrapper around the JSON):
   }
 
   // Default herbicide prompt (existing)
+  // Inject pixel sensor data if available from context
+  const pixelSensorNote = (context.pixelVerdict || context.pixelGreenPct !== undefined)
+    ? `\n\nOBJECTIVE PIXEL SENSOR DATA (GROUND TRUTH — ANCHOR YOUR COVER ESTIMATE TO THIS):\n${context.pixelVerdict || ''}\n${context.pixelGreenPct !== undefined ? `Green pixel ratio: ${context.pixelGreenPct.toFixed(1)}% | Dead/desiccated pixel ratio: ${(context.pixelDeadPct || 0).toFixed(1)}%` : ''}\nYour weed \"cover\" values for living weeds MUST be consistent with these pixel measurements. If pixel analysis shows <15% green, do NOT report total living cover >20%. If dead/tan tissue dominates (dead ratio >50%), mark predominantly-brown/tan grass crowns as \"Dead/Desiccated\" or \"Controlled\" — NOT \"Regrowth\". Use \"Regrowth\" ONLY when clearly vibrant NEW green shoots are actively emerging from soil/crown and pixel green ratio supports it.`
+    : '';
+
   return `You are an agricultural weed science expert analyzing a herbicide trial plot photo. Provide a rigorous, scientifically accurate assessment.
 ${tagInstruction}
 
@@ -295,23 +300,27 @@ PLOT INFORMATION:
 - Days After Application (DAA): ${context.daa ?? 0}
 - Replication: ${context.rep || 1}
 ${historyNote}
+${pixelSensorNote}
 
 SCIENTIFIC ANALYSIS TASKS:
 1. **Weed Species Identification**: Identify all visible weed species. Write each species as "Common Name (Scientific name)" — Genus capitalised, species lowercase (e.g. "Barnyard Grass (Echinochloa crus-galli)", "Horse Purslane (Trianthema portulacastrum)").
 
 2. **Ground Cover Estimation (CRITICAL FOR EFFICACY)**:
-   - Estimate the percentage of the ground covered by *living, active, green* weeds (0-100%).
-   - **DO NOT** count weeds that are dead, brown, desiccated, yellow (chlorotic), or bleached white (carotenoid-bleached) as living cover. These are controlled weeds. Only estimate the remaining living green cover.
-   - The total weed cover should represent only the surviving green weed pressure.
+   - Estimate the percentage of the ground covered by *living, active, VIBRANT GREEN* weeds (0-100%).
+   - **DO NOT** count weeds that are dead, brown, tan, straw-coloured, desiccated, yellow (chlorotic), or bleached white (carotenoid-bleached) as living cover. These are controlled weeds.
+   - **TAN/PALE GRASS CROWNS** that have been chemically desiccated are NOT living cover — they are dead tissue.
+   - The total weed cover should represent only the surviving actively-growing green weed pressure.
 
 3. **Herbicidal Injury Response & Symptoms**:
    - Classify the observed treatment response for each weed using:
-     - "Unaffected" - Weeds are healthy, growing, and vibrant green.
+     - "Unaffected" - Weeds are healthy, growing, and vibrant green (DAA 0 baseline).
      - "Slight Injury" - Minor yellowing (chlorosis) or bleaching/whitening at leaf tips.
      - "Moderate Injury" - Moderate yellowing (chlorosis) or bleaching (whitening), partial necrosis (browning), or stunting/wilting.
-     - "Severe Injury" - Heavy chlorosis/bleaching, extensive necrosis (browning), or severe wilting/stunting (e.g., ALS/HPPD inhibitor white/bleached symptoms).
-     - "Dead/Desiccated" - Weeds are completely dead, dried, and turned entirely brown, yellow, or bleached white, with no surviving green tissue.
+     - "Severe Injury" - Heavy chlorosis/bleaching, extensive necrosis (browning), or severe wilting/stunting.
+     - "Dead/Desiccated" - Weeds are completely dead, dried, and turned entirely brown, tan, yellow, or bleached white, with NO surviving green tissue.
      - "Burndown" - Rapid wilting and browning typical of contact herbicides.
+     - "Regrowth" - Use ONLY when clearly vibrant, actively growing NEW green shoots are visibly emerging from the soil or crown — do NOT use for tan/pale surviving grass crowns or sparse green flecks on mostly-brown plants.
+     - "Controlled" - Weeds show complete or near-complete control with predominantly brown/tan tissue.
 
 4. **Growth Stage**: Record stage as one of: Seedling, Vegetative, Flowering, Mature
 

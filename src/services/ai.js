@@ -494,16 +494,33 @@ export async function analyzePhotoForEfficacy(fileData, mimeType = 'image/jpeg',
     let prompt;
     let responseSchema;
 
+    // Run pixel analysis BEFORE building the prompt so the result can be injected
+    let earlyPixelResult = null;
     if (categoryId === 'herbicide') {
+      try {
+        earlyPixelResult = await analyzeWeedCover(fileData, true);
+      } catch (pixErr) {
+        console.warn('[Efficacy] Early pixel analysis failed:', pixErr);
+      }
+    }
+
+    if (categoryId === 'herbicide') {
+      const pixelContext = earlyPixelResult
+        ? `\n\nOBJECTIVE PIXEL SENSOR DATA (GROUND TRUTH — YOU MUST ANCHOR YOUR COVER ESTIMATE TO THIS):
+${earlyPixelResult.pixelVerdict}
+Green pixel ratio: ${(earlyPixelResult.greenRatio * 100).toFixed(1)}% | Dead/desiccated pixel ratio: ${(earlyPixelResult.deadRatio * 100).toFixed(1)}%
+Your "cover" values for LIVING weeds MUST be consistent with these pixel measurements. If pixel analysis shows <15% green, do NOT report total living cover >20%. If pixel analysis shows tan/brown dominates (dead ratio >50%), do NOT mark surviving grass as "Regrowth" — it is "Controlled" or "Dead/Desiccated". Regrowth status should ONLY be used when clearly vibrant, actively growing green shoots are visible and pixel green ratio is high.`
+        : '';
       prompt = `As an agricultural expert analyzing a photo from a herbicide trial, identify up to 2 dominant weed species and estimate their cover/status. Respond ONLY with a single minified JSON object in this exact format: {"weedDetails": [{"species": "...", "cover": NUMBER, "status": "Controlled|Burndown|Re-emerged|Resistant|Unaffected", "notes": "..."}]}.
 - "weedDetails": An array of objects.
 - "species": The scientific or common name of the weed.
-- "cover": Estimate the percentage of the ground covered by *living, active, green* weeds (0-100%). DO NOT count weeds that are dead, brown/necrosed, yellow/chlorotic, or bleached white/albino as living cover. These are controlled weeds.
-- "status": The observed condition of the weed (Controlled/Burndown/Re-emerged/Resistant/Unaffected). Use "Controlled" or "Burndown" for dead, brown, yellow, or white/bleached weeds. Use "Unaffected" for green, healthy weeds.
+- "cover": Estimate the percentage of the ground covered by *living, active, green* weeds (0-100%). DO NOT count weeds that are dead, brown/necrosed, yellow/chlorotic, tan, straw-coloured, or bleached white/albino as living cover. These are controlled weeds.
+- "status": The observed condition of the weed. Use "Controlled" or "Dead/Desiccated" for completely brown/tan/yellow/bleached weeds with no surviving green shoots. Use "Burndown" for rapid wilting/browning. Use "Regrowth" ONLY when clearly vibrant green new shoots are visibly emerging from soil or crown — do NOT use Regrowth for surviving tan/pale grass crowns. Use "Unaffected" for fully green, healthy weeds.
 - "notes": A brief qualitative observation.
 - Prefer stable species naming across dates (e.g., Bermudagrass = Cynodon dactylon).
 - Do NOT introduce a new species unless clearly visible.
 - On day 0 to day 1, avoid reporting increased cover unless there is clear regrowth evidence.
+${pixelContext}
 ${historyPrompt}`;
 
       responseSchema = {
@@ -709,25 +726,28 @@ ${historyPrompt}`;
       }
     }
 
-    // Run offline weed cover detection in parallel for herbicide
+    // Weed cover pixel analysis — use earlyPixelResult if already computed, else run now
     let weedCoverEstimate = null;
     if (categoryId === 'herbicide') {
       try {
-        const greenOnly = true; // Only count living green weeds
-        const coverResult = await analyzeWeedCover(fileData, greenOnly);
+        const coverResult = earlyPixelResult || await analyzeWeedCover(fileData, true);
         weedCoverEstimate = {
           cover: coverResult.cover,
+          deadCover: coverResult.deadCover || 0,
+          greenRatio: coverResult.greenRatio || 0,
+          deadRatio: coverResult.deadRatio || 0,
           vari: coverResult.vari,
           vegetationIndex: coverResult.vegetationIndex,
           confidence: coverResult.confidence,
           source: 'offline',
           mode: coverResult.mode,
+          pixelVerdict: coverResult.pixelVerdict || '',
           breakdown: coverResult.breakdown,
           details: coverResult.details
         };
-        console.log('[Weed Cover] Offline estimate (green-only):', coverResult);
+        console.log('[Weed Cover] Pixel analysis (multi-class):', coverResult);
       } catch (error) {
-        console.warn('[Weed Cover] Offline analysis failed:', error);
+        console.warn('[Weed Cover] Pixel analysis failed:', error);
       }
     }
 
@@ -737,10 +757,44 @@ ${historyPrompt}`;
       if (analysisContext.trial && typeof window !== 'undefined' && typeof window.applyHistoricalWeedTracking === 'function') {
         weedDetails = window.applyHistoricalWeedTracking(analysisContext.trial, { daa: analysisContext.daa, weedDetails }).weedDetails;
       }
+
+      // ── Cross-validation: anchor AI cover to pixel measurement ────────────
+      // If pixel analysis is available, use it to correct AI over-estimates.
+      if (weedCoverEstimate && weedCoverEstimate.greenRatio !== undefined) {
+        const pixelGreenPct = Math.round(weedCoverEstimate.greenRatio * 100);
+        const pixelDeadDominant = weedCoverEstimate.deadRatio > 0.50; // >50% dead tissue
+        const aiTotalCover = weedDetails.reduce((sum, w) => sum + (w.cover || 0), 0);
+
+        // If AI is over-reporting green cover vs pixels by >15pp, scale down
+        if (aiTotalCover > 0 && (aiTotalCover - pixelGreenPct) > 15) {
+          const scaleFactor = Math.max(0, pixelGreenPct) / aiTotalCover;
+          console.warn(`[Cover Cross-Validation] AI reported ${aiTotalCover}% but pixels show ${pixelGreenPct}%. Scaling down by factor ${scaleFactor.toFixed(2)}.`);
+          weedDetails = weedDetails.map(w => ({
+            ...w,
+            cover: Math.round((w.cover || 0) * scaleFactor)
+          }));
+        }
+
+        // If plot is dead-dominant (>50% dead pixels), correct any "Regrowth" labels
+        // on species that have very low individual cover
+        if (pixelDeadDominant) {
+          weedDetails = weedDetails.map(w => {
+            const status = String(w.status || '').toLowerCase();
+            // "Regrowth" on a dead-dominant plot with low cover is likely misclassified
+            if ((status === 'regrowth' || status === 're-emerged') && (w.cover || 0) < 15) {
+              console.warn(`[Cover Cross-Validation] Pixel dead-dominant (${Math.round(weedCoverEstimate.deadRatio*100)}% dead). Correcting "${w.species}" from "${w.status}" → "Controlled" (cover ${w.cover}%).`);
+              return { ...w, status: 'Controlled', notes: (w.notes || '') + ' [Pixel-corrected: dead tissue dominant]' };
+            }
+            return w;
+          });
+        }
+      }
+
       const aiData = { weedDetails };
       if (weedCoverEstimate) aiData.weedCoverEstimate = weedCoverEstimate;
       return aiData;
     }
+
 
     // Non-herbicide: expect { metrics: { primaryField: number }, details: {...}, value: number }
     const aiData = {};
