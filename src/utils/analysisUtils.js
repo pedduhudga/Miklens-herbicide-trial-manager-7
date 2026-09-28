@@ -585,6 +585,15 @@ export function validateEfficacyData (efficacy, categoryId = 'herbicide', includ
                                 (obs.weedDetails || []).filter(w => String(w?.species || '').trim().toLowerCase() === 'total').forEach(t => { t.cover = obs.weedCover; });
                                 addWarning(obs, 'AI Reconciled: corrected false weed cover based on complete mortality notes.');
                             }
+                        } else if (hasGreenTissueMention.test(allObsText) || (obs.weedCover && obs.weedCover > 0)) {
+                            // If observation has genuine surviving green tissue or regrowth, remove any stale "corrected false weed cover" log
+                            if (obs.validationNotes && /corrected false weed cover/i.test(obs.validationNotes)) {
+                                const filteredNotes = obs.validationNotes
+                                    .split(/\s*;\s*/)
+                                    .filter(note => !/corrected false weed cover/i.test(note))
+                                    .join('; ');
+                                obs.validationNotes = filteredNotes || undefined;
+                            }
                         }
                     }
                 });
