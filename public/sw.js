@@ -187,11 +187,13 @@ async function staleWhileRevalidate(request, cacheName = DYNAMIC_CACHE) {
   
   const fetchPromise = fetch(request).then((networkResponse) => {
     if (networkResponse.ok) {
+      // Clone BEFORE caching so the original body stream is not consumed
+      const responseToCache = networkResponse.clone();
       caches.open(cacheName).then(cache => {
-        cache.put(request, networkResponse.clone());
+        cache.put(request, responseToCache);
       });
     }
-    return networkResponse;
+    return networkResponse; // original remains unconsumed for the caller
   }).catch(() => null);
   
   // Return cached immediately, update if network succeeds

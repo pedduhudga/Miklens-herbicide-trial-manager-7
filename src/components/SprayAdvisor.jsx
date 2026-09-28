@@ -14,7 +14,9 @@ import {
 export default function SprayAdvisor({ lat, lon, locationName = 'Current Location' }) {
   const [analysis, setAnalysis] = useState(null);
   const [extendedForecast, setExtendedForecast] = useState(null);
-  const [selectedDate, setSelectedDate] = useState(() => new Date().toLocaleDateString('en-CA'));
+  // Use toISOString() to get YYYY-MM-DD; avoids the global Date.prototype.toLocaleDateString
+  // monkey-patch in dateUtils.js which would otherwise return DD-MM-YYYY format.
+  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('current');

@@ -168,10 +168,15 @@ function getRiskLevel(score) {
  */
 export async function analyzeSprayWindow(lat, lon, targetDate = null) {
   try {
-    const isToday = !targetDate || targetDate === new Date().toISOString().split('T')[0];
-    const isPast = targetDate && new Date(targetDate) < new Date(new Date().setHours(0,0,0,0));
-    const forecast = targetDate 
-      ? await fetchWeatherForecast(lat, lon, 1, targetDate, targetDate)
+    // Ensure targetDate is in YYYY-MM-DD format; HTML date inputs always give YYYY-MM-DD.
+    // Appending T00:00:00 prevents locale-dependent midnight-UTC ambiguity.
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    const safeTargetDate = (targetDate && dateRegex.test(targetDate)) ? targetDate : null;
+    const todayStr = new Date().toISOString().split('T')[0];
+    const isToday = !safeTargetDate || safeTargetDate === todayStr;
+    const isPast = safeTargetDate && new Date(safeTargetDate + 'T00:00:00') < new Date(todayStr + 'T00:00:00');
+    const forecast = safeTargetDate
+      ? await fetchWeatherForecast(lat, lon, 1, safeTargetDate, safeTargetDate)
       : await fetchWeatherForecast(lat, lon, 3);
     
     if (!forecast || !forecast.hourly) {
@@ -372,12 +377,21 @@ export async function getExtendedSprayForecast(lat, lon, targetDate = null) {
   try {
     let forecast;
     if (targetDate) {
-      const start = new Date(targetDate);
-      const end = new Date(targetDate);
-      end.setDate(end.getDate() + 6);
-      const startStr = start.toISOString().split('T')[0];
-      const endStr = end.toISOString().split('T')[0];
-      forecast = await fetchWeatherForecast(lat, lon, 7, startStr, endStr);
+      // Ensure targetDate is in YYYY-MM-DD format before passing to Date constructor.
+      // The HTML date input always yields YYYY-MM-DD so this is just a safety guard.
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+      const safeDateStr = dateRegex.test(targetDate) ? targetDate : new Date().toISOString().split('T')[0];
+      const start = new Date(safeDateStr + 'T00:00:00');
+      if (isNaN(start.getTime())) {
+        console.warn('[SprayAdvisor] getExtendedSprayForecast: invalid targetDate, using today');
+        forecast = await fetchWeatherForecast(lat, lon, 7);
+      } else {
+        const end = new Date(start);
+        end.setDate(end.getDate() + 6);
+        const startStr = start.toISOString().split('T')[0];
+        const endStr = end.toISOString().split('T')[0];
+        forecast = await fetchWeatherForecast(lat, lon, 7, startStr, endStr);
+      }
     } else {
       forecast = await fetchWeatherForecast(lat, lon, 7);
     }
