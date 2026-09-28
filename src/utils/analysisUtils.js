@@ -555,41 +555,35 @@ export function validateEfficacyData (efficacy, categoryId = 'herbicide', includ
                     }
 
                     // Automated contradiction reconciliation for post-spray herbicide observations:
-                    // If AI efficacy text or notes indicate high weed knockdown, severe injury, desiccation, or dead thatch,
-                    // but weedCover is still recorded high (e.g., old vision model hallucinated dead brown thatch as living cover),
-                    // reconcile the weed cover and species status to represent actual living green weed cover.
+                    // If AI efficacy text or notes indicate near 100% complete mortality, complete burndown with zero green tissue,
+                    // but weedCover was accidentally set to high baseline-like numbers without any green tissue mentioned:
                     const currentDaa = parseFloat(obs.daa) || 0;
                     if (categoryId === 'herbicide' && currentDaa > baselineDaa) {
                         const allObsText = `${obs.notes || ''} ${obs.aiEfficacyAssessment || ''} ${obs.aiSummary || ''} ${(obs.weedDetails || []).map(w => w.notes || '').join(' ')}`.toLowerCase();
-                        const highKnockdownKeywords = /\b(severe herbicidal injury|extensive browning|high levels of weed knockdown|canopy tissue appearing desiccated|desiccated or chlorotic|complete burndown|high weed mortality|dead canopy|complete knockdown|dead thatch|top-kill)\b/i;
-                        const explicitRegrowthKeywords = /\b(regrowth|re-emerg|new green shoots?|active sprouting|re-infestation|green leaf emergence|new seedlings?)\b/i;
+                        const totalDeadKeywords = /\b(complete weed mortality|100% knockdown|complete burndown|zero living green tissue|no living tissue|completely dead and crispy)\b/i;
+                        const hasGreenTissueMention = /\b(living green|green tissue|green blades|green shoots?|regrowth|re-emerg|emerging|sprouting|recovery)\b/i;
 
-                        if (highKnockdownKeywords.test(allObsText) && !explicitRegrowthKeywords.test(allObsText)) {
+                        if (totalDeadKeywords.test(allObsText) && !hasGreenTissueMention.test(allObsText)) {
                             let wasRepaired = false;
                             (obs.weedDetails || []).forEach(w => {
                                 const spName = String(w?.species || '').trim().toLowerCase();
                                 if (!spName || spName === 'total') return;
                                 const c = toNum(w.cover);
-                                // If cover was recorded > 10% despite notes describing severe knockdown/desiccation
                                 if (c !== null && c > 10) {
                                     w.cover = 0;
                                     const bio = getWeedBiology(w.species);
                                     w.status = bio.lifecycle === 'Perennial' ? 'Top-kill' : 'Dead/Desiccated';
-                                    w.notes = upsertCoverCorrectionNote(w.notes, 'Reconciled to 0% based on observed severe canopy desiccation/knockdown');
-                                    wasRepaired = true;
-                                } else if (String(w.status || '').toLowerCase() === 'regrowth') {
-                                    const bio = getWeedBiology(w.species);
-                                    w.status = (toNum(w.cover) || 0) > 0.1 ? 'Suppressed' : (bio.lifecycle === 'Perennial' ? 'Top-kill' : 'Controlled');
+                                    w.notes = upsertCoverCorrectionNote(w.notes, 'Reconciled to 0% based on observed complete burndown');
                                     wasRepaired = true;
                                 }
                             });
 
-                            if (wasRepaired || (toNum(obs.weedCover) || 0) > 10) {
+                            if (wasRepaired) {
                                 const recalculated = deriveTotalCoverFromDetails(obs.weedDetails);
                                 obs.weedCover = recalculated !== null ? recalculated : 0;
                                 obs.weedCoverMode = 'reconciled';
                                 (obs.weedDetails || []).filter(w => String(w?.species || '').trim().toLowerCase() === 'total').forEach(t => { t.cover = obs.weedCover; });
-                                addWarning(obs, 'AI Reconciled: corrected false weed cover & regrowth based on severe desiccation/knockdown field notes.');
+                                addWarning(obs, 'AI Reconciled: corrected false weed cover based on complete mortality notes.');
                             }
                         }
                     }

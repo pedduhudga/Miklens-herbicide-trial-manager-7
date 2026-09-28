@@ -334,11 +334,14 @@ This step MUST be done before any numbers are estimated.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 STEP 2 — TISSUE TYPE DISCRIMINATION (CRITICAL FOR BERMUDA GRASS AND STOLONIFEROUS SPECIES)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-For grasses (especially Bermuda grass / Cynodon dactylon), distinguish:
-  • PRIMARY LEAF BLADES: Flat, green grass leaves — only vibrant GREEN blades = living.
-  • STOLONS / RUNNERS: The wiry horizontal stems connecting plants. These can be TAN/BROWN even when the plant was once alive. TAN stolons = dead stolon thatch, NOT living cover.
-  • NEW EMERGING SHOOTS: Short, bright-green, upright new tillers or shoots pushing up through dead thatch. These are GENUINE REGROWTH — count as living ONLY if clearly vibrant green AND distinctly emerging (not just discolouration of old tissue).
-  • DEAD THATCH / CROWN: Brown/tan matted grass remains. Even if they have tiny residual green patches from JPEG compression artefacts, the DOMINANT colour determines classification.
+For grasses (especially Bermuda grass / Cynodon dactylon):
+  • PRIMARY LEAF BLADES & TILLERS: Thin, upright or horizontal green grass blades distributed across the frame. When green grass blades are seen dispersed throughout the brown/tan background, examine their overall density:
+    - If green blades cover 30-70% of the grid squares (even if interlaced over dead lower thatch), living green cover is MODERATE TO HIGH (40-75%), NOT 5-10%!
+    - Do NOT mistake a dense network of living green blades for "isolated flecks". If you see green blades from top to bottom of the frame, this is SUBSTANTIAL LIVING VEGETATION.
+  • REGROWTH / RE-INFESTATION DISCRIMINATION:
+    - If a post-spray observation (e.g. DAA 7, DAA 9, DAA 14+) shows vibrant green grass blades actively spreading or emerging over a base of brown desiccated thatch/stolons, this represents ACTIVE REGROWTH (or incomplete burndown with active recovery).
+    - Status for such recovering grass MUST BE "Regrowth" (or "Suppressed" if partial recovery), with cover representing the true living blade surface area (e.g., 40-70%).
+  • DEAD THATCH / STOLONS: The dry, fibrous tan/straw/brown material underneath. Only count as dead if there are NO green leaves emerging.
 
 For broadleaf weeds:
   • WILTED LEAVES: Flaccid, drooping, losing colour — injured but may still be alive if green.
@@ -348,12 +351,15 @@ For broadleaf weeds:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 STEP 3 — QUANTITATIVE COVER ESTIMATION
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Estimate cover percentages ONLY from Category A (Vibrant Green) tissue above.
-- Cover = % of total photo frame covered by actively photosynthesising green tissue.
+Estimate cover percentages ONLY from Category A & B (living/green) tissue:
+- Cover = % of total photo frame covered by living green leaf tissue.
+- Assess overall blade density across the entire photo:
+  * Sparse green flecks (<10% of frame green): 2-10% cover.
+  * Moderate green blades across multiple quadrants (15-35% green): 15-35% cover.
+  * Dense green blades throughout the canopy interlacing over brown thatch: 45-75% cover.
+  * Fully green dense sward: 80-100% cover.
+- Do NOT underestimate cover when green blades are thin and fine. Sum up the visual impact across all 9 grid zones.
 - Provide estimates for each weed species separately.
-- If the dominant colour in the frame is TAN / BROWN / STRAW, the weed cover must be LOW (0-20%).
-- If the frame is predominantly green, weed cover will be moderate-high.
-- Do NOT round to neat multiples like 25, 50, 75. Give your true visual estimate (e.g., 8, 13, 22, 31).
 - For total cover: if species overlap, use probabilistic union: total = 1-(1-a/100)(1-b/100)... × 100
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -364,15 +370,12 @@ Use ONLY these status labels:
   • "Slight Injury"   — <20% of leaf area chlorotic/bleached; plant still largely green and turgid.
   • "Moderate Injury" — 20-50% of leaf area chlorotic, necrotic, or browning. Plant visibly stressed.
   • "Severe Injury"   — >50% of leaf area necrotic/chlorotic; wilting/collapsing but some green surviving.
-  • "Dead/Desiccated" — Entire plant brown, tan, straw, bleached. NO green tissue remaining. Crispy/brittle.
-  • "Top-kill"        — Visible aboveground tissue completely desiccated and brown, but species persists.
-  • "Burndown"        — Rapid brown collapse from contact herbicide action. Typical of paraquat/diquat.
-  • "Regrowth"        — STRICT DEFINITION: Use ONLY when ALL THREE are true:
-                         (1) New green shoots are clearly visually distinct from dead old tissue
-                         (2) The shoots are upright, vibrant green, and clearly younger growth
-                         (3) The shoots represent true NEW growth from crown/rhizome, not survival of old tissue
-                         If ANY doubt, use "Controlled" or "Dead/Desiccated" instead.
-  • "Controlled"      — Near-complete control with dominant brown/tan appearance and only trace green.
+  • "Dead/Desiccated" — Entire plant brown, tan, straw, bleached. NO green tissue remaining.
+  • "Top-kill"        — Visible aboveground tissue completely desiccated and brown, 0% green.
+  • "Burndown"        — Rapid brown collapse from contact herbicide action.
+  • "Regrowth"        — Active resurgence or emergence of green shoots/blades over previous damage or thatch at later post-spray timepoints (DAA 7-28+).
+  • "Suppressed"      — Weed growth is stunted or partially chlorotic with 15-40% surviving green tissue.
+  • "Controlled"      — Near-complete control with dominant brown/tan appearance and only trace green (<5%).
   • "Resistant"       — Weed appears fully unaffected at high DAA when others are controlled (strong survivor).
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
