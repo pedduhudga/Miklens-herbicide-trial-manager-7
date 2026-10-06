@@ -163,6 +163,36 @@ function AppLayout() {
     };
   }, [sidebarOpen, state.activeConflict, updateState]);
 
+  // 8.5 Auto-Backup on Exit: Save IndexedDB snapshot & sync queue when user exits or switches tabs
+  useEffect(() => {
+    const handleExitBackup = () => {
+      try {
+        const cur = getAppState();
+        if (cur) {
+          import('./services/offlineStorage.js').then(({ createExitSnapshot }) => {
+            createExitSnapshot(cur);
+          }).catch(() => {});
+        }
+      } catch (e) {
+        // Safe exit
+      }
+    };
+
+    window.addEventListener('beforeunload', handleExitBackup);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        handleExitBackup();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleExitBackup);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [getAppState]);
+
+
   const handleResolveConflict = (resolvedItem) => {
     updateState({
       trials: state.trials.map(t => String(t.ID) === String(resolvedItem.ID) ? resolvedItem : t)

@@ -220,6 +220,59 @@ export async function getOfflineStorageStats() {
   return getStorageStats();
 }
 
+/**
+ * 8.5 Auto-Backup on Exit: takes an emergency snapshot of in-memory data
+ * and pending changes to IndexedDB and metadata cache upon tab close/unload/minimize.
+ */
+export async function createExitSnapshot(appState) {
+  try {
+    if (!appState) return false;
+    await initOfflineDB();
+    const snapshotMeta = {
+      timestamp: Date.now(),
+      trialsCount: appState.trials?.length || 0,
+      syncQueueCount: appState.syncQueue?.length || 0,
+      activeCategory: localStorage.getItem('activeCategory') || 'herbicide',
+      hasPendingSync: (appState.syncQueue?.length || 0) > 0
+    };
+
+    // Save key collections to IndexedDB tables
+    const collections = ['trials', 'projects', 'formulations', 'blocks'];
+    for (const coll of collections) {
+      if (Array.isArray(appState[coll]) && appState[coll].length > 0) {
+        const table = db[coll];
+        if (table) {
+          const items = appState[coll].map(item => {
+            const id = item.ID !== undefined ? item.ID : (item.id !== undefined ? item.id : String(Math.random()));
+            return { ...item, ID: String(id) };
+          });
+          await table.bulkPut(items);
+        }
+      }
+    }
+
+    if (Array.isArray(appState.syncQueue) && appState.syncQueue.length > 0) {
+      await saveSyncQueueOffline(appState.syncQueue);
+    }
+
+    // Persist quick metadata in localStorage
+    localStorage.setItem('miklens_last_exit_snapshot', JSON.stringify(snapshotMeta));
+    return true;
+  } catch (err) {
+    console.warn('[OfflineStorage] Auto-backup exit snapshot failed:', err);
+    return false;
+  }
+}
+
+export function getLastExitSnapshotMeta() {
+  try {
+    const raw = localStorage.getItem('miklens_last_exit_snapshot');
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
 // Run automatic cleanup on module load (delayed)
 if (typeof window !== 'undefined') {
   setTimeout(() => {

@@ -1,10 +1,12 @@
-import React, { memo, useMemo, useCallback, useState } from 'react';
-import { Calendar, MapPin, FlaskConical, Activity, Image as ImageIcon, ChevronLeft, ChevronRight, Edit, MoreVertical, Eye, Copy, FolderOpen, FileDown, ScanLine, MonitorPlay, Archive, FileCode, FileSpreadsheet, Share2, BrainCircuit, Trash2, Camera, CheckCircle, Clock, Pencil, CloudSun } from 'lucide-react';
+import React, { memo, useMemo, useCallback, useState, useEffect } from 'react';
+import { Calendar, MapPin, FlaskConical, Activity, Image as ImageIcon, ChevronLeft, ChevronRight, Edit, MoreVertical, Eye, Copy, FolderOpen, FileDown, ScanLine, MonitorPlay, Archive, FileCode, FileSpreadsheet, Share2, BrainCircuit, Trash2, Camera, CheckCircle, Clock, Pencil, CloudSun, Sparkles } from 'lucide-react';
 import { safeJsonParse } from '../utils/helpers.js';
 import { formatDateTime } from '../utils/dateUtils.js';
 import { calculateEffectiveControlDays } from '../utils/trialLifecycle.js';
 import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryValue } from '../utils/categoryConfig.js';
 import { useAuth } from '../hooks/useAuth.js';
+import { resolvePhotoSrc } from '../utils/photoUtils.js';
+import PhotoComparisonModal from './PhotoComparisonModal.jsx';
 
 const RESULT_COLORS = {
   'Excellent': 'bg-emerald-100 text-emerald-700',
@@ -100,10 +102,101 @@ const TrialCard = memo(function TrialCard({
   const isEditable = !isViewer && (isOwnData || isSharedEdit);
   const canDownloadTrial = !isViewer && isOwnData && user?.tabPermissions?.['Allow Downloads'] !== false;
   const [activePhotoIdx, setActivePhotoIdx] = useState(0);
+  const [touchStartX, setTouchStartX] = useState(null);
+  const [isCarouselHovered, setIsCarouselHovered] = useState(false);
+
   const photos = useMemo(() => {
     const parsed = safeJsonParse(trial.PhotoURLs, []);
     return Array.isArray(parsed) ? parsed.filter(p => !p.deleted) : [];
   }, [trial.PhotoURLs]);
+
+  // Aggregate trial photos and observation photos for seamless in-card carousel
+  const allCardPhotos = useMemo(() => {
+    const list = [];
+    photos.forEach((p, idx) => {
+      const src = typeof p === 'string' ? p : (p.url || p.fileData || p.dataUrl || p.driveId);
+      if (src) {
+        list.push({
+          id: p.id || p.tempId || `tp_${idx}`,
+          src,
+          label: p.label || p.name || 'Trial Photo',
+          daa: p.daa !== undefined ? p.daa : null,
+          date: p.date || ''
+        });
+      }
+    });
+
+    if (Array.isArray(efficacyData)) {
+      efficacyData.forEach((obs, oIdx) => {
+        if (obs.photoUrl && !list.some(x => x.src === obs.photoUrl)) {
+          list.push({
+            id: `obs_${oIdx}`,
+            src: obs.photoUrl,
+            label: `DAA ${obs.daa ?? '?'} Obs Photo`,
+            daa: obs.daa,
+            date: obs.date || ''
+          });
+        }
+        if (Array.isArray(obs.photos)) {
+          obs.photos.forEach((op, opIdx) => {
+            const u = typeof op === 'string' ? op : (op.url || op.fileData || op.dataUrl);
+            if (u && !list.some(x => x.src === u)) {
+              list.push({
+                id: `obs_${oIdx}_${opIdx}`,
+                src: u,
+                label: `DAA ${obs.daa ?? '?'} Obs Photo`,
+                daa: obs.daa,
+                date: obs.date || ''
+              });
+            }
+          });
+        }
+      });
+    }
+    return list;
+  }, [photos, efficacyData]);
+
+  // Auto-advance photos gently (every 4 seconds) if multiple photos exist and user isn't hovering
+  useEffect(() => {
+    if (allCardPhotos.length <= 1 || isCarouselHovered) return;
+    const interval = setInterval(() => {
+      setActivePhotoIdx(prev => (prev + 1) % allCardPhotos.length);
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [allCardPhotos.length, isCarouselHovered]);
+
+  const handlePrevPhoto = useCallback((e) => {
+    e.stopPropagation();
+    setActivePhotoIdx(prev => (prev > 0 ? prev - 1 : allCardPhotos.length - 1));
+  }, [allCardPhotos.length]);
+
+  const handleNextPhoto = useCallback((e) => {
+    e.stopPropagation();
+    setActivePhotoIdx(prev => (prev + 1) % allCardPhotos.length);
+  }, [allCardPhotos.length]);
+
+  const handleTouchStart = useCallback((e) => {
+    if (e.touches && e.touches[0]) {
+      setTouchStartX(e.touches[0].clientX);
+    }
+  }, []);
+
+  const handleTouchEnd = useCallback((e) => {
+    if (touchStartX === null || !e.changedTouches || !e.changedTouches[0]) return;
+    const touchEndX = e.changedTouches[0].clientX;
+    const diff = touchStartX - touchEndX;
+    if (Math.abs(diff) > 30) {
+      if (diff > 0) {
+        setActivePhotoIdx(prev => (prev + 1) % allCardPhotos.length);
+      } else {
+        setActivePhotoIdx(prev => (prev > 0 ? prev - 1 : allCardPhotos.length - 1));
+      }
+    }
+    setTouchStartX(null);
+  }, [touchStartX, allCardPhotos.length]);
+
+  const [showPhotoComparison, setShowPhotoComparison] = useState(false);
+
   const isLive = String(trial.IsLive) !== 'false';
   const isCompleted = trial.IsCompleted === true || trial.IsCompleted === 'true';
 
@@ -508,6 +601,16 @@ const TrialCard = memo(function TrialCard({
                   <button onClick={handleAiGenerate} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-violet-50">
                     <BrainCircuit className="w-3.5 h-3.5 text-violet-500" /> Generate AI Report
                   </button>
+                  <button
+                    onClick={(e) => {
+                      stopPropagation(e);
+                      setShowPhotoComparison(true);
+                      onToggleMenu && onToggleMenu(null);
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-indigo-700 hover:bg-indigo-50 font-medium"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-indigo-500" /> AI Photo Comparison
+                  </button>
                   {!isViewer && isOwnData && (
                     <>
                       <hr className="my-1 border-slate-100" />
@@ -527,26 +630,6 @@ const TrialCard = memo(function TrialCard({
             <Calendar className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
             <span>{formatDateTime(trial.Date) || '—'}</span>
           </div>
-          {(() => {
-            const trialLocation = trial.Location || project?.Location;
-            return (
-              <>
-                {trial.Lat && trial.Lon ? (
-                  <div className="flex items-center gap-1.5 font-mono text-slate-500">
-                    <MapPin className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
-                    <span>{parseFloat(trial.Lat).toFixed(6)}, {parseFloat(trial.Lon).toFixed(6)}</span>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{trialLocation || '—'}</span></div>
-                )}
-                {trial.Lat && trial.Lon && trialLocation && (
-                  <div className="flex items-center gap-1.5 text-slate-400 pl-5 text-[11px] -mt-0.5">
-                    <span className="truncate">{trialLocation}</span>
-                  </div>
-                )}
-              </>
-            );
-          })()}
           <div className="flex items-center gap-1.5"><FlaskConical className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{trial.Dosage || '—'}</span></div>
           {trial.WeedSpecies && <div className="flex items-center gap-1.5"><Activity className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{trial.WeedSpecies}</span></div>}
           {trial.TrialDesign === 'Split-Plot' && (trial.MainFactor || trial.SubFactor) && (
@@ -581,8 +664,6 @@ const TrialCard = memo(function TrialCard({
           )}
         </div>
 
-
-
         {/* Quick Rating */}
         {isEditable && (
           <div className="mt-2 flex items-center gap-1" onClick={stopPropagation}>
@@ -607,12 +688,105 @@ const TrialCard = memo(function TrialCard({
           </div>
         )}
 
-        <div className="mt-3 flex items-center gap-2 flex-wrap">
+        <div className="mt-2.5 flex items-center gap-2 flex-wrap">
           <ResultBadge result={trial.Result} />
           {photos.length > 0 && <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full flex items-center gap-1"><ImageIcon className="w-3 h-3" />{photos.length}</span>}
           {efficacyData.length > 0 && <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{efficacyData.length} obs</span>}
           {trial.YieldValue && <span className="text-xs bg-teal-50 text-teal-700 px-2 py-0.5 rounded-full font-semibold">{trial.YieldValue} t/ha</span>}
         </div>
+
+        {/* ══ JIO-MART STYLE IN-CARD PHOTO CAROUSEL ═══════════════════════ */}
+        {allCardPhotos.length > 0 && (
+          <div
+            className="mt-2 relative rounded-lg overflow-hidden bg-slate-900/5 border border-slate-100 group select-none cursor-pointer"
+            style={{ height: '98px' }}
+            onClick={(e) => {
+              stopPropagation(e);
+              onViewDetails(trial);
+            }}
+            onMouseEnter={() => setIsCarouselHovered(true)}
+            onMouseLeave={() => setIsCarouselHovered(false)}
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
+          >
+            {/* Active Image */}
+            {(() => {
+              const currentPhoto = allCardPhotos[activePhotoIdx % allCardPhotos.length];
+              const resolvedSrc = resolvePhotoSrc(currentPhoto);
+              return resolvedSrc ? (
+                <img
+                  src={resolvedSrc}
+                  alt={currentPhoto?.label || 'Trial photo'}
+                  className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                  loading="lazy"
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                  }}
+                />
+              ) : (
+                <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 bg-slate-100">
+                  <ImageIcon className="w-4 h-4 mb-0.5 opacity-50" />
+                  <span className="text-[9px]">Photo available</span>
+                </div>
+              );
+            })()}
+
+            {/* Top Overlay Badge: DAA Tag & Photo Index */}
+            <div className="absolute top-1 left-1 right-1 flex items-center justify-between pointer-events-none">
+              {allCardPhotos[activePhotoIdx % allCardPhotos.length]?.daa !== null &&
+               allCardPhotos[activePhotoIdx % allCardPhotos.length]?.daa !== undefined ? (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-600/90 text-white backdrop-blur-xs shadow-xs">
+                  DAA {allCardPhotos[activePhotoIdx % allCardPhotos.length].daa}
+                </span>
+              ) : <span />}
+              {allCardPhotos.length > 1 && (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-black/60 text-white backdrop-blur-xs shadow-xs">
+                  {(activePhotoIdx % allCardPhotos.length) + 1}/{allCardPhotos.length}
+                </span>
+              )}
+            </div>
+
+            {/* Left / Right Carousel Arrow Buttons */}
+            {allCardPhotos.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  onClick={handlePrevPhoto}
+                  className="absolute left-1 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white/90 hover:bg-white text-slate-800 shadow flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                  title="Previous photo"
+                >
+                  <ChevronLeft className="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleNextPhoto}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white/90 hover:bg-white text-slate-800 shadow flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                  title="Next photo"
+                >
+                  <ChevronRight className="w-3 h-3" />
+                </button>
+
+                {/* Dot Indicators */}
+                <div className="absolute bottom-1 left-0 right-0 flex items-center justify-center gap-1 z-10 pointer-events-none">
+                  {allCardPhotos.slice(0, 6).map((_, dotIdx) => (
+                    <span
+                      key={dotIdx}
+                      className={`h-1.5 rounded-full transition-all ${
+                        dotIdx === (activePhotoIdx % allCardPhotos.length)
+                          ? 'w-3 bg-white shadow-xs'
+                          : 'w-1.5 bg-white/60'
+                      }`}
+                    />
+                  ))}
+                  {allCardPhotos.length > 6 && (
+                    <span className="text-[8px] text-white/90 font-bold ml-0.5">+</span>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         <div className="mt-2 flex items-center justify-between" onClick={stopPropagation}>
           <div className="flex items-center gap-1.5">
             {isCompleted ? (
@@ -667,6 +841,16 @@ const TrialCard = memo(function TrialCard({
           View Details <ChevronRight className="w-3.5 h-3.5" />
         </button>
       </div>
+
+      {showPhotoComparison && (
+        <PhotoComparisonModal
+          isOpen={showPhotoComparison}
+          onClose={() => setShowPhotoComparison(false)}
+          trial={trial}
+          initialBeforeUrl={allCardPhotos.find(p => p.daa === 0 || p.daa === '0')?.src || (allCardPhotos[0]?.src || null)}
+          initialAfterUrl={allCardPhotos.length > 1 ? allCardPhotos[allCardPhotos.length - 1]?.src : null}
+        />
+      )}
     </div>
   );
 });

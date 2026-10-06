@@ -9,9 +9,10 @@ import SmartAlerts from '../components/SmartAlerts.jsx';
 import WeatherDashboard from '../components/WeatherDashboard.jsx';
 import {
   Activity, FolderOpen, FlaskConical, CheckCircle, Plus,
-  TrendingUp, AlertCircle, Leaf, BarChart3, Search, ChevronRight,
+  TrendingUp, TrendingDown, AlertCircle, Leaf, BarChart3, Search, ChevronRight,
   Thermometer, Droplets, Wind, CloudRain, Sprout, Filter, Grid3x3,
-  Clock, Camera, CalendarDays, CloudOff, Eye, MapPin, Zap, ShieldAlert
+  Clock, Camera, CalendarDays, CloudOff, Eye, MapPin, Zap, ShieldAlert,
+  Sparkles, ArrowRight
 } from 'lucide-react';
 import { getCategoryConfig } from '../utils/categoryConfig.js';
 import { getTrialCalculatedEfficacy } from '../utils/formulationTrialUtils.js';
@@ -532,6 +533,121 @@ export default function Dashboard({ onMenuClick }) {
     setTargetResults({ query: q, results: ranked, total: matched.length });
   };
 
+  // ══════════════════════════════════════════════════════════════════
+  // 7.1 — PROACTIVE AI INSIGHTS ENGINE
+  // ══════════════════════════════════════════════════════════════════
+  const proactiveInsights = useMemo(() => {
+    const insights = [];
+    const active = trials.filter(t => t.IsCompleted !== true && t.IsCompleted !== 'true');
+
+    // 1. Declining efficacy detection
+    const decliningTrials = [];
+    active.forEach(t => {
+      const eff = safeJsonParse(t.EfficacyDataJSON, []);
+      if (eff.length >= 2) {
+        const sorted = [...eff].sort((a, b) => (a.daa || 0) - (b.daa || 0));
+        const prev = sorted[sorted.length - 2];
+        const last = sorted[sorted.length - 1];
+        const prevVal = prev.controlPct ?? prev.wce ?? null;
+        const lastVal = last.controlPct ?? last.wce ?? null;
+        if (prevVal !== null && lastVal !== null && lastVal < prevVal - 10) {
+          decliningTrials.push({ trial: t, drop: Math.round(prevVal - lastVal) });
+        }
+      }
+    });
+
+    if (decliningTrials.length > 0) {
+      insights.push({
+        id: 'declining_eff',
+        type: 'danger',
+        icon: TrendingDown,
+        title: `${decliningTrials.length} active trial${decliningTrials.length > 1 ? 's show' : ' shows'} declining efficacy`,
+        description: `Loss of control detected between latest observations (up to -${Math.max(...decliningTrials.map(d => d.drop))}% drop). Review application dosage or weed regrowth.`,
+        actionLabel: 'Inspect Trials',
+        actionRoute: '/trials',
+        badge: 'ACTION NEEDED',
+        badgeBg: 'bg-red-100 text-red-700'
+      });
+    }
+
+    // 2. Outperforming star formulation benchmark
+    const formulaMap = {};
+    trials.forEach(t => {
+      if (!t.FormulationName) return;
+      if (!formulaMap[t.FormulationName]) formulaMap[t.FormulationName] = [];
+      const eff = getTrialCalculatedEfficacy(t, activeCategory);
+      if (eff !== null && eff > 0) formulaMap[t.FormulationName].push(eff);
+    });
+
+    const starFormulas = Object.entries(formulaMap).map(([name, effs]) => {
+      const avg = Math.round(effs.reduce((a, b) => a + b, 0) / effs.length);
+      return { name, avg, count: effs.length };
+    }).filter(f => f.count >= 2 && f.avg >= 90);
+
+    if (starFormulas.length > 0) {
+      const top = starFormulas.sort((a, b) => b.avg - a.avg)[0];
+      insights.push({
+        id: 'star_performer',
+        type: 'success',
+        icon: Sparkles,
+        title: `"${top.name}" achieves standout ${top.avg}% control across ${top.count} trials`,
+        description: `This formulation consistently leads ${catConfig.name.toLowerCase()} trials this season. Consider promoting to large-scale registration trials.`,
+        actionLabel: 'View in Analytics',
+        actionRoute: '/analytics',
+        badge: 'TOP PERFORMER',
+        badgeBg: 'bg-emerald-100 text-emerald-700'
+      });
+    }
+
+    // 3. Overdue observation alert
+    const staleTrials = active.filter(t => {
+      const eff = safeJsonParse(t.EfficacyDataJSON, []);
+      let lastD = t.Date ? new Date(t.Date) : null;
+      eff.forEach(o => {
+        const d = o.date ? new Date(o.date) : null;
+        if (d && (!lastD || d > lastD)) lastD = d;
+      });
+      if (!lastD) return false;
+      return (Date.now() - lastD.getTime()) > 10 * 86400000;
+    });
+
+    if (staleTrials.length > 0) {
+      insights.push({
+        id: 'stale_obs',
+        type: 'info',
+        icon: Clock,
+        title: `${staleTrials.length} trial${staleTrials.length > 1 ? 's have' : ' has'} no recorded observations in >10 days`,
+        description: `Timely intervals are crucial for accurate regression curves. Plots at ${staleTrials.slice(0, 2).map(t => t.Location || t.FormulationName).join(', ')} require field scoring.`,
+        actionLabel: 'Log Observations',
+        actionRoute: '/trials',
+        badge: 'SCHEDULE',
+        badgeBg: 'bg-blue-100 text-blue-700'
+      });
+    }
+
+    // 4. Resistance / dosage anomaly warning
+    const failureTrials = trials.filter(t => {
+      const eff = getTrialCalculatedEfficacy(t, activeCategory);
+      return eff !== null && eff < 45 && t.Dosage && !t.IsControl;
+    });
+
+    if (failureTrials.length > 0) {
+      insights.push({
+        id: 'resistance_signal',
+        type: 'warning',
+        icon: ShieldAlert,
+        title: `Possible resistance or sub-lethal dose flagged on ${failureTrials.length} plot${failureTrials.length > 1 ? 's' : ''}`,
+        description: `Treated plots demonstrated <45% efficacy despite full product application. Check Resistance Tracker for target biotypes.`,
+        actionLabel: 'Open Resistance Tracker',
+        actionRoute: '/resistance',
+        badge: 'BIOTYPE ALERT',
+        badgeBg: 'bg-purple-100 text-purple-700'
+      });
+    }
+
+    return insights;
+  }, [trials, activeCategory, catConfig.name]);
+
   const rawName = user?.Name || user?.Username || user?.username || 'Researcher';
   const cleanName = rawName.includes('@') ? rawName.split('@')[0] : rawName;
   const displayName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
@@ -617,6 +733,60 @@ export default function Dashboard({ onMenuClick }) {
                   </div>
                 ))
               )}
+            </div>
+          )}
+
+          {/* ══ 7.1 — PROACTIVE AI INSIGHTS ═══════════════════════════ */}
+          {proactiveInsights.length > 0 && (
+            <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-5 text-white shadow-md border border-slate-800">
+              <div className="flex items-center justify-between mb-3.5">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-amber-400/20 text-amber-300 flex items-center justify-center ring-1 ring-amber-400/30">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm tracking-wide flex items-center gap-2">
+                      Proactive AI Insights
+                      <span className="text-[10px] font-semibold bg-indigo-500/30 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-400/30">
+                        {proactiveInsights.length} Live Signals
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-slate-300">Automated intelligence generated from current field observations & lifecycle data</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                {proactiveInsights.map((insight) => {
+                  const Icon = insight.icon;
+                  return (
+                    <div
+                      key={insight.id}
+                      className="rounded-xl bg-white/10 hover:bg-white/15 backdrop-blur-sm border border-white/10 p-3.5 flex flex-col justify-between transition-all duration-200"
+                    >
+                      <div>
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${insight.badgeBg}`}>
+                            {insight.badge}
+                          </span>
+                          <Icon className="w-4 h-4 text-white/70" />
+                        </div>
+                        <h4 className="text-xs font-bold text-white leading-snug">{insight.title}</h4>
+                        <p className="text-[11px] text-slate-300 mt-1 leading-relaxed">{insight.description}</p>
+                      </div>
+
+                      <div className="mt-3 pt-2 border-t border-white/10 flex justify-end">
+                        <button
+                          onClick={() => navigate(insight.actionRoute)}
+                          className="text-[11px] font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition"
+                        >
+                          {insight.actionLabel} <ArrowRight className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 

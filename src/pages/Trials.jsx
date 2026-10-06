@@ -279,7 +279,9 @@ export default function Trials({ onMenuClick }) {
   const [isObsModalOpen, setIsObsModalOpen] = useState(false);
   const [editingObsIdx, setEditingObsIdx] = useState(null);
   const [quickEditObs, setQuickEditObs] = useState(null); // { obsIdx, fieldKey, label, value }
-  const [obsForm, setObsForm] = useState({ daa: '', date: toDatetimeLocal(new Date()), notes: '', weedDetails: [], weatherTemp: '', weatherHumidity: '', weatherWind: '', weatherRain: '', bbchStage: '', phytotoxicityPct: '', phytotoxicityNotes: '' });
+  const [obsForm, setObsForm] = useState({ daa: '', date: toDatetimeLocal(new Date()), notes: '', weedDetails: [], weatherTemp: '', weatherHumidity: '', weatherWind: '', weatherRain: '', bbchStage: '', phytotoxicityPct: '', phytotoxicityNotes: '', photos: [] });
+  const [obsDragOver, setObsDragOver] = useState(false);
+  const bulkObsPhotoInputRef = useRef(null);
 
   // --- Voice Field Scout ---
   const [isVoiceScoutOpen, setIsVoiceScoutOpen] = useState(false);
@@ -1960,17 +1962,19 @@ export default function Trials({ onMenuClick }) {
       const filledForm = { ...initialForm, ...obs };
       filledForm.daa = obs.daa ?? '';
       filledForm.date = obs.date || '';
+      filledForm.photos = Array.isArray(obs.photos) ? obs.photos : (obs.photoUrl ? [{ id: 'existing_photo', url: obs.photoUrl, name: 'Observation Photo' }] : []);
       setObsForm(filledForm);
     } else {
       const today = new Date().toISOString().split('T')[0];
       const autoDaa = activeTrial?.Date ? calculateDAA(today, activeTrial.Date) : '';
-      const newForm = { ...initialForm, date: today, daa: autoDaa };
+      const newForm = { ...initialForm, date: today, daa: autoDaa, photos: [] };
       
       const savedDraft = activeTrial ? localStorage.getItem(`obs_draft_${activeTrial.ID}`) : null;
       if (savedDraft) {
         try {
           const parsed = JSON.parse(savedDraft);
           if (parsed && (window.confirm("An unsaved observation draft was found for this trial. Would you like to restore it?"))) {
+            if (!Array.isArray(parsed.photos)) parsed.photos = [];
             setObsForm(parsed);
           } else {
             localStorage.removeItem(`obs_draft_${activeTrial.ID}`);
@@ -2032,6 +2036,46 @@ export default function Trials({ onMenuClick }) {
 
     const efficacy = calculateEfficacy(categoryId, val, controlVal);
     return getRatingFromEfficacy(categoryId, efficacy);
+  };
+
+  // 2.7 — Bulk Photo Upload handler for observation
+  const handleBulkObsPhotoUpload = async (files) => {
+    if (!files || files.length === 0) return;
+    const fileList = Array.from(files).filter(f => f.type && f.type.startsWith('image/'));
+    if (fileList.length === 0) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Please select valid image files', type: 'error' } }));
+      return;
+    }
+
+    window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Processing ${fileList.length} observation photo(s)...`, type: 'info' } }));
+
+    const readPromises = fileList.map(file => {
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          resolve({
+            id: `obs_p_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+            url: e.target.result,
+            fileData: e.target.result,
+            name: file.name,
+            size: file.size,
+            date: new Date().toISOString()
+          });
+        };
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(file);
+      });
+    });
+
+    const newPhotos = (await Promise.all(readPromises)).filter(Boolean);
+    setObsForm(prev => {
+      const existing = Array.isArray(prev.photos) ? prev.photos : [];
+      return {
+        ...prev,
+        photos: [...existing, ...newPhotos]
+      };
+    });
+    window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `${newPhotos.length} photo(s) added to this observation`, type: 'success' } }));
   };
 
   const handleSaveObs = async (e) => {
@@ -2126,6 +2170,14 @@ export default function Trials({ onMenuClick }) {
       newObs.weedDetails = newObs.weedDetails || obsForm.weedDetails || [];
     }
 
+    // Attach bulk observation photos
+    if (Array.isArray(obsForm.photos) && obsForm.photos.length > 0) {
+      newObs.photos = obsForm.photos;
+      if (!newObs.photoUrl && obsForm.photos[0]?.url) {
+        newObs.photoUrl = obsForm.photos[0].url;
+      }
+    }
+
     if (editingObsIdx !== null) {
       const prevObs = efficacyData[editingObsIdx];
       catConfig.observationFields?.forEach(f => {
@@ -2159,9 +2211,28 @@ export default function Trials({ onMenuClick }) {
 
     const newResult = calculateResultRating(efficacyData, activeTrial.IsControl || false, activeCategory, activeTrial);
 
+    // Synchronize observation photos into the trial's PhotoURLs collection
+    let photosList = safeJsonParse(activeTrial.PhotoURLs, []);
+    if (Array.isArray(obsForm.photos) && obsForm.photos.length > 0) {
+      obsForm.photos.forEach(p => {
+        const pUrl = typeof p === 'string' ? p : (p.url || p.fileData);
+        if (pUrl && !photosList.some(existing => (typeof existing === 'string' ? existing : (existing.url || existing.fileData)) === pUrl)) {
+          photosList.push({
+            fileData: pUrl,
+            url: pUrl,
+            date: formatPhotoDate(new Date().toISOString()),
+            daa: Number(obsForm.daa) || null,
+            label: `DAA ${obsForm.daa ?? '?'} Observation Photo`,
+            tag: `Observation DAA ${obsForm.daa ?? '?'}`
+          });
+        }
+      });
+    }
+
     const updated = {
       ...activeTrial,
       EfficacyDataJSON: JSON.stringify(efficacyData),
+      PhotoURLs: JSON.stringify(photosList),
       Result: newResult
     };
 
@@ -2172,7 +2243,7 @@ export default function Trials({ onMenuClick }) {
       localStorage.removeItem(`obs_draft_${activeTrial.ID}`);
     }
     try {
-      await updateTrial({ ID: updated.ID, EfficacyDataJSON: updated.EfficacyDataJSON, Result: updated.Result }, getAppState);
+      await updateTrial({ ID: updated.ID, EfficacyDataJSON: updated.EfficacyDataJSON, PhotoURLs: updated.PhotoURLs, Result: updated.Result }, getAppState);
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Observation saved', type: 'success' } }));
     } catch (err) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Failed to save observation', type: 'error' } }));
@@ -10102,6 +10173,93 @@ If none are present, write "None".`;
                     </button>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+
+          {/* ══ 2.7 — BULK PHOTO UPLOAD PER OBSERVATION ═══════════════ */}
+          <div className="border border-slate-200 rounded-xl p-3 bg-white space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Camera className="w-4 h-4 text-emerald-600" />
+                <span className="text-xs font-bold text-slate-700 uppercase">Observation Photos</span>
+                {(obsForm.photos || []).length > 0 && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                    {obsForm.photos.length} photo{obsForm.photos.length !== 1 ? 's' : ''}
+                  </span>
+                )}
+              </div>
+              <span className="text-[10px] text-slate-400">DAA {obsForm.daa !== '' && obsForm.daa !== null ? obsForm.daa : '?'}</span>
+            </div>
+
+            {/* Drag & Drop Upload Zone */}
+            <div
+              onDragOver={(e) => { e.preventDefault(); setObsDragOver(true); }}
+              onDragLeave={(e) => { e.preventDefault(); setObsDragOver(false); }}
+              onDrop={(e) => {
+                e.preventDefault();
+                setObsDragOver(false);
+                if (e.dataTransfer.files) handleBulkObsPhotoUpload(e.dataTransfer.files);
+              }}
+              onClick={() => bulkObsPhotoInputRef.current?.click()}
+              className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all ${
+                obsDragOver ? 'border-emerald-500 bg-emerald-50/70 scale-[0.99]' : 'border-slate-200 bg-slate-50/60 hover:bg-slate-100/70 hover:border-slate-300'
+              }`}
+            >
+              <input
+                ref={bulkObsPhotoInputRef}
+                type="file"
+                multiple
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files) handleBulkObsPhotoUpload(e.target.files);
+                  e.target.value = '';
+                }}
+              />
+              <div className="flex flex-col items-center justify-center gap-1.5 pointer-events-none">
+                <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                  <Camera className="w-4 h-4" />
+                </div>
+                <p className="text-xs font-semibold text-slate-700">
+                  Drag & drop multiple photos or <span className="text-emerald-600 underline">browse</span>
+                </p>
+                <p className="text-[10px] text-slate-400">
+                  Attach multiple field, canopy, or close-up photos to DAA {obsForm.daa || '?'}
+                </p>
+              </div>
+            </div>
+
+            {/* Photo Thumbnails Grid */}
+            {Array.isArray(obsForm.photos) && obsForm.photos.length > 0 && (
+              <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 pt-1">
+                {obsForm.photos.map((p, pIdx) => {
+                  const pSrc = typeof p === 'string' ? p : (p.url || p.fileData);
+                  return (
+                    <div key={p.id || pIdx} className="relative group rounded-lg overflow-hidden border border-slate-200 aspect-square bg-slate-100">
+                      <img src={pSrc} alt={`Obs photo ${pIdx + 1}`} className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setObsForm(prev => ({
+                              ...prev,
+                              photos: prev.photos.filter((_, i) => i !== pIdx)
+                            }));
+                          }}
+                          className="w-6 h-6 rounded-full bg-red-600 text-white flex items-center justify-center hover:bg-red-700 shadow"
+                          title="Remove photo"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                      <span className="absolute bottom-1 left-1 text-[8px] bg-black/60 text-white px-1 rounded font-bold pointer-events-none">
+                        #{pIdx + 1}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
