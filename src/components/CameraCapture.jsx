@@ -1,7 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { X, Zap, Focus } from 'lucide-react';
+import { X, Zap, Focus, Layers } from 'lucide-react';
+import { triggerHaptic } from '../utils/nativeCapabilities.js';
 
-export default function CameraCapture({ isOpen = true, onClose, onCapture, initialAspectRatio = '3:4', onAspectChange }) {
+export default function CameraCapture({ 
+  isOpen = true, 
+  onClose, 
+  onCapture, 
+  initialAspectRatio = '3:4', 
+  onAspectChange,
+  allowBurst = false,
+  onBurstCapture = null
+}) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const previewParentRef = useRef(null);
@@ -13,6 +22,8 @@ export default function CameraCapture({ isOpen = true, onClose, onCapture, initi
   const [focusSupported, setFocusSupported] = useState(false);
   const [aspectRatio, setAspectRatio] = useState(initialAspectRatio || '3:4');
   const [parentDims, setParentDims] = useState({ width: 0, height: 0 });
+  const [burstActive, setBurstActive] = useState(false);
+  const [burstCount, setBurstCount] = useState(0);
 
   useEffect(() => {
     let activeStream = null;
@@ -205,14 +216,30 @@ export default function CameraCapture({ isOpen = true, onClose, onCapture, initi
     const videoWidth = video.videoWidth;
     const videoHeight = video.videoHeight;
 
+    triggerHaptic('medium');
+
+    const finishCapture = (capturedDataUrl) => {
+      if (burstActive && onBurstCapture) {
+        setBurstCount(prev => prev + 1);
+        onBurstCapture(capturedDataUrl, burstCount + 1);
+        // Play visual confirmation flash
+        if (canvasRef.current && canvasRef.current.parentElement) {
+          canvasRef.current.parentElement.classList.add('opacity-50');
+          setTimeout(() => canvasRef.current?.parentElement?.classList.remove('opacity-50'), 100);
+        }
+      } else {
+        onCapture(capturedDataUrl);
+        onClose();
+      }
+    };
+
     if (!displayWidth || !displayHeight || !videoWidth || !videoHeight) {
       // Fallback if dimensions are not resolved
       canvas.width = videoWidth || 1920;
       canvas.height = videoHeight || 1080;
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
-      onCapture(dataUrl);
-      onClose();
+      finishCapture(dataUrl);
       return;
     }
 
@@ -266,8 +293,7 @@ export default function CameraCapture({ isOpen = true, onClose, onCapture, initi
           ctx.drawImage(img, srcX, srcY, srcW, srcH, 0, 0, destW, destH);
 
           URL.revokeObjectURL(img.src);
-          onCapture(canvas.toDataURL('image/jpeg', 0.96));
-          onClose();
+          finishCapture(canvas.toDataURL('image/jpeg', 0.96));
           return;
         } catch (captureErr) {
           console.warn("[CameraCapture] Native Still ImageCapture failed, falling back to stream capture:", captureErr);
@@ -310,8 +336,7 @@ export default function CameraCapture({ isOpen = true, onClose, onCapture, initi
 
     // High quality JPEG
     const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
-    onCapture(dataUrl);
-    onClose();
+    finishCapture(dataUrl);
   };
 
   // Compute exact dimensions for the letterboxed/centered video preview
@@ -407,14 +432,28 @@ export default function CameraCapture({ isOpen = true, onClose, onCapture, initi
         {/* Bottom Bar */}
         <div className="w-full flex justify-around items-center px-4 mt-2 z-[10001] min-h-[80px]">
           <div className="w-12 h-12 flex items-center justify-center">
-             {flashSupported && (
+             {allowBurst ? (
+               <button
+                 onClick={() => {
+                   triggerHaptic('light');
+                   setBurstActive(!burstActive);
+                 }}
+                 className={`w-12 h-12 rounded-full flex flex-col items-center justify-center transition-all ${
+                   burstActive ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/50' : 'bg-black/40 text-slate-300 backdrop-blur-md'
+                 }`}
+                 title={burstActive ? 'Continuous Burst Mode Active' : 'Enable Burst Mode'}
+               >
+                 <Layers className="w-5 h-5" />
+                 {burstActive && <span className="text-[9px] font-bold mt-0.5 leading-none">{burstCount}</span>}
+               </button>
+             ) : flashSupported ? (
                <button
                   onClick={toggleFlash}
                   className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${flashOn ? 'bg-yellow-400 text-yellow-900' : 'bg-black/40 text-white backdrop-blur-md'}`}
                >
                   <Zap className="w-6 h-6" />
                </button>
-             )}
+             ) : null}
           </div>
 
           <button

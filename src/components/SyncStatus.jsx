@@ -175,18 +175,20 @@ export default function SyncStatus() {
 
   return (
     <div className="relative">
-      {/* Compact Status Badge */}
+      {/* Field-Optimized Status Badge with Haptics */}
       <button
-        onClick={() => setIsExpanded(!isExpanded)}
-        className={`flex items-center gap-1.5 px-2.5 py-1.5 md:px-3 md:py-2 rounded-lg text-xs font-medium border transition touch-manipulation ${
-          // On mobile, use icon only to save space
-          'md:gap-2 ' + config.color + (config.pulse ? ' animate-pulse' : '')
+        onClick={() => {
+          import('../utils/nativeCapabilities.js').then(m => m.triggerHaptic('light')).catch(() => {});
+          setIsExpanded(!isExpanded);
+        }}
+        className={`flex items-center gap-1.5 px-3 py-1.5 md:px-3 md:py-2 rounded-xl text-xs font-semibold border transition shadow-sm touch-manipulation ${
+          config.color + (config.pulse ? ' animate-pulse' : '')
         }`}
+        title={`Sync Status: ${config.label}`}
+        aria-label={`Sync Status: ${config.label}`}
       >
         {config.icon}
-        <span className="hidden md:inline">{config.label}</span>
-        {/* Mobile: show dot indicator instead of label */}
-        <span className="md:hidden w-1.5 h-1.5 rounded-full bg-current" />
+        <span className="inline text-[11px] md:text-xs font-medium">{config.label}</span>
         {(status === SYNC_STATUS.CONFLICTS || (effectivePendingCount > 0)) && (
           <ChevronRight className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
         )}
@@ -243,6 +245,33 @@ export default function SyncStatus() {
                 Force Sync Now
               </button>
             )}
+
+            {/* Offline Fail-Safe Export */}
+            <button
+              onClick={() => {
+                try {
+                  const dataToExport = {
+                    timestamp: new Date().toISOString(),
+                    syncQueue: appSyncQueue,
+                    localStorageDump: { ...localStorage }
+                  };
+                  const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `offline_field_backup_${Date.now()}.json`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                } catch (err) {
+                  console.error('Backup export failed:', err);
+                }
+              }}
+              className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 border border-slate-200 text-slate-600 hover:text-slate-800 hover:bg-slate-50 rounded-lg text-xs font-medium transition"
+              title="Download local JSON copy of queued field observations"
+            >
+              <Download className="w-3.5 h-3.5 text-slate-500" />
+              Export Local Backup (JSON)
+            </button>
           </div>
           
           {/* Conflict Warning */}

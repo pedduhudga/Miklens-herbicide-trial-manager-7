@@ -58,11 +58,29 @@ body.high-contrast {
     --bg-gradient-3: #ffffff;
     --bg-gradient-4: #ffffff;
     --surface-glass: #ffffff;
-    --surface-border: #000000;
+    --surface-border: #111827;
     --card-bg: #ffffff;
-    --card-text-muted: #000000;
-    --primary-color: #008000;
-    --primary-hover-color: #006400;
+    --card-text-muted: #111827;
+    --primary-color: #047857;
+    --primary-hover-color: #064e3b;
+}
+
+body.high-contrast * {
+    border-color: rgba(0, 0, 0, 0.45) !important;
+    text-shadow: none !important;
+}
+
+body.high-contrast .dashboard-card,
+body.high-contrast button {
+    border-width: 1.5px !important;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.15) !important;
+}
+
+/* Touch manipulation & ergonomic tap targets for field work */
+.touch-target-field {
+    min-height: 48px;
+    min-width: 48px;
+    touch-action: manipulation;
 }
 
 body {

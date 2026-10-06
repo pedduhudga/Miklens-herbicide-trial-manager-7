@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Download, Smartphone, Wifi, WifiOff, RefreshCw, X, ChevronRight, Plus } from 'lucide-react';
+import { Download, Smartphone, Wifi, WifiOff, RefreshCw, X, ChevronRight, Plus, HardDrive } from 'lucide-react';
+import { getIndexedDBUsage } from '../services/storageQuotaManager.js';
+import { triggerHaptic } from '../utils/nativeCapabilities.js';
 
 export default function PWAStatus() {
   const [isInstallable, setIsInstallable] = useState(false);
@@ -10,6 +12,7 @@ export default function PWAStatus() {
   const [updateRegistration, setUpdateRegistration] = useState(null);
   const [dismissed, setDismissed] = useState(false);
   const [installPromptShown, setInstallPromptShown] = useState(false);
+  const [storageStats, setStorageStats] = useState(null);
 
   useEffect(() => {
     // Check if app is already installed
@@ -122,6 +125,19 @@ export default function PWAStatus() {
     setDismissed(true);
   };
 
+  // Load storage usage stats
+  useEffect(() => {
+    let active = true;
+    getIndexedDBUsage().then((stats) => {
+      if (active && stats && stats.quota > 0) {
+        const usedMB = (stats.used / (1024 * 1024)).toFixed(1);
+        const quotaMB = (stats.quota / (1024 * 1024 * 1024)).toFixed(1);
+        setStorageStats({ usedMB, quotaGB: quotaMB });
+      }
+    }).catch(() => {});
+    return () => { active = false; };
+  }, []);
+
   // Log current state for debugging
   useEffect(() => {
     console.log('[PWA Status]', { isInstallable, isInstalled, isOnline, deferredPrompt: !!deferredPrompt });
@@ -131,7 +147,7 @@ export default function PWAStatus() {
   if (isInstalled && !showUpdate) {
     return (
       <div 
-        className="md:hidden fixed bottom-[calc(5rem+env(safe-area-inset-bottom,0px))] left-4 z-40"
+        className="md:hidden fixed bottom-[calc(5rem+env(safe-area-inset-bottom,0px))] left-4 z-40 flex items-center gap-2"
         style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
       >
         <div className={`flex items-center gap-2 px-3 py-2 rounded-full text-xs font-medium shadow-sm backdrop-blur-md ${
@@ -151,6 +167,16 @@ export default function PWAStatus() {
             </>
           )}
         </div>
+
+        {storageStats && (
+          <div 
+            className="flex items-center gap-1.5 px-2.5 py-2 rounded-full text-[11px] font-medium bg-slate-100/90 text-slate-600 shadow-sm backdrop-blur-md"
+            title={`Offline Storage: ${storageStats.usedMB} MB cached`}
+          >
+            <HardDrive className="w-3 h-3 text-slate-500" />
+            <span>{storageStats.usedMB} MB</span>
+          </div>
+        )}
       </div>
     );
   }

@@ -1387,12 +1387,29 @@ Rules:
         />
       )}
 
-      {/* Camera Modal for photo capture */}
+      {/* Camera Modal for photo capture with Field Burst Mode */}
       {cameraModal && (
         <CameraCapture
           onCapture={(dataUrl) => handleCapture(dataUrl, cameraModal.mode)}
           onClose={() => setCameraModal(null)}
           initialAspectRatio="3:4"
+          allowBurst={true}
+          onBurstCapture={async (burstDataUrl, count) => {
+            const { trialId, mode } = cameraModal;
+            if (!trialId) return;
+            window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Burst #${count} captured & queued!`, type: 'info' } }));
+            // Quick background upload with auto-tagged sequential timestamp
+            const now = new Date().toISOString();
+            handlePhotoUpload(
+              burstDataUrl, 
+              'image/jpeg', 
+              trialId, 
+              mode, 
+              now, 
+              `Burst Plot Plant ${count}`, 
+              `Burst Shot ${count}`
+            );
+          }}
         />
       )}
 

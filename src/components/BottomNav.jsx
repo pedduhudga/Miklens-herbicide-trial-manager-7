@@ -4,6 +4,8 @@ import { LayoutDashboard, FlaskConical, ListChecks, PlusCircle, MoreHorizontal, 
 import { useAppState } from '../hooks/useAppState.jsx';
 import { getCategoryConfig } from '../utils/categoryConfig.js';
 
+import { triggerHaptic } from '../utils/nativeCapabilities.js';
+
 export default function BottomNav({ onMoreClick }) {
   const { state } = useAppState();
   const activeCategory = state.activeCategory || 'herbicide';
@@ -28,7 +30,7 @@ export default function BottomNav({ onMoreClick }) {
 
   return (
     <nav 
-      className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200/80 shadow-[0_-4px_24px_rgba(0,0,0,0.08)] z-50"
+      className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200/80 shadow-[0_-4px_24px_rgba(0,0,0,0.08)] z-50 select-none"
       role="navigation" 
       aria-label="Mobile Navigation"
       style={{ 
@@ -42,8 +44,9 @@ export default function BottomNav({ onMoreClick }) {
             key={item.to}
             to={item.to}
             aria-label={item.label}
+            onClick={() => triggerHaptic('light')}
             className={({ isActive }) =>
-              `flex flex-col items-center justify-center flex-1 h-full transition-all duration-200 ${
+              `flex flex-col items-center justify-center flex-1 h-full transition-all duration-200 active:scale-95 touch-manipulation ${
                 isActive 
                   ? `${colors.active} ${colors.activeBg}` 
                   : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
@@ -68,8 +71,9 @@ export default function BottomNav({ onMoreClick }) {
         <NavLink
           to="/scanner"
           aria-label="Scan Plot QR Code"
+          onClick={() => triggerHaptic('medium')}
           className={({ isActive }) =>
-            `absolute -top-5 left-1/2 -translate-x-1/2 flex flex-col items-center justify-center z-10 transition-transform duration-200 active:scale-95 ${
+            `absolute -top-5 left-1/2 -translate-x-1/2 flex flex-col items-center justify-center z-10 transition-transform duration-200 active:scale-95 touch-manipulation ${
               isActive ? colors.active : 'text-white'
             }`
           }
@@ -94,10 +98,13 @@ export default function BottomNav({ onMoreClick }) {
 
         {/* Menu Button */}
         <button
-          onClick={onMoreClick}
+          onClick={(e) => {
+            triggerHaptic('light');
+            onMoreClick(e);
+          }}
           aria-label="Open Menu"
           aria-haspopup="true"
-          className="flex flex-col items-center justify-center flex-1 h-full text-slate-500 hover:text-slate-700 hover:bg-slate-50 transition-colors"
+          className="flex flex-col items-center justify-center flex-1 h-full text-slate-500 hover:text-slate-700 hover:bg-slate-50 active:scale-95 transition-all touch-manipulation"
         >
           <MoreHorizontal className="w-6 h-6" />
           <span className="text-[11px] font-semibold mt-0.5">Menu</span>

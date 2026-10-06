@@ -10561,6 +10561,12 @@ If none are present, write "None".`;
             onCapture={handleCapturePhoto}
             onClose={() => setIsCameraOpen(false)}
             initialAspectRatio={initialAspect}
+            allowBurst={true}
+            onBurstCapture={(burstDataUrl, count) => {
+              window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Burst photo #${count} saved!`, type: 'info' } }));
+              const now = new Date().toISOString();
+              saveAndAnalyzePhoto(burstDataUrl, now, currentTrial, `Burst Plot Plant ${count}`);
+            }}
             onAspectChange={async (ratio) => {
               if (currentTrial) {
                 const updatedSettings = { ...safeJsonParse(currentTrial.LiveQRSettings, {}), cameraAspectRatio: ratio };

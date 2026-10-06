@@ -126,9 +126,42 @@ function AppLayout() {
   const location = useLocation(); // Subscribe to location changes to force update of nested routes
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const toggleSidebar = () => setSidebarOpen(!sidebarOpen);
-
   const { state, updateState, getAppState } = useAppState();
   const { isAuthenticated, isViewer, isAdmin, user } = useAuth();
+
+  // Android hardware back button & modal dismiss support
+  useEffect(() => {
+    let unlisten = null;
+    const setupBackButton = async () => {
+      try {
+        if (window.Capacitor?.isNativePlatform?.()) {
+          const { App: CapApp } = await import('@capacitor/app');
+          const listener = await CapApp.addListener('backButton', ({ canGoBack }) => {
+            if (sidebarOpen) {
+              setSidebarOpen(false);
+              return;
+            }
+            if (state.activeConflict) {
+              updateState({ activeConflict: null });
+              return;
+            }
+            if (canGoBack) {
+              window.history.back();
+            } else {
+              CapApp.exitApp();
+            }
+          });
+          unlisten = () => listener.remove();
+        }
+      } catch (err) {
+        // Fallback for non-Capacitor environments
+      }
+    };
+    setupBackButton();
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [sidebarOpen, state.activeConflict, updateState]);
 
   const handleResolveConflict = (resolvedItem) => {
     updateState({
