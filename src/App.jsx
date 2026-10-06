@@ -134,8 +134,8 @@ function AppLayout() {
     let unlisten = null;
     const setupBackButton = async () => {
       try {
-        if (window.Capacitor?.isNativePlatform?.()) {
-          const { App: CapApp } = await import('@capacitor/app');
+        const CapApp = window.Capacitor?.Plugins?.App;
+        if (CapApp && window.Capacitor?.isNativePlatform?.()) {
           const listener = await CapApp.addListener('backButton', ({ canGoBack }) => {
             if (sidebarOpen) {
               setSidebarOpen(false);
@@ -162,6 +162,7 @@ function AppLayout() {
       if (unlisten) unlisten();
     };
   }, [sidebarOpen, state.activeConflict, updateState]);
+
 
   // 8.5 Auto-Backup on Exit: Save IndexedDB snapshot & sync queue when user exits or switches tabs
   useEffect(() => {
