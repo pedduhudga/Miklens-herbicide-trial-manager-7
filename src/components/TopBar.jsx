@@ -33,7 +33,7 @@ export default function TopBar({ title, onMenuClick }) {
 
   return (
     <header 
-      className="bg-white/80 backdrop-blur-md border-b border-slate-200/50 px-4 py-3 flex justify-between items-center flex-shrink-0 shadow-sm sticky top-0 z-20"
+      className="bg-white/80 backdrop-blur-md border-b border-slate-200/50 px-4 py-3 flex justify-between items-center flex-shrink-0 shadow-sm sticky top-0 z-20 w-full max-w-full overflow-hidden"
       style={{ 
         paddingTop: 'max(12px, env(safe-area-inset-top))',
         paddingLeft: 'max(16px, env(safe-area-inset-left))',

@@ -6082,7 +6082,7 @@ If none are present, write "None".`;
   }, [activeTrial, photoEditModal, trials, updateState, getAppState]);
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden">
+    <div className="flex-1 flex flex-col h-full overflow-hidden w-full max-w-full min-w-0">
       <TopBar title="Trials" onMenuClick={onMenuClick} />
 
       {recoveryDraft && (
@@ -6113,7 +6113,7 @@ If none are present, write "None".`;
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden w-full max-w-full min-w-0">
         {/* ── TOOLBAR (Modularized) ── */}
         <TrialFiltersBar
           search={search}
