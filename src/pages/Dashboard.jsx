@@ -10,7 +10,8 @@ import WeatherDashboard from '../components/WeatherDashboard.jsx';
 import {
   Activity, FolderOpen, FlaskConical, CheckCircle, Plus,
   TrendingUp, AlertCircle, Leaf, BarChart3, Search, ChevronRight,
-  Thermometer, Droplets, Wind, CloudRain, Sprout, Filter, Grid3x3
+  Thermometer, Droplets, Wind, CloudRain, Sprout, Filter, Grid3x3,
+  Clock, Camera, CalendarDays, CloudOff, Eye, MapPin, Zap, ShieldAlert
 } from 'lucide-react';
 import { getCategoryConfig } from '../utils/categoryConfig.js';
 import { getTrialCalculatedEfficacy } from '../utils/formulationTrialUtils.js';
@@ -247,6 +248,262 @@ export default function Dashboard({ onMenuClick }) {
     [...projects].sort((a, b) => new Date(b.CreatedAt || 0) - new Date(a.CreatedAt || 0)).slice(0, 3)
   , [projects]);
 
+  // ══════════════════════════════════════════════════════════════════
+  // 1.1 — ACTIVITY FEED: Reconstruct last 15 actions from data timestamps
+  // ══════════════════════════════════════════════════════════════════
+  const activityFeed = useMemo(() => {
+    const events = [];
+    const allTrials = state.trials || [];
+    const allProjects = state.projects || [];
+    const allFormulations = state.formulations || [];
+
+    allTrials.forEach(t => {
+      const cat = t.Category || 'herbicide';
+      // Trial created
+      if (t.CreatedAt) {
+        events.push({ type: 'trial_created', icon: 'plus', color: 'emerald', label: `Trial created: ${t.FormulationName || 'Untitled'}`, detail: t.Location ? `at ${t.Location}` : (t.WeedSpecies ? `on ${t.WeedSpecies}` : ''), time: new Date(t.CreatedAt), trialId: t.ID, category: cat });
+      }
+      // Trial finalized
+      if ((t.IsCompleted === true || t.IsCompleted === 'true') && t.FinalizationDate) {
+        events.push({ type: 'trial_finalized', icon: 'check', color: 'blue', label: `Trial finalized: ${t.FormulationName || 'Untitled'}`, detail: t.Result ? `Result: ${t.Result}` : '', time: new Date(t.FinalizationDate), trialId: t.ID, category: cat });
+      }
+      // Observations added
+      const obs = safeJsonParse(t.EfficacyDataJSON, []);
+      if (Array.isArray(obs)) {
+        obs.forEach(o => {
+          const rawD = o.date || o.ObservationDate || o.timestamp;
+          if (rawD) {
+            const d = new Date(rawD);
+            if (!isNaN(d.getTime())) {
+              events.push({ type: 'observation', icon: 'eye', color: 'purple', label: `Observation recorded (DAA ${o.daa || '?'})`, detail: t.FormulationName || '', time: d, trialId: t.ID, category: cat });
+            }
+          }
+        });
+      }
+      // Photos added
+      const photos = safeJsonParse(t.PhotoURLs, []);
+      if (Array.isArray(photos) && photos.length > 0) {
+        // Use the trial's last modified or creation date for photos
+        const photoTime = t.LastModified ? new Date(t.LastModified) : (t.CreatedAt ? new Date(t.CreatedAt) : null);
+        if (photoTime && !isNaN(photoTime.getTime())) {
+          events.push({ type: 'photo', icon: 'camera', color: 'amber', label: `${photos.length} photo${photos.length > 1 ? 's' : ''} added`, detail: t.FormulationName || '', time: photoTime, trialId: t.ID, category: cat });
+        }
+      }
+    });
+
+    allProjects.forEach(p => {
+      if (p.CreatedAt) {
+        events.push({ type: 'project_created', icon: 'folder', color: 'indigo', label: `Project created: ${p.Name || 'Untitled'}`, detail: p.Description ? p.Description.slice(0, 40) : '', time: new Date(p.CreatedAt), category: p.Category || 'herbicide' });
+      }
+    });
+
+    allFormulations.forEach(f => {
+      if (f.CreatedAt) {
+        events.push({ type: 'formulation_created', icon: 'flask', color: 'teal', label: `Formulation added: ${f.Name || 'Untitled'}`, detail: f.Code || '', time: new Date(f.CreatedAt), category: f.Category || 'herbicide' });
+      }
+    });
+
+    return events
+      .filter(e => !isNaN(e.time.getTime()))
+      .sort((a, b) => b.time - a.time)
+      .slice(0, 15);
+  }, [state.trials, state.projects, state.formulations]);
+
+  // ══════════════════════════════════════════════════════════════════
+  // 1.3 — TRIAL HEALTH HEATMAP: Compute health status per active trial
+  // ══════════════════════════════════════════════════════════════════
+  const trialHealthData = useMemo(() => {
+    const now = Date.now();
+    const activeTrials = trials.filter(t => t.IsCompleted !== true && t.IsCompleted !== 'true');
+
+    return activeTrials.map(t => {
+      const obs = safeJsonParse(t.EfficacyDataJSON, []);
+      let lastObsDate = t.Date ? new Date(t.Date) : null;
+      if (Array.isArray(obs)) {
+        obs.forEach(o => {
+          const rawD = o.date || o.ObservationDate || o.timestamp;
+          if (rawD) {
+            const d = new Date(rawD);
+            if (!isNaN(d.getTime()) && (!lastObsDate || d > lastObsDate)) lastObsDate = d;
+          }
+        });
+      }
+
+      const daysSinceObs = lastObsDate ? Math.max(0, Math.floor((now - lastObsDate.getTime()) / 86400000)) : 999;
+      const obsCount = obs.length;
+
+      // Efficacy trend: compare last two observations
+      let efficacyTrend = 'stable';
+      if (obs.length >= 2) {
+        const sorted = [...obs].sort((a, b) => (a.daa || 0) - (b.daa || 0));
+        const prev = sorted[sorted.length - 2];
+        const last = sorted[sorted.length - 1];
+        const prevVal = prev.controlPct ?? prev.wce ?? null;
+        const lastVal = last.controlPct ?? last.wce ?? null;
+        if (prevVal !== null && lastVal !== null) {
+          if (lastVal < prevVal - 10) efficacyTrend = 'declining';
+          else if (lastVal > prevVal + 5) efficacyTrend = 'improving';
+        }
+      }
+
+      // Calculate health score 0-100
+      let healthScore = 100;
+      if (daysSinceObs > 14) healthScore -= 40;
+      else if (daysSinceObs > 7) healthScore -= 20;
+      else if (daysSinceObs > 3) healthScore -= 5;
+
+      if (obsCount === 0) healthScore -= 30;
+      if (efficacyTrend === 'declining') healthScore -= 20;
+
+      // Weather risk
+      const hasWeatherRisk = (t.Temperature && parseFloat(t.Temperature) > 35) || (t.Windspeed && parseFloat(t.Windspeed) > 20);
+      if (hasWeatherRisk) healthScore -= 10;
+
+      healthScore = Math.max(0, Math.min(100, healthScore));
+
+      let status = 'green';
+      if (healthScore < 40) status = 'red';
+      else if (healthScore < 70) status = 'amber';
+
+      return {
+        id: t.ID,
+        name: t.FormulationName || 'Untitled',
+        location: t.Location || '',
+        daysSinceObs,
+        obsCount,
+        efficacyTrend,
+        healthScore,
+        status,
+        hasWeatherRisk,
+      };
+    }).sort((a, b) => a.healthScore - b.healthScore);
+  }, [trials]);
+
+  // ══════════════════════════════════════════════════════════════════
+  // 1.4 — DUE OBSERVATIONS CALENDAR: Calculate upcoming observation dates
+  // ══════════════════════════════════════════════════════════════════
+  const dueObservations = useMemo(() => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const results = [];
+    const STANDARD_DAA_INTERVALS = [0, 3, 7, 14, 21, 28, 42, 56, 70, 84, 90];
+
+    trials.forEach(t => {
+      if (t.IsCompleted === true || t.IsCompleted === 'true') return;
+      if (!t.Date) return;
+
+      const trialDate = new Date(t.Date);
+      if (isNaN(trialDate.getTime())) return;
+      trialDate.setHours(0, 0, 0, 0);
+
+      const obs = safeJsonParse(t.EfficacyDataJSON, []);
+      const recordedDAAs = new Set();
+      if (Array.isArray(obs)) {
+        obs.forEach(o => {
+          if (o.daa !== undefined && o.daa !== null) recordedDAAs.add(Number(o.daa));
+        });
+      }
+
+      // Find next unrecorded DAA
+      for (const daa of STANDARD_DAA_INTERVALS) {
+        if (recordedDAAs.has(daa)) continue;
+        const dueDate = new Date(trialDate.getTime() + daa * 86400000);
+        dueDate.setHours(0, 0, 0, 0);
+        // Show observations due from today to 14 days in the future
+        const diffDays = Math.round((dueDate - now) / 86400000);
+        if (diffDays >= -1 && diffDays <= 14) {
+          results.push({
+            trialId: t.ID,
+            trialName: t.FormulationName || 'Untitled',
+            location: t.Location || '',
+            daa,
+            dueDate,
+            diffDays,
+            isOverdue: diffDays < 0,
+            isToday: diffDays === 0,
+          });
+        }
+        break; // only next due per trial
+      }
+    });
+
+    return results.sort((a, b) => a.dueDate - b.dueDate);
+  }, [trials]);
+
+  // ══════════════════════════════════════════════════════════════════
+  // 1.6 — WEATHER ALERT BANNER: Check 48h forecast for trial locations
+  // ══════════════════════════════════════════════════════════════════
+  const [forecastAlerts, setForecastAlerts] = useState([]);
+  const [forecastLoading, setForecastLoading] = useState(false);
+  const forecastCheckedRef = useRef(false);
+
+  useEffect(() => {
+    if (forecastCheckedRef.current) return;
+    const locationsToCheck = [];
+    const seen = new Set();
+    trials.forEach(t => {
+      if (t.IsCompleted === true || t.IsCompleted === 'true') return;
+      if (!t.Lat || !t.Lon) return;
+      const lat = parseFloat(t.Lat);
+      const lon = parseFloat(t.Lon);
+      if (isNaN(lat) || isNaN(lon)) return;
+      const key = `${lat.toFixed(2)},${lon.toFixed(2)}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      locationsToCheck.push({ lat, lon, name: t.Location || 'Trial Site', trialName: t.FormulationName || 'Untitled' });
+    });
+
+    if (locationsToCheck.length === 0) return;
+    forecastCheckedRef.current = true;
+    setForecastLoading(true);
+
+    // Check up to 3 unique locations to avoid excessive API calls
+    const toCheck = locationsToCheck.slice(0, 3);
+    Promise.all(toCheck.map(async (loc) => {
+      try {
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&hourly=precipitation_probability,wind_speed_10m,temperature_2m&forecast_days=2&timezone=auto`;
+        const res = await fetch(url);
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (!data?.hourly) return null;
+
+        const alerts = [];
+        const hours = data.hourly.time || [];
+        const precip = data.hourly.precipitation_probability || [];
+        const wind = data.hourly.wind_speed_10m || [];
+        const temp = data.hourly.temperature_2m || [];
+
+        // Check for heavy rain (>60% probability in any 6h window)
+        let highRainHours = 0;
+        let maxWind = 0;
+        let extremeTemp = false;
+
+        for (let i = 0; i < hours.length; i++) {
+          if (precip[i] > 60) highRainHours++;
+          if (wind[i] > maxWind) maxWind = wind[i];
+          if (temp[i] > 38 || temp[i] < 5) extremeTemp = true;
+        }
+
+        if (highRainHours >= 4) {
+          alerts.push({ type: 'rain', severity: 'high', location: loc.name, msg: `Heavy rain expected (${highRainHours}h with >60% probability) — avoid spraying` });
+        }
+        if (maxWind > 25) {
+          alerts.push({ type: 'wind', severity: 'high', location: loc.name, msg: `High wind forecast (up to ${Math.round(maxWind)} km/h) — spray drift risk` });
+        }
+        if (extremeTemp) {
+          alerts.push({ type: 'temp', severity: 'medium', location: loc.name, msg: `Extreme temperatures forecast at ${loc.name} — may affect product efficacy` });
+        }
+        return alerts;
+      } catch {
+        return null;
+      }
+    })).then(results => {
+      const allAlerts = results.filter(Boolean).flat();
+      setForecastAlerts(allAlerts);
+      setForecastLoading(false);
+    });
+  }, [trials]);
+
   // ── Find top formulations by target
   const handleFindByTarget = () => {
     const q = targetQuery.trim().toLowerCase();
@@ -330,6 +587,39 @@ export default function Dashboard({ onMenuClick }) {
             <StatCard icon={Sprout}      label="Auto-Closed"    value={stats.autoFinalizedCount} sub="Due to inactivity" color="emerald" onClick={() => navigate('/alerts')} />
           </div>
 
+          {/* ══ 1.6 — WEATHER ALERT BANNER ════════════════════════════ */}
+          {(forecastAlerts.length > 0 || forecastLoading) && (
+            <div className="space-y-2">
+              {forecastLoading ? (
+                <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-center gap-3 animate-pulse">
+                  <CloudRain className="w-5 h-5 text-blue-500" />
+                  <span className="text-sm text-blue-700">Checking 48h weather forecast for your trial locations...</span>
+                </div>
+              ) : (
+                forecastAlerts.map((alert, i) => (
+                  <div key={i} className={`rounded-xl px-4 py-3 flex items-center gap-3 border ${
+                    alert.severity === 'high' 
+                      ? 'bg-red-50 border-red-200' 
+                      : 'bg-amber-50 border-amber-200'
+                  }`}>
+                    {alert.type === 'rain' && <CloudRain className={`w-5 h-5 shrink-0 ${alert.severity === 'high' ? 'text-red-500' : 'text-amber-500'}`} />}
+                    {alert.type === 'wind' && <Wind className={`w-5 h-5 shrink-0 ${alert.severity === 'high' ? 'text-red-500' : 'text-amber-500'}`} />}
+                    {alert.type === 'temp' && <Thermometer className={`w-5 h-5 shrink-0 ${alert.severity === 'high' ? 'text-red-500' : 'text-amber-500'}`} />}
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-semibold ${alert.severity === 'high' ? 'text-red-800' : 'text-amber-800'}`}>
+                        ⚠️ {alert.msg}
+                      </p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        <MapPin className="w-3 h-3 inline mr-1" />{alert.location} · Next 48 hours
+                      </p>
+                    </div>
+                    <ShieldAlert className={`w-4 h-4 shrink-0 ${alert.severity === 'high' ? 'text-red-400' : 'text-amber-400'}`} />
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
           {/* ── Smart Alerts ──────────────────────────────────────── */}
           <div className="max-w-2xl">
             <SmartAlerts compact={true} />
@@ -392,6 +682,136 @@ export default function Dashboard({ onMenuClick }) {
               )}
             </div>
           </div>
+
+          {/* ══ 1.3 — TRIAL HEALTH HEATMAP ════════════════════════════ */}
+          {trialHealthData.length > 0 && (
+            <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                    <Activity className="w-4 h-4" style={{ color: catConfig.color.hex }} />
+                    Trial Health Monitor
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Active trials colored by health: <span className="text-emerald-600 font-bold">●</span> Healthy <span className="text-amber-500 font-bold">●</span> Needs Attention <span className="text-red-500 font-bold">●</span> Critical
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-slate-500">
+                  <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-bold">
+                    {trialHealthData.filter(t => t.status === 'green').length}
+                  </span>
+                  <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">
+                    {trialHealthData.filter(t => t.status === 'amber').length}
+                  </span>
+                  <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold">
+                    {trialHealthData.filter(t => t.status === 'red').length}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2">
+                {trialHealthData.map(t => {
+                  const bgColor = t.status === 'green' 
+                    ? 'bg-emerald-50 border-emerald-200 hover:bg-emerald-100' 
+                    : t.status === 'amber' 
+                    ? 'bg-amber-50 border-amber-200 hover:bg-amber-100'
+                    : 'bg-red-50 border-red-200 hover:bg-red-100';
+                  const textColor = t.status === 'green' ? 'text-emerald-700' : t.status === 'amber' ? 'text-amber-700' : 'text-red-700';
+                  const dotColor = t.status === 'green' ? 'bg-emerald-500' : t.status === 'amber' ? 'bg-amber-500' : 'bg-red-500';
+
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => navigate('/trials')}
+                      className={`relative rounded-lg border p-2.5 text-left transition-all duration-200 group ${bgColor}`}
+                      title={`${t.name}\n${t.location}\nDays since obs: ${t.daysSinceObs === 999 ? 'Never' : t.daysSinceObs}\nObservations: ${t.obsCount}\nTrend: ${t.efficacyTrend}\nHealth: ${t.healthScore}%`}
+                    >
+                      <div className={`absolute top-1.5 right-1.5 w-2 h-2 rounded-full ${dotColor} ${t.status === 'red' ? 'animate-pulse' : ''}`} />
+                      <p className={`text-[10px] font-bold ${textColor} truncate leading-tight`}>{t.name}</p>
+                      <p className="text-[9px] text-slate-400 truncate mt-0.5">{t.location || '—'}</p>
+                      <div className="flex items-center gap-1 mt-1.5">
+                        <div className="flex-1 h-1 bg-slate-200 rounded-full overflow-hidden">
+                          <div 
+                            className={`h-full rounded-full transition-all ${t.status === 'green' ? 'bg-emerald-500' : t.status === 'amber' ? 'bg-amber-500' : 'bg-red-500'}`}
+                            style={{ width: `${t.healthScore}%` }}
+                          />
+                        </div>
+                        <span className={`text-[8px] font-bold ${textColor}`}>{t.healthScore}</span>
+                      </div>
+                      {t.efficacyTrend === 'declining' && (
+                        <TrendingUp className="w-3 h-3 text-red-400 rotate-180 mt-1" />
+                      )}
+                      {t.hasWeatherRisk && (
+                        <CloudRain className="w-3 h-3 text-amber-400 mt-0.5" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ══ 1.4 — DUE OBSERVATIONS CALENDAR ═══════════════════════ */}
+          {dueObservations.length > 0 && (
+            <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                    <CalendarDays className="w-4 h-4" style={{ color: catConfig.color.hex }} />
+                    Upcoming Observations
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">Next 14 days — {dueObservations.length} observation{dueObservations.length !== 1 ? 's' : ''} due</p>
+                </div>
+                <button
+                  onClick={() => navigate('/trials')}
+                  className="text-xs font-semibold flex items-center gap-1 hover:underline"
+                  style={{ color: catConfig.color.hex }}
+                >
+                  View Trials <ChevronRight className="w-3 h-3" />
+                </button>
+              </div>
+
+              <div className="space-y-1.5">
+                {dueObservations.map((item, i) => {
+                  const dateStr = item.dueDate.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+                  let statusBg, statusText, badge;
+                  if (item.isOverdue) {
+                    statusBg = 'bg-red-50 border-red-200';
+                    statusText = 'text-red-700';
+                    badge = <span className="text-[10px] font-bold bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full">OVERDUE</span>;
+                  } else if (item.isToday) {
+                    statusBg = 'bg-amber-50 border-amber-200';
+                    statusText = 'text-amber-700';
+                    badge = <span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full animate-pulse">TODAY</span>;
+                  } else if (item.diffDays <= 2) {
+                    statusBg = 'bg-blue-50 border-blue-100';
+                    statusText = 'text-blue-700';
+                    badge = <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">IN {item.diffDays}d</span>;
+                  } else {
+                    statusBg = 'bg-slate-50 border-slate-100';
+                    statusText = 'text-slate-600';
+                    badge = <span className="text-[10px] font-medium bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full">IN {item.diffDays}d</span>;
+                  }
+
+                  return (
+                    <div key={`${item.trialId}-${item.daa}-${i}`} className={`flex items-center gap-3 rounded-lg border p-2.5 ${statusBg} transition-all hover:shadow-sm`}>
+                      <div className="flex flex-col items-center w-12 shrink-0">
+                        <span className={`text-xs font-bold ${statusText}`}>{dateStr.split(' ')[1]}</span>
+                        <span className="text-[10px] text-slate-400">{dateStr.split(' ')[2]}</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-xs font-bold ${statusText} truncate`}>{item.trialName}</p>
+                        <p className="text-[10px] text-slate-400 truncate">
+                          DAA {item.daa} observation{item.location ? ` · ${item.location}` : ''}
+                        </p>
+                      </div>
+                      {badge}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* ── Top Formulations This Season (Ranked by Kill Rate & Control Longevity) ────────── */}
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
@@ -527,6 +947,68 @@ export default function Dashboard({ onMenuClick }) {
               </div>
             )}
           </div>
+
+          {/* ══ 1.1 — ACTIVITY FEED / TIMELINE ════════════════════════ */}
+          {activityFeed.length > 0 && (
+            <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+              <h3 className="font-bold text-slate-800 flex items-center gap-2 mb-4">
+                <Clock className="w-4 h-4" style={{ color: catConfig.color.hex }} />
+                Recent Activity
+                <span className="text-xs text-slate-400 font-normal">— last {activityFeed.length} events across all categories</span>
+              </h3>
+
+              <div className="relative">
+                {/* Timeline line */}
+                <div className="absolute left-[15px] top-2 bottom-2 w-0.5 bg-slate-100 rounded-full" />
+
+                <div className="space-y-0.5">
+                  {activityFeed.map((event, i) => {
+                    const colorMap = {
+                      emerald: 'bg-emerald-500', blue: 'bg-blue-500', purple: 'bg-purple-500',
+                      amber: 'bg-amber-500', indigo: 'bg-indigo-500', teal: 'bg-teal-500',
+                    };
+                    const iconMap = {
+                      plus: <Plus className="w-2.5 h-2.5 text-white" />,
+                      check: <CheckCircle className="w-2.5 h-2.5 text-white" />,
+                      eye: <Eye className="w-2.5 h-2.5 text-white" />,
+                      camera: <Camera className="w-2.5 h-2.5 text-white" />,
+                      folder: <FolderOpen className="w-2.5 h-2.5 text-white" />,
+                      flask: <FlaskConical className="w-2.5 h-2.5 text-white" />,
+                    };
+
+                    const timeAgo = (() => {
+                      const diff = Date.now() - event.time.getTime();
+                      const mins = Math.floor(diff / 60000);
+                      if (mins < 1) return 'just now';
+                      if (mins < 60) return `${mins}m ago`;
+                      const hrs = Math.floor(mins / 60);
+                      if (hrs < 24) return `${hrs}h ago`;
+                      const days = Math.floor(hrs / 24);
+                      if (days < 7) return `${days}d ago`;
+                      if (days < 30) return `${Math.floor(days / 7)}w ago`;
+                      return event.time.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+                    })();
+
+                    return (
+                      <div key={`${event.type}-${i}`} className="flex items-start gap-3 py-1.5 pl-0 group">
+                        {/* Timeline dot */}
+                        <div className={`w-[30px] h-[30px] rounded-full ${colorMap[event.color] || 'bg-slate-400'} flex items-center justify-center shrink-0 z-10 ring-2 ring-white`}>
+                          {iconMap[event.icon] || <Activity className="w-2.5 h-2.5 text-white" />}
+                        </div>
+                        {/* Content */}
+                        <div className="flex-1 min-w-0 pt-0.5">
+                          <p className="text-xs font-semibold text-slate-700 truncate group-hover:text-slate-900 transition">{event.label}</p>
+                          {event.detail && <p className="text-[10px] text-slate-400 truncate">{event.detail}</p>}
+                        </div>
+                        {/* Time */}
+                        <span className="text-[10px] text-slate-400 shrink-0 pt-1">{timeAgo}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
 
         </div>
       </div>
