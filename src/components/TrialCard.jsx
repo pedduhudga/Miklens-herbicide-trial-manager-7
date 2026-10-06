@@ -3,6 +3,7 @@ import { Calendar, MapPin, FlaskConical, Activity, Image as ImageIcon, ChevronLe
 import { safeJsonParse } from '../utils/helpers.js';
 import { formatDateTime } from '../utils/dateUtils.js';
 import { calculateEffectiveControlDays } from '../utils/trialLifecycle.js';
+import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryValue } from '../utils/categoryConfig.js';
 import { useAuth } from '../hooks/useAuth.js';
 import { resolvePhotoSrc, getPhotoThumbnailSrc, getDriveFileId } from '../utils/photoUtils.js';
 import PhotoComparisonModal from './PhotoComparisonModal.jsx';
