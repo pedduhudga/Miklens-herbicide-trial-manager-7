@@ -3,9 +3,8 @@ import { Calendar, MapPin, FlaskConical, Activity, Image as ImageIcon, ChevronLe
 import { safeJsonParse } from '../utils/helpers.js';
 import { formatDateTime } from '../utils/dateUtils.js';
 import { calculateEffectiveControlDays } from '../utils/trialLifecycle.js';
-import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryValue } from '../utils/categoryConfig.js';
 import { useAuth } from '../hooks/useAuth.js';
-import { resolvePhotoSrc } from '../utils/photoUtils.js';
+import { resolvePhotoSrc, getPhotoThumbnailSrc, getDriveFileId } from '../utils/photoUtils.js';
 import PhotoComparisonModal from './PhotoComparisonModal.jsx';
 
 const RESULT_COLORS = {
@@ -114,11 +113,12 @@ const TrialCard = memo(function TrialCard({
   const allCardPhotos = useMemo(() => {
     const list = [];
     photos.forEach((p, idx) => {
-      const src = typeof p === 'string' ? p : (p.url || p.fileData || p.dataUrl || p.driveId);
+      const src = getPhotoThumbnailSrc(p, 600) || resolvePhotoSrc(p) || (typeof p === 'string' ? p : (p.url || p.fileData || p.dataUrl));
       if (src) {
         list.push({
           id: p.id || p.tempId || `tp_${idx}`,
           src,
+          rawItem: p,
           label: p.label || p.name || 'Trial Photo',
           daa: p.daa !== undefined ? p.daa : null,
           date: p.date || ''
@@ -128,22 +128,27 @@ const TrialCard = memo(function TrialCard({
 
     if (Array.isArray(efficacyData)) {
       efficacyData.forEach((obs, oIdx) => {
-        if (obs.photoUrl && !list.some(x => x.src === obs.photoUrl)) {
-          list.push({
-            id: `obs_${oIdx}`,
-            src: obs.photoUrl,
-            label: `DAA ${obs.daa ?? '?'} Obs Photo`,
-            daa: obs.daa,
-            date: obs.date || ''
-          });
+        if (obs.photoUrl) {
+          const u = getPhotoThumbnailSrc(obs.photoUrl, 600) || resolvePhotoSrc(obs.photoUrl) || obs.photoUrl;
+          if (u && !list.some(x => x.src === u)) {
+            list.push({
+              id: `obs_${oIdx}`,
+              src: u,
+              rawItem: obs.photoUrl,
+              label: `DAA ${obs.daa ?? '?'} Obs Photo`,
+              daa: obs.daa,
+              date: obs.date || ''
+            });
+          }
         }
         if (Array.isArray(obs.photos)) {
           obs.photos.forEach((op, opIdx) => {
-            const u = typeof op === 'string' ? op : (op.url || op.fileData || op.dataUrl);
+            const u = getPhotoThumbnailSrc(op, 600) || resolvePhotoSrc(op) || (typeof op === 'string' ? op : (op.url || op.fileData || op.dataUrl));
             if (u && !list.some(x => x.src === u)) {
               list.push({
                 id: `obs_${oIdx}_${opIdx}`,
                 src: u,
+                rawItem: op,
                 label: `DAA ${obs.daa ?? '?'} Obs Photo`,
                 daa: obs.daa,
                 date: obs.date || ''
@@ -712,7 +717,7 @@ const TrialCard = memo(function TrialCard({
             {/* Active Image */}
             {(() => {
               const currentPhoto = allCardPhotos[activePhotoIdx % allCardPhotos.length];
-              const resolvedSrc = resolvePhotoSrc(currentPhoto);
+              const resolvedSrc = currentPhoto?.src || getPhotoThumbnailSrc(currentPhoto?.rawItem, 600) || resolvePhotoSrc(currentPhoto?.rawItem);
               return resolvedSrc ? (
                 <img
                   src={resolvedSrc}
@@ -720,7 +725,14 @@ const TrialCard = memo(function TrialCard({
                   className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                   loading="lazy"
                   onError={(e) => {
-                    e.currentTarget.style.display = 'none';
+                    const driveId = getDriveFileId(resolvedSrc) || getDriveFileId(currentPhoto?.rawItem);
+                    if (driveId && !e.currentTarget.dataset.fallbackTried) {
+                      e.currentTarget.dataset.fallbackTried = '1';
+                      e.currentTarget.src = `https://drive.google.com/thumbnail?id=${driveId}&sz=w600`;
+                    } else if (driveId && e.currentTarget.dataset.fallbackTried === '1') {
+                      e.currentTarget.dataset.fallbackTried = '2';
+                      e.currentTarget.src = `https://drive.google.com/uc?export=view&id=${driveId}`;
+                    }
                   }}
                 />
               ) : (
