@@ -181,13 +181,14 @@ const TrialCard = memo(function TrialCard({
     setActivePhotoIdx(prev => (prev + 1) % allCardPhotos.length);
   }, [allCardPhotos.length]);
 
-  const touchCoordsRef = useRef({ startX: 0, startY: 0, isSwipe: false });
+  const touchCoordsRef = useRef({ startX: 0, startY: 0, startTime: 0, isSwipe: false });
 
   const handleTouchStart = useCallback((e) => {
     if (e.touches && e.touches[0]) {
       touchCoordsRef.current = {
         startX: e.touches[0].clientX,
         startY: e.touches[0].clientY,
+        startTime: Date.now(),
         isSwipe: false
       };
     }
@@ -203,6 +204,9 @@ const TrialCard = memo(function TrialCard({
     // If horizontal movement dominates over vertical by > 8px, lock horizontal swipe
     if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 8) {
       touchCoordsRef.current.isSwipe = true;
+      if (e.cancelable) {
+        e.preventDefault();
+      }
     }
   }, []);
 
@@ -212,9 +216,12 @@ const TrialCard = memo(function TrialCard({
     const endY = e.changedTouches[0].clientY;
     const diffX = touchCoordsRef.current.startX - endX;
     const diffY = touchCoordsRef.current.startY - endY;
+    const elapsed = Date.now() - touchCoordsRef.current.startTime;
 
-    // Strict horizontal swipe check: horizontal > vertical and delta > 20px
-    if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 20) {
+    const isHorizontal = Math.abs(diffX) > Math.abs(diffY);
+    const isSwiped = Math.abs(diffX) > 25 || (Math.abs(diffX) > 15 && elapsed < 350);
+
+    if (isHorizontal && isSwiped) {
       touchCoordsRef.current.isSwipe = true;
       if (diffX > 0) {
         // Swipe Left -> Next Photo
@@ -771,10 +778,10 @@ const TrialCard = memo(function TrialCard({
                       const driveId = getDriveFileId(resolvedSrc) || getDriveFileId(currentPhoto?.rawItem);
                       if (driveId && !e.currentTarget.dataset.fallbackTried) {
                         e.currentTarget.dataset.fallbackTried = '1';
-                        e.currentTarget.src = `https://drive.google.com/thumbnail?id=${driveId}&sz=w600`;
+                        e.currentTarget.src = `https://drive.google.com/uc?export=view&id=${driveId}`;
                       } else if (driveId && e.currentTarget.dataset.fallbackTried === '1') {
                         e.currentTarget.dataset.fallbackTried = '2';
-                        e.currentTarget.src = `https://drive.google.com/uc?export=view&id=${driveId}`;
+                        e.currentTarget.src = `https://drive.google.com/uc?export=download&id=${driveId}`;
                       }
                     }}
                   />
@@ -840,7 +847,7 @@ const TrialCard = memo(function TrialCard({
                 <button
                   type="button"
                   onClick={handlePrevPhoto}
-                  className="absolute left-1 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white/90 hover:bg-white text-slate-800 shadow flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                  className="absolute left-1 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-white/95 hover:bg-white text-slate-800 shadow-md flex items-center justify-center opacity-85 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity z-10 active:scale-95"
                   title="Previous photo"
                 >
                   <ChevronLeft className="w-3 h-3" />
@@ -848,7 +855,7 @@ const TrialCard = memo(function TrialCard({
                 <button
                   type="button"
                   onClick={handleNextPhoto}
-                  className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white/90 hover:bg-white text-slate-800 shadow flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-white/95 hover:bg-white text-slate-800 shadow-md flex items-center justify-center opacity-85 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity z-10 active:scale-95"
                   title="Next photo"
                 >
                   <ChevronRight className="w-3 h-3" />
@@ -989,7 +996,17 @@ const TrialCard = memo(function TrialCard({
             <img
               src={resolvePhotoSrc(lightboxPhoto?.rawItem, 1600) || lightboxPhoto?.src}
               alt={lightboxPhoto?.label || 'Full trial photo'}
-              className="max-w-full max-h-[80vh] w-auto h-auto object-contain rounded-xl shadow-2xl transition-transform"
+              className="max-w-full max-h-[80vh] w-auto h-auto object-contain rounded-xl shadow-2xl transition-transform allow-pinch-zoom"
+              onError={(e) => {
+                const driveId = getDriveFileId(lightboxPhoto?.src) || getDriveFileId(lightboxPhoto?.rawItem);
+                if (driveId && !e.currentTarget.dataset.fallbackTried) {
+                  e.currentTarget.dataset.fallbackTried = '1';
+                  e.currentTarget.src = `https://drive.google.com/uc?export=view&id=${driveId}`;
+                } else if (driveId && e.currentTarget.dataset.fallbackTried === '1') {
+                  e.currentTarget.dataset.fallbackTried = '2';
+                  e.currentTarget.src = `https://drive.google.com/uc?export=download&id=${driveId}`;
+                }
+              }}
             />
 
             {/* Left Nav Arrow */}

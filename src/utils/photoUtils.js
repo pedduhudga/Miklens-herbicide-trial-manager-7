@@ -57,7 +57,7 @@ export function resolvePhotoSrc(photo, size = 480) {
 
     const driveId = getDriveFileId(s);
     if (driveId) {
-      return size ? `https://lh3.googleusercontent.com/d/${driveId}=w${size}` : `https://lh3.googleusercontent.com/d/${driveId}`;
+      return size ? `https://drive.google.com/thumbnail?id=${driveId}&sz=w${size}` : `https://drive.google.com/uc?export=view&id=${driveId}`;
     }
 
     if (s.startsWith('http://') || s.startsWith('https://')) {
@@ -87,7 +87,7 @@ export function resolvePhotoSrc(photo, size = 480) {
       if (u.startsWith('data:') || u.startsWith('blob:') || u.startsWith('local-photo-id:')) return u;
       const driveId = getDriveFileId(u);
       if (driveId) {
-        return size ? `https://lh3.googleusercontent.com/d/${driveId}=w${size}` : `https://lh3.googleusercontent.com/d/${driveId}`;
+        return size ? `https://drive.google.com/thumbnail?id=${driveId}&sz=w${size}` : `https://drive.google.com/uc?export=view&id=${driveId}`;
       }
       if (u.startsWith('http://') || u.startsWith('https://')) return u;
     }
@@ -96,7 +96,7 @@ export function resolvePhotoSrc(photo, size = 480) {
   // Extract Drive ID directly from object properties
   const driveId = getDriveFileId(photo);
   if (driveId) {
-    return size ? `https://lh3.googleusercontent.com/d/${driveId}=w${size}` : `https://lh3.googleusercontent.com/d/${driveId}`;
+    return size ? `https://drive.google.com/thumbnail?id=${driveId}&sz=w${size}` : `https://drive.google.com/uc?export=view&id=${driveId}`;
   }
 
   return null;
@@ -112,7 +112,7 @@ export function getPhotoThumbnailSrc(photo, size = 320) {
   
   const driveId = getDriveFileId(photo);
   if (driveId) {
-    return `https://lh3.googleusercontent.com/d/${driveId}=w${size}`;
+    return `https://drive.google.com/thumbnail?id=${driveId}&sz=w${size}`;
   }
 
   const raw = resolvePhotoSrc(photo, size);
@@ -120,7 +120,7 @@ export function getPhotoThumbnailSrc(photo, size = 320) {
   
   const rawDriveId = getDriveFileId(raw);
   if (rawDriveId) {
-    return `https://lh3.googleusercontent.com/d/${rawDriveId}=w${size}`;
+    return `https://drive.google.com/thumbnail?id=${rawDriveId}&sz=w${size}`;
   }
 
   return raw;

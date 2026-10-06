@@ -1,10 +1,10 @@
 // Service Worker for Miklens Trial Manager PWA
-// Version: 2.1.0 - Enhanced caching strategies & navigation network-first fix
+// Version: 2.2.0 - Bypassed external Drive media & hardened FetchEvent against rejections
 
-const CACHE_NAME = 'trial-manager-v2.1.0';
-const STATIC_CACHE = 'static-v2.1.0';
-const DYNAMIC_CACHE = 'dynamic-v2.1.0';
-const IMAGE_CACHE = 'images-v2.1.0';
+const CACHE_NAME = 'trial-manager-v2.2.0';
+const STATIC_CACHE = 'static-v2.2.0';
+const DYNAMIC_CACHE = 'dynamic-v2.2.0';
+const IMAGE_CACHE = 'images-v2.2.0';
 
 // IndexedDB setup via Dexie for offline data
 importScripts('https://unpkg.com/dexie@4.4.4/dist/dexie.js');
@@ -33,7 +33,7 @@ const PRECACHE_URLS = [
 
 // Install event - cache core assets
 self.addEventListener('install', (event) => {
-  console.log('[SW] Installing service worker v2.0.0');
+  console.log('[SW] Installing service worker v2.2.0');
   event.waitUntil(
     caches.open(STATIC_CACHE).then((cache) => {
       console.log('[SW] Precaching core assets');
@@ -85,6 +85,18 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // CRITICAL: Bypass Service Worker for external media / Google Drive / CDN imagery
+  // Letting the browser fetch them natively avoids CORS failures, opaque caching rejections, and net::ERR_FAILED
+  if (
+    url.hostname.includes('drive.google.com') ||
+    url.hostname.includes('googleusercontent.com') ||
+    url.hostname.includes('images.weserv.nl') ||
+    url.hostname.includes('tile.openstreetmap.org') ||
+    (url.hostname.includes('googleapis.com') && !url.pathname.includes('/v1/'))
+  ) {
+    return; // Native browser fetch!
+  }
+
   // Handle different resource types with different strategies
   if (isNavigationRequest(request, url)) {
     // Navigation & HTML requests - Network First to ensure index.html always has latest asset hashes
@@ -125,7 +137,9 @@ function isImage(url) {
   const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico'];
   return imageExtensions.some(ext => url.pathname.toLowerCase().endsWith(ext)) ||
          url.href.includes('data:image') ||
-         url.href.includes('blob:');
+         url.href.includes('blob:') ||
+         url.pathname.includes('/thumbnail') ||
+         url.search.includes('sz=w');
 }
 
 // Helper: Check if request is API call
@@ -156,7 +170,8 @@ async function cacheFirst(request, cacheName = STATIC_CACHE) {
     console.warn('[SW] Cache First failed for:', request.url);
     // Return offline fallback for images
     if (isImage(new URL(request.url))) {
-      return caches.match('/icons/icon-192x192.png');
+      const fallback = await caches.match('./favicon.svg');
+      if (fallback) return fallback;
     }
     throw error;
   }
@@ -186,15 +201,23 @@ async function staleWhileRevalidate(request, cacheName = DYNAMIC_CACHE) {
   const cachedResponse = await caches.match(request);
   
   const fetchPromise = fetch(request).then((networkResponse) => {
-    if (networkResponse.ok) {
+    if (networkResponse && networkResponse.ok) {
       // Clone BEFORE caching so the original body stream is not consumed
       const responseToCache = networkResponse.clone();
       caches.open(cacheName).then(cache => {
         cache.put(request, responseToCache);
-      });
+      }).catch(() => {});
     }
-    return networkResponse; // original remains unconsumed for the caller
-  }).catch(() => null);
+    return networkResponse;
+  }).catch((err) => {
+    if (cachedResponse) return cachedResponse;
+    // Return valid response object instead of null to prevent ServiceWorker FetchEvent unhandled rejection
+    return new Response('Network error', { 
+      status: 503, 
+      statusText: 'Service Unavailable',
+      headers: { 'Content-Type': 'text/plain' }
+    });
+  });
   
   // Return cached immediately, update if network succeeds
   return cachedResponse || fetchPromise;

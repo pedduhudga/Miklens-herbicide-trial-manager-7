@@ -85,14 +85,18 @@ body.high-contrast button {
 
 html, body {
     overflow-x: hidden;
-    max-width: 100vw;
+    max-width: 100%;
     width: 100%;
+    touch-action: manipulation;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
 }
 
 #root {
     overflow-x: hidden;
-    max-width: 100vw;
+    max-width: 100%;
     width: 100%;
+    position: relative;
 }
 
 body {
