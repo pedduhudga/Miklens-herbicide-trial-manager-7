@@ -1,5 +1,5 @@
 import React, { memo, useMemo, useCallback, useState, useEffect } from 'react';
-import { Calendar, MapPin, FlaskConical, Activity, Image as ImageIcon, ChevronLeft, ChevronRight, Edit, MoreVertical, Eye, Copy, FolderOpen, FileDown, ScanLine, MonitorPlay, Archive, FileCode, FileSpreadsheet, Share2, BrainCircuit, Trash2, Camera, CheckCircle, Clock, Pencil, CloudSun, Sparkles } from 'lucide-react';
+import { Calendar, MapPin, FlaskConical, Activity, Image as ImageIcon, ChevronLeft, ChevronRight, Edit, MoreVertical, Eye, Copy, FolderOpen, FileDown, ScanLine, MonitorPlay, Archive, FileCode, FileSpreadsheet, Share2, BrainCircuit, Trash2, Camera, CheckCircle, Clock, Pencil, CloudSun, Sparkles, Maximize2, Minimize2, X } from 'lucide-react';
 import { safeJsonParse } from '../utils/helpers.js';
 import { formatDateTime } from '../utils/dateUtils.js';
 import { calculateEffectiveControlDays } from '../utils/trialLifecycle.js';
@@ -202,6 +202,8 @@ const TrialCard = memo(function TrialCard({
   }, [touchStartX, allCardPhotos.length]);
 
   const [showPhotoComparison, setShowPhotoComparison] = useState(false);
+  const [photoFitMode, setPhotoFitMode] = useState('contain'); // 'contain' (Full Photo uncropped) | 'cover' (Fill)
+  const [lightboxPhoto, setLightboxPhoto] = useState(null);
 
   const isLive = String(trial.IsLive) !== 'false';
   const isCompleted = trial.IsCompleted === true || trial.IsCompleted === 'true';
@@ -704,11 +706,11 @@ const TrialCard = memo(function TrialCard({
         {/* ══ JIO-MART STYLE IN-CARD PHOTO CAROUSEL ═══════════════════════ */}
         {allCardPhotos.length > 0 && (
           <div
-            className="mt-2 relative rounded-lg overflow-hidden bg-slate-900/5 border border-slate-100 group select-none cursor-pointer"
-            style={{ height: '98px' }}
+            className="mt-2 relative rounded-lg overflow-hidden bg-slate-900/10 border border-slate-100 group select-none cursor-pointer"
+            style={{ height: '115px' }}
             onClick={(e) => {
               stopPropagation(e);
-              onViewDetails(trial);
+              setLightboxPhoto(allCardPhotos[activePhotoIdx % allCardPhotos.length]);
             }}
             onMouseEnter={() => setIsCarouselHovered(true)}
             onMouseLeave={() => setIsCarouselHovered(false)}
@@ -720,22 +722,33 @@ const TrialCard = memo(function TrialCard({
               const currentPhoto = allCardPhotos[activePhotoIdx % allCardPhotos.length];
               const resolvedSrc = currentPhoto?.src || getPhotoThumbnailSrc(currentPhoto?.rawItem, 600) || resolvePhotoSrc(currentPhoto?.rawItem);
               return resolvedSrc ? (
-                <img
-                  src={resolvedSrc}
-                  alt={currentPhoto?.label || 'Trial photo'}
-                  className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                  loading="lazy"
-                  onError={(e) => {
-                    const driveId = getDriveFileId(resolvedSrc) || getDriveFileId(currentPhoto?.rawItem);
-                    if (driveId && !e.currentTarget.dataset.fallbackTried) {
-                      e.currentTarget.dataset.fallbackTried = '1';
-                      e.currentTarget.src = `https://drive.google.com/thumbnail?id=${driveId}&sz=w600`;
-                    } else if (driveId && e.currentTarget.dataset.fallbackTried === '1') {
-                      e.currentTarget.dataset.fallbackTried = '2';
-                      e.currentTarget.src = `https://drive.google.com/uc?export=view&id=${driveId}`;
-                    }
-                  }}
-                />
+                <>
+                  {/* Blurred Backdrop Ambience for Uncropped 'contain' mode */}
+                  {photoFitMode === 'contain' && (
+                    <img
+                      src={resolvedSrc}
+                      alt=""
+                      aria-hidden="true"
+                      className="absolute inset-0 w-full h-full object-cover blur-xs opacity-35 scale-110 pointer-events-none"
+                    />
+                  )}
+                  <img
+                    src={resolvedSrc}
+                    alt={currentPhoto?.label || 'Trial photo'}
+                    className={`relative z-1 w-full h-full ${photoFitMode === 'contain' ? 'object-contain' : 'object-cover'} transition-all duration-300 group-hover:scale-[1.02]`}
+                    loading="lazy"
+                    onError={(e) => {
+                      const driveId = getDriveFileId(resolvedSrc) || getDriveFileId(currentPhoto?.rawItem);
+                      if (driveId && !e.currentTarget.dataset.fallbackTried) {
+                        e.currentTarget.dataset.fallbackTried = '1';
+                        e.currentTarget.src = `https://drive.google.com/thumbnail?id=${driveId}&sz=w600`;
+                      } else if (driveId && e.currentTarget.dataset.fallbackTried === '1') {
+                        e.currentTarget.dataset.fallbackTried = '2';
+                        e.currentTarget.src = `https://drive.google.com/uc?export=view&id=${driveId}`;
+                      }
+                    }}
+                  />
+                </>
               ) : (
                 <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 bg-slate-100">
                   <ImageIcon className="w-4 h-4 mb-0.5 opacity-50" />
@@ -744,19 +757,51 @@ const TrialCard = memo(function TrialCard({
               );
             })()}
 
-            {/* Top Overlay Badge: DAA Tag & Photo Index */}
-            <div className="absolute top-1 left-1 right-1 flex items-center justify-between pointer-events-none">
-              {allCardPhotos[activePhotoIdx % allCardPhotos.length]?.daa !== null &&
-               allCardPhotos[activePhotoIdx % allCardPhotos.length]?.daa !== undefined ? (
-                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-600/90 text-white backdrop-blur-xs shadow-xs">
-                  DAA {allCardPhotos[activePhotoIdx % allCardPhotos.length].daa}
-                </span>
-              ) : <span />}
-              {allCardPhotos.length > 1 && (
-                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-black/60 text-white backdrop-blur-xs shadow-xs">
-                  {(activePhotoIdx % allCardPhotos.length) + 1}/{allCardPhotos.length}
-                </span>
-              )}
+            {/* Top Overlay Bar: DAA Tag, Fit/Fill Toggle, Expand Fullscreen, Photo Counter */}
+            <div className="absolute top-1 left-1 right-1 flex items-center justify-between z-10 pointer-events-none">
+              <div>
+                {allCardPhotos[activePhotoIdx % allCardPhotos.length]?.daa !== null &&
+                allCardPhotos[activePhotoIdx % allCardPhotos.length]?.daa !== undefined ? (
+                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-600/90 text-white backdrop-blur-xs shadow-xs">
+                    DAA {allCardPhotos[activePhotoIdx % allCardPhotos.length].daa}
+                  </span>
+                ) : <span />}
+              </div>
+
+              <div className="flex items-center gap-1">
+                {/* Fit / Fill Toggle */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPhotoFitMode(m => m === 'contain' ? 'cover' : 'contain');
+                  }}
+                  className="pointer-events-auto px-1.5 py-0.5 rounded bg-black/60 hover:bg-black/80 text-white text-[9px] font-semibold backdrop-blur-xs transition shadow-xs flex items-center gap-0.5"
+                  title={photoFitMode === 'contain' ? 'Currently: Full Uncropped photo. Click to Fill frame.' : 'Currently: Fill frame. Click to view Full Uncropped photo.'}
+                >
+                  {photoFitMode === 'contain' ? 'Full' : 'Fill'}
+                </button>
+
+                {/* Lightbox / Zoom full photo button */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setLightboxPhoto(allCardPhotos[activePhotoIdx % allCardPhotos.length]);
+                  }}
+                  className="pointer-events-auto w-5 h-5 rounded bg-black/60 hover:bg-black/80 text-white flex items-center justify-center backdrop-blur-xs transition shadow-xs"
+                  title="Expand to Fullscreen Photo Lightbox"
+                >
+                  <Maximize2 className="w-3 h-3" />
+                </button>
+
+                {/* Photo Counter Badge */}
+                {allCardPhotos.length > 1 && (
+                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-black/60 text-white backdrop-blur-xs shadow-xs">
+                    {(activePhotoIdx % allCardPhotos.length) + 1}/{allCardPhotos.length}
+                  </span>
+                )}
+              </div>
             </div>
 
             {/* Left / Right Carousel Arrow Buttons */}
@@ -863,6 +908,100 @@ const TrialCard = memo(function TrialCard({
           initialBeforeUrl={allCardPhotos.find(p => p.daa === 0 || p.daa === '0')?.src || (allCardPhotos[0]?.src || null)}
           initialAfterUrl={allCardPhotos.length > 1 ? allCardPhotos[allCardPhotos.length - 1]?.src : null}
         />
+      )}
+
+      {/* ══ FULLSCREEN PHOTO LIGHTBOX MODAL ═══════════════════════ */}
+      {lightboxPhoto && (
+        <div
+          className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col items-center justify-center p-4 select-none animate-in fade-in duration-200"
+          onClick={(e) => {
+            e.stopPropagation();
+            setLightboxPhoto(null);
+          }}
+        >
+          {/* Top Bar */}
+          <div className="absolute top-4 left-4 right-4 flex items-center justify-between text-white z-20" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2.5">
+              <span className="font-bold text-sm sm:text-base">{trial.FormulationName || 'Trial Photo'}</span>
+              {lightboxPhoto.daa !== null && lightboxPhoto.daa !== undefined && (
+                <span className="px-2.5 py-0.5 bg-emerald-600 rounded-full text-xs font-bold text-white shadow">
+                  DAA {lightboxPhoto.daa}
+                </span>
+              )}
+              {lightboxPhoto.date && (
+                <span className="text-xs text-white/70 hidden sm:inline">{lightboxPhoto.date}</span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-semibold text-white/80 bg-white/10 px-2.5 py-1 rounded-full">
+                {(activePhotoIdx % allCardPhotos.length) + 1} / {allCardPhotos.length}
+              </span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setLightboxPhoto(null);
+                }}
+                className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 text-white flex items-center justify-center transition shadow"
+                title="Close (Esc)"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Main Photo View (100% Uncropped Full Resolution) */}
+          <div
+            className="relative max-w-5xl max-h-[82vh] w-full h-full flex items-center justify-center p-2"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={lightboxPhoto.src}
+              alt={lightboxPhoto.label || 'Full trial photo'}
+              className="max-w-full max-h-[80vh] w-auto h-auto object-contain rounded-xl shadow-2xl transition-transform"
+            />
+
+            {/* Left Nav Arrow */}
+            {allCardPhotos.length > 1 && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const nextIdx = activePhotoIdx > 0 ? activePhotoIdx - 1 : allCardPhotos.length - 1;
+                  setActivePhotoIdx(nextIdx);
+                  setLightboxPhoto(allCardPhotos[nextIdx]);
+                }}
+                className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-black/60 hover:bg-black/90 text-white flex items-center justify-center transition shadow-lg z-10"
+                title="Previous photo"
+              >
+                <ChevronLeft className="w-6 h-6" />
+              </button>
+            )}
+
+            {/* Right Nav Arrow */}
+            {allCardPhotos.length > 1 && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const nextIdx = (activePhotoIdx + 1) % allCardPhotos.length;
+                  setActivePhotoIdx(nextIdx);
+                  setLightboxPhoto(allCardPhotos[nextIdx]);
+                }}
+                className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-black/60 hover:bg-black/90 text-white flex items-center justify-center transition shadow-lg z-10"
+                title="Next photo"
+              >
+                <ChevronRight className="w-6 h-6" />
+              </button>
+            )}
+          </div>
+
+          {/* Bottom Caption */}
+          <div className="absolute bottom-4 left-4 right-4 flex items-center justify-center text-center text-xs text-white/70 pointer-events-none">
+            <span>{lightboxPhoto.label || 'Trial observation photo'} — tap anywhere outside or press Close</span>
+          </div>
+        </div>
       )}
     </div>
   );
