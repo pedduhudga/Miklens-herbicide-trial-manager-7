@@ -1,4 +1,4 @@
-import React, { memo, useMemo, useCallback, useState, useEffect } from 'react';
+import React, { memo, useMemo, useCallback, useState, useEffect, useRef } from 'react';
 import { Calendar, MapPin, FlaskConical, Activity, Image as ImageIcon, ChevronLeft, ChevronRight, Edit, MoreVertical, Eye, Copy, FolderOpen, FileDown, ScanLine, MonitorPlay, Archive, FileCode, FileSpreadsheet, Share2, BrainCircuit, Trash2, Camera, CheckCircle, Clock, Pencil, CloudSun, Sparkles, Maximize2, Minimize2, X } from 'lucide-react';
 import { safeJsonParse } from '../utils/helpers.js';
 import { formatDateTime } from '../utils/dateUtils.js';
@@ -181,25 +181,50 @@ const TrialCard = memo(function TrialCard({
     setActivePhotoIdx(prev => (prev + 1) % allCardPhotos.length);
   }, [allCardPhotos.length]);
 
+  const touchCoordsRef = useRef({ startX: 0, startY: 0, isSwipe: false });
+
   const handleTouchStart = useCallback((e) => {
     if (e.touches && e.touches[0]) {
-      setTouchStartX(e.touches[0].clientX);
+      touchCoordsRef.current = {
+        startX: e.touches[0].clientX,
+        startY: e.touches[0].clientY,
+        isSwipe: false
+      };
+    }
+  }, []);
+
+  const handleTouchMove = useCallback((e) => {
+    if (!e.touches || !e.touches[0]) return;
+    const currentX = e.touches[0].clientX;
+    const currentY = e.touches[0].clientY;
+    const dx = currentX - touchCoordsRef.current.startX;
+    const dy = currentY - touchCoordsRef.current.startY;
+
+    // If horizontal movement dominates over vertical by > 8px, lock horizontal swipe
+    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 8) {
+      touchCoordsRef.current.isSwipe = true;
     }
   }, []);
 
   const handleTouchEnd = useCallback((e) => {
-    if (touchStartX === null || !e.changedTouches || !e.changedTouches[0]) return;
-    const touchEndX = e.changedTouches[0].clientX;
-    const diff = touchStartX - touchEndX;
-    if (Math.abs(diff) > 30) {
-      if (diff > 0) {
+    if (!e.changedTouches || !e.changedTouches[0]) return;
+    const endX = e.changedTouches[0].clientX;
+    const endY = e.changedTouches[0].clientY;
+    const diffX = touchCoordsRef.current.startX - endX;
+    const diffY = touchCoordsRef.current.startY - endY;
+
+    // Strict horizontal swipe check: horizontal > vertical and delta > 20px
+    if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 20) {
+      touchCoordsRef.current.isSwipe = true;
+      if (diffX > 0) {
+        // Swipe Left -> Next Photo
         setActivePhotoIdx(prev => (prev + 1) % allCardPhotos.length);
       } else {
+        // Swipe Right -> Prev Photo
         setActivePhotoIdx(prev => (prev > 0 ? prev - 1 : allCardPhotos.length - 1));
       }
     }
-    setTouchStartX(null);
-  }, [touchStartX, allCardPhotos.length]);
+  }, [allCardPhotos.length]);
 
   const [showPhotoComparison, setShowPhotoComparison] = useState(false);
   const [photoFitMode, setPhotoFitMode] = useState('contain'); // 'contain' (Full Photo uncropped) | 'cover' (Fill)
@@ -706,21 +731,26 @@ const TrialCard = memo(function TrialCard({
         {/* ══ JIO-MART STYLE IN-CARD PHOTO CAROUSEL ═══════════════════════ */}
         {allCardPhotos.length > 0 && (
           <div
-            className="mt-2 relative rounded-lg overflow-hidden bg-slate-900/10 border border-slate-100 group select-none cursor-pointer"
-            style={{ height: '115px' }}
+            className="mt-2 relative rounded-lg overflow-hidden bg-slate-900/10 border border-slate-100 group select-none cursor-pointer touch-pan-y"
+            style={{ height: '115px', touchAction: 'pan-y' }}
             onClick={(e) => {
               stopPropagation(e);
+              if (touchCoordsRef.current.isSwipe) {
+                touchCoordsRef.current.isSwipe = false;
+                return;
+              }
               setLightboxPhoto(allCardPhotos[activePhotoIdx % allCardPhotos.length]);
             }}
             onMouseEnter={() => setIsCarouselHovered(true)}
             onMouseLeave={() => setIsCarouselHovered(false)}
             onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}
           >
             {/* Active Image */}
             {(() => {
               const currentPhoto = allCardPhotos[activePhotoIdx % allCardPhotos.length];
-              const resolvedSrc = currentPhoto?.src || getPhotoThumbnailSrc(currentPhoto?.rawItem, 600) || resolvePhotoSrc(currentPhoto?.rawItem);
+              const resolvedSrc = currentPhoto?.src || getPhotoThumbnailSrc(currentPhoto?.rawItem, 320) || resolvePhotoSrc(currentPhoto?.rawItem, 320);
               return resolvedSrc ? (
                 <>
                   {/* Blurred Backdrop Ambience for Uncropped 'contain' mode */}
@@ -957,8 +987,8 @@ const TrialCard = memo(function TrialCard({
             onClick={(e) => e.stopPropagation()}
           >
             <img
-              src={lightboxPhoto.src}
-              alt={lightboxPhoto.label || 'Full trial photo'}
+              src={resolvePhotoSrc(lightboxPhoto?.rawItem, 1600) || lightboxPhoto?.src}
+              alt={lightboxPhoto?.label || 'Full trial photo'}
               className="max-w-full max-h-[80vh] w-auto h-auto object-contain rounded-xl shadow-2xl transition-transform"
             />
 

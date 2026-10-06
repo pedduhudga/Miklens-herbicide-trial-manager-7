@@ -40,8 +40,9 @@ export function getDriveFileId(photoOrUrl) {
 /**
  * Resolve a displayable / AI-usable source URL from a photo entry.
  * Handles legacy shapes: string URLs, { url }, { fileData }, { driveId }, etc.
+ * Adds Google CDN sizing parameter (=w480) for lightweight instant loading.
  */
-export function resolvePhotoSrc(photo) {
+export function resolvePhotoSrc(photo, size = 480) {
   if (!photo) return null;
 
   // Handle string inputs
@@ -56,7 +57,7 @@ export function resolvePhotoSrc(photo) {
 
     const driveId = getDriveFileId(s);
     if (driveId) {
-      return `https://lh3.googleusercontent.com/d/${driveId}`;
+      return size ? `https://lh3.googleusercontent.com/d/${driveId}=w${size}` : `https://lh3.googleusercontent.com/d/${driveId}`;
     }
 
     if (s.startsWith('http://') || s.startsWith('https://')) {
@@ -85,7 +86,9 @@ export function resolvePhotoSrc(photo) {
     if (u !== '[base64-removed]' && !u.includes('[base64-removed]')) {
       if (u.startsWith('data:') || u.startsWith('blob:') || u.startsWith('local-photo-id:')) return u;
       const driveId = getDriveFileId(u);
-      if (driveId) return `https://lh3.googleusercontent.com/d/${driveId}`;
+      if (driveId) {
+        return size ? `https://lh3.googleusercontent.com/d/${driveId}=w${size}` : `https://lh3.googleusercontent.com/d/${driveId}`;
+      }
       if (u.startsWith('http://') || u.startsWith('https://')) return u;
     }
   }
@@ -93,7 +96,7 @@ export function resolvePhotoSrc(photo) {
   // Extract Drive ID directly from object properties
   const driveId = getDriveFileId(photo);
   if (driveId) {
-    return `https://lh3.googleusercontent.com/d/${driveId}`;
+    return size ? `https://lh3.googleusercontent.com/d/${driveId}=w${size}` : `https://lh3.googleusercontent.com/d/${driveId}`;
   }
 
   return null;
@@ -103,8 +106,8 @@ export function isPhotoBroken(photo) {
   return !resolvePhotoSrc(photo);
 }
 
-/** Thumbnail URL for grid display (Drive-aware). */
-export function getPhotoThumbnailSrc(photo, size = 400) {
+/** Thumbnail URL for grid display (Drive-aware). Uses size 320 for ultra-fast mobile loading. */
+export function getPhotoThumbnailSrc(photo, size = 320) {
   if (!photo) return null;
   
   const driveId = getDriveFileId(photo);
@@ -112,7 +115,7 @@ export function getPhotoThumbnailSrc(photo, size = 400) {
     return `https://lh3.googleusercontent.com/d/${driveId}=w${size}`;
   }
 
-  const raw = resolvePhotoSrc(photo);
+  const raw = resolvePhotoSrc(photo, size);
   if (!raw) return null;
   
   const rawDriveId = getDriveFileId(raw);
@@ -122,6 +125,7 @@ export function getPhotoThumbnailSrc(photo, size = 400) {
 
   return raw;
 }
+
 
 
 /** Strip base64 blobs from photo arrays — safe for Sheets mirror (images live on Drive). */
