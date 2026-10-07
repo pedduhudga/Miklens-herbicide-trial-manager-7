@@ -1,4 +1,4 @@
-﻿/**
+/**
  * reportDataBuilder.js
  *
  * Core data aggregation service for the advanced reporting pipeline.
@@ -1018,6 +1018,7 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
   // ── 4. Build raw data matrix ────────────────────────────────────────────────
   // rawMatrix[treatmentName][repId][paramKey] = value
   const rawMatrix = {};
+  const allObservations = [];
   const allDaas = new Set();
 
   for (const key of treatmentKeys) {
@@ -1040,6 +1041,29 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
         f => f.type === 'number'
       );
 
+      // Collect all DAA points and stream every raw observation
+      parsedEfficacy.forEach(obs => {
+        const d = parseFloat(obs.daa);
+        if (Number.isFinite(d)) allDaas.add(d);
+
+        const obsEntry = {
+          treatment: name,
+          treatmentKey: key,
+          replication: trial.Replication || trial.ReplicationNumber || repId,
+          plotNumber: trial.PlotNumber || '',
+          trialID: trial.ID || '',
+          date: obs.date || trial.Date || '',
+          daa: Number.isFinite(d) ? d : null,
+          harvestNumber: obs.harvestNumber || obs.harvest || 1,
+          sampleCount: obs.sampleCount || '',
+          notes: obs.notes || '',
+        };
+        for (const field of numFields) {
+          obsEntry[field.key] = toNum(obs[field.key]);
+        }
+        allObservations.push(obsEntry);
+      });
+
       // Pick the target observation (final or specific DAA)
       let targetObs = null;
       if (options.daa !== null && options.daa !== undefined) {
@@ -1053,12 +1077,6 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
           parsedEfficacy[0]
         );
       }
-
-      // Collect all DAA points
-      parsedEfficacy.forEach(obs => {
-        const d = parseFloat(obs.daa);
-        if (Number.isFinite(d)) allDaas.add(d);
-      });
 
       const row = {
         daa: targetObs ? (parseFloat(targetObs.daa) || null) : null,
@@ -1386,11 +1404,12 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
     allParamEntries.find(p => p.key === primaryField) ||
     (allParamEntries.length ? allParamEntries[0] : buildParameterEntry(primaryField));
 
-  // Yield parameter (if category supports yield)
+  // Yield parameter (if category supports yield or harvest data is present)
   const buildYieldEntry = async () => {
-    // Check if any trial has yield data
+    // Check if any trial has yield or harvest data
     const hasYield = subTrials.some(t => {
-      const yVal = toNum(t.Yield || t.YieldValue || t.yieldKgPlot);
+      const hData = safeJsonParse(t.HarvestDataJSON, {});
+      const yVal = toNum(t.Yield || t.YieldValue || t.yieldKgPlot || hData.actualMarketableWeight || hData.cumulativeMarketableYield || hData.cumulativeTotalYield);
       return yVal !== null;
     });
     if (!hasYield) return null;
@@ -1399,7 +1418,10 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
     for (const key of treatmentKeys) {
       const { name, trials: tTrials } = treatmentMap[key];
       const vals = tTrials
-        .map(t => toNum(t.Yield || t.YieldValue || t.yieldKgPlot))
+        .map(t => {
+          const hData = safeJsonParse(t.HarvestDataJSON, {});
+          return toNum(t.Yield || t.YieldValue || t.yieldKgPlot || hData.actualMarketableWeight || hData.cumulativeMarketableYield || hData.cumulativeTotalYield);
+        })
         .filter(v => v !== null);
       if (vals.length) yieldMeans[name] = descStats(vals);
     }
@@ -1677,6 +1699,7 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
     meta,
     treatmentList,
     rawMatrix,
+    allObservations,
     timeSeries,
     parameters: allParamEntries,
     primaryParameter: primaryParamEntry,
@@ -1705,6 +1728,68 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
         notes: app.notes || '',
       }));
     }),
+    harvestPickings: subTrials.flatMap(trial => {
+      const hData = safeJsonParse(trial.HarvestDataJSON, {});
+      let pList = Array.isArray(hData.pickings) ? [...hData.pickings] : [];
+      if (pList.length === 0 && (hData.harvestDate || hData.actualMarketableWeight || hData.actualFruitCount)) {
+        pList = [{
+          id: 'p_1',
+          pickingNumber: 1,
+          harvestDate: hData.harvestDate || trial.Date || '',
+          actualMarketableWeight: hData.actualMarketableWeight,
+          actualUnmarketableWeight: hData.actualUnmarketableWeight,
+          actualFruitCount: hData.actualFruitCount,
+          notes: hData.notes || '',
+        }];
+      }
+      return pList.map(p => ({
+        ...p,
+        trialID: trial.ID,
+        treatmentName: trial.FormulationName || '',
+        plotNumber: trial.PlotNumber || '',
+        replication: trial.Replication || '',
+      }));
+    }),
+    harvestSummary: (() => {
+      const summary = {};
+      for (const key of treatmentKeys) {
+        const { name, trials: tTrials } = treatmentMap[key];
+        let cumMarketable = 0;
+        let cumUnmarketable = 0;
+        let cumFruitCount = 0;
+        let pickingsCount = 0;
+
+        tTrials.forEach(t => {
+          const hData = safeJsonParse(t.HarvestDataJSON, {});
+          const pList = Array.isArray(hData.pickings) ? hData.pickings : [];
+          if (pList.length > 0) {
+            pickingsCount += pList.length;
+            pList.forEach(p => {
+              cumMarketable += parseFloat(p.actualMarketableWeight ?? p.marketableWeight ?? 0) || 0;
+              cumUnmarketable += parseFloat(p.actualUnmarketableWeight ?? p.unmarketableWeight ?? 0) || 0;
+              cumFruitCount += parseFloat(p.actualFruitCount ?? p.fruitCount ?? 0) || 0;
+            });
+          } else if (hData.actualMarketableWeight || hData.cumulativeMarketableYield) {
+            pickingsCount += 1;
+            cumMarketable += parseFloat(hData.actualMarketableWeight || hData.cumulativeMarketableYield || 0) || 0;
+            cumUnmarketable += parseFloat(hData.actualUnmarketableWeight || hData.cumulativeUnmarketableYield || 0) || 0;
+            cumFruitCount += parseFloat(hData.actualFruitCount || hData.cumulativeFruitCount || 0) || 0;
+          }
+        });
+
+        const cumTotal = cumMarketable + cumUnmarketable;
+        const marketablePct = cumTotal > 0 ? (cumMarketable / cumTotal) * 100 : (cumMarketable > 0 ? 100 : 0);
+        summary[name] = {
+          pickingsCount,
+          cumMarketable,
+          cumUnmarketable,
+          cumTotal,
+          marketablePct,
+          cumFruitCount,
+        };
+      }
+      return summary;
+    })(),
   };
 
   // ── Task 13: Residual diagnostics ──────────────────────────────────────────

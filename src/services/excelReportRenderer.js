@@ -285,30 +285,55 @@ function buildSheet4RawData(wb, reportData) {
   addHeaderRow(ws, ['Treatment', 'Replication', 'Plot Number', 'Date', 'DAA', ...fieldLabels]);
 
   let rowIdx = 0;
-  for (const [treatmentName, reps] of Object.entries(rawMatrix)) {
-    for (const [repId, repData] of Object.entries(reps || {})) {
+  if (Array.isArray(reportData.allObservations) && reportData.allObservations.length > 0) {
+    reportData.allObservations.forEach(obs => {
       const rowValues = [
-        treatmentName,
-        repId,
-        repData.plotNumber || '—',
-        repData.date || '—',
-        repData.daa ?? '—',
+        obs.treatment,
+        obs.replication,
+        obs.plotNumber || '—',
+        obs.date || '—',
+        obs.daa !== null && obs.daa !== undefined ? obs.daa : '—',
         ...fieldKeys.map(key => {
-          const v = repData[key];
+          const v = obs[key];
           return v !== null && v !== undefined ? v : '—';
         }),
       ];
-      // Streaming row-by-row — safe for >30 treatments (no pre-built array)
       const row = ws.addRow(rowValues);
       if (rowIdx % 2 === 0) {
         row.eachCell({ includeEmpty: true }, cell => { cell.fill = ALT_FILL; });
       }
-      // Apply number format to data columns
       fieldKeys.forEach((_, colOffset) => {
         const cell = row.getCell(6 + colOffset);
         if (typeof cell.value === 'number') cell.numFmt = NUM_FMT_2;
       });
       rowIdx++;
+    });
+  } else {
+    for (const [treatmentName, reps] of Object.entries(rawMatrix)) {
+      for (const [repId, repData] of Object.entries(reps || {})) {
+        const rowValues = [
+          treatmentName,
+          repId,
+          repData.plotNumber || '—',
+          repData.date || '—',
+          repData.daa ?? '—',
+          ...fieldKeys.map(key => {
+            const v = repData[key];
+            return v !== null && v !== undefined ? v : '—';
+          }),
+        ];
+        // Streaming row-by-row — safe for >30 treatments (no pre-built array)
+        const row = ws.addRow(rowValues);
+        if (rowIdx % 2 === 0) {
+          row.eachCell({ includeEmpty: true }, cell => { cell.fill = ALT_FILL; });
+        }
+        // Apply number format to data columns
+        fieldKeys.forEach((_, colOffset) => {
+          const cell = row.getCell(6 + colOffset);
+          if (typeof cell.value === 'number') cell.numFmt = NUM_FMT_2;
+        });
+        rowIdx++;
+      }
     }
   }
 
@@ -630,86 +655,176 @@ function buildSheet10Yield(wb, reportData) {
   const yieldMeans = yieldData?.means && Object.keys(yieldData.means).length > 0
     ? yieldData.means
     : null;
+  const harvestPickings = Array.isArray(reportData.harvestPickings) ? reportData.harvestPickings : [];
+  const harvestSummary = reportData.harvestSummary || {};
 
-  if (!yieldMeans) {
-    ws.addRow(['No yield data recorded in this project']);
+  if (!yieldMeans && harvestPickings.length === 0) {
+    ws.addRow(['No yield or harvest data recorded in this project']);
     autoColumnWidths(ws);
     return;
   }
 
-  const yAnova = yieldData.anova || null;
-  const pVal0  = yAnova?.p?.[0] ?? null;
-  const sig    = sigStars(pVal0);
-
   // Title row
-  const titleRow = ws.addRow(['Yield Analysis']);
-  titleRow.getCell(1).font = { bold: true, size: 12, color: { argb: 'FF2C3E50' } };
-  ws.mergeCells(`A${titleRow.number}:I${titleRow.number}`);
-  titleRow.height = 22;
+  const titleRow = ws.addRow(['Yield & Agronomic Harvest Analysis']);
+  titleRow.getCell(1).font = { bold: true, size: 14, color: { argb: 'FF2C3E50' } };
+  ws.mergeCells(`A${titleRow.number}:J${titleRow.number}`);
+  titleRow.height = 24;
 
-  // ── Task 16.4: Yield metadata sub-header ─────────────────────────────────
-  // YieldUnit, GrainMoisture, ThousandGrainWeight, HarvestDAA sourced from
-  // yieldData.meta, reportData.meta, or treatmentList[0].
-  const meta = reportData.meta || {};
-  const firstTreatment = Array.isArray(reportData.treatmentList) ? reportData.treatmentList[0] : null;
-  const yMeta = yieldData.meta || {};
-  const yieldUnit          = yMeta.YieldUnit           || meta.YieldUnit           || firstTreatment?.YieldUnit           || '—';
-  const grainMoisture      = yMeta.GrainMoisture       || meta.GrainMoisture       || firstTreatment?.GrainMoisture       || null;
-  const thousandGrainWeight= yMeta.ThousandGrainWeight || meta.ThousandGrainWeight || firstTreatment?.ThousandGrainWeight || null;
-  const harvestDAA         = yMeta.HarvestDAA          || meta.HarvestDAA          || firstTreatment?.HarvestDAA          || null;
+  // 1. Multi-Harvest Sequential Pickings Log Table
+  if (harvestPickings.length > 0) {
+    ws.addRow([]);
+    const sec1 = ws.addRow(['1. Sequential Harvest Pickings Log']);
+    sec1.getCell(1).font = { bold: true, size: 11, color: { argb: 'FF2C3E50' } };
+    ws.mergeCells(`A${sec1.number}:J${sec1.number}`);
 
-  const metaHeaderRow = ws.addRow(['Yield Unit', 'Grain Moisture (%)', '1000-Grain Wt (g)', 'Harvest DAA']);
-  metaHeaderRow.eachCell({ includeEmpty: true }, cell => {
-    cell.font = { bold: true, size: 9, color: { argb: 'FF555555' } };
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F5E9' } };
-  });
-  const metaValRow = ws.addRow([
-    yieldUnit,
-    grainMoisture  != null ? parseFloat(fmt(grainMoisture, 1))       : '—',
-    thousandGrainWeight != null ? parseFloat(fmt(thousandGrainWeight, 2)) : '—',
-    harvestDAA     != null ? harvestDAA                               : '—',
-  ]);
-  metaValRow.eachCell({ includeEmpty: true }, cell => {
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F8E9' } };
-  });
-  ws.addRow([]); // blank separator before means table
-
-  addHeaderRow(ws, ['Treatment', 'n', 'Mean', 'SD', 'SE', 'CV%', 'Efficacy (%)', 'CLD Letter', 'Significance']);
-
-  Object.entries(yieldMeans).forEach(([tName, m], idx) => {
-    const row = ws.addRow([
-      tName,
-      m.n ?? '—',
-      m.mean !== null && m.mean !== undefined ? parseFloat(fmt(m.mean)) : '—',
-      m.sd   !== null && m.sd   !== undefined ? parseFloat(fmt(m.sd))   : '—',
-      m.se   !== null && m.se   !== undefined ? parseFloat(fmt(m.se))   : '—',
-      m.cv   !== null && m.cv   !== undefined ? parseFloat(fmt(m.cv, 1)) : '—',
-      m.efficacy_pct !== null && m.efficacy_pct !== undefined ? parseFloat(fmt(m.efficacy_pct, 1)) : '—',
-      m.cldLetter || '—',
-      sig,
+    const pickHead = ws.addRow([
+      'Picking #', 'Harvest Date', 'Treatment Name', 'Plot #',
+      'Marketable Yield (kg)', 'Unmarketable Yield (kg)', 'Total Yield (kg)',
+      'Marketable %', 'Fruit / Specimen Count', 'Quality Notes'
     ]);
-    ['C', 'D', 'E', 'F', 'G'].forEach(col => {
-      const cell = row.getCell(col);
-      if (typeof cell.value === 'number') cell.numFmt = NUM_FMT_2;
+    pickHead.eachCell({ includeEmpty: true }, cell => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF27AE60' } };
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.alignment = { horizontal: 'center' };
     });
-    if (idx % 2 === 0) {
-      row.eachCell({ includeEmpty: true }, cell => { cell.fill = ALT_FILL; });
-    }
-  });
 
-  // Footer
-  ws.addRow([]);
-  if (yAnova) {
-    [
-      ['Grand Mean', yAnova.grandMean],
-      ['SEm±',       yAnova.sem],
-      ['LSD 5%',     yAnova.lsd5],
-      ['LSD 1%',     yAnova.lsd1],
-      ['CV%',        yAnova.cv !== null ? fmt(yAnova.cv, 1) + '%' : '—'],
-    ].forEach(([label, value]) => {
-      const row = ws.addRow([label, value !== null && value !== undefined ? value : '—']);
-      row.getCell(1).font = BOLD_FONT;
+    harvestPickings.forEach((p, idx) => {
+      const mVal = parseFloat(p.actualMarketableWeight ?? p.marketableWeight ?? 0) || 0;
+      const uVal = parseFloat(p.actualUnmarketableWeight ?? p.unmarketableWeight ?? 0) || 0;
+      const tot = mVal + uVal;
+      const mPct = tot > 0 ? ((mVal / tot) * 100).toFixed(1) + '%' : (mVal > 0 ? '100%' : '—');
+      const row = ws.addRow([
+        `Picking ${p.pickingNumber || (idx + 1)}`,
+        p.harvestDate || '—',
+        p.treatmentName || '—',
+        p.plotNumber || '—',
+        mVal > 0 ? parseFloat(fmt(mVal)) : (p.actualMarketableWeight ?? '—'),
+        uVal > 0 ? parseFloat(fmt(uVal)) : (p.actualUnmarketableWeight ?? '—'),
+        tot > 0 ? parseFloat(fmt(tot)) : '—',
+        mPct,
+        p.actualFruitCount ?? p.fruitCount ?? '—',
+        p.notes || '—'
+      ]);
+      if (idx % 2 === 0) row.eachCell({ includeEmpty: true }, cell => { cell.fill = ALT_FILL; });
     });
+
+    // 2. Cumulative Treatment Harvest Yield Summary
+    if (Object.keys(harvestSummary).length > 0) {
+      ws.addRow([]);
+      const sec2 = ws.addRow(['2. Cumulative Treatment Harvest Yield Summary']);
+      sec2.getCell(1).font = { bold: true, size: 11, color: { argb: 'FF2C3E50' } };
+      ws.mergeCells(`A${sec2.number}:H${sec2.number}`);
+
+      const sumHead = ws.addRow([
+        'Treatment Name', 'Pickings Count', 'Cumulative Marketable (kg)',
+        'Cumulative Unmarketable (kg)', 'Cumulative Total (kg)', 'Overall Marketable %',
+        'Total Fruit Count', '% Gain vs Control'
+      ]);
+      sumHead.eachCell({ includeEmpty: true }, cell => {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF34495E' } };
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.alignment = { horizontal: 'center' };
+      });
+
+      const ctlEntry = Object.entries(harvestSummary).find(([k]) => /control|untreated|check|utc/i.test(k));
+      const ctlYield = ctlEntry ? ctlEntry[1].cumMarketable : (Object.values(harvestSummary)[0]?.cumMarketable || 0);
+
+      Object.entries(harvestSummary).forEach(([tName, s], sIdx) => {
+        let diffStr = 'Control (Ref)';
+        if (!/control|untreated|check|utc/i.test(tName)) {
+          if (ctlYield > 0 && s.cumMarketable > 0) {
+            const diff = ((s.cumMarketable - ctlYield) / ctlYield) * 100;
+            diffStr = `${diff >= 0 ? '+' : ''}${diff.toFixed(1)}%`;
+          } else {
+            diffStr = '—';
+          }
+        }
+        const row = ws.addRow([
+          tName,
+          s.pickingsCount,
+          parseFloat(fmt(s.cumMarketable)),
+          parseFloat(fmt(s.cumUnmarketable)),
+          parseFloat(fmt(s.cumTotal)),
+          s.marketablePct !== null ? fmt(s.marketablePct, 1) + '%' : '—',
+          s.cumFruitCount > 0 ? s.cumFruitCount : '—',
+          diffStr
+        ]);
+        if (sIdx % 2 === 0) row.eachCell({ includeEmpty: true }, cell => { cell.fill = ALT_FILL; });
+      });
+    }
+  }
+
+  // 3. Statistical Means & ANOVA (if available)
+  if (yieldMeans) {
+    ws.addRow([]);
+    const sec3 = ws.addRow(['3. Statistical Yield Means & Variance Analysis']);
+    sec3.getCell(1).font = { bold: true, size: 11, color: { argb: 'FF2C3E50' } };
+    ws.mergeCells(`A${sec3.number}:I${sec3.number}`);
+
+    const yAnova = yieldData.anova || null;
+    const pVal0  = yAnova?.p?.[0] ?? null;
+    const sig    = sigStars(pVal0);
+
+    const meta = reportData.meta || {};
+    const firstTreatment = Array.isArray(reportData.treatmentList) ? reportData.treatmentList[0] : null;
+    const yMeta = yieldData.meta || {};
+    const yieldUnit          = yMeta.YieldUnit           || meta.YieldUnit           || firstTreatment?.YieldUnit           || 'kg';
+    const grainMoisture      = yMeta.GrainMoisture       || meta.GrainMoisture       || firstTreatment?.GrainMoisture       || null;
+    const thousandGrainWeight= yMeta.ThousandGrainWeight || meta.ThousandGrainWeight || firstTreatment?.ThousandGrainWeight || null;
+    const harvestDAA         = yMeta.HarvestDAA          || meta.HarvestDAA          || firstTreatment?.HarvestDAA          || null;
+
+    const metaHeaderRow = ws.addRow(['Yield Unit', 'Grain Moisture (%)', '1000-Grain Wt (g)', 'Harvest DAA']);
+    metaHeaderRow.eachCell({ includeEmpty: true }, cell => {
+      cell.font = { bold: true, size: 9, color: { argb: 'FF555555' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F5E9' } };
+    });
+    const metaValRow = ws.addRow([
+      yieldUnit,
+      grainMoisture  != null ? parseFloat(fmt(grainMoisture, 1))       : '—',
+      thousandGrainWeight != null ? parseFloat(fmt(thousandGrainWeight, 2)) : '—',
+      harvestDAA     != null ? harvestDAA                               : '—',
+    ]);
+    metaValRow.eachCell({ includeEmpty: true }, cell => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F8E9' } };
+    });
+    ws.addRow([]);
+
+    addHeaderRow(ws, ['Treatment', 'n', 'Mean', 'SD', 'SE', 'CV%', 'Efficacy (%)', 'CLD Letter', 'Significance']);
+
+    Object.entries(yieldMeans).forEach(([tName, m], idx) => {
+      const row = ws.addRow([
+        tName,
+        m.n ?? '—',
+        m.mean !== null && m.mean !== undefined ? parseFloat(fmt(m.mean)) : '—',
+        m.sd   !== null && m.sd   !== undefined ? parseFloat(fmt(m.sd))   : '—',
+        m.se   !== null && m.se   !== undefined ? parseFloat(fmt(m.se))   : '—',
+        m.cv   !== null && m.cv   !== undefined ? parseFloat(fmt(m.cv, 1)) : '—',
+        m.efficacy_pct !== null && m.efficacy_pct !== undefined ? parseFloat(fmt(m.efficacy_pct, 1)) : '—',
+        m.cldLetter || '—',
+        sig,
+      ]);
+      ['C', 'D', 'E', 'F', 'G'].forEach(col => {
+        const cell = row.getCell(col);
+        if (typeof cell.value === 'number') cell.numFmt = NUM_FMT_2;
+      });
+      if (idx % 2 === 0) {
+        row.eachCell({ includeEmpty: true }, cell => { cell.fill = ALT_FILL; });
+      }
+    });
+
+    ws.addRow([]);
+    if (yAnova) {
+      [
+        ['Grand Mean', yAnova.grandMean],
+        ['SEm±',       yAnova.sem],
+        ['LSD 5%',     yAnova.lsd5],
+        ['LSD 1%',     yAnova.lsd1],
+        ['CV%',        yAnova.cv !== null ? fmt(yAnova.cv, 1) + '%' : '—'],
+      ].forEach(([label, value]) => {
+        const row = ws.addRow([label, value !== null && value !== undefined ? value : '—']);
+        row.getCell(1).font = BOLD_FONT;
+      });
+    }
   }
 
   autoColumnWidths(ws);

@@ -641,12 +641,24 @@ export default function Trials({ onMenuClick }) {
   });
   const bulkQrRef = useRef(null);
 
-  // --- Harvest & Yield ---
+  // --- Harvest & Multi-Picking Yield ---
   const [harvestForm, setHarvestForm] = useState({
+    pickings: [],
     actualFruitCount: '',
     actualMarketableWeight: '',
     actualUnmarketableWeight: '',
     harvestDate: '',
+    notes: '',
+    photos: []
+  });
+  const [isPickingModalOpen, setIsPickingModalOpen] = useState(false);
+  const [editingPickingIdx, setEditingPickingIdx] = useState(null);
+  const [pickingForm, setPickingForm] = useState({
+    pickingNumber: 1,
+    harvestDate: '',
+    actualMarketableWeight: '',
+    actualUnmarketableWeight: '',
+    actualFruitCount: '',
     notes: '',
     photos: []
   });
@@ -2145,6 +2157,10 @@ export default function Trials({ onMenuClick }) {
     let newObs = {
       daa: Number(obsForm.daa),
       date: obsForm.date,
+      treatment: activeTrial.FormulationName || (activeTrial.IsControl ? 'Untreated Check (Control)' : 'Treated'),
+      plot: activeTrial.PlotNumber || '1',
+      rep: activeTrial.Replication || 1,
+      treatmentNumber: activeTrial.IsControl ? 1 : 2,
       notes: obsForm.notes,
       weatherTemp: obsForm.weatherTemp,
       weatherHumidity: obsForm.weatherHumidity,
@@ -2342,12 +2358,13 @@ export default function Trials({ onMenuClick }) {
 
   // --- Applications Log Logic ---
   const handleOpenAppModal = (app = null, idx = null) => {
+    const currentTrial = detailTrial || activeTrial;
     if (app) {
       setEditingAppIdx(idx);
       setAppForm({
         code: app.code || '',
         date: app.date || toDatetimeLocal(new Date()),
-        dosage: app.dosage || activeTrial.Dosage || '',
+        dosage: app.dosage || currentTrial?.Dosage || '',
         cropStage: app.cropStage || '',
         targetStage: app.targetStage || '',
         method: app.method || 'Foliar Spray',
@@ -2362,12 +2379,12 @@ export default function Trials({ onMenuClick }) {
     } else {
       setEditingAppIdx(null);
       // Auto-sequence application code/name: App A, App B, App C...
-      const currentApps = safeJsonParse(activeTrial?.ApplicationLogJSON, []);
+      const currentApps = safeJsonParse(currentTrial?.ApplicationLogJSON, []);
       const nextLetter = String.fromCharCode(65 + currentApps.length); // A, B, C...
       setAppForm({
         code: `App ${nextLetter}`,
         date: toDatetimeLocal(new Date()),
-        dosage: activeTrial?.Dosage || '',
+        dosage: currentTrial?.Dosage || '',
         cropStage: '',
         targetStage: '',
         method: 'Foliar Spray',
@@ -2385,9 +2402,10 @@ export default function Trials({ onMenuClick }) {
 
   const handleSaveApp = async (e) => {
     e.preventDefault();
-    if (!activeTrial) return;
+    const currentTrial = detailTrial || activeTrial;
+    if (!currentTrial) return;
 
-    const currentApps = safeJsonParse(activeTrial.ApplicationLogJSON, []);
+    const currentApps = safeJsonParse(currentTrial.ApplicationLogJSON, []);
     const newApp = { ...appForm };
 
     if (editingAppIdx !== null) {
@@ -2398,7 +2416,7 @@ export default function Trials({ onMenuClick }) {
     currentApps.sort((a, b) => new Date(a.date) - new Date(b.date));
 
     const updated = {
-      ...activeTrial,
+      ...currentTrial,
       ApplicationLogJSON: JSON.stringify(currentApps)
     };
 
@@ -2408,20 +2426,21 @@ export default function Trials({ onMenuClick }) {
 
     try {
       await updateTrial({ ID: updated.ID, ApplicationLogJSON: updated.ApplicationLogJSON }, getAppState);
-      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Application saved', type: 'success' } }));
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Application saved successfully', type: 'success' } }));
     } catch (err) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Failed to save application', type: 'error' } }));
     }
   };
 
   const handleDeleteApp = async (idx) => {
-    if (!activeTrial || !window.confirm('Delete this application entry? This cannot be undone.')) return;
+    const currentTrial = detailTrial || activeTrial;
+    if (!currentTrial || !window.confirm('Delete this application entry? This cannot be undone.')) return;
 
-    const currentApps = safeJsonParse(activeTrial.ApplicationLogJSON, []);
+    const currentApps = safeJsonParse(currentTrial.ApplicationLogJSON, []);
     currentApps.splice(idx, 1);
 
     const updated = {
-      ...activeTrial,
+      ...currentTrial,
       ApplicationLogJSON: JSON.stringify(currentApps)
     };
 
@@ -2558,19 +2577,166 @@ export default function Trials({ onMenuClick }) {
   const detailPhotos = detailTrial ? safeJsonParse(detailTrial.PhotoURLs, []).filter(p => !p.deleted) : [];
   const detailIsCompleted = detailTrial?.IsCompleted === true || detailTrial?.IsCompleted === 'true';
 
+  // Calculate cumulative harvest totals from an array of pickings
+  const calculateHarvestTotals = useCallback((pickingsList = []) => {
+    let totMark = 0;
+    let totUnmark = 0;
+    let totFruits = 0;
+    let latestDate = '';
+    (pickingsList || []).forEach(p => {
+      const m = parseFloat(p.actualMarketableWeight ?? p.marketableWeight ?? 0);
+      const u = parseFloat(p.actualUnmarketableWeight ?? p.unmarketableWeight ?? 0);
+      const f = parseFloat(p.actualFruitCount ?? p.fruitCount ?? 0);
+      if (!isNaN(m)) totMark += m;
+      if (!isNaN(u)) totUnmark += u;
+      if (!isNaN(f)) totFruits += f;
+      if (p.harvestDate && p.harvestDate > latestDate) latestDate = p.harvestDate;
+    });
+    return {
+      actualMarketableWeight: totMark > 0 ? totMark : '',
+      actualUnmarketableWeight: totUnmark > 0 ? totUnmark : '',
+      actualFruitCount: totFruits > 0 ? totFruits : '',
+      harvestDate: latestDate || (pickingsList[pickingsList.length - 1]?.harvestDate || '')
+    };
+  }, []);
+
   useEffect(() => {
     if (detailTrial) {
       const data = safeJsonParse(detailTrial.HarvestDataJSON, {});
+      let pickings = Array.isArray(data.pickings) ? [...data.pickings] : [];
+      // Upgrade legacy single harvest into Picking 1 if no pickings array exists yet
+      if (pickings.length === 0 && (data.harvestDate || data.actualMarketableWeight || data.actualFruitCount)) {
+        pickings = [{
+          id: 'p_legacy_1',
+          pickingNumber: 1,
+          harvestDate: data.harvestDate ?? '',
+          actualMarketableWeight: data.actualMarketableWeight ?? '',
+          actualUnmarketableWeight: data.actualUnmarketableWeight ?? '',
+          actualFruitCount: data.actualFruitCount ?? '',
+          notes: data.notes ?? '',
+          photos: data.photos ?? []
+        }];
+      }
+      const totals = calculateHarvestTotals(pickings);
       setHarvestForm({
-        actualFruitCount: data.actualFruitCount ?? '',
-        actualMarketableWeight: data.actualMarketableWeight ?? '',
-        actualUnmarketableWeight: data.actualUnmarketableWeight ?? '',
-        harvestDate: data.harvestDate ?? '',
+        pickings,
+        actualFruitCount: totals.actualFruitCount !== '' ? totals.actualFruitCount : (data.actualFruitCount ?? ''),
+        actualMarketableWeight: totals.actualMarketableWeight !== '' ? totals.actualMarketableWeight : (data.actualMarketableWeight ?? ''),
+        actualUnmarketableWeight: totals.actualUnmarketableWeight !== '' ? totals.actualUnmarketableWeight : (data.actualUnmarketableWeight ?? ''),
+        harvestDate: totals.harvestDate || (data.harvestDate ?? ''),
         notes: data.notes ?? '',
         photos: data.photos ?? []
       });
     }
-  }, [detailTrial]);
+  }, [detailTrial, calculateHarvestTotals]);
+
+  // Picking CRUD Handlers
+  const handleOpenPickingModal = (picking = null, idx = null) => {
+    if (picking && idx !== null) {
+      setEditingPickingIdx(idx);
+      setPickingForm({
+        pickingNumber: picking.pickingNumber || (idx + 1),
+        harvestDate: picking.harvestDate || '',
+        actualMarketableWeight: picking.actualMarketableWeight ?? picking.marketableWeight ?? '',
+        actualUnmarketableWeight: picking.actualUnmarketableWeight ?? picking.unmarketableWeight ?? '',
+        actualFruitCount: picking.actualFruitCount ?? picking.fruitCount ?? '',
+        notes: picking.notes ?? '',
+        photos: picking.photos ?? []
+      });
+    } else {
+      setEditingPickingIdx(null);
+      const nextNum = (harvestForm.pickings || []).length + 1;
+      setPickingForm({
+        pickingNumber: nextNum,
+        harvestDate: new Date().toISOString().split('T')[0],
+        actualMarketableWeight: '',
+        actualUnmarketableWeight: '',
+        actualFruitCount: '',
+        notes: '',
+        photos: []
+      });
+    }
+    setIsPickingModalOpen(true);
+  };
+
+  const handleSavePicking = async (e) => {
+    e.preventDefault();
+    const currentTrial = detailTrial || activeTrial;
+    if (!currentTrial) return;
+
+    const currentPickings = [...(harvestForm.pickings || [])];
+    const newPicking = {
+      ...pickingForm,
+      id: editingPickingIdx !== null ? currentPickings[editingPickingIdx]?.id || `p_${Date.now()}` : `p_${Date.now()}`,
+      pickingNumber: Number(pickingForm.pickingNumber) || (editingPickingIdx !== null ? editingPickingIdx + 1 : currentPickings.length + 1),
+      actualMarketableWeight: pickingForm.actualMarketableWeight !== '' ? Number(pickingForm.actualMarketableWeight) : '',
+      actualUnmarketableWeight: pickingForm.actualUnmarketableWeight !== '' ? Number(pickingForm.actualUnmarketableWeight) : '',
+      actualFruitCount: pickingForm.actualFruitCount !== '' ? Number(pickingForm.actualFruitCount) : '',
+    };
+
+    if (editingPickingIdx !== null) {
+      currentPickings[editingPickingIdx] = newPicking;
+    } else {
+      currentPickings.push(newPicking);
+    }
+    currentPickings.sort((a, b) => (a.pickingNumber - b.pickingNumber) || (new Date(a.harvestDate) - new Date(b.harvestDate)));
+
+    const totals = calculateHarvestTotals(currentPickings);
+    const updatedForm = {
+      ...harvestForm,
+      ...totals,
+      pickings: currentPickings
+    };
+
+    setHarvestForm(updatedForm);
+    setIsPickingModalOpen(false);
+
+    const updatedTrial = {
+      ...currentTrial,
+      HarvestDataJSON: JSON.stringify(updatedForm)
+    };
+
+    updateState({ trials: getAppState().trials.map(t => t.ID === updatedTrial.ID ? updatedTrial : t) });
+    setActiveTrial(updatedTrial);
+
+    try {
+      await updateTrial({ ID: updatedTrial.ID, HarvestDataJSON: updatedTrial.HarvestDataJSON }, getAppState);
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Harvest Picking #${newPicking.pickingNumber} saved!`, type: 'success' } }));
+    } catch (err) {
+      console.error(err);
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Failed to save harvest picking', type: 'error' } }));
+    }
+  };
+
+  const handleDeletePicking = async (idx) => {
+    const currentTrial = detailTrial || activeTrial;
+    if (!currentTrial || !window.confirm('Delete this harvest picking entry?')) return;
+
+    const currentPickings = (harvestForm.pickings || []).filter((_, i) => i !== idx);
+    const totals = calculateHarvestTotals(currentPickings);
+    const updatedForm = {
+      ...harvestForm,
+      ...totals,
+      pickings: currentPickings
+    };
+
+    setHarvestForm(updatedForm);
+
+    const updatedTrial = {
+      ...currentTrial,
+      HarvestDataJSON: JSON.stringify(updatedForm)
+    };
+
+    updateState({ trials: getAppState().trials.map(t => t.ID === updatedTrial.ID ? updatedTrial : t) });
+    setActiveTrial(updatedTrial);
+
+    try {
+      await updateTrial({ ID: updatedTrial.ID, HarvestDataJSON: updatedTrial.HarvestDataJSON }, getAppState);
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Harvest picking deleted', type: 'success' } }));
+    } catch (err) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Failed to delete harvest picking', type: 'error' } }));
+    }
+  };
 
   // Helper for statistics
   const interpretCV = useCallback((cv) => {
@@ -7482,7 +7648,7 @@ If none are present, write "None".`;
                       <h4 className="font-bold text-slate-800 text-sm">Treatment Applications Log</h4>
                       <p className="text-xs text-slate-500">Record sequential treatment applications made to this plot.</p>
                     </div>
-                    {!detailIsCompleted && !isViewer && (
+                    {!isViewer && (
                       <button 
                         onClick={() => handleOpenAppModal(null)}
                         className="flex items-center gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg font-bold transition shadow-sm"
@@ -7499,7 +7665,7 @@ If none are present, write "None".`;
                         <div className="text-center py-12 bg-white rounded-xl border border-dashed border-slate-200">
                           <Clock className="w-8 h-8 text-slate-300 mx-auto mb-2" />
                           <p className="text-sm font-semibold text-slate-400">No sequential applications recorded yet</p>
-                          {!detailIsCompleted && !isViewer && (
+                          {!isViewer && (
                             <button 
                               onClick={() => handleOpenAppModal(null)}
                               className="mt-3 text-xs text-emerald-600 font-bold hover:underline"
@@ -7524,7 +7690,7 @@ If none are present, write "None".`;
                                   {app.date ? formatDateTime(app.date) : 'No date'}
                                 </span>
                               </div>
-                              {!detailIsCompleted && !isViewer && (
+                              {!isViewer && (
                                 <div className="flex items-center gap-1">
                                   <button 
                                     onClick={() => handleOpenAppModal(app, idx)} 
@@ -9080,32 +9246,15 @@ If none are present, write "None".`;
                 <div className="space-y-6">
                   <div className="flex justify-between items-center bg-slate-50 p-4 rounded-xl border border-slate-100">
                     <div>
-                      <h4 className="font-bold text-slate-800 text-sm">Harvest & Final Yield Log</h4>
-                      <p className="text-xs text-slate-500">Record final physical harvest yields, weights, and photos.</p>
+                      <h4 className="font-bold text-slate-800 text-sm">Harvest & Multi-Picking Yield Log</h4>
+                      <p className="text-xs text-slate-500">Record sequential harvest pickings, fruit counts, physical yields, and photos.</p>
                     </div>
-                    {detailTrial.EfficacyDataJSON && safeJsonParse(detailTrial.EfficacyDataJSON, []).some(o => o.fruitCount || o.marketableYield || o.unmarketableYield) && (
+                    {!isViewer && (
                       <button
-                        onClick={() => {
-                          const obs = safeJsonParse(detailTrial.EfficacyDataJSON, []);
-                          const validCounts = obs.map(o => o.fruitCount).filter(v => typeof v === 'number' && v > 0);
-                          const validMark = obs.map(o => o.marketableYield).filter(v => typeof v === 'number' && v > 0);
-                          const validUnmark = obs.map(o => o.unmarketableYield).filter(v => typeof v === 'number' && v > 0);
-                          
-                          const avgCount = validCounts.length ? Math.round(validCounts.reduce((s,v)=>s+v, 0)/validCounts.length) : '';
-                          const avgMark = validMark.length ? Math.round(validMark.reduce((s,v)=>s+v, 0)/validMark.length) : '';
-                          const avgUnmark = validUnmark.length ? Math.round(validUnmark.reduce((s,v)=>s+v, 0)/validUnmark.length) : '';
-                          
-                          setHarvestForm(prev => ({
-                            ...prev,
-                            actualFruitCount: avgCount,
-                            actualMarketableWeight: avgMark,
-                            actualUnmarketableWeight: avgUnmark,
-                          }));
-                          window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Prefilled from AI observation averages!', type: 'success' } }));
-                        }}
-                        className="flex items-center gap-1 text-xs bg-amber-500 hover:bg-amber-600 text-white px-2.5 py-1.5 rounded-lg font-bold transition shadow-sm"
+                        onClick={() => handleOpenPickingModal(null)}
+                        className="flex items-center gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg font-bold transition shadow-sm"
                       >
-                        <Sparkles className="w-3.5 h-3.5" /> Suggest from AI Obs
+                        <Plus className="w-3.5 h-3.5" /> Add Harvest / Picking
                       </button>
                     )}
                   </div>
@@ -9115,17 +9264,22 @@ If none are present, write "None".`;
                     const totalWeight = (parseFloat(harvestForm.actualMarketableWeight || 0) + parseFloat(harvestForm.actualUnmarketableWeight || 0));
                     const avgFruitWeight = harvestForm.actualFruitCount > 0 ? (totalWeight / harvestForm.actualFruitCount).toFixed(1) : '—';
                     const marketableRatio = totalWeight > 0 ? ((parseFloat(harvestForm.actualMarketableWeight || 0) / totalWeight) * 100).toFixed(1) : '—';
+                    const pickingsCount = (harvestForm.pickings || []).length;
                     return (
-                      <div className="grid grid-cols-3 gap-4 bg-emerald-50/50 p-4 rounded-xl border border-emerald-100">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 bg-emerald-50/50 p-4 rounded-xl border border-emerald-100">
                         <div className="text-center">
+                          <p className="text-[10px] font-bold text-slate-500 uppercase">Pickings Recorded</p>
+                          <p className="text-lg font-black text-emerald-800">{pickingsCount > 0 ? `${pickingsCount} ${pickingsCount === 1 ? 'Picking' : 'Pickings'}` : '—'}</p>
+                        </div>
+                        <div className="text-center md:border-l border-slate-200">
+                          <p className="text-[10px] font-bold text-slate-500 uppercase">Cumul. Marketable</p>
+                          <p className="text-lg font-black text-emerald-700">{harvestForm.actualMarketableWeight ? `${harvestForm.actualMarketableWeight} g` : '—'}</p>
+                        </div>
+                        <div className="text-center md:border-l border-slate-200">
                           <p className="text-[10px] font-bold text-slate-500 uppercase">Total Yield</p>
-                          <p className="text-lg font-black text-emerald-700">{totalWeight ? `${totalWeight} g` : '—'}</p>
+                          <p className="text-lg font-black text-slate-900">{totalWeight ? `${totalWeight} g` : '—'}</p>
                         </div>
-                        <div className="text-center border-x border-slate-200">
-                          <p className="text-[10px] font-bold text-slate-500 uppercase">Avg Fruit Size</p>
-                          <p className="text-lg font-black text-emerald-700">{avgFruitWeight !== '—' ? `${avgFruitWeight} g` : '—'}</p>
-                        </div>
-                        <div className="text-center">
+                        <div className="text-center md:border-l border-slate-200">
                           <p className="text-[10px] font-bold text-slate-500 uppercase">Marketable %</p>
                           <p className="text-lg font-black text-emerald-700">{marketableRatio !== '—' ? `${marketableRatio}%` : '—'}</p>
                         </div>
@@ -9133,96 +9287,166 @@ If none are present, write "None".`;
                     );
                   })()}
 
-                  {/* AI Quick-Fill Notes/Dictation */}
-                  {!isViewer && !detailIsCompleted && (
-                    <div className="border border-purple-100 rounded-xl p-3.5 bg-purple-50/30 space-y-2">
-                      <div className="flex justify-between items-center">
-                        <label className="text-xs font-semibold text-slate-500 uppercase flex items-center gap-1">
-                          <Sparkles className="w-3.5 h-3.5 text-purple-600 animate-pulse" /> AI Quick-Fill Notes/Dictation
-                        </label>
-                        {aiNotesParsing && <span className="text-xs text-purple-600 animate-pulse font-medium">Parsing...</span>}
+                  {/* Sequential Pickings List */}
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                        <h5 className="text-xs font-bold uppercase tracking-wider text-slate-700">Harvest Pickings Timeline</h5>
+                        <span className="text-[10px] font-extrabold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                          {(harvestForm.pickings || []).length}
+                        </span>
                       </div>
-                      <textarea
-                        rows="2"
-                        placeholder="Type or dictate e.g., 'Harvested 30 good tomatoes today (850g) and 4 damaged ones (90g) on June 18'"
-                        value={harvestDictationText}
-                        onChange={e => setHarvestDictationText(e.target.value)}
-                        className="w-full border rounded-lg px-3 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-purple-400"
-                      ></textarea>
-                      <button
-                        type="button"
-                        onClick={handleParseHarvestNotes}
-                        disabled={!harvestDictationText.trim() || aiNotesParsing}
-                        className="w-full py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg shadow-sm transition disabled:bg-purple-300 disabled:cursor-not-allowed"
-                      >
-                        Parse Notes & Fill Form
-                      </button>
                     </div>
-                  )}
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Harvest Date</label>
-                      <input
-                        type="date"
-                        value={harvestForm.harvestDate || ''}
-                        onChange={e => setHarvestForm(prev => ({ ...prev, harvestDate: e.target.value }))}
-                        disabled={isViewer || detailIsCompleted}
-                        className="w-full border rounded-xl px-3.5 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Fruit Count per Plant</label>
-                      <input
-                        type="number"
-                        placeholder="e.g. 45"
-                        value={harvestForm.actualFruitCount || ''}
-                        onChange={e => setHarvestForm(prev => ({ ...prev, actualFruitCount: e.target.value }))}
-                        disabled={isViewer || detailIsCompleted}
-                        className="w-full border rounded-xl px-3.5 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Marketable Yield (g/plant)</label>
-                      <input
-                        type="number"
-                        placeholder="Pristine fruits > 20g"
-                        value={harvestForm.actualMarketableWeight || ''}
-                        onChange={e => setHarvestForm(prev => ({ ...prev, actualMarketableWeight: e.target.value }))}
-                        disabled={isViewer || detailIsCompleted}
-                        className="w-full border rounded-xl px-3.5 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Unmarketable Yield (g/plant)</label>
-                      <input
-                        type="number"
-                        placeholder="Cracked/sunburnt/damaged"
-                        value={harvestForm.actualUnmarketableWeight || ''}
-                        onChange={e => setHarvestForm(prev => ({ ...prev, actualUnmarketableWeight: e.target.value }))}
-                        disabled={isViewer || detailIsCompleted}
-                        className="w-full border rounded-xl px-3.5 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                      />
-                    </div>
+                    {(!harvestForm.pickings || harvestForm.pickings.length === 0) ? (
+                      <div className="text-center py-8 bg-white rounded-xl border border-dashed border-slate-200">
+                        <Clock className="w-7 h-7 text-slate-300 mx-auto mb-1.5" />
+                        <p className="text-xs font-semibold text-slate-500">No multi-harvest pickings logged yet</p>
+                        {!isViewer && (
+                          <button
+                            onClick={() => handleOpenPickingModal(null)}
+                            className="mt-2 text-xs text-emerald-600 font-bold hover:underline"
+                          >
+                            + Record 1st Harvest / Picking →
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="space-y-2.5">
+                        {harvestForm.pickings.map((p, pIdx) => {
+                          const pTotal = (parseFloat(p.actualMarketableWeight || 0) + parseFloat(p.actualUnmarketableWeight || 0));
+                          const pRatio = pTotal > 0 ? ((parseFloat(p.actualMarketableWeight || 0) / pTotal) * 100).toFixed(1) : null;
+                          return (
+                            <div key={p.id || pIdx} className="bg-white rounded-xl border border-slate-200 p-3.5 shadow-sm hover:border-emerald-200 transition">
+                              <div className="flex justify-between items-start mb-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="bg-emerald-100 text-emerald-800 text-xs font-black px-2.5 py-0.5 rounded-md">
+                                    Picking #{p.pickingNumber || (pIdx + 1)}
+                                  </span>
+                                  <span className="text-xs font-semibold text-slate-500">
+                                    {p.harvestDate ? formatDateTime(p.harvestDate) : 'No date'}
+                                  </span>
+                                </div>
+                                {!isViewer && (
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenPickingModal(p, pIdx)}
+                                      className="p-1 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition"
+                                      title="Edit Picking"
+                                    >
+                                      <Pencil className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeletePicking(pIdx)}
+                                      className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition"
+                                      title="Delete Picking"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                                <div>
+                                  <span className="text-slate-400 block text-[10px] font-semibold uppercase">Marketable</span>
+                                  <span className="font-bold text-emerald-700">{p.actualMarketableWeight ? `${p.actualMarketableWeight} g` : '—'}</span>
+                                </div>
+                                <div>
+                                  <span className="text-slate-400 block text-[10px] font-semibold uppercase">Unmarketable</span>
+                                  <span className="font-bold text-rose-600">{p.actualUnmarketableWeight ? `${p.actualUnmarketableWeight} g` : '—'}</span>
+                                </div>
+                                <div>
+                                  <span className="text-slate-400 block text-[10px] font-semibold uppercase">Fruit Count</span>
+                                  <span className="font-bold text-slate-800">{p.actualFruitCount ? `${p.actualFruitCount} fruits` : '—'}</span>
+                                </div>
+                                <div>
+                                  <span className="text-slate-400 block text-[10px] font-semibold uppercase">Marketable %</span>
+                                  <span className="font-bold text-emerald-700">{pRatio ? `${pRatio}%` : '—'}</span>
+                                </div>
+                              </div>
+                              {p.notes && (
+                                <p className="text-xs text-slate-600 mt-2 italic bg-white px-1">“{p.notes}”</p>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Harvest Notes / Remarks</label>
-                    <textarea
-                      rows="3"
-                      placeholder="Enter fruit grades, damage observations, or yield summaries..."
-                      value={harvestForm.notes || ''}
-                      onChange={e => setHarvestForm(prev => ({ ...prev, notes: e.target.value }))}
-                      disabled={isViewer || detailIsCompleted}
-                      className="w-full border rounded-xl px-3.5 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                    ></textarea>
+                  {/* Cumulative Details */}
+                  <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/50 space-y-4">
+                    <div className="flex justify-between items-center">
+                      <h5 className="text-xs font-bold uppercase tracking-wider text-slate-700">Cumulative / Overall Plot Yields</h5>
+                      <span className="text-[10px] text-slate-400 font-medium">Aggregated totals</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Final Harvest Date</label>
+                        <input
+                          type="date"
+                          value={harvestForm.harvestDate || ''}
+                          onChange={e => setHarvestForm(prev => ({ ...prev, harvestDate: e.target.value }))}
+                          disabled={isViewer}
+                          className="w-full border rounded-xl px-3.5 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Total Fruit Count per Plant</label>
+                        <input
+                          type="number"
+                          placeholder="e.g. 45"
+                          value={harvestForm.actualFruitCount || ''}
+                          onChange={e => setHarvestForm(prev => ({ ...prev, actualFruitCount: e.target.value }))}
+                          disabled={isViewer}
+                          className="w-full border rounded-xl px-3.5 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Marketable Yield (g/plant)</label>
+                        <input
+                          type="number"
+                          placeholder="Pristine fruits > 20g"
+                          value={harvestForm.actualMarketableWeight || ''}
+                          onChange={e => setHarvestForm(prev => ({ ...prev, actualMarketableWeight: e.target.value }))}
+                          disabled={isViewer}
+                          className="w-full border rounded-xl px-3.5 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Unmarketable Yield (g/plant)</label>
+                        <input
+                          type="number"
+                          placeholder="Cracked/sunburnt/damaged"
+                          value={harvestForm.actualUnmarketableWeight || ''}
+                          onChange={e => setHarvestForm(prev => ({ ...prev, actualUnmarketableWeight: e.target.value }))}
+                          disabled={isViewer}
+                          className="w-full border rounded-xl px-3.5 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Harvest Notes / Remarks</label>
+                      <textarea
+                        rows="3"
+                        placeholder="Enter fruit grades, damage observations, or cumulative yield summaries..."
+                        value={harvestForm.notes || ''}
+                        onChange={e => setHarvestForm(prev => ({ ...prev, notes: e.target.value }))}
+                        disabled={isViewer}
+                        className="w-full border rounded-xl px-3.5 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                      ></textarea>
+                    </div>
                   </div>
 
                   {/* Harvest Photo Gallery */}
                   <div className="space-y-2">
                     <div className="flex justify-between items-center">
                       <label className="block text-xs font-semibold text-slate-500 uppercase">Harvest Photos ({(harvestForm.photos || []).length})</label>
-                      {!isViewer && !detailIsCompleted && (
+                      {!isViewer && (
                         <div className="flex gap-2">
                           {(harvestForm.photos || []).length > 0 && (
                             <button
@@ -9267,7 +9491,7 @@ If none are present, write "None".`;
                           return (
                             <div key={pIdx} className="relative group rounded-xl overflow-hidden border bg-slate-50 aspect-video flex items-center justify-center">
                               <img src={thumbnailSrc} alt={`Harvest photo ${pIdx + 1}`} className="object-cover w-full h-full" />
-                              {!isViewer && !detailIsCompleted && (
+                              {!isViewer && (
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -9293,13 +9517,18 @@ If none are present, write "None".`;
                   </div>
 
                   {/* Save button */}
-                  {!isViewer && !detailIsCompleted && (
+                  {!isViewer && (
                     <button
                       type="button"
                       onClick={async () => {
+                        const totals = calculateHarvestTotals(harvestForm.pickings || []);
+                        const updatedForm = {
+                          ...harvestForm,
+                          ...totals
+                        };
                         const updated = {
                           ...detailTrial,
-                          HarvestDataJSON: JSON.stringify(harvestForm)
+                          HarvestDataJSON: JSON.stringify(updatedForm)
                         };
                         updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
                         setActiveTrial(updated);
@@ -9312,7 +9541,7 @@ If none are present, write "None".`;
                       }}
                       className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition"
                     >
-                      Save Harvest Data
+                      Save Harvest & Yield Data
                     </button>
                   )}
                 </div>
@@ -9671,6 +9900,106 @@ If none are present, write "None".`;
               className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 rounded-lg text-sm font-bold shadow-sm transition"
             >
               Save Application Entry
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* ── MULTI-HARVEST / PICKING MODAL ── */}
+      <Modal
+        isOpen={isPickingModalOpen}
+        onClose={() => setIsPickingModalOpen(false)}
+        title={editingPickingIdx !== null ? `Edit Harvest Picking #${pickingForm.pickingNumber || (editingPickingIdx + 1)}` : `Record Harvest Picking #${pickingForm.pickingNumber || ((harvestForm.pickings || []).length + 1)}`}
+      >
+        <form onSubmit={handleSavePicking} className="space-y-4 max-h-[80vh] overflow-y-auto pr-1">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Picking Number *</label>
+              <input
+                type="number"
+                min="1"
+                required
+                value={pickingForm.pickingNumber}
+                onChange={e => setPickingForm({ ...pickingForm, pickingNumber: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+                placeholder="1"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Harvest Date *</label>
+              <input
+                type="date"
+                required
+                value={pickingForm.harvestDate}
+                onChange={e => setPickingForm({ ...pickingForm, harvestDate: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Marketable Yield (g/plant)</label>
+              <input
+                type="number"
+                step="any"
+                min="0"
+                placeholder="e.g. 850"
+                value={pickingForm.actualMarketableWeight}
+                onChange={e => setPickingForm({ ...pickingForm, actualMarketableWeight: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Unmarketable Yield (g/plant)</label>
+              <input
+                type="number"
+                step="any"
+                min="0"
+                placeholder="e.g. 90"
+                value={pickingForm.actualUnmarketableWeight}
+                onChange={e => setPickingForm({ ...pickingForm, actualUnmarketableWeight: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Fruit / Pod Count (per plant)</label>
+            <input
+              type="number"
+              min="0"
+              placeholder="e.g. 35"
+              value={pickingForm.actualFruitCount}
+              onChange={e => setPickingForm({ ...pickingForm, actualFruitCount: e.target.value })}
+              className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Harvest Notes / Remarks</label>
+            <textarea
+              rows="3"
+              value={pickingForm.notes}
+              onChange={e => setPickingForm({ ...pickingForm, notes: e.target.value })}
+              className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+              placeholder="Fruit sizing, quality grading, color, blemish notes for this picking..."
+            />
+          </div>
+
+          <div className="pt-4 flex justify-end gap-3 border-t">
+            <button
+              type="button"
+              onClick={() => setIsPickingModalOpen(false)}
+              className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg font-medium"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 rounded-lg text-sm font-bold shadow-sm transition"
+            >
+              Save Harvest Picking
             </button>
           </div>
         </form>

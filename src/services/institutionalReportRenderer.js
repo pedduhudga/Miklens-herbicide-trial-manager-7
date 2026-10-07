@@ -165,6 +165,7 @@ export async function generateInstitutionalPDF(reportData) {
   const pw = doc.internal.pageSize.getWidth();
   const ph = doc.internal.pageSize.getHeight();
   const dc = reportData.docControl;
+  const cat = (reportData.category || 'herbicide').toLowerCase();
 
   // ═══════════════════════════════════════════════════════════════════════════
   // PAGE 1: MIKLENS BIO EXECUTIVE REGULATORY COVER PAGE
@@ -266,7 +267,13 @@ export async function generateInstitutionalPDF(reportData) {
   doc.setFontSize(8.5);
   doc.setFont('helvetica', 'italic');
   doc.setTextColor(71, 85, 105);
-  const subtitle = `Comprehensive Institutional Field Evaluation of Bio-Herbicide Weed Suppression Dynamics, Canopy Desiccation, and Selectivity Profile under Field Conditions`;
+  const subtitle = (cat === 'nutrition' || cat === 'biostimulant')
+    ? `Comprehensive Institutional Field Evaluation of Bio-Stimulatory Crop Vigor Dynamics, Vegetative Growth Enhancement, and Selectivity Profile under Field Conditions`
+    : cat === 'pesticide'
+    ? `Comprehensive Institutional Field Evaluation of Bio-Pesticide Target Pest Suppression Dynamics, Canopy Protection, and Crop Selectivity Profile under Field Conditions`
+    : cat === 'fungicide'
+    ? `Comprehensive Institutional Field Evaluation of Bio-Fungicide Pathogen Suppression Dynamics, Foliar Protection, and Crop Selectivity Profile under Field Conditions`
+    : `Comprehensive Institutional Field Evaluation of Bio-Herbicide Weed Suppression Dynamics, Canopy Desiccation, and Selectivity Profile under Field Conditions`;
   const subLines = doc.splitTextToSize(subtitle, pw - 28);
   doc.text(subLines, 14, curCoverY);
   curCoverY += subLines.length * 4.5 + 6;
@@ -462,11 +469,16 @@ export async function generateInstitutionalPDF(reportData) {
   doc.text('1.2 Trial Experimental Design & Agronomic Setup', 14, curY);
 
   curY += 2;
+  const weedGrowthStageLabel = cat === 'pesticide' ? 'Pest Infestation Stage:'
+    : cat === 'fungicide' ? 'Infection Stage:'
+    : (cat === 'nutrition' || cat === 'biostimulant') ? 'Crop Growth Stage:'
+    : 'Weed Growth Stage:';
+
   autoTable(doc, {
     startY: curY,
     body: [
       ['Study Design:', dc.studyDesign, 'Plot Dimensions / Area:', dc.treatmentPlotArea],
-      ['Target Crop / Site:', dc.cropDisplay, 'Weed Growth Stage:', dc.weedGrowthStage],
+      ['Target Crop / Site:', dc.cropDisplay, weedGrowthStageLabel, dc.weedGrowthStage],
       ['Tillage Practice:', dc.tillageType, 'Spray Nozzle Type:', dc.nozzleType],
       ['Protocol Status:', dc.status, 'Agronomic Result:', dc.result]
     ],
@@ -474,6 +486,34 @@ export async function generateInstitutionalPDF(reportData) {
     styles: { fontSize: 8, cellPadding: 1.8 },
     columnStyles: { 0: { fontStyle: 'bold', cellWidth: 38 }, 2: { fontStyle: 'bold', cellWidth: 38 } }
   });
+
+  if (reportData.applicationTimeline && reportData.applicationTimeline.length > 0) {
+    curY = doc.lastAutoTable.finalY + 6;
+    doc.setFontSize(9.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...MIKLENS_DARK);
+    doc.text('1.3 Sequential Treatment Applications Log', 14, curY);
+
+    curY += 2;
+    autoTable(doc, {
+      startY: curY,
+      head: [['App #', 'Date', 'Treatment Name', 'Plot #', 'Dosage', 'Method', 'Crop Stage', 'Weather Conditions', 'Notes']],
+      body: reportData.applicationTimeline.map(a => [
+        a.appNo,
+        a.date,
+        a.treatmentName,
+        a.plotNumber || '—',
+        a.dosage,
+        a.method,
+        a.cropStage,
+        a.weather,
+        a.notes
+      ]),
+      theme: 'grid',
+      headStyles: { fillColor: [39, 174, 96], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.5 },
+      styles: { fontSize: 7, cellPadding: 1.5 }
+    });
+  }
 
   curY = doc.lastAutoTable.finalY + 8;
   doc.setFontSize(11);
@@ -520,26 +560,51 @@ export async function generateInstitutionalPDF(reportData) {
   doc.text(`Soil Texture: ${dc.soilTexture}    |    Soil Drainage: ${dc.soilDrainage}`, 18, curY + 16);
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // PAGE 3: BOTANICAL WEED FLORA CENSUS, EFFICACY & CROP SAFETY
+  // PAGE 3: BOTANICAL / PEST / PATHOGEN CENSUS, EFFICACY & CROP SAFETY
   // ═══════════════════════════════════════════════════════════════════════════
   doc.addPage();
   curY = 24;
 
+  const sec3Title = cat === 'pesticide' ? '3. TARGET PEST POPULATION & INFESTATION CENSUS' :
+    cat === 'fungicide' ? '3. TARGET PATHOGEN & DISEASE SYMPTOMS PROFILE' :
+    (cat === 'nutrition' || cat === 'biostimulant') ? '3. CROP NUTRITIONAL & VEGETATIVE GROWTH PROFILE' :
+    '3. BOTANICAL WEED FLORA IDENTIFICATION';
+
+  const tab1Title = cat === 'pesticide' ? 'Table 1: Target pest species and infestation census recorded across experimental plots' :
+    cat === 'fungicide' ? 'Table 1: Target disease symptoms and fungal pathogen census recorded across experimental plots' :
+    (cat === 'nutrition' || cat === 'biostimulant') ? 'Table 1: Target vegetative and crop growth parameters evaluated prior to application' :
+    'Table 1: Weed flora census recorded across experimental plots prior to application';
+
+  const sec4Title = cat === 'pesticide' ? '4. PEST POPULATION SUPPRESSION & BIO-EFFICACY ANALYSIS' :
+    cat === 'fungicide' ? '4. DISEASE SUPPRESSION & FUNGICIDAL EFFICACY ANALYSIS' :
+    (cat === 'nutrition' || cat === 'biostimulant') ? '4. BIO-STIMULATION, VIGOR & YIELD ENHANCEMENT ANALYSIS' :
+    '4. WEED CONTROL EFFICACY ANALYSIS';
+
+  const tab2Title = cat === 'pesticide' ? 'Table 2: Target pest reduction and observed suppression efficiency (%)' :
+    cat === 'fungicide' ? 'Table 2: Disease severity reduction and observed control efficiency (%)' :
+    (cat === 'nutrition' || cat === 'biostimulant') ? 'Table 2: Crop vegetative vigor gain and physiological growth enhancement (%)' :
+    'Table 2: Weed cover reduction and observed control efficiency (WCE %)';
+
+  const targetColHeader = cat === 'pesticide' ? 'Target Pest Species' :
+    cat === 'fungicide' ? 'Target Pathogen' :
+    (cat === 'nutrition' || cat === 'biostimulant') ? 'Growth Parameter' :
+    'Target Weed Flora';
+
   doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(...MIKLENS_DARK);
-  doc.text('3. BOTANICAL WEED FLORA IDENTIFICATION', 14, curY);
+  doc.text(sec3Title, 14, curY);
 
   curY += 3;
   doc.setFontSize(8);
   doc.setFont('helvetica', 'italic');
   doc.setTextColor(71, 85, 105);
-  doc.text('Table 1: Weed flora census recorded across experimental plots prior to application', 14, curY);
+  doc.text(tab1Title, 14, curY);
 
   curY += 3;
   autoTable(doc, {
     startY: curY,
-    head: [['S. No.', 'Botanical Scientific Name', 'Common Vernacular Name', 'Botanical Family', 'Growth Habit']],
+    head: [['S. No.', 'Botanical / Taxonomic Scientific Name', 'Common Vernacular Name', 'Family / Classification', 'Growth Habit / Life Stage']],
     body: reportData.weedFloraTable.map(w => [w.sNo, w.scientificName, w.commonName, w.botanicalFamily, w.habit]),
     theme: 'grid',
     headStyles: { fillColor: MIKLENS_GREEN, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
@@ -551,23 +616,23 @@ export async function generateInstitutionalPDF(reportData) {
   doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(...MIKLENS_DARK);
-  doc.text('4. WEED CONTROL EFFICACY ANALYSIS', 14, curY);
+  doc.text(sec4Title, 14, curY);
 
   curY += 3;
   doc.setFontSize(8);
   doc.setFont('helvetica', 'italic');
   doc.setTextColor(71, 85, 105);
-  doc.text('Table 2: Weed cover reduction and observed control efficiency (WCE %)', 14, curY);
+  doc.text(tab2Title, 14, curY);
 
   curY += 3;
   autoTable(doc, {
     startY: curY,
-    head: [['S. No.', 'Target Weed Flora', 'Initial Cover (%)', 'Final Cover (%)', 'Observed Control / WCE (%)', 'Biological Herbicide Response']],
+    head: [['S. No.', targetColHeader, 'Initial Level', 'Final Level', reportData.controlLabel || 'Observed Control (%)', 'Biological Response']],
     body: reportData.efficacyAnalysis.map(e => [
       e.sNo,
       e.species,
-      `${e.initialCover.toFixed(1)}%`,
-      `${e.finalCover.toFixed(1)}%`,
+      (cat === 'herbicide' || cat === 'fungicide') ? `${e.initialCover.toFixed(1)}%` : `${e.initialCover}`,
+      (cat === 'herbicide' || cat === 'fungicide') ? `${e.finalCover.toFixed(1)}%` : `${e.finalCover}`,
       `${e.wce.toFixed(1)}%`,
       e.symptoms
     ]),
@@ -644,11 +709,11 @@ export async function generateInstitutionalPDF(reportData) {
   curY += 3;
   autoTable(doc, {
     startY: curY,
-    head: [['DAA', 'Date', 'Plot Weed Cover (%)', 'Observed Control (%)', 'Phenological Status', 'In-Situ Field Observations']],
+    head: [['DAA', 'Date', reportData.metricLabel || 'Plot Weed Cover (%)', reportData.controlLabel || 'Observed Control (%)', 'Phenological Status', 'In-Situ Field Observations']],
     body: reportData.treatmentTimeline.map(t => [
       t.daa === 0 ? '0 (Pre)' : `${t.daa}`,
       t.date,
-      `${t.weedCover.toFixed(1)}%`,
+      (cat === 'herbicide' || cat === 'fungicide') ? `${t.weedCover.toFixed(1)}%` : `${t.weedCover.toFixed(1)}`,
       `${t.controlPct.toFixed(1)}%`,
       t.status,
       t.notes
@@ -680,10 +745,10 @@ export async function generateInstitutionalPDF(reportData) {
       startY: curY,
       head: [['Statistical Parameter / Metric', 'Recorded Value', 'Agronomic Evaluation & Regulatory Significance']],
       body: [
-        ['Pre-Treatment Baseline Cover', `${p.baselineCover.toFixed(1)}%`, 'Initial weed infestation level prior to application'],
-        ['Final Monitored Weed Cover', `${p.finalCover.toFixed(1)}%`, 'Residual living weed canopy at trial conclusion'],
-        ['Net Canopy Reduction', `${p.netReduction.toFixed(1)}%`, 'Overall vegetative population reduction achieved'],
-        ['Peak Bio-Efficacy Achieved', `${p.peakControl.toFixed(1)}%`, `Maximum weed desiccation reached at ${p.peakDaa} DAA`],
+        ['Pre-Treatment Baseline Level', (cat === 'herbicide' || cat === 'fungicide') ? `${p.baselineCover.toFixed(1)}%` : `${p.baselineCover.toFixed(1)}`, 'Initial target infestation / baseline level prior to application'],
+        ['Final Monitored Level', (cat === 'herbicide' || cat === 'fungicide') ? `${p.finalCover.toFixed(1)}%` : `${p.finalCover.toFixed(1)}`, 'Terminal target level at trial conclusion'],
+        ['Net Reduction / Gain', `${p.netReduction.toFixed(1)}%`, (cat === 'nutrition' || cat === 'biostimulant') ? 'Overall vegetative vigor gain achieved' : 'Overall target population reduction achieved'],
+        ['Peak Bio-Efficacy Achieved', `${p.peakControl.toFixed(1)}%`, `Maximum efficacy response reached at ${p.peakDaa} DAA`],
         ['Mean Suppression Stability', `${p.meanControl.toFixed(1)}% ± ${p.sem.toFixed(2)}%`, `Mean control across post-treatment period (SE(m) ± ${p.sem.toFixed(2)})`],
         ['Coefficient of Variation (CV %)', `${p.cv.toFixed(2)}%`, 'Measurement consistency and plot uniformity index'],
         ['Crop Safety Rating', `${p.phytoScore.toFixed(1)} / 10`, `Safety clearance: ${p.phytoDesc.injuryLevel}`]
@@ -707,7 +772,13 @@ export async function generateInstitutionalPDF(reportData) {
     doc.setFontSize(7.8);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(30, 41, 59);
-    const conclusionP1 = `Application of ${dc.productName} demonstrated strong bio-efficacy against ${reportData.dominantFloraName}, reducing weed canopy from ${p.baselineCover}% to ${p.finalCover}% (net ${p.netReduction}% reduction). Peak suppression of ${p.peakControl}% occurred at ${p.peakDaa} DAA with high consistency (CV: ${p.cv}%).`;
+    const conclusionP1 = cat === 'pesticide'
+      ? `Application of ${dc.productName} demonstrated strong bio-efficacy against ${reportData.dominantFloraName}, reducing pest population from ${p.baselineCover} to ${p.finalCover} (net ${p.netReduction}% reduction). Peak suppression of ${p.peakControl}% occurred at ${p.peakDaa} DAA with high consistency (CV: ${p.cv}%).`
+      : cat === 'fungicide'
+      ? `Application of ${dc.productName} demonstrated strong bio-fungicidal control against ${reportData.dominantFloraName}, reducing disease severity from ${p.baselineCover}% to ${p.finalCover}% (net ${p.netReduction}% suppression). Peak control of ${p.peakControl}% occurred at ${p.peakDaa} DAA with high consistency (CV: ${p.cv}%).`
+      : (cat === 'nutrition' || cat === 'biostimulant')
+      ? `Application of ${dc.productName} exhibited notable bio-stimulatory activity in ${dc.crop}, increasing vegetative vigor index from ${p.baselineCover} to ${p.finalCover} (growth gain ${p.peakControl}%). High uniformity across plots was confirmed (CV: ${p.cv}%).`
+      : `Application of ${dc.productName} demonstrated strong bio-efficacy against ${reportData.dominantFloraName}, reducing weed canopy from ${p.baselineCover}% to ${p.finalCover}% (net ${p.netReduction}% reduction). Peak suppression of ${p.peakControl}% occurred at ${p.peakDaa} DAA with high consistency (CV: ${p.cv}%).`;
     const conclusionP2 = `The formulation proved selective and non-injurious to ${dc.crop} (phytotoxicity index ${p.phytoScore}/10). The trial confirms commercial efficacy and crop safety standards.`;
     doc.text(doc.splitTextToSize(conclusionP1, pw - 36), 18, curY + 11);
     doc.text(doc.splitTextToSize(conclusionP2, pw - 36), 18, curY + 17);
@@ -744,6 +815,53 @@ export async function generateInstitutionalPDF(reportData) {
     doc.text('ANOVA confirms statistically verified differences among treatments under standardized field trial evaluation.', 18, curY + 11);
   }
 
+  // Harvest Pickings Section
+  if (reportData.harvestPickings && reportData.harvestPickings.length > 0) {
+    curY = doc.lastAutoTable.finalY + 8;
+    if (curY + 50 > ph - 25) {
+      doc.addPage();
+      curY = 24;
+    }
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...MIKLENS_DARK);
+    doc.text('7.1 CROP HARVEST & SEQUENTIAL PICKINGS YIELD EVALUATION', 14, curY);
+
+    curY += 3;
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'italic');
+    doc.setTextColor(71, 85, 105);
+    doc.text('Table 5: Sequential harvest pickings and marketable yield distribution recorded across treatments', 14, curY);
+
+    curY += 3;
+    autoTable(doc, {
+      startY: curY,
+      head: [['Picking #', 'Harvest Date', 'Treatment Name', 'Plot #', 'Marketable (kg)', 'Unmarketable (kg)', 'Total Yield (kg)', 'Marketable %', 'Fruit / Unit Count', 'Notes']],
+      body: reportData.harvestPickings.map(h => [
+        `Picking ${h.pickingNumber}`,
+        h.harvestDate,
+        h.treatmentName,
+        h.plotNumber || '—',
+        typeof h.marketableYield === 'number' ? `${h.marketableYield.toFixed(2)} kg` : String(h.marketableYield),
+        typeof h.unmarketableYield === 'number' ? `${h.unmarketableYield.toFixed(2)} kg` : String(h.unmarketableYield),
+        typeof h.totalYield === 'number' ? `${h.totalYield.toFixed(2)} kg` : String(h.totalYield),
+        h.marketablePct,
+        String(h.fruitCount),
+        h.notes
+      ]),
+      theme: 'grid',
+      headStyles: { fillColor: [39, 174, 96], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.5, halign: 'center' },
+      styles: { fontSize: 7, cellPadding: 1.8, halign: 'center' },
+      columnStyles: {
+        0: { cellWidth: 18, fontStyle: 'bold' },
+        1: { cellWidth: 20 },
+        2: { cellWidth: 32, halign: 'left' },
+        3: { cellWidth: 12 },
+        9: { halign: 'left' }
+      }
+    });
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // PAGE 5+: IN-SITU PHOTOGRAPHIC EVIDENCE GALLERY (REAL PHOTOS EMBEDDED)
   // ═══════════════════════════════════════════════════════════════════════════
@@ -759,7 +877,11 @@ export async function generateInstitutionalPDF(reportData) {
   doc.setFontSize(8);
   doc.setFont('helvetica', 'italic');
   doc.setTextColor(71, 85, 105);
-  doc.text('In-situ photo plates documenting weed canopy suppression, symptom progression, and crop safety', 14, curY);
+  const photoSub = cat === 'pesticide' ? 'In-situ photo plates documenting target pest control, canopy progression, and crop safety'
+    : cat === 'fungicide' ? 'In-situ photo plates documenting disease symptom suppression and crop safety'
+    : (cat === 'nutrition' || cat === 'biostimulant') ? 'In-situ photo plates documenting vegetative growth response, foliage development, and crop safety'
+    : 'In-situ photo plates documenting weed canopy suppression, symptom progression, and crop safety';
+  doc.text(photoSub, 14, curY);
 
   curY += 6;
   const photos = reportData.photoUrls || [];
@@ -878,156 +1000,277 @@ export async function generateInstitutionalPDF(reportData) {
 export async function generateInstitutionalDocx(reportData) {
   const dc = reportData.docControl;
   const stats = reportData.statistics;
+  const cat = (reportData.category || 'herbicide').toLowerCase();
+
+  const objectiveText = cat === 'pesticide'
+    ? `To evaluate the pest-control bio-efficacy and crop safety profile of ${reportData.treatments[0]?.productName || 'the test product'} applied in ${dc.cropDisplay} under field conditions.`
+    : cat === 'fungicide'
+    ? `To evaluate the disease-control bio-fungicidal efficacy and crop safety profile of ${reportData.treatments[0]?.productName || 'the test product'} applied in ${dc.cropDisplay} under field conditions.`
+    : (cat === 'nutrition' || cat === 'biostimulant')
+    ? `To evaluate the bio-stimulatory efficacy, vegetative growth enhancement, and crop safety profile of ${reportData.treatments[0]?.productName || 'the test product'} applied in ${dc.cropDisplay} under field conditions.`
+    : `To evaluate the weed-control bio-efficacy and crop selectivity profile of ${reportData.treatments[0]?.productName || 'the test product'} applied in ${dc.cropDisplay} under field conditions.`;
+
+  const docxSec3Title = cat === 'pesticide' ? '3. PEST POPULATION SUPPRESSION & BIO-EFFICACY ANALYSIS' :
+    cat === 'fungicide' ? '3. DISEASE SUPPRESSION & FUNGICIDAL EFFICACY ANALYSIS' :
+    (cat === 'nutrition' || cat === 'biostimulant') ? '3. BIO-STIMULATION, VIGOR & YIELD ENHANCEMENT ANALYSIS' :
+    '3. WEED CONTROL EFFICACY ANALYSIS';
+
+  const docxTargetCol = cat === 'pesticide' ? 'Target Pest Species' :
+    cat === 'fungicide' ? 'Target Pathogen' :
+    (cat === 'nutrition' || cat === 'biostimulant') ? 'Growth Parameter' :
+    'Target Weed Flora';
+
+  const docChildren = [
+    new Paragraph({
+      text: `${dc.companyName} — ${dc.division}`,
+      heading: HeadingLevel.HEADING_2,
+      alignment: AlignmentType.CENTER
+    }),
+    new Paragraph({
+      text: `Report No: ${dc.reportNo}  |  Protocol Ref: ${dc.protocolRefNo}  |  SOP: ${dc.sopFormCode}`,
+      alignment: AlignmentType.CENTER
+    }),
+    new Paragraph({ text: '' }),
+    new Paragraph({
+      text: dc.title,
+      heading: HeadingLevel.HEADING_1,
+      alignment: AlignmentType.CENTER
+    }),
+    new Paragraph({ text: '' }),
+    new Paragraph({
+      children: [
+        new TextRun({ text: 'Prepared By: ', bold: true }),
+        new TextRun(`${dc.preparedBy} (${dc.preparedByTitle})\n`),
+        new TextRun({ text: 'Reviewed & Approved By: ', bold: true }),
+        new TextRun(`${dc.approvedBy} (${dc.approvedByTitle})\n`),
+        new TextRun({ text: 'Date: ', bold: true }),
+        new TextRun(`${dc.reportDate}\n`),
+        new TextRun({ text: 'Location: ', bold: true }),
+        new TextRun(`${dc.locationName} (GPS: ${dc.latitude}, ${dc.longitude})`)
+      ]
+    }),
+    new Paragraph({ text: '' }),
+    new Paragraph({
+      text: '1. TRIAL PROTOCOL AND OBJECTIVES',
+      heading: HeadingLevel.HEADING_2
+    }),
+    new Paragraph({
+      text: objectiveText
+    }),
+    new Paragraph({ text: '' }),
+    new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      rows: [
+        new TableRow({
+          children: [
+            new TableCell({ children: [new Paragraph({ text: 'Trt No', bold: true })] }),
+            new TableCell({ children: [new Paragraph({ text: 'Product Commercial Name', bold: true })] }),
+            new TableCell({ children: [new Paragraph({ text: 'Calibrated Dose', bold: true })] }),
+            new TableCell({ children: [new Paragraph({ text: 'Method', bold: true })] }),
+            new TableCell({ children: [new Paragraph({ text: 'Timing', bold: true })] }),
+            new TableCell({ children: [new Paragraph({ text: 'Spray Volume', bold: true })] })
+          ]
+        }),
+        ...reportData.treatments.map(t => new TableRow({
+          children: [
+            new TableCell({ children: [new Paragraph({ text: String(t.trNo || '') })] }),
+            new TableCell({ children: [new Paragraph({ text: String(t.productName || '') })] }),
+            new TableCell({ children: [new Paragraph({ text: String(t.dosePerLitre || '') })] }),
+            new TableCell({ children: [new Paragraph({ text: String(t.method || '') })] }),
+            new TableCell({ children: [new Paragraph({ text: String(t.timing || '') })] }),
+            new TableCell({ children: [new Paragraph({ text: String(t.sprayVolume || '') })] })
+          ]
+        }))
+      ]
+    }),
+    new Paragraph({ text: '' })
+  ];
+
+  // Optional Section 1.1: Sequential Treatment Applications Log
+  if (reportData.applicationTimeline && reportData.applicationTimeline.length > 0) {
+    docChildren.push(
+      new Paragraph({
+        text: '1.1 SEQUENTIAL TREATMENT APPLICATIONS LOG',
+        heading: HeadingLevel.HEADING_3
+      }),
+      new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        rows: [
+          new TableRow({
+            children: [
+              new TableCell({ children: [new Paragraph({ text: 'App #', bold: true })] }),
+              new TableCell({ children: [new Paragraph({ text: 'Date', bold: true })] }),
+              new TableCell({ children: [new Paragraph({ text: 'Treatment Name', bold: true })] }),
+              new TableCell({ children: [new Paragraph({ text: 'Plot #', bold: true })] }),
+              new TableCell({ children: [new Paragraph({ text: 'Dosage', bold: true })] }),
+              new TableCell({ children: [new Paragraph({ text: 'Method', bold: true })] }),
+              new TableCell({ children: [new Paragraph({ text: 'Crop Stage', bold: true })] }),
+              new TableCell({ children: [new Paragraph({ text: 'Weather', bold: true })] }),
+              new TableCell({ children: [new Paragraph({ text: 'Notes', bold: true })] })
+            ]
+          }),
+          ...reportData.applicationTimeline.map(a => new TableRow({
+            children: [
+              new TableCell({ children: [new Paragraph({ text: String(a.appNo || '') })] }),
+              new TableCell({ children: [new Paragraph({ text: String(a.date || '') })] }),
+              new TableCell({ children: [new Paragraph({ text: String(a.treatmentName || '') })] }),
+              new TableCell({ children: [new Paragraph({ text: String(a.plotNumber || '—') })] }),
+              new TableCell({ children: [new Paragraph({ text: String(a.dosage || '') })] }),
+              new TableCell({ children: [new Paragraph({ text: String(a.method || '') })] }),
+              new TableCell({ children: [new Paragraph({ text: String(a.cropStage || '') })] }),
+              new TableCell({ children: [new Paragraph({ text: String(a.weather || '') })] }),
+              new TableCell({ children: [new Paragraph({ text: String(a.notes || '') })] })
+            ]
+          }))
+        ]
+      }),
+      new Paragraph({ text: '' })
+    );
+  }
+
+  docChildren.push(
+    new Paragraph({
+      text: '2. ENVIRONMENTAL & SOIL PROFILE PARAMETERS',
+      heading: HeadingLevel.HEADING_2
+    }),
+    new Paragraph({
+      children: [
+        new TextRun({ text: 'Weather Conditions: ', bold: true }),
+        new TextRun(dc.weatherContext + '\n'),
+        new TextRun({ text: 'Soil Profile: ', bold: true }),
+        new TextRun(dc.soilProfile)
+      ]
+    }),
+    new Paragraph({ text: '' }),
+    new Paragraph({
+      text: docxSec3Title,
+      heading: HeadingLevel.HEADING_2
+    }),
+    new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      rows: [
+        new TableRow({
+          children: [
+            new TableCell({ children: [new Paragraph({ text: 'S.No', bold: true })] }),
+            new TableCell({ children: [new Paragraph({ text: docxTargetCol, bold: true })] }),
+            new TableCell({ children: [new Paragraph({ text: 'Initial Level', bold: true })] }),
+            new TableCell({ children: [new Paragraph({ text: 'Final Level', bold: true })] }),
+            new TableCell({ children: [new Paragraph({ text: reportData.controlLabel || 'Observed Control (%)', bold: true })] }),
+            new TableCell({ children: [new Paragraph({ text: 'Biological Response', bold: true })] })
+          ]
+        }),
+        ...reportData.efficacyAnalysis.map(e => new TableRow({
+          children: [
+            new TableCell({ children: [new Paragraph({ text: String(e.sNo) })] }),
+            new TableCell({ children: [new Paragraph({ text: String(e.species) })] }),
+            new TableCell({ children: [new Paragraph({ text: (cat === 'herbicide' || cat === 'fungicide') ? `${e.initialCover}%` : `${e.initialCover}` })] }),
+            new TableCell({ children: [new Paragraph({ text: (cat === 'herbicide' || cat === 'fungicide') ? `${e.finalCover}%` : `${e.finalCover}` })] }),
+            new TableCell({ children: [new Paragraph({ text: `${e.wce}%` })] }),
+            new TableCell({ children: [new Paragraph({ text: String(e.symptoms) })] })
+          ]
+        }))
+      ]
+    }),
+    new Paragraph({ text: '' }),
+    new Paragraph({
+      text: '4. CHRONOLOGICAL OBSERVATIONS TIMELINE',
+      heading: HeadingLevel.HEADING_2
+    }),
+    new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      rows: [
+        new TableRow({
+          children: [
+            new TableCell({ children: [new Paragraph({ text: 'DAA', bold: true })] }),
+            new TableCell({ children: [new Paragraph({ text: 'Date', bold: true })] }),
+            new TableCell({ children: [new Paragraph({ text: reportData.metricLabel || 'Observed Metric', bold: true })] }),
+            new TableCell({ children: [new Paragraph({ text: reportData.controlLabel || 'Control (%)', bold: true })] }),
+            new TableCell({ children: [new Paragraph({ text: 'Phenological Status', bold: true })] }),
+            new TableCell({ children: [new Paragraph({ text: 'Notes', bold: true })] })
+          ]
+        }),
+        ...reportData.treatmentTimeline.map(t => new TableRow({
+          children: [
+            new TableCell({ children: [new Paragraph({ text: String(t.daa) })] }),
+            new TableCell({ children: [new Paragraph({ text: String(t.date) })] }),
+            new TableCell({ children: [new Paragraph({ text: (cat === 'herbicide' || cat === 'fungicide') ? `${t.weedCover}%` : `${t.weedCover}` })] }),
+            new TableCell({ children: [new Paragraph({ text: `${t.controlPct}%` })] }),
+            new TableCell({ children: [new Paragraph({ text: String(t.status) })] }),
+            new TableCell({ children: [new Paragraph({ text: String(t.notes) })] })
+          ]
+        }))
+      ]
+    }),
+    new Paragraph({ text: '' })
+  );
+
+  // Optional Section: Sequential Harvest Pickings & Yield
+  if (reportData.harvestPickings && reportData.harvestPickings.length > 0) {
+    docChildren.push(
+      new Paragraph({
+        text: '5. CROP HARVEST & AGRONOMIC YIELD EVALUATION',
+        heading: HeadingLevel.HEADING_2
+      }),
+      new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        rows: [
+          new TableRow({
+            children: [
+              new TableCell({ children: [new Paragraph({ text: 'Picking #', bold: true })] }),
+              new TableCell({ children: [new Paragraph({ text: 'Harvest Date', bold: true })] }),
+              new TableCell({ children: [new Paragraph({ text: 'Treatment Name', bold: true })] }),
+              new TableCell({ children: [new Paragraph({ text: 'Plot #', bold: true })] }),
+              new TableCell({ children: [new Paragraph({ text: 'Marketable (kg)', bold: true })] }),
+              new TableCell({ children: [new Paragraph({ text: 'Unmarketable (kg)', bold: true })] }),
+              new TableCell({ children: [new Paragraph({ text: 'Total Yield (kg)', bold: true })] }),
+              new TableCell({ children: [new Paragraph({ text: 'Marketable %', bold: true })] }),
+              new TableCell({ children: [new Paragraph({ text: 'Count', bold: true })] }),
+              new TableCell({ children: [new Paragraph({ text: 'Notes', bold: true })] })
+            ]
+          }),
+          ...reportData.harvestPickings.map(h => new TableRow({
+            children: [
+              new TableCell({ children: [new Paragraph({ text: `Picking ${h.pickingNumber}` })] }),
+              new TableCell({ children: [new Paragraph({ text: String(h.harvestDate || '') })] }),
+              new TableCell({ children: [new Paragraph({ text: String(h.treatmentName || '') })] }),
+              new TableCell({ children: [new Paragraph({ text: String(h.plotNumber || '—') })] }),
+              new TableCell({ children: [new Paragraph({ text: typeof h.marketableYield === 'number' ? `${h.marketableYield} kg` : String(h.marketableYield) })] }),
+              new TableCell({ children: [new Paragraph({ text: typeof h.unmarketableYield === 'number' ? `${h.unmarketableYield} kg` : String(h.unmarketableYield) })] }),
+              new TableCell({ children: [new Paragraph({ text: typeof h.totalYield === 'number' ? `${h.totalYield} kg` : String(h.totalYield) })] }),
+              new TableCell({ children: [new Paragraph({ text: String(h.marketablePct || '') })] }),
+              new TableCell({ children: [new Paragraph({ text: String(h.fruitCount || '—') })] }),
+              new TableCell({ children: [new Paragraph({ text: String(h.notes || '') })] })
+            ]
+          }))
+        ]
+      }),
+      new Paragraph({ text: '' })
+    );
+  }
+
+  const statConclusionText = cat === 'pesticide'
+    ? `Statistical evaluation confirms pest population reduction from ${stats.progression.baselineCover} to ${stats.progression.finalCover} (net ${stats.progression.netReduction}% reduction). Peak suppression of ${stats.progression.peakControl}% occurred at ${stats.progression.peakDaa} DAA (CV: ${stats.progression.cv}%). Crop safety index was recorded at ${stats.progression.phytoScore}/10 (${stats.progression.phytoDesc.injuryLevel}), confirming complete crop selectivity and efficacy clearance.`
+    : cat === 'fungicide'
+    ? `Statistical evaluation confirms disease severity reduction from ${stats.progression.baselineCover}% to ${stats.progression.finalCover}% (net ${stats.progression.netReduction}% reduction). Peak control of ${stats.progression.peakControl}% occurred at ${stats.progression.peakDaa} DAA (CV: ${stats.progression.cv}%). Crop safety index was recorded at ${stats.progression.phytoScore}/10 (${stats.progression.phytoDesc.injuryLevel}), confirming complete crop selectivity and efficacy clearance.`
+    : (cat === 'nutrition' || cat === 'biostimulant')
+    ? `Statistical evaluation confirms crop vegetative vigor gain from ${stats.progression.baselineCover} to ${stats.progression.finalCover} (net ${stats.progression.peakControl}% enhancement). High treatment uniformity across plots was confirmed (CV: ${stats.progression.cv}%). Crop safety index was recorded at ${stats.progression.phytoScore}/10 (${stats.progression.phytoDesc.injuryLevel}), confirming complete crop selectivity and efficacy clearance.`
+    : `Statistical analysis confirms weed canopy reduction from ${stats.progression.baselineCover}% to ${stats.progression.finalCover}% (net ${stats.progression.netReduction}% suppression). Peak efficacy of ${stats.progression.peakControl}% occurred at ${stats.progression.peakDaa} DAA (CV: ${stats.progression.cv}%). Crop phytotoxicity rating was recorded at ${stats.progression.phytoScore}/10 (${stats.progression.phytoDesc.injuryLevel}), confirming complete crop selectivity and efficacy clearance.`;
+
+  docChildren.push(
+    new Paragraph({
+      text: '6. STATISTICAL EVALUATION & REGULATORY CONCLUSION',
+      heading: HeadingLevel.HEADING_2
+    }),
+    new Paragraph({
+      text: statConclusionText
+    })
+  );
 
   const doc = new Document({
     sections: [
       {
         properties: {},
-        children: [
-          new Paragraph({
-            text: `${dc.companyName} — ${dc.division}`,
-            heading: HeadingLevel.HEADING_2,
-            alignment: AlignmentType.CENTER
-          }),
-          new Paragraph({
-            text: `Report No: ${dc.reportNo}  |  Protocol Ref: ${dc.protocolRefNo}  |  SOP: ${dc.sopFormCode}`,
-            alignment: AlignmentType.CENTER
-          }),
-          new Paragraph({ text: '' }),
-          new Paragraph({
-            text: dc.title,
-            heading: HeadingLevel.HEADING_1,
-            alignment: AlignmentType.CENTER
-          }),
-          new Paragraph({ text: '' }),
-          new Paragraph({
-            children: [
-              new TextRun({ text: 'Prepared By: ', bold: true }),
-              new TextRun(`${dc.preparedBy} (${dc.preparedByTitle})\n`),
-              new TextRun({ text: 'Reviewed & Approved By: ', bold: true }),
-              new TextRun(`${dc.approvedBy} (${dc.approvedByTitle})\n`),
-              new TextRun({ text: 'Date: ', bold: true }),
-              new TextRun(`${dc.reportDate}\n`),
-              new TextRun({ text: 'Location: ', bold: true }),
-              new TextRun(`${dc.locationName} (GPS: ${dc.latitude}, ${dc.longitude})`)
-            ]
-          }),
-          new Paragraph({ text: '' }),
-          new Paragraph({
-            text: '1. TRIAL PROTOCOL AND OBJECTIVES',
-            heading: HeadingLevel.HEADING_2
-          }),
-          new Paragraph({
-            text: `To evaluate the weed-control bio-efficacy and crop selectivity profile of ${reportData.treatments[0]?.productName || 'the test product'} applied in ${dc.cropDisplay} under field conditions.`
-          }),
-          new Paragraph({ text: '' }),
-          new Table({
-            width: { size: 100, type: WidthType.PERCENTAGE },
-            rows: [
-              new TableRow({
-                children: [
-                  new TableCell({ children: [new Paragraph({ text: 'Trt No', bold: true })] }),
-                  new TableCell({ children: [new Paragraph({ text: 'Product Commercial Name', bold: true })] }),
-                  new TableCell({ children: [new Paragraph({ text: 'Calibrated Dose', bold: true })] }),
-                  new TableCell({ children: [new Paragraph({ text: 'Method', bold: true })] }),
-                  new TableCell({ children: [new Paragraph({ text: 'Timing', bold: true })] }),
-                  new TableCell({ children: [new Paragraph({ text: 'Spray Volume', bold: true })] })
-                ]
-              }),
-              ...reportData.treatments.map(t => new TableRow({
-                children: [
-                  new TableCell({ children: [new Paragraph({ text: String(t.trNo || '') })] }),
-                  new TableCell({ children: [new Paragraph({ text: String(t.productName || '') })] }),
-                  new TableCell({ children: [new Paragraph({ text: String(t.dosePerLitre || '') })] }),
-                  new TableCell({ children: [new Paragraph({ text: String(t.method || '') })] }),
-                  new TableCell({ children: [new Paragraph({ text: String(t.timing || '') })] }),
-                  new TableCell({ children: [new Paragraph({ text: String(t.sprayVolume || '') })] })
-                ]
-              }))
-            ]
-          }),
-          new Paragraph({ text: '' }),
-          new Paragraph({
-            text: '2. ENVIRONMENTAL & SOIL PROFILE PARAMETERS',
-            heading: HeadingLevel.HEADING_2
-          }),
-          new Paragraph({
-            children: [
-              new TextRun({ text: 'Weather Conditions: ', bold: true }),
-              new TextRun(dc.weatherContext + '\n'),
-              new TextRun({ text: 'Soil Profile: ', bold: true }),
-              new TextRun(dc.soilProfile)
-            ]
-          }),
-          new Paragraph({ text: '' }),
-          new Paragraph({
-            text: '3. WEED CONTROL EFFICACY ANALYSIS',
-            heading: HeadingLevel.HEADING_2
-          }),
-          new Table({
-            width: { size: 100, type: WidthType.PERCENTAGE },
-            rows: [
-              new TableRow({
-                children: [
-                  new TableCell({ children: [new Paragraph({ text: 'S.No', bold: true })] }),
-                  new TableCell({ children: [new Paragraph({ text: 'Target Weed Flora', bold: true })] }),
-                  new TableCell({ children: [new Paragraph({ text: 'Initial Cover (%)', bold: true })] }),
-                  new TableCell({ children: [new Paragraph({ text: 'Final Cover (%)', bold: true })] }),
-                  new TableCell({ children: [new Paragraph({ text: 'Observed Control (%)', bold: true })] }),
-                  new TableCell({ children: [new Paragraph({ text: 'Herbicide Response', bold: true })] })
-                ]
-              }),
-              ...reportData.efficacyAnalysis.map(e => new TableRow({
-                children: [
-                  new TableCell({ children: [new Paragraph({ text: String(e.sNo) })] }),
-                  new TableCell({ children: [new Paragraph({ text: String(e.species) })] }),
-                  new TableCell({ children: [new Paragraph({ text: `${e.initialCover}%` })] }),
-                  new TableCell({ children: [new Paragraph({ text: `${e.finalCover}%` })] }),
-                  new TableCell({ children: [new Paragraph({ text: `${e.wce}%` })] }),
-                  new TableCell({ children: [new Paragraph({ text: String(e.symptoms) })] })
-                ]
-              }))
-            ]
-          }),
-          new Paragraph({ text: '' }),
-          new Paragraph({
-            text: '4. CHRONOLOGICAL OBSERVATIONS TIMELINE',
-            heading: HeadingLevel.HEADING_2
-          }),
-          new Table({
-            width: { size: 100, type: WidthType.PERCENTAGE },
-            rows: [
-              new TableRow({
-                children: [
-                  new TableCell({ children: [new Paragraph({ text: 'DAA', bold: true })] }),
-                  new TableCell({ children: [new Paragraph({ text: 'Date', bold: true })] }),
-                  new TableCell({ children: [new Paragraph({ text: 'Weed Cover (%)', bold: true })] }),
-                  new TableCell({ children: [new Paragraph({ text: 'Control (%)', bold: true })] }),
-                  new TableCell({ children: [new Paragraph({ text: 'Phenological Status', bold: true })] }),
-                  new TableCell({ children: [new Paragraph({ text: 'Notes', bold: true })] })
-                ]
-              }),
-              ...reportData.treatmentTimeline.map(t => new TableRow({
-                children: [
-                  new TableCell({ children: [new Paragraph({ text: String(t.daa) })] }),
-                  new TableCell({ children: [new Paragraph({ text: String(t.date) })] }),
-                  new TableCell({ children: [new Paragraph({ text: `${t.weedCover}%` })] }),
-                  new TableCell({ children: [new Paragraph({ text: `${t.controlPct}%` })] }),
-                  new TableCell({ children: [new Paragraph({ text: String(t.status) })] }),
-                  new TableCell({ children: [new Paragraph({ text: String(t.notes) })] })
-                ]
-              }))
-            ]
-          }),
-          new Paragraph({ text: '' }),
-          new Paragraph({
-            text: '5. STATISTICAL EVALUATION & REGULATORY CONCLUSION',
-            heading: HeadingLevel.HEADING_2
-          }),
-          new Paragraph({
-            text: `Statistical analysis confirms weed canopy reduction from ${stats.progression.baselineCover}% to ${stats.progression.finalCover}% (net ${stats.progression.netReduction}% suppression). Peak efficacy of ${stats.progression.peakControl}% occurred at ${stats.progression.peakDaa} DAA (CV: ${stats.progression.cv}%). Crop phytotoxicity rating was recorded at ${stats.progression.phytoScore}/10 (${stats.progression.phytoDesc.injuryLevel}), confirming complete crop selectivity and efficacy clearance.`
-          })
-        ]
+        children: docChildren
       }
     ]
   });

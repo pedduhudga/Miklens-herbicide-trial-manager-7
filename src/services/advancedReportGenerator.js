@@ -816,7 +816,7 @@ export class AdvancedReportGenerator {
       trialOrTrials.forEach(t => {
         const obsList = safeJsonParse(t.EfficacyDataJSON, []);
         const photoList = safeJsonParse(t.PhotoURLs, []);
-        const trtName = t.FormulationName || 'Untreated Control';
+        const trtName = t.FormulationName || (t.IsControl ? 'Untreated Check (Control)' : 'Treated');
         let trtNum = uniqueTreatments.indexOf(trtName) + 1;
         if (trtNum === 0) trtNum = 1;
         
@@ -841,6 +841,37 @@ export class AdvancedReportGenerator {
         });
       });
 
+      this.applicationLog = trialOrTrials.flatMap(t => {
+        const apps = safeJsonParse(t.ApplicationLogJSON, []);
+        return apps.map(a => ({
+          ...a,
+          treatmentName: t.FormulationName || 'Treated',
+          plotNumber: t.PlotNumber || '1'
+        }));
+      });
+
+      this.harvestPickings = trialOrTrials.flatMap(t => {
+        const hData = safeJsonParse(t.HarvestDataJSON, {});
+        let pList = Array.isArray(hData.pickings) ? [...hData.pickings] : [];
+        if (pList.length === 0 && (hData.harvestDate || hData.actualMarketableWeight || hData.actualFruitCount)) {
+          pList = [{
+            id: 'p_1',
+            pickingNumber: 1,
+            harvestDate: hData.harvestDate || t.Date,
+            actualMarketableWeight: hData.actualMarketableWeight,
+            actualUnmarketableWeight: hData.actualUnmarketableWeight,
+            actualFruitCount: hData.actualFruitCount,
+            notes: hData.notes,
+            photos: hData.photos || []
+          }];
+        }
+        return pList.map(p => ({
+          ...p,
+          treatmentName: t.FormulationName || 'Treated',
+          plotNumber: t.PlotNumber || '1'
+        }));
+      });
+
       this.soil = safeJsonParse(firstTrial.SoilDataJSON, null);
     } else {
       // Single trial mode
@@ -849,35 +880,67 @@ export class AdvancedReportGenerator {
       this.design = proj?.Design || representative?.Design || 'RCBD';
       
       const rawObs = safeJsonParse(trialOrTrials.EfficacyDataJSON, []);
-      const obsTrts = [...new Set(rawObs.map(o => o.treatment).filter(Boolean))];
+      const currentTrt = trialOrTrials.IsControl
+        ? 'Untreated Check (Control)'
+        : (trialOrTrials.FormulationName || 'Test Treatment');
+
+      let obsTrts = [...new Set(rawObs.map(o => o.treatment).filter(Boolean))];
+      if (!obsTrts.includes(currentTrt)) {
+        obsTrts.push(currentTrt);
+      }
       const controlIdx = obsTrts.findIndex(n => /control|untreated|check|utc/i.test(n));
       if (controlIdx > -1) {
         const [ctl] = obsTrts.splice(controlIdx, 1);
         obsTrts.unshift(ctl);
-      }
-      if (obsTrts.length === 0) {
-        obsTrts.push('Untreated Check (Control)');
-        if (trialOrTrials.FormulationName) obsTrts.push(trialOrTrials.FormulationName);
-      } else if (obsTrts.length === 1) {
-        if (/control|untreated|check|utc/i.test(obsTrts[0])) {
-          obsTrts.push(trialOrTrials.FormulationName || 'Test Treatment');
-        } else {
-          obsTrts.unshift('Untreated Check (Control)');
-        }
+      } else if (!trialOrTrials.IsControl) {
+        // If single tested product, provide reference Control label for contrast
+        obsTrts.unshift('Untreated Check (Control)');
       }
       this.treatmentNames = obsTrts;
 
       this.observations = rawObs.map(obs => {
-        const trtName = obs.treatment || 'Untreated Check (Control)';
-        let trtNum = obsTrts.indexOf(trtName) + 1;
-        if (trtNum === 0) trtNum = 1;
+        const trtName = obs.treatment || currentTrt;
+        let trtNum = this.treatmentNames.indexOf(trtName) + 1;
+        if (trtNum === 0) {
+          this.treatmentNames.push(trtName);
+          trtNum = this.treatmentNames.length;
+        }
         return {
           ...obs,
           date: normalizeDateString(obs.date, trialOrTrials.Date),
           treatmentNumber: trtNum,
-          treatment: trtName
+          treatment: trtName,
+          plot: obs.plot || trialOrTrials.PlotNumber || '1',
+          rep: obs.rep || trialOrTrials.Replication || 1
         };
       });
+
+      const apps = safeJsonParse(trialOrTrials.ApplicationLogJSON, []);
+      this.applicationLog = apps.map(a => ({
+        ...a,
+        treatmentName: currentTrt,
+        plotNumber: trialOrTrials.PlotNumber || '1'
+      }));
+
+      const hData = safeJsonParse(trialOrTrials.HarvestDataJSON, {});
+      let pList = Array.isArray(hData.pickings) ? [...hData.pickings] : [];
+      if (pList.length === 0 && (hData.harvestDate || hData.actualMarketableWeight || hData.actualFruitCount)) {
+        pList = [{
+          id: 'p_1',
+          pickingNumber: 1,
+          harvestDate: hData.harvestDate || trialOrTrials.Date,
+          actualMarketableWeight: hData.actualMarketableWeight,
+          actualUnmarketableWeight: hData.actualUnmarketableWeight,
+          actualFruitCount: hData.actualFruitCount,
+          notes: hData.notes,
+          photos: hData.photos || []
+        }];
+      }
+      this.harvestPickings = pList.map(p => ({
+        ...p,
+        treatmentName: currentTrt,
+        plotNumber: trialOrTrials.PlotNumber || '1'
+      }));
 
       this.photos = safeJsonParse(trialOrTrials.PhotoURLs, []).map(photo => {
         return {
@@ -952,6 +1015,18 @@ export class AdvancedReportGenerator {
     if (potReplicatesCount > 0 && identicalPotReplicatesCount === potReplicatesCount) {
       this.duplicatePotWarning = true;
     }
+  }
+
+  matchesTreatment(obs, trtNum, trtName) {
+    if (!obs) return false;
+    if (obs.treatmentNumber !== undefined && obs.treatmentNumber !== null) {
+      if (Number(obs.treatmentNumber) === Number(trtNum)) return true;
+    }
+    if (obs.treatment && trtName) {
+      if (String(obs.treatment).trim().toLowerCase() === String(trtName).trim().toLowerCase()) return true;
+    }
+    if (!obs.treatment && !obs.treatmentNumber && Number(trtNum) === 1) return true;
+    return false;
   }
 
   async processObservationsWithAI() {
@@ -1284,12 +1359,14 @@ export class AdvancedReportGenerator {
       // 5. Build Chartwork Sheet
       await this.createChartworkSheet();
       
-      // 6. Build Post-Harvest Sheet (if post-harvest observations exist)
-      const hasPostHarvest = this.activeFields.some(f => 
+      // 6. Build Post-Harvest Sheet (if post-harvest observations or harvest pickings exist)
+      const hasHarvestPickings = (this.harvestPickings && this.harvestPickings.length > 0);
+      const hasPostHarvestObs = this.activeFields.some(f => 
         /harvest|yield|storage|firmness|loss/i.test(f.key)
       ) && this.observations.some(o => 
         this.activeFields.some(f => /harvest|yield|storage|firmness|loss/i.test(f.key) && o[f.key] !== undefined && o[f.key] !== null && o[f.key] !== '')
       );
+      const hasPostHarvest = hasHarvestPickings || hasPostHarvestObs;
       if (hasPostHarvest) {
         await this.createPostHarvestSheet();
       }
@@ -1819,6 +1896,48 @@ export class AdvancedReportGenerator {
     ws.getCell(`A${summaryStartRow + 1}`).value = 'Total Pots';
     ws.getCell(`A${summaryStartRow + 1}`).font = { bold: true };
     ws.getCell(`B${summaryStartRow + 1}`).value = totalPots;
+
+    // Render Treatment Applications Log Table if recorded
+    if (this.applicationLog && this.applicationLog.length > 0) {
+      let appRow = summaryStartRow + 4;
+      ws.getCell(`A${appRow}`).value = 'Sequential Treatment Applications Log';
+      ws.getCell(`A${appRow}`).font = { bold: true, size: 12, color: { rgb: '2C3E50' } };
+      appRow++;
+
+      const appHeaders = ['App # / Code', 'Application Date', 'Treatment / Formulation', 'Plot #', 'Dosage', 'Application Method', 'Crop Stage', 'Weather Conditions', 'Adjuvant / Tank Mix', 'Notes'];
+      ws.getRow(appRow).values = appHeaders;
+      ws.getRow(appRow).font = { bold: true, color: { rgb: 'FFFFFF' } };
+      ws.getRow(appRow).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: '27AE60' } };
+      appRow++;
+
+      this.applicationLog.forEach((app, aIdx) => {
+        const weatherStr = [
+          app.temp ? `${app.temp}°C` : '',
+          app.humidity ? `${app.humidity}% RH` : '',
+          app.windspeed ? `${app.windspeed} km/h` : '',
+          app.rain === 'Yes' ? 'Rain' : ''
+        ].filter(Boolean).join(', ') || 'Normal';
+
+        const mixStr = [app.adjuvant, app.tankMix].filter(Boolean).join(' + ') || '—';
+
+        ws.getRow(appRow).values = [
+          app.code || `App ${aIdx + 1}`,
+          app.date || '—',
+          app.treatmentName || '—',
+          app.plotNumber || '—',
+          app.dosage || '—',
+          app.method || 'Foliar Spray',
+          app.cropStage || '—',
+          weatherStr,
+          mixStr,
+          app.notes || '—'
+        ];
+        if (aIdx % 2 === 1) {
+          ws.getRow(appRow).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'F9FAFB' } };
+        }
+        appRow++;
+      });
+    }
   }
 
   // 4. Assessment Data Summary Sheet
@@ -1889,7 +2008,7 @@ export class AdvancedReportGenerator {
         ws.getCell(currentRow, 3).value = obs.harvestNumber || obs.harvest || 1;
         ws.getCell(currentRow, 4).value = obs.plotNumber || obs.plot || (idx + 1);
         ws.getCell(currentRow, 5).value = obs.replication || obs.rep || 1;
-        ws.getCell(currentRow, 6).value = obs.treatmentNumber || obs.treatment || 1;
+        ws.getCell(currentRow, 6).value = obs.treatment || (this.treatmentNames[Number(obs.treatmentNumber || 1) - 1]) || `Trt ${obs.treatmentNumber || 1}`;
         ws.getCell(currentRow, 7).value = potIdValue;
 
         // Write category-specific variables & apply critical deficiency formats
@@ -2077,7 +2196,7 @@ export class AdvancedReportGenerator {
       // Calculate treatment means to find best/worst
       const trtMeans = this.treatmentNames.map((name, idx) => {
         const trtNum = idx + 1;
-        const trtVals = this.observations.filter(o => (o.treatmentNumber || o.treatment || 1) === trtNum)
+        const trtVals = this.observations.filter(o => this.matchesTreatment(o, trtNum, name))
                                          .map(o => {
                                            if (f.key.toLowerCase().replace(/\s/g, '') === 'plantheight' && o.potHeights) {
                                              return o.potHeights.map(h => parseFloat(h)).filter(v => !isNaN(v));
@@ -2155,7 +2274,7 @@ export class AdvancedReportGenerator {
     beneficialFields.forEach(f => {
       const trtMeans = this.treatmentNames.map((name, idx) => {
         const trtNum = idx + 1;
-        const trtVals = this.observations.filter(o => (o.treatmentNumber || o.treatment || 1) === trtNum)
+        const trtVals = this.observations.filter(o => this.matchesTreatment(o, trtNum, name))
                                          .map(o => {
                                            if (f.key.toLowerCase().replace(/\s/g, '') === 'plantheight' && o.potHeights) {
                                              return o.potHeights.map(h => parseFloat(h)).filter(v => !isNaN(v));
@@ -2216,7 +2335,7 @@ export class AdvancedReportGenerator {
     stressFields.forEach(f => {
       const trtMeans = this.treatmentNames.map((name, idx) => {
         const trtNum = idx + 1;
-        const trtVals = this.observations.filter(o => (o.treatmentNumber || o.treatment || 1) === trtNum)
+        const trtVals = this.observations.filter(o => this.matchesTreatment(o, trtNum, name))
                                          .map(o => {
                                            if (f.key.toLowerCase().replace(/\s/g, '') === 'plantheight' && o.potHeights) {
                                              return o.potHeights.map(h => parseFloat(h)).filter(v => !isNaN(v));
@@ -2384,54 +2503,201 @@ export class AdvancedReportGenerator {
     ws.views = [{ showGridLines: true }];
 
     ws.getCell('A1').value = 'POST-HARVEST & YIELD RETENTION DATA';
-    ws.getCell('A1').font = { bold: true, size: 12 };
+    ws.getCell('A1').font = { bold: true, size: 14, color: { rgb: '2C3E50' } };
 
-    ws.mergeCells('A3:F5');
-    ws.getCell('A3').value = `Post-harvest and yield parameter analysis extracted from real trial observations.\nThis sheet summarizes treatment averages for recorded harvest-related metrics.`;
+    ws.mergeCells('A3:H4');
+    ws.getCell('A3').value = `Comprehensive post-harvest, sequential pickings, and cumulative yield retention analysis.\nSummarizes all recorded harvest cycles, marketable vs unmarketable yields, fruit counts, and treatment averages.`;
     ws.getCell('A3').alignment = { wrapText: true, vertical: 'top' };
 
-    // Find harvest/yield fields in activeFields
+    let curRow = 6;
+
+    // 1. Render Sequential Multi-Harvest Pickings Log if available
+    if (this.harvestPickings && this.harvestPickings.length > 0) {
+      ws.getCell(`A${curRow}`).value = '1. SEQUENTIAL HARVEST PICKINGS LOG';
+      ws.getCell(`A${curRow}`).font = { bold: true, size: 11, color: { rgb: '2980B9' } };
+      curRow++;
+
+      const pickingHeaders = [
+        'Picking #',
+        'Harvest Date',
+        'Treatment Name',
+        'Plot #',
+        'Marketable Yield (kg)',
+        'Unmarketable Yield (kg)',
+        'Total Yield (kg)',
+        'Marketable %',
+        'Fruit / Plant Count',
+        'Quality Notes'
+      ];
+      ws.getRow(curRow).values = pickingHeaders;
+      ws.getRow(curRow).font = { bold: true, color: { rgb: 'FFFFFF' } };
+      ws.getRow(curRow).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: '27AE60' } };
+      curRow++;
+
+      this.harvestPickings.forEach((p, pIdx) => {
+        const mYield = parseFloat(p.actualMarketableWeight ?? p.marketableWeight ?? 0) || 0;
+        const uYield = parseFloat(p.actualUnmarketableWeight ?? p.unmarketableWeight ?? 0) || 0;
+        const totYield = mYield + uYield;
+        const mPct = totYield > 0 ? ((mYield / totYield) * 100).toFixed(1) + '%' : (mYield > 0 ? '100%' : '—');
+        const count = p.actualFruitCount ?? p.fruitCount ?? '—';
+
+        ws.getRow(curRow).values = [
+          `Picking ${p.pickingNumber || (pIdx + 1)}`,
+          p.harvestDate || '—',
+          p.treatmentName || '—',
+          p.plotNumber || '—',
+          mYield > 0 ? parseFloat(mYield.toFixed(2)) : (p.actualMarketableWeight ?? '—'),
+          uYield > 0 ? parseFloat(uYield.toFixed(2)) : (p.actualUnmarketableWeight ?? '—'),
+          totYield > 0 ? parseFloat(totYield.toFixed(2)) : '—',
+          mPct,
+          count,
+          p.notes || '—'
+        ];
+        if (pIdx % 2 === 1) {
+          ws.getRow(curRow).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'F9FAFB' } };
+        }
+        curRow++;
+      });
+
+      curRow += 2;
+
+      // 2. Cumulative Treatment Yield Summary
+      ws.getCell(`A${curRow}`).value = '2. CUMULATIVE HARVEST YIELD SUMMARY BY TREATMENT';
+      ws.getCell(`A${curRow}`).font = { bold: true, size: 11, color: { rgb: '2980B9' } };
+      curRow++;
+
+      const summaryHeaders = [
+        'Treatment Name',
+        'Total Pickings',
+        'Cumulative Marketable Yield (kg)',
+        'Cumulative Unmarketable Yield (kg)',
+        'Cumulative Total Yield (kg)',
+        'Overall Marketable %',
+        'Total Fruit / Specimen Count',
+        '% Yield Gain vs Control'
+      ];
+      ws.getRow(curRow).values = summaryHeaders;
+      ws.getRow(curRow).font = { bold: true, color: { rgb: 'FFFFFF' } };
+      ws.getRow(curRow).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: '34495E' } };
+      curRow++;
+
+      // Compute cumulative per treatment
+      const trtSummaries = this.treatmentNames.map((tName, tIdx) => {
+        const trtNum = tIdx + 1;
+        const trtPickings = this.harvestPickings.filter(p => {
+          if (p.treatmentName && String(p.treatmentName).trim().toLowerCase() === String(tName).trim().toLowerCase()) return true;
+          if (p.treatmentNumber && Number(p.treatmentNumber) === trtNum) return true;
+          return tIdx === 0 && !p.treatmentName;
+        });
+
+        let cumMarketable = 0;
+        let cumUnmarketable = 0;
+        let cumCount = 0;
+        trtPickings.forEach(p => {
+          cumMarketable += parseFloat(p.actualMarketableWeight ?? p.marketableWeight ?? 0) || 0;
+          cumUnmarketable += parseFloat(p.actualUnmarketableWeight ?? p.unmarketableWeight ?? 0) || 0;
+          cumCount += parseFloat(p.actualFruitCount ?? p.fruitCount ?? 0) || 0;
+        });
+        const cumTotal = cumMarketable + cumUnmarketable;
+        const cumPct = cumTotal > 0 ? ((cumMarketable / cumTotal) * 100).toFixed(1) + '%' : (cumMarketable > 0 ? '100%' : '—');
+
+        return {
+          treatmentName: tName,
+          pickingsCount: trtPickings.length,
+          cumMarketable,
+          cumUnmarketable,
+          cumTotal,
+          cumPct,
+          cumCount
+        };
+      });
+
+      const controlTrt = trtSummaries.find(s => /control|untreated|check|utc/i.test(s.treatmentName)) || trtSummaries[0];
+      const ctlYield = controlTrt?.cumMarketable || 0;
+
+      trtSummaries.forEach((s, sIdx) => {
+        let diffStr = 'Control (Ref)';
+        if (!/control|untreated|check|utc/i.test(s.treatmentName)) {
+          if (ctlYield > 0 && s.cumMarketable > 0) {
+            const diff = ((s.cumMarketable - ctlYield) / ctlYield) * 100;
+            diffStr = `${diff >= 0 ? '+' : ''}${diff.toFixed(1)}%`;
+          } else {
+            diffStr = '—';
+          }
+        }
+
+        ws.getRow(curRow).values = [
+          s.treatmentName,
+          s.pickingsCount,
+          parseFloat(s.cumMarketable.toFixed(2)),
+          parseFloat(s.cumUnmarketable.toFixed(2)),
+          parseFloat(s.cumTotal.toFixed(2)),
+          s.cumPct,
+          s.cumCount > 0 ? s.cumCount : '—',
+          diffStr
+        ];
+        if (sIdx % 2 === 1) {
+          ws.getRow(curRow).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'F9FAFB' } };
+        }
+        curRow++;
+      });
+
+      curRow += 2;
+    }
+
+    // 3. Observation harvest fields if present
     const harvestFields = this.activeFields.filter(f => 
       /harvest|yield|storage|firmness|loss/i.test(f.key)
     );
 
-    let startRow = 7;
-    harvestFields.forEach(f => {
-      ws.getCell(`A${startRow}`).value = `${f.label} - Treatment Averages`;
-      ws.getCell(`A${startRow}`).font = { bold: true, size: 11 };
-      startRow++;
+    if (harvestFields.length > 0) {
+      ws.getCell(`A${curRow}`).value = '3. OBSERVATION HARVEST & YIELD PARAMETERS';
+      ws.getCell(`A${curRow}`).font = { bold: true, size: 11, color: { rgb: '2980B9' } };
+      curRow++;
 
-      // Averages by Treatment and Date/DAA
-      const dates = [...new Set(this.observations.map(o => o.date).filter(Boolean))];
-      ws.getRow(startRow).values = ['Treatment Name', ...dates.map(d => `Date: ${d}`)];
-      ws.getRow(startRow).font = { bold: true };
-      ws.getRow(startRow).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'ECF0F1' } };
-      startRow++;
+      harvestFields.forEach(f => {
+        ws.getCell(`A${curRow}`).value = `${f.label} - Treatment Averages`;
+        ws.getCell(`A${curRow}`).font = { bold: true, size: 10 };
+        curRow++;
 
-      this.treatmentNames.forEach((trtName, trtIdx) => {
-        const trtNum = trtIdx + 1;
-        const rowValues = [trtName];
-        dates.forEach(d => {
-          const obsList = this.observations.filter(o => 
-            parseInt(o.treatmentNumber || o.treatment || 1) === trtNum && o.date === d
-          );
-          const vals = obsList.map(o => parseFloat(o[f.key])).filter(v => !isNaN(v));
-          if (vals.length > 0) {
-            const avg = vals.reduce((sum, v) => sum + v, 0) / vals.length;
-            rowValues.push(parseFloat(avg.toFixed(2)));
-          } else {
-            rowValues.push('N/A');
-          }
+        const dates = [...new Set(this.observations.map(o => o.date).filter(Boolean))];
+        ws.getRow(curRow).values = ['Treatment Name', ...dates.map(d => `Date: ${d}`)];
+        ws.getRow(curRow).font = { bold: true };
+        ws.getRow(curRow).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'ECF0F1' } };
+        curRow++;
+
+        this.treatmentNames.forEach((trtName, trtIdx) => {
+          const trtNum = trtIdx + 1;
+          const rowValues = [trtName];
+          dates.forEach(d => {
+            const obsList = this.observations.filter(o => 
+              this.matchesTreatment(o, trtNum, trtName) && o.date === d
+            );
+            const vals = obsList.map(o => parseFloat(o[f.key])).filter(v => !isNaN(v));
+            if (vals.length > 0) {
+              const avg = vals.reduce((sum, v) => sum + v, 0) / vals.length;
+              rowValues.push(parseFloat(avg.toFixed(2)));
+            } else {
+              rowValues.push('N/A');
+            }
+          });
+          ws.getRow(curRow).values = rowValues;
+          curRow++;
         });
-        ws.getRow(startRow).values = rowValues;
-        startRow++;
-      });
 
-      startRow += 2; // spacer
-    });
+        curRow += 2;
+      });
+    }
 
     ws.column_dimensions = {
-      'A': { width: 30 }
+      'A': { width: 30 },
+      'B': { width: 18 },
+      'C': { width: 25 },
+      'D': { width: 25 },
+      'E': { width: 22 },
+      'F': { width: 18 },
+      'G': { width: 22 },
+      'H': { width: 22 }
     };
   }
 
@@ -2627,7 +2893,7 @@ export class AdvancedReportGenerator {
         const trtNum = trtIdx + 1;
         const trtData = [];
         dates.forEach(d => {
-          const tObs = this.observations.filter(o => (o.date || this.trial.Date || 'N/A') === d && (o.treatmentNumber || o.treatment || 1) === trtNum);
+          const tObs = this.observations.filter(o => (o.date || this.trial.Date || 'N/A') === d && this.matchesTreatment(o, trtNum, trtName));
           const tAvg = tObs.length ? tObs.reduce((a, b) => a + parseFloat(b[f.key] || 0), 0) / tObs.length : 0;
           trtData.push(tAvg);
         });

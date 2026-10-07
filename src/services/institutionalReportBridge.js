@@ -235,11 +235,20 @@ export function buildInstitutionalReportData(targetData, globalState = {}, userO
   const protocolRefNo = userOverrides.protocolRefNo || (project?.Code || project?.Name ? `MB/PROT/${(project?.Code || project?.Name || '').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 15)}` : `MB/RD/COE/${year}/F${rawIdSuffix}`);
   const sopFormCode = userOverrides.sopFormCode || primaryTrial.SOPCode || 'MB/COP8/2-06';
 
+  const category = (primaryTrial.Category || project?.Category || globalState.activeCategory || 'herbicide').toLowerCase();
+  const defaultProductFallback = category === 'pesticide' ? 'Miklens Bio Bio-Pesticide'
+    : category === 'fungicide' ? 'Miklens Bio Bio-Fungicide'
+    : (category === 'nutrition' || category === 'biostimulant') ? 'Miklens Bio Bio-Stimulant'
+    : 'Miklens Bio Bio-Herbicide';
+
   // Strictly sanitized product title (No chemical mix formulas or secret recipes)
-  const rawProductName = primaryTrial.TrialName || primaryTrial.FormulationName || project?.Name || 'Bio-Herbicide';
-  const sanitizedProduct = sanitizeProductName(rawProductName, 'Miklens Bio Bio-Herbicide');
+  const rawProductName = primaryTrial.TrialName || primaryTrial.FormulationName || project?.Name || defaultProductFallback;
+  const sanitizedProduct = sanitizeProductName(rawProductName, defaultProductFallback);
   const cropDisplay = cropName + (varietyName ? ` (cv. ${varietyName})` : '') + (intercropName ? ` Intercropped with ${intercropName}` : '');
-  const title = userOverrides.title || `Bio-efficacy and Crop Safety Evaluation of ${sanitizedProduct} in ${cropDisplay}`;
+  const categoryTitleType = (category === 'nutrition' || category === 'biostimulant')
+    ? 'Bio-stimulatory Efficacy, Plant Vigor and Agronomic Yield Evaluation'
+    : 'Bio-efficacy and Crop Safety Evaluation';
+  const title = userOverrides.title || `${categoryTitleType} of ${sanitizedProduct} in ${cropDisplay}`;
 
   // Soil Details
   const soilData = safeJsonParse(primaryTrial.SoilDataJSON || primaryTrial.SoilProfileJSON, {}) || {};
@@ -349,43 +358,46 @@ export function buildInstitutionalReportData(targetData, globalState = {}, userO
     { heightRange: observedWeedHeight, dose: selectedCalibratedDose }
   ];
 
-  // 4. Botanical Weed Flora Identification (Table 1) - ONLY from real logged data
-  const floraSet = new Map();
+  // 4. Botanical Weed Flora / Target Pest / Pathogen Identification (Table 1) - ONLY from real logged data
+  const targetSpeciesSet = new Map();
   subTrials.forEach(t => {
     const obsList = safeJsonParse(t.EfficacyDataJSON || t.Observations, []);
     obsList.forEach(o => {
       if (Array.isArray(o.weedDetails)) {
         o.weedDetails.forEach(wd => {
           if (wd && wd.species && wd.species.trim()) {
-            floraSet.set(wd.species.trim(), true);
+            targetSpeciesSet.set(wd.species.trim(), true);
           }
         });
       }
     });
-    if (t.WeedSpecies && typeof t.WeedSpecies === 'string') {
-      t.WeedSpecies.split(/[,;\n]/).forEach(s => {
+    const speciesFields = [t.WeedSpecies, t.TargetWeed, t.PestSpecies, t.PestTarget, t.DiseaseTarget, t.PathogenName, t.TargetSpecies];
+    speciesFields.forEach(sf => {
+      if (sf && typeof sf === 'string') {
+        sf.split(/[,;\n]/).forEach(s => {
+          const trimmed = s.trim();
+          if (trimmed) targetSpeciesSet.set(trimmed, true);
+        });
+      }
+    });
+  });
+
+  const projSpecies = [project?.TargetWeed, project?.WeedSpecies, project?.PestTarget, project?.DiseaseTarget, project?.TargetSpecies];
+  projSpecies.forEach(ps => {
+    if (ps && typeof ps === 'string') {
+      ps.split(/[,;\n]/).forEach(s => {
         const trimmed = s.trim();
-        if (trimmed) floraSet.set(trimmed, true);
-      });
-    }
-    if (t.TargetWeed && typeof t.TargetWeed === 'string') {
-      t.TargetWeed.split(/[,;\n]/).forEach(s => {
-        const trimmed = s.trim();
-        if (trimmed) floraSet.set(trimmed, true);
+        if (trimmed) targetSpeciesSet.set(trimmed, true);
       });
     }
   });
 
-  if (project?.TargetWeed && typeof project.TargetWeed === 'string') {
-    project.TargetWeed.split(/[,;\n]/).forEach(s => {
-      const trimmed = s.trim();
-      if (trimmed) floraSet.set(trimmed, true);
-    });
-  }
-
-  let rawFloraList = Array.from(floraSet.keys());
+  let rawFloraList = Array.from(targetSpeciesSet.keys());
   if (rawFloraList.length === 0) {
-    const fallbackTarget = primaryTrial.TargetWeed || primaryTrial.WeedSpecies || project?.TargetWeed || 'Target Mixed Weed Flora';
+    const fallbackTarget = category === 'pesticide' ? 'Target Sucking & Foliar Insect Pests'
+      : category === 'fungicide' ? 'Target Fungal Foliar Pathogens'
+      : (category === 'nutrition' || category === 'biostimulant') ? 'Crop Vegetative & Canopy Growth Profile'
+      : 'Target Mixed Weed Flora';
     rawFloraList = [fallbackTarget];
   }
 
@@ -400,35 +412,72 @@ export function buildInstitutionalReportData(targetData, globalState = {}, userO
       isDominant: idx === 0,
     };
   });
-  const dominantFloraName = weedFloraTable[0]?.scientificName || 'Target Mixed Weed Flora';
+  const dominantFloraName = weedFloraTable[0]?.scientificName || 'Target Flora / Pathogen Specimen';
+
+  // Extract primary value from observation based on category
+  const extractObsMetric = (o) => {
+    if (!o) return 0;
+    if (category === 'pesticide') {
+      const v = o.pestCount ?? o.liveInsectCount ?? o.larvaCount ?? o.adultCount ?? o.damageRating ?? o.sampleCount;
+      return v !== undefined && v !== null && v !== '' ? Number(v) : null;
+    }
+    if (category === 'fungicide') {
+      const v = o.diseaseSeverity ?? o.diseaseSeverityPct ?? o.diseaseIncidence ?? o.lesionCountAvg ?? o.sampleCount;
+      return v !== undefined && v !== null && v !== '' ? Number(v) : null;
+    }
+    if (category === 'nutrition' || category === 'biostimulant') {
+      const v = o.chlorophyllIndex ?? o.plantHeight ?? o.vigorRating ?? o.leafCount ?? o.sampleCount;
+      return v !== undefined && v !== null && v !== '' ? Number(v) : null;
+    }
+    const v = o.weedCover ?? o.sampleCount;
+    return v !== undefined && v !== null && v !== '' ? Number(v) : null;
+  };
 
   // 5. Chronological Treatment Observations Timeline
   const rawObsList = safeJsonParse(primaryTrial.EfficacyDataJSON || primaryTrial.Observations, []);
   const sortedObs = [...rawObsList].sort((a, b) => Number(a.daa || 0) - Number(b.daa || 0));
 
   const baselineObs = sortedObs.find(o => Number(o.daa) === 0) || sortedObs[0] || null;
-  const baselineCover = baselineObs ? Number(baselineObs.weedCover ?? baselineObs.sampleCount ?? 80) : 80;
+  const rawBase = extractObsMetric(baselineObs);
+  const baselineCover = rawBase !== null ? rawBase : (category === 'herbicide' ? 80 : (category === 'pesticide' ? 25 : (category === 'fungicide' ? 30 : 20)));
 
   let prevCover = null;
   const treatmentTimeline = sortedObs.map(o => {
     const daaVal = o.daa !== undefined && o.daa !== null ? Number(o.daa) : 0;
     const dateVal = o.date ? formatDate(o.date) : '—';
-    const currentCover = o.weedCover !== undefined && o.weedCover !== null && o.weedCover !== ''
-      ? Number(o.weedCover)
-      : (o.sampleCount ? Number(o.sampleCount) : 0);
+    const currentCover = extractObsMetric(o) ?? 0;
 
     let controlPct = 0;
-    if (o.weedMortalityPct !== undefined && o.weedMortalityPct !== '') {
-      controlPct = Number(o.weedMortalityPct);
-    } else if (o.weedControlPct !== undefined && o.weedControlPct !== '') {
-      controlPct = Number(o.weedControlPct);
-    } else if (o.efficacy !== undefined && o.efficacy !== '') {
-      controlPct = Number(o.efficacy);
-    } else if (baselineCover > 0) {
-      controlPct = Math.max(0, Math.min(100, ((baselineCover - currentCover) / baselineCover) * 100));
+    if (category === 'nutrition' || category === 'biostimulant') {
+      if (o.vigorRating !== undefined && o.vigorRating !== '') {
+        controlPct = Number(o.vigorRating) * 10;
+      } else if (baselineCover > 0) {
+        controlPct = Math.max(0, ((currentCover - baselineCover) / baselineCover) * 100);
+      }
+    } else {
+      if (o.weedMortalityPct !== undefined && o.weedMortalityPct !== '') {
+        controlPct = Number(o.weedMortalityPct);
+      } else if (o.weedControlPct !== undefined && o.weedControlPct !== '') {
+        controlPct = Number(o.weedControlPct);
+      } else if (o.efficacy !== undefined && o.efficacy !== '') {
+        controlPct = Number(o.efficacy);
+      } else if (baselineCover > 0) {
+        controlPct = Math.max(0, Math.min(100, ((baselineCover - currentCover) / baselineCover) * 100));
+      }
     }
 
-    const status = daaVal === 0 ? 'Baseline' : getHerbicideStatus(currentCover, baselineCover, prevCover);
+    let status = 'Baseline';
+    if (daaVal > 0) {
+      if (category === 'pesticide') {
+        status = currentCover <= 1 ? 'Complete Pest Suppression' : currentCover <= 5 ? 'High Suppression' : controlPct >= 50 ? 'Moderate Suppression' : 'Active Infestation';
+      } else if (category === 'fungicide') {
+        status = currentCover <= 1 ? 'Disease Arrested' : controlPct >= 75 ? 'Strong Suppression' : controlPct >= 40 ? 'Partial Protection' : 'Active Symptoms';
+      } else if (category === 'nutrition' || category === 'biostimulant') {
+        status = currentCover >= baselineCover * 1.25 ? 'High Vigor / Enhanced Growth' : currentCover >= baselineCover ? 'Positive Vegetative Response' : 'Uniform Growth';
+      } else {
+        status = getHerbicideStatus(currentCover, baselineCover, prevCover);
+      }
+    }
     prevCover = currentCover;
 
     // Sanitize notes: strip recipe formulas or secret ingredient references
@@ -438,6 +487,7 @@ export function buildInstitutionalReportData(targetData, globalState = {}, userO
     return {
       daa: daaVal,
       date: dateVal,
+      observedMetric: currentCover,
       weedCover: currentCover,
       controlPct: parseFloat(controlPct.toFixed(1)),
       status,
@@ -455,7 +505,7 @@ export function buildInstitutionalReportData(targetData, globalState = {}, userO
         if (!speciesEfficacyMap[spName]) speciesEfficacyMap[spName] = [];
         speciesEfficacyMap[spName].push({
           daa: Number(obs.daa || 0),
-          cover: Number(wd.cover ?? obs.weedCover ?? 0)
+          cover: Number(wd.cover ?? extractObsMetric(obs) ?? 0)
         });
       });
     }
@@ -467,29 +517,47 @@ export function buildInstitutionalReportData(targetData, globalState = {}, userO
       const sortedPts = pts.sort((a, b) => a.daa - b.daa);
       const initC = sortedPts[0]?.cover ?? 0;
       const finalC = sortedPts[sortedPts.length - 1]?.cover ?? 0;
-      const wceVal = initC > 0 ? Math.max(0, ((initC - finalC) / initC) * 100) : 0;
+      let wceVal = 0;
+      if (category === 'nutrition' || category === 'biostimulant') {
+        wceVal = initC > 0 ? Math.max(0, ((finalC - initC) / initC) * 100) : 0;
+      } else {
+        wceVal = initC > 0 ? Math.max(0, ((initC - finalC) / initC) * 100) : 0;
+      }
       return {
         sNo: idx + 1,
         species,
         initialCover: parseFloat(initC.toFixed(1)),
         finalCover: parseFloat(finalC.toFixed(1)),
         wce: parseFloat(wceVal.toFixed(1)),
-        symptoms: getHerbicideStatus(finalC, initC, null)
+        symptoms: category === 'pesticide' ? (finalC <= 1 ? 'High Pest Mortality' : 'Pest Suppression')
+          : category === 'fungicide' ? (finalC <= 2 ? 'Disease Arrested' : 'Foliar Protection')
+          : (category === 'nutrition' || category === 'biostimulant') ? 'Enhanced Vigor & Photosynthetic Index'
+          : getHerbicideStatus(finalC, initC, null)
       };
     });
   } else {
     // Overall plot canopy
     const finalObs = sortedObs[sortedObs.length - 1];
     const initCover = baselineCover;
-    const finalCover = finalObs ? Number(finalObs.weedCover ?? 0) : 0;
-    const wceVal = initCover > 0 ? Math.max(0, ((initCover - finalCover) / initCover) * 100) : 0;
+    const finalCover = extractObsMetric(finalObs) ?? 0;
+    let wceVal = 0;
+    if (category === 'nutrition' || category === 'biostimulant') {
+      wceVal = initCover > 0 ? Math.max(0, ((finalCover - initCover) / initCover) * 100) : 0;
+    } else {
+      wceVal = initCover > 0 ? Math.max(0, ((initCover - finalCover) / initCover) * 100) : 0;
+    }
+    const symptoms = category === 'pesticide' ? (finalCover <= 2 ? 'Pest Population Suppressed' : 'Pest Suppression')
+      : category === 'fungicide' ? (finalCover <= 5 ? 'Disease Arrested' : 'Foliar Protection')
+      : (category === 'nutrition' || category === 'biostimulant') ? 'Enhanced Vigor & Photosynthetic Index'
+      : getHerbicideStatus(finalCover, initCover, null);
+
     efficacyAnalysis = [{
       sNo: 1,
       species: dominantFloraName,
       initialCover: parseFloat(initCover.toFixed(1)),
       finalCover: parseFloat(finalCover.toFixed(1)),
       wce: parseFloat(wceVal.toFixed(1)),
-      symptoms: getHerbicideStatus(finalCover, initCover, null)
+      symptoms
     }];
   }
 
@@ -631,7 +699,67 @@ export function buildInstitutionalReportData(targetData, globalState = {}, userO
     };
   });
 
+  // 11. Application Log
+  const applicationTimeline = subTrials.flatMap(trial => {
+    const apps = safeJsonParse(trial.ApplicationLogJSON, []);
+    return apps.map((app, aIdx) => ({
+      appNo: app.code || `App ${aIdx + 1}`,
+      date: app.date || trial.Date || '',
+      treatmentName: trial.FormulationName || 'Treated',
+      plotNumber: trial.PlotNumber || '',
+      dosage: app.dosage || trial.Dosage || 'As recommended',
+      method: app.method || trial.ApplicationMethod || 'Foliar Spray',
+      cropStage: app.cropStage || trial.CropStage || '—',
+      weather: [app.temp ? `${app.temp}°C` : '', app.humidity ? `${app.humidity}% RH` : '', app.windspeed ? `${app.windspeed} km/h` : '', app.rain === 'Yes' ? 'Rain' : ''].filter(Boolean).join(', ') || 'Normal',
+      tankMix: [app.adjuvant, app.tankMix].filter(Boolean).join(' + ') || '—',
+      notes: app.notes || '—',
+    }));
+  });
+
+  // 12. Harvest Pickings & Yield Summary
+  const harvestPickings = subTrials.flatMap(trial => {
+    const hData = safeJsonParse(trial.HarvestDataJSON, {});
+    let pList = Array.isArray(hData.pickings) ? [...hData.pickings] : [];
+    if (pList.length === 0 && (hData.harvestDate || hData.actualMarketableWeight || hData.actualFruitCount)) {
+      pList = [{
+        id: 'p_1',
+        pickingNumber: 1,
+        harvestDate: hData.harvestDate || trial.Date || '',
+        actualMarketableWeight: hData.actualMarketableWeight,
+        actualUnmarketableWeight: hData.actualUnmarketableWeight,
+        actualFruitCount: hData.actualFruitCount,
+        notes: hData.notes || '',
+      }];
+    }
+    return pList.map((p, pIdx) => {
+      const mVal = parseFloat(p.actualMarketableWeight ?? p.marketableWeight ?? 0) || 0;
+      const uVal = parseFloat(p.actualUnmarketableWeight ?? p.unmarketableWeight ?? 0) || 0;
+      const tot = mVal + uVal;
+      const mPct = tot > 0 ? ((mVal / tot) * 100).toFixed(1) + '%' : (mVal > 0 ? '100%' : '—');
+      return {
+        pickingNumber: p.pickingNumber || (pIdx + 1),
+        harvestDate: p.harvestDate || '—',
+        treatmentName: trial.FormulationName || 'Treated',
+        plotNumber: trial.PlotNumber || '',
+        marketableYield: mVal > 0 ? parseFloat(mVal.toFixed(2)) : (p.actualMarketableWeight ?? '—'),
+        unmarketableYield: uVal > 0 ? parseFloat(uVal.toFixed(2)) : (p.actualUnmarketableWeight ?? '—'),
+        totalYield: tot > 0 ? parseFloat(tot.toFixed(2)) : '—',
+        marketablePct: mPct,
+        fruitCount: p.actualFruitCount ?? p.fruitCount ?? '—',
+        notes: p.notes || '—',
+      };
+    });
+  });
+
+  const metricLabel = (category === 'pesticide' ? 'Pest Count' : (category === 'fungicide' ? 'Disease Severity (%)' : (category === 'nutrition' || category === 'biostimulant' ? 'Chlorophyll / Vigor' : 'Plot Weed Cover (%)')));
+  const controlLabel = (category === 'nutrition' || category === 'biostimulant') ? 'Growth Gain (%)' : (category === 'pesticide' ? 'Pest Suppression (%)' : (category === 'fungicide' ? 'Disease Control (%)' : 'Observed Control (%)'));
+
   return {
+    category,
+    applicationTimeline,
+    harvestPickings,
+    metricLabel,
+    controlLabel,
     docControl,
     treatments,
     doseHeightMatrix,
