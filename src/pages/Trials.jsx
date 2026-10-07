@@ -10357,6 +10357,75 @@ If none are present, write "None".`;
             </div>
           </div>
 
+          {/* Institutional / Regulatory R&D Sampling (Miklens Bio Standard) */}
+          <details className="border border-emerald-200 rounded-xl bg-emerald-50/50 p-3 group">
+            <summary className="text-xs font-bold text-emerald-800 uppercase flex items-center justify-between cursor-pointer select-none">
+              <span className="flex items-center gap-1.5">
+                <span>📋</span> Institutional Regulatory Data (5 Quadrats, Biomass, 0–10 Scale)
+              </span>
+              <span className="text-[10px] text-emerald-600 font-normal">Optional</span>
+            </summary>
+            <div className="mt-3 space-y-3 pt-2 border-t border-emerald-100">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">Direct Weed Mortality (%)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.1"
+                    value={obsForm.weedMortalityPct || ''}
+                    onChange={e => setObsForm(p => ({ ...p, weedMortalityPct: e.target.value }))}
+                    placeholder="e.g. 90.0"
+                    className="w-full px-2.5 py-1.5 text-xs border rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">0–10 Crop Phytotoxicity Score</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="10"
+                    step="0.1"
+                    value={obsForm.phytotoxicityScore10 || ''}
+                    onChange={e => setObsForm(p => ({ ...p, phytotoxicityScore10: e.target.value }))}
+                    placeholder="e.g. 4.0"
+                    className="w-full px-2.5 py-1.5 text-xs border rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">Weed Fresh Biomass (g/m²)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={obsForm.freshBiomassGrams || ''}
+                    onChange={e => setObsForm(p => ({ ...p, freshBiomassGrams: e.target.value }))}
+                    placeholder="e.g. 332.45"
+                    className="w-full px-2.5 py-1.5 text-xs border rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">Weed Dry Biomass (g/m²)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={obsForm.dryBiomassGrams || ''}
+                    onChange={e => setObsForm(p => ({ ...p, dryBiomassGrams: e.target.value }))}
+                    placeholder="e.g. 78.62"
+                    className="w-full px-2.5 py-1.5 text-xs border rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <p className="text-[10px] text-emerald-700 italic">
+                * Note: If left blank, these values will be automatically modeled and derived from your standard % Weed Cover and % Phytotoxicity for the 15-page Miklens Bio Dossier.
+              </p>
+            </div>
+          </details>
+
           <div>
             <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Notes</label>
             <textarea rows="2" value={obsForm.notes} onChange={e => setObsForm({...obsForm, notes: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400" />

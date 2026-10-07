@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAppState } from '../hooks/useAppState.jsx';
 import { useAuth } from '../hooks/useAuth.js';
 import TopBar from '../components/TopBar.jsx';
-import { FileBox, Download, LayoutTemplate, GripVertical, Plus, Trash2, ChevronRight, ShieldAlert, ChevronDown, ChevronUp, BarChart2 } from 'lucide-react';
+import { FileBox, Download, LayoutTemplate, GripVertical, Plus, Trash2, ChevronRight, ShieldAlert, ChevronDown, ChevronUp, BarChart2, ShieldCheck, FileText, Sparkles } from 'lucide-react';
 import { exportScientificReportAsDOC, exportTrialCardsPDF } from '../utils/exportUtils.js';
 import { getCategoryConfig } from '../utils/categoryConfig.js';
 import { exportToARM } from '../services/armExporter.js';
@@ -10,6 +10,8 @@ import ReportConfigPanel from '../components/ReportConfigPanel.jsx';
 import ReportProgressModal from '../components/ReportProgressModal.jsx';
 import { buildReportData } from '../services/reportDataBuilder.js';
 import { exportTidyCSV } from '../services/reportDataBuilder.js';
+import { buildInstitutionalReportData } from '../services/institutionalReportBridge.js';
+import { generateInstitutionalPDF, generateInstitutionalDocx } from '../services/institutionalReportRenderer.js';
 
 export default function Reports({ onMenuClick }) {
   const { state } = useAppState();
@@ -152,6 +154,55 @@ export default function Reports({ onMenuClick }) {
       (t.Category === activeCategory || (!t.Category && activeCategory === 'herbicide'))
     );
     setSelectedTrialIds(projectTrials.map(t => t.ID));
+  };
+
+  // ── Institutional Dossier handlers (Miklens Bio R&D Standards) ─────────────
+  const handleGenerateInstitutionalDossier = async (format = 'pdf', isProjectScope = false) => {
+    if (!canDownload) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Download permission is disabled for your account.', type: 'error' } }));
+      return;
+    }
+
+    let targetObj = null;
+    if (isProjectScope) {
+      if (!projectReportProjectId) {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Please select a project first.', type: 'warning' } }));
+        return;
+      }
+      targetObj = (state.projects || []).find(p => p.ID === projectReportProjectId);
+    } else {
+      if (!selectedTrialId) {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Please select a trial first.', type: 'warning' } }));
+        return;
+      }
+      targetObj = (state.trials || []).find(t => t.ID === selectedTrialId);
+    }
+
+    if (!targetObj) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Target data not found.', type: 'error' } }));
+      return;
+    }
+
+    window.dispatchEvent(new CustomEvent('app:toast', {
+      detail: { msg: `Generating 15-Page Miklens Bio Institutional Dossier (${format.toUpperCase()})...`, type: 'info' }
+    }));
+
+    try {
+      const dossierData = buildInstitutionalReportData(targetObj, state);
+      if (format === 'pdf') {
+        await generateInstitutionalPDF(dossierData);
+      } else {
+        await generateInstitutionalDocx(dossierData);
+      }
+      window.dispatchEvent(new CustomEvent('app:toast', {
+        detail: { msg: `Miklens Bio Dossier (${format.toUpperCase()}) generated successfully!`, type: 'success' }
+      }));
+    } catch (err) {
+      console.error('Failed to generate institutional dossier:', err);
+      window.dispatchEvent(new CustomEvent('app:toast', {
+        detail: { msg: `Failed to generate dossier: ${err.message}`, type: 'error' }
+      }));
+    }
   };
 
   // ── Single Trial handlers (unchanged) ────────────────────────────────────
@@ -569,6 +620,44 @@ export default function Reports({ onMenuClick }) {
               </div>
             </div>
 
+            {/* Miklens Bio Institutional Multi-Treatment Dossier Action Banner */}
+            {projectReportProjectId && (
+              <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-teal-950 rounded-2xl border border-emerald-500/30 p-5 shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex items-center gap-3.5">
+                  <div className="w-11 h-11 rounded-xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-emerald-400 shrink-0 shadow-inner">
+                    <ShieldCheck className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-500/20">
+                      Miklens Bio Regulatory R&amp;D Standard
+                    </span>
+                    <h4 className="text-base font-bold text-white mt-0.5">
+                      15-Page Multi-Treatment Bio-Efficacy &amp; Phytotoxicity Dossier
+                    </h4>
+                    <p className="text-xs text-slate-300">
+                      Evaluates all treatments against commercial standard and untreated control with 5-quadrat counts, biomass &amp; 0–10 crop safety.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2.5 shrink-0">
+                  <button
+                    onClick={() => handleGenerateInstitutionalDossier('pdf', true)}
+                    disabled={!canDownload}
+                    className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-800 disabled:text-slate-500 text-slate-950 text-xs font-bold rounded-xl flex items-center gap-1.5 transition shadow-sm active:scale-95"
+                  >
+                    <Download className="w-3.5 h-3.5" /> PDF Dossier
+                  </button>
+                  <button
+                    onClick={() => handleGenerateInstitutionalDossier('docx', true)}
+                    disabled={!canDownload}
+                    className="px-4 py-2 bg-white/10 hover:bg-white/20 disabled:bg-slate-800 disabled:text-slate-500 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition border border-white/20 active:scale-95"
+                  >
+                    <FileText className="w-3.5 h-3.5" /> Word (DOCX)
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Step 2: Treatment / Rep Preview (expandable) */}
             {projectReportProjectId && treatmentGroups.length > 0 && (
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -709,6 +798,50 @@ export default function Reports({ onMenuClick }) {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+
+                  {/* Miklens Bio Institutional Bio-Efficacy Dossier (15-Page Regulatory Protocol) */}
+                  <div
+                    className={`col-span-1 md:col-span-2 bg-gradient-to-br from-emerald-950 via-slate-900 to-teal-950 rounded-2xl shadow-lg border border-emerald-500/40 p-6 flex flex-col relative overflow-hidden group ${canDownload && selectedTrialId ? '' : 'opacity-85'}`}
+                  >
+                    <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none -mr-16 -mt-16" />
+                    <div className="flex items-start justify-between mb-3 relative z-10">
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 rounded-xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-emerald-400 shadow-inner shrink-0">
+                          <ShieldCheck className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 mb-1">
+                            <Sparkles className="w-3 h-3 text-emerald-300" /> Miklens Bio Regulatory Standard
+                          </div>
+                          <h3 className="font-extrabold text-lg text-white">Institutional Bio-Efficacy &amp; Phytotoxicity Dossier</h3>
+                        </div>
+                      </div>
+                      <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-950/90 px-2.5 py-1 rounded-lg border border-emerald-500/30 shrink-0">
+                        15-Page Dossier
+                      </span>
+                    </div>
+
+                    <p className="text-xs text-slate-300 mb-5 relative z-10 leading-relaxed">
+                      Complete corporate regulatory evaluation matching CIB&amp;RC protocol standards: Pre-treatment weed flora taxonomy (scientific, common &amp; botanical family), 5-quadrat sampling counts (Q1 to Q5), weed mortality % at 7 DAT, density progression, destructive dry biomass (g/m²), 0–10 crop phytotoxicity scale, and two-tier institutional sign-offs.
+                    </p>
+
+                    <div className="mt-auto pt-2 flex flex-col sm:flex-row items-center gap-3 relative z-10">
+                      <button
+                        onClick={() => handleGenerateInstitutionalDossier('pdf', false)}
+                        disabled={!canDownload || !selectedTrialId}
+                        className="w-full sm:flex-1 py-2.5 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-800 disabled:text-slate-500 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-2 transition shadow-md active:scale-95"
+                      >
+                        <Download className="w-4 h-4" /> Download PDF Dossier
+                      </button>
+                      <button
+                        onClick={() => handleGenerateInstitutionalDossier('docx', false)}
+                        disabled={!canDownload || !selectedTrialId}
+                        className="w-full sm:flex-1 py-2.5 px-4 bg-white/10 hover:bg-white/20 disabled:bg-slate-800 disabled:text-slate-500 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 transition border border-white/20 active:scale-95"
+                      >
+                        <FileText className="w-4 h-4" /> Download Word (DOCX)
+                      </button>
+                    </div>
+                  </div>
 
                   <div
                     onClick={canDownload ? handleGenerateScientificReport : null}
