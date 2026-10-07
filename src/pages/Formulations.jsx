@@ -1218,16 +1218,16 @@ export default function Formulations({ onMenuClick }) {
           })()}
 
           <div>
-            <div className="flex justify-between items-center mb-2">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 mb-2.5">
               <div>
-                <label className="block text-sm font-semibold text-slate-700">Recipe Ingredients</label>
-                <span className="text-[11px] text-slate-400">Specify active components and quantities</span>
+                <label className="block text-sm font-bold text-slate-800">Recipe Ingredients</label>
+                <span className="text-xs text-slate-500">Specify active components, quantities, and units</span>
               </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => handleOpenQuickAddIngredient('', null)}
-                  className="text-xs font-bold text-purple-700 hover:text-purple-800 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition"
+                  className="text-xs font-bold text-purple-700 hover:text-purple-800 bg-purple-50 hover:bg-purple-100 border border-purple-200/80 px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition"
                   title="Add a new ingredient and its unit price directly into the ingredients library"
                 >
                   <Plus className="w-3.5 h-3.5" />
@@ -1236,7 +1236,7 @@ export default function Formulations({ onMenuClick }) {
                 <button
                   type="button"
                   onClick={handleAddIngredientRow}
-                  className="text-xs font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition"
+                  className="text-xs font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   Add Row
@@ -1244,7 +1244,7 @@ export default function Formulations({ onMenuClick }) {
               </div>
             </div>
 
-            <div className="space-y-2.5 max-h-72 overflow-y-auto p-1">
+            <div className="space-y-3 max-h-[380px] overflow-y-auto p-0.5 pr-1">
               {ingredients.map((ing, index) => {
                 const cleanName = (ing.name || '').trim();
                 const matchedLib = cleanName ? findIngredientInLibrary(cleanName, state.ingredients || []) : null;
@@ -1257,8 +1257,12 @@ export default function Formulations({ onMenuClick }) {
                 const lineCost = libCost * qtyInBase;
 
                 return (
-                  <div key={index} className="bg-slate-50/90 p-2.5 rounded-xl border border-slate-200/80 space-y-1.5 transition-all">
-                    <div className="flex gap-2 items-center">
+                  <div key={index} className="bg-slate-50/90 hover:bg-slate-50 p-3 rounded-xl border border-slate-200/90 shadow-2xs space-y-2.5 transition-all">
+                    {/* Row 1: Item Identifier + Full-Width Ingredient Name Input + Remove Button */}
+                    <div className="flex items-center gap-2">
+                      <span className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold flex items-center justify-center shrink-0">
+                        {index + 1}
+                      </span>
                       <div className="flex-1 min-w-0">
                         <input
                           type="text"
@@ -1266,89 +1270,117 @@ export default function Formulations({ onMenuClick }) {
                           required
                           value={ing.name}
                           onChange={e => handleIngredientChange(index, 'name', e.target.value)}
-                          className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
-                          placeholder="Ingredient name (e.g. Pelargonic acid)"
-                        />
-                      </div>
-                      <div className="w-24 shrink-0">
-                        <input
-                          type="number"
-                          step="any"
-                          required
-                          value={ing.quantity}
-                          onChange={e => handleIngredientChange(index, 'quantity', e.target.value)}
-                          className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white font-mono"
-                          placeholder="Qty"
-                        />
-                      </div>
-                      <div className="w-24 shrink-0">
-                        <input
-                          type="text"
-                          list="unit-options-list"
-                          required
-                          value={ing.unit}
-                          onChange={e => handleIngredientChange(index, 'unit', e.target.value)}
-                          className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white font-mono"
-                          placeholder="Unit (ml/L)"
+                          className="w-full px-3 py-2 text-sm font-semibold border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none bg-white text-slate-800 placeholder-slate-400 transition"
+                          placeholder="Ingredient name (e.g. Glyphosate, Pelargonic acid)"
                         />
                       </div>
                       <button
                         type="button"
                         onClick={() => handleRemoveIngredientRow(index)}
                         disabled={ingredients.length === 1}
-                        className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg disabled:opacity-20 shrink-0 transition"
+                        className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg disabled:opacity-20 shrink-0 transition"
                         title="Remove ingredient"
                       >
-                        <X className="w-4 h-4" />
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
 
-                    {/* Price and Library Status Strip */}
-                    <div className="flex items-center justify-between text-[11px] px-1">
+                    {/* Row 2: Quantity & Unit in a clean responsive grid */}
+                    <div className="grid grid-cols-12 gap-2 items-center">
+                      <div className="col-span-5 sm:col-span-4">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">Quantity</span>
+                        <input
+                          type="number"
+                          step="any"
+                          required
+                          value={ing.quantity}
+                          onChange={e => handleIngredientChange(index, 'quantity', e.target.value)}
+                          className="w-full px-3 py-1.5 text-sm font-mono border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white font-semibold text-slate-800"
+                          placeholder="0.00"
+                        />
+                      </div>
+                      <div className="col-span-4 sm:col-span-3">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">Unit</span>
+                        <input
+                          type="text"
+                          list="unit-options-list"
+                          required
+                          value={ing.unit}
+                          onChange={e => handleIngredientChange(index, 'unit', e.target.value)}
+                          className="w-full px-3 py-1.5 text-sm font-mono border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white font-semibold text-slate-800"
+                          placeholder="ml / L"
+                        />
+                      </div>
+                      <div className="col-span-3 sm:col-span-5 self-end pb-0.5">
+                        <div className="flex items-center gap-1 flex-wrap">
+                          {['ml', 'L', 'gm', 'kg'].map(u => (
+                            <button
+                              key={u}
+                              type="button"
+                              onClick={() => handleIngredientChange(index, 'unit', u)}
+                              className={`px-1.5 py-1 text-[10px] font-bold rounded border transition leading-none ${
+                                (ing.unit || '').toLowerCase() === u.toLowerCase()
+                                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                              }`}
+                            >
+                              {u}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Row 3: Price and Library Status Strip */}
+                    <div className="pt-1.5 border-t border-slate-200/60 flex items-center justify-between text-xs px-0.5">
                       {cleanName ? (
                         matchedLib ? (
                           libCost > 0 ? (
-                            <span className="text-emerald-700 font-medium inline-flex items-center gap-1.5 flex-wrap">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
-                              <span>Library: <strong>{CURRENCY_SYMBOL}{libCost.toFixed(2)} / {libUnit.toUpperCase()}</strong></span>
+                            <div className="flex items-center gap-2 flex-wrap w-full justify-between">
+                              <span className="text-emerald-700 font-medium inline-flex items-center gap-1.5 text-xs">
+                                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse" />
+                                <span>Library: <strong>{CURRENCY_SYMBOL}{libCost.toFixed(2)} / {libUnit.toUpperCase()}</strong></span>
+                                {matchedLib.Name && matchedLib.Name.toLowerCase() !== cleanName.toLowerCase() && (
+                                  <span className="text-slate-400 text-[10px]">({matchedLib.Name})</span>
+                                )}
+                              </span>
                               {hasValidQty && (
-                                <span className="bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold">
+                                <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full text-xs font-bold border border-emerald-200">
                                   Line Cost: {CURRENCY_SYMBOL}{lineCost.toFixed(2)}
                                 </span>
                               )}
-                              {matchedLib.Name && matchedLib.Name.toLowerCase() !== cleanName.toLowerCase() && (
-                                <span className="text-slate-400 text-[10px]">({matchedLib.Name})</span>
-                              )}
-                            </span>
+                            </div>
                           ) : (
-                            <div className="flex items-center gap-2">
-                              <span className="text-amber-700 font-medium">⚠️ Cost missing (₹0.00 in library)</span>
+                            <div className="flex items-center justify-between w-full gap-2 flex-wrap">
+                              <span className="text-amber-700 font-medium text-xs flex items-center gap-1">
+                                <span>⚠️</span> Price missing in library
+                              </span>
                               <button
                                 type="button"
                                 onClick={() => handleOpenQuickAddIngredient(cleanName, index)}
-                                className="text-purple-700 font-bold hover:underline"
+                                className="text-xs text-purple-700 hover:text-purple-800 font-bold bg-purple-50 hover:bg-purple-100 border border-purple-200 px-2 py-1 rounded-lg transition"
                               >
-                                + Update Price
+                                + Set Price ({CURRENCY_SYMBOL})
                               </button>
                             </div>
                           )
                         ) : (
-                          <div className="flex items-center justify-between w-full">
-                            <span className="text-amber-700 font-medium">
-                              Not listed in Ingredients library
+                          <div className="flex items-center justify-between w-full gap-2 flex-wrap">
+                            <span className="text-amber-700 font-medium text-xs">
+                              Not in ingredients library
                             </span>
                             <button
                               type="button"
                               onClick={() => handleOpenQuickAddIngredient(cleanName, index)}
-                              className="font-bold text-purple-700 hover:text-purple-800 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-2 py-0.5 rounded text-[11px] transition inline-flex items-center gap-1"
+                              className="font-bold text-purple-700 hover:text-purple-800 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-2.5 py-1 rounded-lg text-xs transition inline-flex items-center gap-1"
                             >
-                              <Plus className="w-3 h-3" />
+                              <Plus className="w-3.5 h-3.5" />
                               Save to Library & Set Price
                             </button>
                           </div>
                         )
                       ) : (
-                        <span className="text-slate-400 italic">Select from library or enter custom ingredient</span>
+                        <span className="text-slate-400 italic text-[11px]">Type or choose ingredient name from library dropdown</span>
                       )}
                     </div>
                   </div>
