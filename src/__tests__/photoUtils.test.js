@@ -125,3 +125,56 @@ describe('Property 7: sortAndGroupPhotos() sort order', () => {
     expect(sortAndGroupPhotos(undefined)).toEqual([]);
   });
 });
+
+// ─── deduplicatePhotoList() unit tests ────────────────────────────────────────
+
+import { deduplicatePhotoList } from '../utils/photoUtils.js';
+
+describe('deduplicatePhotoList()', () => {
+  it('returns empty array when given null or empty list', () => {
+    expect(deduplicatePhotoList(null)).toEqual([]);
+    expect(deduplicatePhotoList([])).toEqual([]);
+  });
+
+  it('removes duplicate photos with the same Drive ID', () => {
+    const photos = [
+      { driveId: 'drive_123', url: 'https://drive.google.com/thumbnail?id=drive_123', label: 'Plot 1' },
+      { driveId: 'drive_123', url: 'https://drive.google.com/thumbnail?id=drive_123&sz=w480', label: 'Plot 1 copy' },
+    ];
+    const result = deduplicatePhotoList(photos);
+    expect(result).toHaveLength(1);
+    expect(result[0].driveId).toBe('drive_123');
+  });
+
+  it('removes duplicate photos with the exact same timestamp/date, DAA, and label', () => {
+    const photos = [
+      { date: '2026-03-15T10:00:00Z', daa: 14, label: 'Weed Control Plot 1', url: 'https://storage/img1.jpg' },
+      { date: '2026-03-15T10:00:00Z', daa: 14, label: 'Weed Control Plot 1', url: 'https://storage/img2_copy.jpg' },
+      { date: '2026-03-15T10:00:00Z', daa: 28, label: 'Weed Control Plot 1', url: 'https://storage/img3.jpg' },
+    ];
+    const result = deduplicatePhotoList(photos);
+    expect(result).toHaveLength(2);
+    expect(result.map(p => p.daa)).toEqual([14, 28]);
+  });
+
+  it('deduplicates string URL entries and normalizes Google Drive URLs', () => {
+    const photos = [
+      'https://drive.google.com/thumbnail?id=photo_abc&sz=w480',
+      'https://drive.google.com/thumbnail?id=photo_abc&sz=w1000',
+      'https://drive.google.com/thumbnail?id=photo_xyz&sz=w480',
+    ];
+    const result = deduplicatePhotoList(photos);
+    expect(result).toHaveLength(2);
+  });
+
+  it('prioritizes valid remote photos over placeholder or broken data URLs', () => {
+    const photos = [
+      { driveId: 'same_file', fileData: '[base64-removed]', url: null },
+      { driveId: 'same_file', url: 'https://drive.google.com/uc?id=same_file' },
+    ];
+    const result = deduplicatePhotoList(photos);
+    expect(result).toHaveLength(1);
+    expect(result[0].url).toBe('https://drive.google.com/uc?id=same_file');
+  });
+});
+

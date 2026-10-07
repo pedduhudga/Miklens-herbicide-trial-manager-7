@@ -6,8 +6,8 @@ export function getDriveFileId(photoOrUrl) {
   
   if (typeof photoOrUrl === 'object') {
     const directId = photoOrUrl.driveId || photoOrUrl.fileId || photoOrUrl.driveFileId;
-    if (typeof directId === 'string' && directId.length >= 10 && !directId.includes('/')) {
-      return directId;
+    if (typeof directId === 'string' && directId.trim().length >= 5 && !directId.includes('/')) {
+      return directId.trim();
     }
     const url = photoOrUrl.url || photoOrUrl.src || photoOrUrl.fileUrl || photoOrUrl.photoUrl || photoOrUrl.fileData;
     if (typeof url === 'string') return getDriveFileId(url);
@@ -190,4 +190,72 @@ export async function compressImage(dataUrl, maxDimension = 2048, quality = 0.85
     img.src = dataUrl;
   });
 }
+
+/**
+ * Deduplicates photo items in a photo array based on:
+ * 1. Matching Google Drive File IDs (driveId, fileId, or extracted from URL)
+ * 2. Identical URLs / fileData (excluding sizing query parameters)
+ * 3. Identical timestamps / dates AND identical labels/tags/filenames
+ * Retains the highest-quality, healthy link among duplicates.
+ */
+export function deduplicatePhotoList(photos) {
+  if (!Array.isArray(photos)) return [];
+
+  // Filter out null/undefined and tombstoned/deleted items
+  const validPhotos = photos.filter(p => p && (typeof p !== 'object' || !p.deleted));
+
+  // Sort so that photos with valid remote URLs or Drive links take precedence over broken ones
+  const sorted = [...validPhotos].sort((a, b) => {
+    const aHasRealUrl = Boolean(a && typeof a === 'object' && a.url && !a.url.includes('[base64-removed]'));
+    const bHasRealUrl = Boolean(b && typeof b === 'object' && b.url && !b.url.includes('[base64-removed]'));
+    if (bHasRealUrl !== aHasRealUrl) return bHasRealUrl ? 1 : -1;
+
+    const aResolved = resolvePhotoSrc(a);
+    const bResolved = resolvePhotoSrc(b);
+    const aHealthy = (aResolved && aResolved.startsWith('http')) ? 2 : (aResolved ? 1 : 0);
+    const bHealthy = (bResolved && bResolved.startsWith('http')) ? 2 : (bResolved ? 1 : 0);
+    return bHealthy - aHealthy;
+  });
+
+  const result = [];
+  const seenDriveIds = new Set();
+  const seenUrls = new Set();
+  const seenTimestampSignatures = new Set();
+
+  for (const p of sorted) {
+    const driveId = getDriveFileId(p);
+    const rawUrl = typeof p === 'string' ? p.trim() : (p.url || p.src || p.fileUrl || p.fileData || '').trim();
+    const dateStr = typeof p === 'object' ? (p.date || p.timestamp || p.createdTime || '').trim() : '';
+    const labelStr = typeof p === 'object' ? (p.label || p.tag || '').trim().toLowerCase() : '';
+    const daaStr = typeof p === 'object' && p.daa !== undefined && p.daa !== null ? String(p.daa) : '';
+    const fileNameStr = typeof p === 'object' ? (p.fileName || p.name || '').trim().toLowerCase() : '';
+
+    // 1. Check Drive ID uniqueness
+    if (driveId) {
+      if (seenDriveIds.has(driveId)) continue;
+      seenDriveIds.add(driveId);
+    }
+
+    // 2. Check normalized URL uniqueness (strip sizing parameters like &sz=w480 or &w=400)
+    if (rawUrl && !rawUrl.startsWith('data:image')) {
+      const cleanUrl = rawUrl.toLowerCase().replace(/(&sz=w\d+)|(&w=\d+)/g, '');
+      if (seenUrls.has(cleanUrl)) continue;
+      seenUrls.add(cleanUrl);
+    }
+
+    // 3. Check exact timestamp / date collision
+    if (dateStr && (labelStr || fileNameStr || daaStr)) {
+      const timeSig = `${dateStr}__${daaStr}__${labelStr || fileNameStr}`;
+      if (seenTimestampSignatures.has(timeSig)) {
+        continue; // Drop duplicate item with identical timestamp and observation
+      }
+      seenTimestampSignatures.add(timeSig);
+    }
+
+    result.push(p);
+  }
+
+  return result;
+}
+
 

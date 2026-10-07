@@ -25,6 +25,7 @@ import { getBotanicalTaxonomy, PHYTOTOXICITY_10_SCALE, getPhytotoxicityDescripti
 import { safeJsonParse } from '../utils/helpers.js';
 import { performANOVA } from '../utils/statsUtils.js';
 import { calculateDAA, formatDate, parseCustomDate } from '../utils/dateUtils.js';
+import { deduplicatePhotoList } from '../utils/photoUtils.js';
 
 /**
  * Strict product name sanitizer.
@@ -169,7 +170,7 @@ export function extractTrialPhotos(subTrials = [], trialDate = null) {
     }
   });
 
-  return photoList.sort((a, b) => (a.daa ?? 0) - (b.daa ?? 0));
+  return deduplicatePhotoList(photoList).sort((a, b) => (a.daa ?? 0) - (b.daa ?? 0));
 }
 
 /**

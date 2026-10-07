@@ -167,131 +167,252 @@ export async function generateInstitutionalPDF(reportData) {
   const dc = reportData.docControl;
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // PAGE 1: COVER & TWO-TIER INSTITUTIONAL CERTIFICATION
+  // PAGE 1: MIKLENS BIO EXECUTIVE REGULATORY COVER PAGE
   // ═══════════════════════════════════════════════════════════════════════════
-  // Outer decorative border
-  doc.setDrawColor(...MIKLENS_GREEN);
-  doc.setLineWidth(0.8);
-  doc.rect(10, 10, pw - 20, ph - 20);
+  // Top Corporate Executive Header Banner (Slate-900 with Emerald Accent)
+  doc.setFillColor(...MIKLENS_DARK);
+  doc.rect(0, 0, pw, 42, 'F');
+
+  // Emerald Accent Stripe
+  doc.setFillColor(...MIKLENS_ACCENT);
+  doc.rect(0, 42, pw, 2.5, 'F');
+
+  // Header Brand Typography
+  doc.setFontSize(14);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(255, 255, 255);
+  doc.text('MIKLENS BIO RESEARCH & DEVELOPMENT CENTRE', 16, 17);
+
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(203, 213, 225);
+  doc.text('Centre of Excellence in Bioscience, Bio-Herbicides & Crop Protection', 16, 24);
+
+  doc.setFontSize(7.5);
+  doc.setFont('helvetica', 'italic');
+  doc.setTextColor(148, 163, 184);
+  doc.text('Official Agricultural Field Evaluation Dossier  •  Registration Standard MB/COP8/2-06', 16, 32);
+
+  // Classification Pill Badge (Top Right)
+  doc.setFillColor(...MIKLENS_GREEN);
+  doc.roundedRect(pw - 66, 13, 52, 9, 2, 2, 'F');
+  doc.setFontSize(7.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(255, 255, 255);
+  doc.text('REGULATORY DOSSIER', pw - 40, 19, { align: 'center' });
+
+  doc.setFontSize(6.8);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(148, 163, 184);
+  doc.text('CONFIDENTIAL & PROPRIETARY', pw - 14, 29, { align: 'right' });
+
+  // Document Control Tracking Bar (Compact 4-column matrix)
+  const metaBarY = 49;
+  doc.setFillColor(248, 250, 252);
+  doc.roundedRect(14, metaBarY, pw - 28, 15, 2, 2, 'F');
   doc.setDrawColor(...BORDER_COLOR);
   doc.setLineWidth(0.3);
-  doc.rect(12, 12, pw - 24, ph - 24);
+  doc.roundedRect(14, metaBarY, pw - 28, 15, 2, 2, 'D');
 
-  // Header meta
-  doc.setFontSize(9);
+  const colW = (pw - 28) / 4;
+  const metaItems = [
+    { label: 'REPORT NUMBER', val: dc.reportNo },
+    { label: 'PROTOCOL REF', val: dc.protocolRefNo },
+    { label: 'SOP FORM CODE', val: dc.sopFormCode },
+    { label: 'ISSUE DATE', val: dc.reportDate }
+  ];
+
+  metaItems.forEach((item, idx) => {
+    const colX = 14 + idx * colW + 4;
+    doc.setFontSize(6.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...SLATE_MUTED);
+    doc.text(item.label, colX, metaBarY + 5);
+
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...MIKLENS_DARK);
+    doc.text(doc.splitTextToSize(item.val, colW - 6)[0] || item.val, colX, metaBarY + 11);
+
+    if (idx < 3) {
+      doc.setDrawColor(...BORDER_COLOR);
+      doc.line(14 + (idx + 1) * colW, metaBarY + 2, 14 + (idx + 1) * colW, metaBarY + 13);
+    }
+  });
+
+  // Primary Hero Dossier Title Section
+  let curCoverY = 73;
+
+  // Category Pill Badge
+  doc.setFillColor(...MIKLENS_LIGHT);
+  doc.roundedRect(14, curCoverY, 68, 6.5, 1.5, 1.5, 'F');
+  doc.setDrawColor(...MIKLENS_GREEN);
+  doc.roundedRect(14, curCoverY, 68, 6.5, 1.5, 1.5, 'D');
+
+  doc.setFontSize(7);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(71, 85, 105);
-  doc.text(`Report No : ${dc.reportNo}`, 16, 20);
-  doc.text(dc.sopFormCode, pw - 16, 20, { align: 'right' });
+  doc.setTextColor(...MIKLENS_GREEN);
+  doc.text('BIO-EFFICACY & CROP SAFETY EVALUATION', 17, curCoverY + 4.5);
 
-  // Organization Title
+  curCoverY += 13;
   doc.setFontSize(16);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(...MIKLENS_GREEN);
-  doc.text(dc.companyName, pw / 2, 32, { align: 'center' });
-  doc.setFontSize(11);
-  doc.setTextColor(100, 116, 139);
-  doc.text(dc.division, pw / 2, 38, { align: 'center' });
-
-  doc.setDrawColor(...MIKLENS_GREEN);
-  doc.setLineWidth(0.5);
-  doc.line(25, 42, pw - 25, 42);
-
-  // Main Dossier Title Box
-  doc.setFillColor(...MIKLENS_LIGHT);
-  doc.roundedRect(18, 56, pw - 36, 44, 3, 3, 'F');
-  doc.setDrawColor(...MIKLENS_GREEN);
-  doc.setLineWidth(0.4);
-  doc.roundedRect(18, 56, pw - 36, 44, 3, 3, 'D');
-
-  doc.setFontSize(13);
-  doc.setFont('helvetica', 'bold');
   doc.setTextColor(...MIKLENS_DARK);
-  const titleLines = doc.splitTextToSize(dc.title, pw - 46);
-  doc.text(titleLines, pw / 2, 70, { align: 'center' });
+  const heroTitleLines = doc.splitTextToSize(dc.title, pw - 28);
+  doc.text(heroTitleLines, 14, curCoverY);
+  curCoverY += heroTitleLines.length * 7 + 2;
 
-  doc.setFontSize(9.5);
-  doc.setFont('helvetica', 'normal');
+  // Subtitle / Scope statement
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'italic');
   doc.setTextColor(71, 85, 105);
-  const locDisplay = dc.locationName + (dc.latitude && dc.latitude !== 'Not recorded' ? ` (GPS: ${dc.latitude}, ${dc.longitude})` : '');
-  doc.text(`Location: ${locDisplay}`, pw / 2, 92, { align: 'center' });
+  const subtitle = `Comprehensive Institutional Field Evaluation of Bio-Herbicide Weed Suppression Dynamics, Canopy Desiccation, and Selectivity Profile under Field Conditions`;
+  const subLines = doc.splitTextToSize(subtitle, pw - 28);
+  doc.text(subLines, 14, curCoverY);
+  curCoverY += subLines.length * 4.5 + 6;
 
-  // Year Badge
-  const currentYear = new Date().getFullYear();
-  doc.setFontSize(20);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(...MIKLENS_GREEN);
-  doc.text(`${currentYear}`, pw / 2, 126, { align: 'center' });
-
-  // Protocol reference & Date
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(71, 85, 105);
-  doc.text(`Protocol Ref. No. ${dc.protocolRefNo}`, pw / 2, 136, { align: 'center' });
-  doc.text(`Date of Report: ${dc.reportDate}`, pw / 2, 143, { align: 'center' });
-
-  // Crop / Site Type & Target Flora Badge
+  // Executive Agronomic Scope & Trial Profile Card
+  const profileCardY = Math.max(curCoverY, 126);
+  const profileCardH = 64;
   doc.setFillColor(248, 250, 252);
-  doc.roundedRect(25, 154, pw - 50, 22, 2, 2, 'F');
+  doc.roundedRect(14, profileCardY, pw - 28, profileCardH, 2, 2, 'F');
   doc.setDrawColor(...BORDER_COLOR);
-  doc.roundedRect(25, 154, pw - 50, 22, 2, 2, 'D');
+  doc.setLineWidth(0.3);
+  doc.roundedRect(14, profileCardY, pw - 28, profileCardH, 2, 2, 'D');
 
+  // Emerald left accent vertical stripe
+  doc.setFillColor(...MIKLENS_GREEN);
+  doc.rect(14, profileCardY, 3.5, profileCardH, 'F');
+
+  // Card Header
   doc.setFontSize(9);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(...MIKLENS_DARK);
-  doc.text(`Target Crop / Site Type: ${dc.cropDisplay}`, pw / 2, 162, { align: 'center' });
-  doc.setFontSize(8.5);
-  doc.setFont('helvetica', 'italic');
-  doc.setTextColor(71, 85, 105);
-  doc.text(`Target Weed Flora: ${reportData.dominantFloraName}`, pw / 2, 170, { align: 'center' });
+  doc.text('TRIAL PROFILE & AGRO-ECOLOGICAL ENVIRONMENT', 22, profileCardY + 8);
 
-  // Two-Tier Institutional Certification Sign-Off
-  const signBoxY = 194;
-  // Box 1: Prepared by Investigator
-  doc.setFillColor(248, 250, 252);
-  doc.roundedRect(20, signBoxY, 80, 44, 2, 2, 'F');
   doc.setDrawColor(...BORDER_COLOR);
-  doc.roundedRect(20, signBoxY, 80, 44, 2, 2, 'D');
+  doc.line(22, profileCardY + 11, pw - 18, profileCardY + 11);
 
-  doc.setFontSize(8.5);
+  // 2-Column Agronomic Metrics Grid
+  const leftColX = 22;
+  const rightColX = pw / 2 + 4;
+  const locDisplay = dc.locationName + (dc.latitude && dc.latitude !== 'Not recorded' ? ` (GPS: ${dc.latitude}, ${dc.longitude})` : '');
+
+  // Left Column
+  const drawMetaRow = (label, val, x, y, maxW) => {
+    doc.setFontSize(7.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...SLATE_MUTED);
+    doc.text(label, x, y);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...MIKLENS_DARK);
+    doc.text(doc.splitTextToSize(val, maxW)[0] || val, x + 38, y);
+  };
+
+  drawMetaRow('Target Crop / System:', dc.cropDisplay, leftColX, profileCardY + 19, (pw / 2) - 62);
+  drawMetaRow('Dominant Weed Flora:', reportData.dominantFloraName, leftColX, profileCardY + 28, (pw / 2) - 62);
+  drawMetaRow('Trial Site Location:', locDisplay, leftColX, profileCardY + 37, (pw / 2) - 62);
+  drawMetaRow('Agro-Climatic Zone:', dc.climateZone, leftColX, profileCardY + 46, (pw / 2) - 62);
+  drawMetaRow('Soil Characteristics:', `${dc.soilTexture} (${dc.soilProfile})`, leftColX, profileCardY + 55, (pw / 2) - 62);
+
+  // Right Column
+  drawMetaRow('Experimental Layout:', dc.studyDesign, rightColX, profileCardY + 19, (pw / 2) - 46);
+  drawMetaRow('Plot Dimensions / Area:', dc.treatmentPlotArea, rightColX, profileCardY + 28, (pw / 2) - 46);
+  drawMetaRow('Application Rate:', `${reportData.treatments[0]?.dosePerLitre || 'Calibrated rate'} (${dc.applicationTiming})`, rightColX, profileCardY + 37, (pw / 2) - 46);
+  drawMetaRow('Method & Spray Vol:', `${dc.applicationMethod} (${dc.sprayVolume})`, rightColX, profileCardY + 46, (pw / 2) - 46);
+  drawMetaRow('Protocol Final Status:', `${dc.status} • ${dc.result}`, rightColX, profileCardY + 55, (pw / 2) - 46);
+
+  // Two-Tier Institutional Certification Panel (Executive Modern Dual Cards)
+  const certPanelY = profileCardY + profileCardH + 8;
+  const certCardW = (pw - 34) / 2;
+  const certCardH = 46;
+
+  // Box 1: Principal Investigator
+  doc.setFillColor(255, 255, 255);
+  doc.roundedRect(14, certPanelY, certCardW, certCardH, 2, 2, 'F');
+  doc.setDrawColor(...BORDER_COLOR);
+  doc.roundedRect(14, certPanelY, certCardW, certCardH, 2, 2, 'D');
+
+  doc.setFillColor(241, 245, 249);
+  doc.roundedRect(14, certPanelY, certCardW, 7, 2, 2, 'F');
+  doc.setFontSize(7.2);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(100, 116, 139);
-  doc.text('REPORT PREPARED BY', 26, signBoxY + 8);
+  doc.setTextColor(...SLATE_MUTED);
+  doc.text('REPORT PREPARED & CERTIFIED BY', 18, certPanelY + 5);
+
   doc.setFontSize(9.5);
+  doc.setFont('helvetica', 'bold');
   doc.setTextColor(...MIKLENS_DARK);
-  doc.text(dc.preparedBy, 26, signBoxY + 18);
-  doc.setFontSize(8);
+  doc.text(dc.preparedBy, 18, certPanelY + 14);
+
+  doc.setFontSize(7.8);
   doc.setFont('helvetica', 'italic');
   doc.setTextColor(71, 85, 105);
-  doc.text(`(${dc.preparedByTitle})`, 26, signBoxY + 24);
+  doc.text(`${dc.preparedByTitle}  •  Miklens Bio R&D Centre`, 18, certPanelY + 19);
+
+  doc.setFontSize(6.8);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(...MIKLENS_GREEN);
+  doc.text('[ VERIFIED FIELD OBSERVATION DATA & METHODOLOGY ]', 18, certPanelY + 27);
+
   doc.setDrawColor(203, 213, 225);
-  doc.line(26, signBoxY + 34, 90, signBoxY + 34);
-  doc.setFontSize(7.5);
+  doc.setLineWidth(0.3);
+  doc.line(18, certPanelY + 36, 14 + certCardW - 14, certPanelY + 36);
+  doc.setFontSize(6.8);
   doc.setFont('helvetica', 'normal');
-  doc.text('Authorized Signature & Date', 26, signBoxY + 39);
+  doc.setTextColor(...SLATE_MUTED);
+  doc.text('Authorized Investigator Signature & Date', 18, certPanelY + 41);
 
   // Box 2: Reviewed & Approved by Scientific Review Board
-  doc.setFillColor(248, 250, 252);
-  doc.roundedRect(pw - 100, signBoxY, 80, 44, 2, 2, 'F');
+  const rightBoxX = 14 + certCardW + 6;
+  doc.setFillColor(255, 255, 255);
+  doc.roundedRect(rightBoxX, certPanelY, certCardW, certCardH, 2, 2, 'F');
   doc.setDrawColor(...BORDER_COLOR);
-  doc.roundedRect(pw - 100, signBoxY, 80, 44, 2, 2, 'D');
+  doc.roundedRect(rightBoxX, certPanelY, certCardW, certCardH, 2, 2, 'D');
 
-  doc.setFontSize(8.5);
+  doc.setFillColor(241, 245, 249);
+  doc.roundedRect(rightBoxX, certPanelY, certCardW, 7, 2, 2, 'F');
+  doc.setFontSize(7.2);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(100, 116, 139);
-  doc.text('REVIEWED AND APPROVED BY', pw - 94, signBoxY + 8);
+  doc.setTextColor(...SLATE_MUTED);
+  doc.text('REVIEWED & INSTITUTIONALLY APPROVED', rightBoxX + 4, certPanelY + 5);
+
   doc.setFontSize(9.5);
+  doc.setFont('helvetica', 'bold');
   doc.setTextColor(...MIKLENS_DARK);
-  doc.text(dc.approvedBy, pw - 94, signBoxY + 18);
-  doc.setFontSize(8);
+  doc.text(dc.approvedBy, rightBoxX + 4, certPanelY + 14);
+
+  doc.setFontSize(7.8);
   doc.setFont('helvetica', 'italic');
   doc.setTextColor(71, 85, 105);
-  doc.text(`(${dc.approvedByTitle})`, pw - 94, signBoxY + 24);
+  doc.text(`${dc.approvedByTitle}  •  Scientific Review Board`, rightBoxX + 4, certPanelY + 19);
+
+  doc.setFontSize(6.8);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(...MIKLENS_GREEN);
+  doc.text('[ APPROVED FOR REGULATORY FILING & REGISTRATION ]', rightBoxX + 4, certPanelY + 27);
+
   doc.setDrawColor(203, 213, 225);
-  doc.line(pw - 94, signBoxY + 34, pw - 30, signBoxY + 34);
-  doc.setFontSize(7.5);
+  doc.setLineWidth(0.3);
+  doc.line(rightBoxX + 4, certPanelY + 36, rightBoxX + certCardW - 14, certPanelY + 36);
+  doc.setFontSize(6.8);
   doc.setFont('helvetica', 'normal');
-  doc.text('Authorized Signature & Date', pw - 94, signBoxY + 39);
+  doc.setTextColor(...SLATE_MUTED);
+  doc.text('Authorized Board Signature & Date', rightBoxX + 4, certPanelY + 41);
+
+  // Modern Executive Bottom Footer
+  doc.setDrawColor(...BORDER_COLOR);
+  doc.line(14, ph - 16, pw - 14, ph - 16);
+
+  doc.setFontSize(7.2);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(...SLATE_MUTED);
+  doc.text(`Miklens Bio Research & Development Centre  •  Confidential Regulatory Evaluation Dossier  •  SOP Code: ${dc.sopFormCode}`, pw / 2, ph - 11, { align: 'center' });
+
+  doc.setFontSize(6.5);
+  doc.setFont('helvetica', 'italic');
+  doc.setTextColor(148, 163, 184);
+  doc.text('Certified for bio-efficacy, crop safety, and institutional agricultural registration compliance.', pw / 2, ph - 7, { align: 'center' });
 
   // ═══════════════════════════════════════════════════════════════════════════
   // PAGE 2: TRIAL PROTOCOL, AGRONOMIC PARAMETERS & ENVIRONMENTAL CONDITIONS

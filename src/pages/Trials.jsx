@@ -19,7 +19,7 @@ import {
   FileCode, MonitorPlay, Archive, Pencil, ScanLine, Crop, Clock, Calculator, Loader2, ShieldCheck
 } from 'lucide-react';
 import { safeJsonParse } from '../utils/helpers.js';
-import { resolvePhotoSrc, getPhotoThumbnailSrc, isPhotoBroken, getDriveFileId, compressImage } from '../utils/photoUtils.js';
+import { resolvePhotoSrc, getPhotoThumbnailSrc, isPhotoBroken, getDriveFileId, compressImage, deduplicatePhotoList } from '../utils/photoUtils.js';
 import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryValue, calculateEfficacy, getRatingFromEfficacy } from '../utils/categoryConfig.js';
 import { calculateDAA, toDateKey, formatPhotoDate, toDatetimeLocal, formatDate, formatDateTime, parseDateFromFilename, parsePhotoInfoFromFilename, parseCustomDate } from '../utils/dateUtils.js';
 import { normalizeObservation } from '../utils/categoryObservationUtils.js';
@@ -3696,7 +3696,10 @@ Rules:
       setSyncingPhotos(true);
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Scanning Google Drive for missing photos...', type: 'info' } }));
       
-      const photoURLs = safeJsonParse(trial.PhotoURLs, []);
+      const rawPhotoURLs = safeJsonParse(trial.PhotoURLs, []);
+      let photoURLs = deduplicatePhotoList(rawPhotoURLs);
+      const initialRawCount = rawPhotoURLs.length;
+
       const brokenPhotos = photoURLs.filter(p => isPhotoBroken(p) && !p.deleted).map(p => ({
         date: p.date || '',
         label: p.label || '',
@@ -3776,23 +3779,27 @@ Rules:
           return;
         }
 
-        // Find if there is an existing entry matching this drive ID (even if broken or base64-removed)
-        const existingPhoto = photoURLs.find(p => 
-          p.driveId === img.id || 
-          p.fileId === img.id || 
-          p.driveFileId === img.id || 
-          getDriveFileId(p.url || p.src) === img.id
-        );
-
         // Smart parsing from filename using parsePhotoInfoFromFilename
         const info = parsePhotoInfoFromFilename(img.name, trial.Date);
         let photoDate = info.date ? info.date.split('T')[0] : (img.createdTime ? img.createdTime.split('T')[0] : new Date().toISOString().split('T')[0]);
         const parsedTag = info.tag || 'Field Observation';
         const parsedLabel = info.label || 'Field Observation';
         const parsedDaa = info.daa;
-
         const normDriveLabel = normalize(parsedTag !== 'Field Observation' ? parsedTag : parsedLabel);
         const webViewUrl = `https://drive.google.com/uc?export=view&id=${img.id}`;
+
+        // Find if there is an existing entry matching this drive ID, filename, or identical timestamp + label
+        const existingPhoto = photoURLs.find(p => 
+          p.driveId === img.id || 
+          p.fileId === img.id || 
+          p.driveFileId === img.id || 
+          getDriveFileId(p.url || p.src) === img.id ||
+          (p.fileName && img.name && p.fileName.toLowerCase() === img.name.toLowerCase()) ||
+          (p.date && photoDate && p.date === photoDate && (
+            (p.daa !== undefined && parsedDaa !== undefined && Number(p.daa) === Number(parsedDaa)) ||
+            (p.label && parsedLabel && normalize(p.label) === normDriveLabel)
+          ))
+        );
 
         if (existingPhoto) {
           if (existingPhoto.deleted) {
@@ -3834,7 +3841,6 @@ Rules:
               if (!p.date && photoDate) p.date = photoDate;
               healed = true;
               healedCount++;
-              // Remove this index from brokenPhotoIndices so it's not reused sequentially
               const idxInBroken = brokenPhotoIndices.indexOf(i);
               if (idxInBroken !== -1) {
                 brokenPhotoIndices.splice(idxInBroken, 1);
@@ -3857,13 +3863,17 @@ Rules:
           healedCount++;
         }
 
-        // 3. Append as new photo if this image is not already present and NOT in healOnly mode
+        // 3. Append as new photo ONLY if this image is not already present with same timestamp/driveId
         if (!healed && !healOnly) {
           const isAlreadyPresent = photoURLs.some(p => 
             p.driveId === img.id || 
             p.fileId === img.id || 
             p.fileName === img.name ||
-            getDriveFileId(p.url || p.src) === img.id
+            getDriveFileId(p.url || p.src) === img.id ||
+            (p.date && photoDate && p.date === photoDate && (
+              (p.daa !== undefined && parsedDaa !== undefined && Number(p.daa) === Number(parsedDaa)) ||
+              (p.label && parsedLabel && normalize(p.label) === normDriveLabel)
+            ))
           );
           if (!isAlreadyPresent) {
             photoURLs.push({
@@ -3882,8 +3892,12 @@ Rules:
         }
       });
 
-      if (addedCount > 0 || healedCount > 0) {
-        const updatedPhotoURLs = JSON.stringify(photoURLs);
+      // Deduplicate all photos to ensure zero repeated items with same timestamp / Drive ID
+      const cleanPhotoURLs = deduplicatePhotoList(photoURLs);
+      const duplicatesRemoved = Math.max(0, initialRawCount - (cleanPhotoURLs.length - addedCount));
+
+      if (addedCount > 0 || healedCount > 0 || duplicatesRemoved > 0) {
+        const updatedPhotoURLs = JSON.stringify(cleanPhotoURLs);
         const updatedTrial = { ...trial, PhotoURLs: updatedPhotoURLs };
         
         updateState({ trials: getAppState().trials.map(t => t.ID === updatedTrial.ID ? updatedTrial : t) });
@@ -3894,14 +3908,12 @@ Rules:
           PhotoURLs: updatedPhotoURLs
         }, getAppState);
 
-        let msg = '';
-        if (healedCount > 0 && addedCount > 0) {
-          msg = `Restored ${healedCount} unavailable photo(s) and imported ${addedCount} new photo(s) from Drive!`;
-        } else if (healedCount > 0) {
-          msg = `Restored ${healedCount} unavailable photo(s) from Drive!`;
-        } else {
-          msg = `Successfully imported ${addedCount} photo(s) from Drive!`;
-        }
+        const msgParts = [];
+        if (healedCount > 0) msgParts.push(`Restored ${healedCount} unavailable photo(s)`);
+        if (addedCount > 0) msgParts.push(`Imported ${addedCount} photo(s) from Drive`);
+        if (duplicatesRemoved > 0) msgParts.push(`Removed ${duplicatesRemoved} duplicate photo(s) with identical timestamp`);
+
+        const msg = msgParts.join(', ') || 'All Google Drive photos synced and deduplicated!';
         window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg, type: 'success' } }));
       } else {
         window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'All Google Drive photos are already synced.', type: 'info' } }));
@@ -3951,7 +3963,10 @@ Rules:
           }));
         }
 
-        const photoURLs = safeJsonParse(trial.PhotoURLs, []);
+        const rawPhotoURLs = safeJsonParse(trial.PhotoURLs, []);
+        let photoURLs = deduplicatePhotoList(rawPhotoURLs);
+        const initialRawCount = rawPhotoURLs.length;
+
         const brokenPhotos = photoURLs.filter(p => isPhotoBroken(p) && !p.deleted).map(p => ({
           date: p.date || '',
           label: p.label || '',
@@ -4005,22 +4020,27 @@ Rules:
                 return;
               }
 
-              const existingPhoto = photoURLs.find(p => 
-                p.driveId === img.id || 
-                p.fileId === img.id || 
-                p.driveFileId === img.id || 
-                getDriveFileId(p.url || p.src) === img.id
-              );
-
               // Smart parsing from filename using parsePhotoInfoFromFilename
               const info = parsePhotoInfoFromFilename(img.name, trial.Date);
               let photoDate = info.date ? info.date.split('T')[0] : (img.createdTime ? img.createdTime.split('T')[0] : new Date().toISOString().split('T')[0]);
               const parsedTag = info.tag || 'Field Observation';
               const parsedLabel = info.label || 'Field Observation';
               const parsedDaa = info.daa;
-
               const normDriveLabel = (parsedTag !== 'Field Observation' ? parsedTag : parsedLabel).toLowerCase().replace(/[^a-z0-9]/g, '');
               const webViewUrl = `https://drive.google.com/uc?export=view&id=${img.id}`;
+
+              // Find if there is an existing entry matching this drive ID, filename, or identical timestamp + label
+              const existingPhoto = photoURLs.find(p => 
+                p.driveId === img.id || 
+                p.fileId === img.id || 
+                p.driveFileId === img.id || 
+                getDriveFileId(p.url || p.src) === img.id ||
+                (p.fileName && img.name && p.fileName.toLowerCase() === img.name.toLowerCase()) ||
+                (p.date && photoDate && p.date === photoDate && (
+                  (p.daa !== undefined && parsedDaa !== undefined && Number(p.daa) === Number(parsedDaa)) ||
+                  (p.label && parsedLabel && (p.label || '').toLowerCase().replace(/[^a-z0-9]/g, '') === normDriveLabel)
+                ))
+              );
 
               if (existingPhoto) {
                 if (existingPhoto.deleted) {
@@ -4084,8 +4104,18 @@ Rules:
                 totalHealed++;
               }
 
-              if (!healed) {
-                if (!healOnly) {
+              if (!healed && !healOnly) {
+                const isAlreadyPresent = photoURLs.some(p => 
+                  p.driveId === img.id || 
+                  p.fileId === img.id || 
+                  p.fileName === img.name ||
+                  getDriveFileId(p.url || p.src) === img.id ||
+                  (p.date && photoDate && p.date === photoDate && (
+                    (p.daa !== undefined && parsedDaa !== undefined && Number(p.daa) === Number(parsedDaa)) ||
+                    (p.label && parsedLabel && (p.label || '').toLowerCase().replace(/[^a-z0-9]/g, '') === normDriveLabel)
+                  ))
+                );
+                if (!isAlreadyPresent) {
                   photoURLs.push({
                     url: webViewUrl,
                     fileName: img.name,
@@ -4103,8 +4133,12 @@ Rules:
               }
             });
 
-            if (localHealed > 0 || localAdded > 0) {
-              const updatedPhotoURLs = JSON.stringify(photoURLs);
+            // Clean duplicates across this trial
+            const cleanPhotoURLs = deduplicatePhotoList(photoURLs);
+            const duplicatesRemoved = Math.max(0, initialRawCount - (cleanPhotoURLs.length - localAdded));
+
+            if (localHealed > 0 || localAdded > 0 || duplicatesRemoved > 0) {
+              const updatedPhotoURLs = JSON.stringify(cleanPhotoURLs);
               const updatedTrial = { ...trial, PhotoURLs: updatedPhotoURLs };
 
               updateState({ trials: getAppState().trials.map(t => t.ID === updatedTrial.ID ? updatedTrial : t) });
