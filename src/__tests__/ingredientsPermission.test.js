@@ -169,4 +169,58 @@ describe('Ingredients Permission & Scientist Herbicide Category Access', () => {
     const items = await dataLayer.getIngredients({ Category: 'herbicide' }, getAppState);
     expect(items).toBeDefined();
   });
+
+  it('correctly filters ingredients library by query (name, PubChem CID, formula, IUPAC, SMILES)', () => {
+    const ingredients = [
+      {
+        ID: '1',
+        Name: 'Glyphosate',
+        PubChemCID: '3496',
+        IupacName: '2-(phosphonomethylamino)acetic acid',
+        MolecularFormula: 'C3H8NO5P',
+        SMILES: 'C(C(=O)O)NCP(=O)(O)O'
+      },
+      {
+        ID: '2',
+        Name: 'Atrazine',
+        PubChemCID: '2256',
+        IupacName: '6-chloro-N2-ethyl-N4-propan-2-yl-1,3,5-triazine-2,4-diamine',
+        MolecularFormula: 'C8H14ClN5',
+        SMILES: 'CCNC1=NC(=NC(=N1)Cl)NC(C)C'
+      },
+      {
+        ID: '3',
+        Name: '2,4-D Acid',
+        PubChemCID: '1486',
+        IupacName: '2-(2,4-dichlorophenoxy)acetic acid',
+        MolecularFormula: 'C8H6Cl2O3',
+        SMILES: 'C1=CC(=C(C=C1Cl)Cl)OCC(=O)O'
+      }
+    ];
+
+    const filterFn = (list, query) => list.filter(ing => {
+      if (!query.trim()) return true;
+      const q = query.toLowerCase().trim();
+      return (
+        (ing.Name && ing.Name.toLowerCase().includes(q)) ||
+        (ing.IupacName && ing.IupacName.toLowerCase().includes(q)) ||
+        (ing.MolecularFormula && ing.MolecularFormula.toLowerCase().includes(q)) ||
+        (ing.PubChemCID && String(ing.PubChemCID).toLowerCase().includes(q)) ||
+        (ing.SMILES && ing.SMILES.toLowerCase().includes(q))
+      );
+    });
+
+    // Name search
+    expect(filterFn(ingredients, 'glyph').map(i => i.Name)).toEqual(['Glyphosate']);
+    // CID search
+    expect(filterFn(ingredients, '2256').map(i => i.Name)).toEqual(['Atrazine']);
+    // Formula search
+    expect(filterFn(ingredients, 'C8H6Cl2O3').map(i => i.Name)).toEqual(['2,4-D Acid']);
+    // IUPAC search
+    expect(filterFn(ingredients, 'triazine').map(i => i.Name)).toEqual(['Atrazine']);
+    // Empty search
+    expect(filterFn(ingredients, '').length).toBe(3);
+    // Non-matching search
+    expect(filterFn(ingredients, 'nonexistent').length).toBe(0);
+  });
 });

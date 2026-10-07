@@ -5,7 +5,7 @@ import TopBar from '../components/TopBar.jsx';
 import Modal from '../components/Modal.jsx';
 import { addIngredient, deleteIngredient } from '../services/dataLayer.js';
 import { hasAccess } from '../utils/categoryConfig.js';
-import { Edit, Trash2, Plus, Search, ChevronDown, ChevronUp, FlaskConical, Share2, ShieldCheck } from 'lucide-react';
+import { Edit, Trash2, Plus, Search, ChevronDown, ChevronUp, FlaskConical, Share2, ShieldCheck, X } from 'lucide-react';
 
 export default function Ingredients({ onMenuClick }) {
   const { state, updateState, getAppState } = useAppState();
@@ -27,6 +27,7 @@ export default function Ingredients({ onMenuClick }) {
   const [editingIngredient, setEditingIngredient] = useState(null);
   const [expandedIngId, setExpandedIngId] = useState(null);
   const [isSearching, setIsSearching] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [formData, setFormData] = useState({
     Name: '',
     Cost: '',
@@ -257,6 +258,19 @@ export default function Ingredients({ onMenuClick }) {
   const sortedIngredients = [...(state.ingredients || [])].filter(ing => ing && ing.Name)
     .sort((a, b) => String(b.ID).localeCompare(String(a.ID), undefined, { numeric: true }));
 
+  const filteredIngredients = sortedIngredients.filter(ing => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase().trim();
+    return (
+      (ing.Name && ing.Name.toLowerCase().includes(q)) ||
+      (ing.IupacName && ing.IupacName.toLowerCase().includes(q)) ||
+      (ing.MolecularFormula && ing.MolecularFormula.toLowerCase().includes(q)) ||
+      (ing.PubChemCID && String(ing.PubChemCID).toLowerCase().includes(q)) ||
+      (ing.Unit && ing.Unit.toLowerCase().includes(q)) ||
+      (ing.SMILES && ing.SMILES.toLowerCase().includes(q))
+    );
+  });
+
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
       <TopBar title="Ingredient Costs" onMenuClick={onMenuClick} />
@@ -289,10 +303,55 @@ export default function Ingredients({ onMenuClick }) {
           )}
         </div>
 
+        {/* Search Bar */}
+        <div className="mb-4 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+          <div className="relative flex-1 group">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none group-focus-within:text-emerald-600 transition-colors" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Search by ingredient name, PubChem CID, formula, IUPAC name..."
+              className="w-full pl-10 pr-10 py-2.5 bg-white border border-slate-200 rounded-xl text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 shadow-sm transition-all"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-md transition"
+                title="Clear search"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+          <div className="flex items-center justify-between sm:justify-end gap-2 text-xs font-semibold text-slate-500 px-1">
+            <span>
+              {searchQuery ? (
+                <>
+                  <span className="text-emerald-600 font-bold">{filteredIngredients.length}</span> of {sortedIngredients.length} found
+                </>
+              ) : (
+                <>
+                  <span className="font-bold text-slate-700">{sortedIngredients.length}</span> total ingredients
+                </>
+              )}
+            </span>
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="text-xs text-indigo-600 hover:text-indigo-700 hover:underline font-semibold"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+
         <div className="bg-white rounded-xl shadow-lg border border-slate-100 overflow-hidden">
-          {sortedIngredients.length > 0 ? (
+          {filteredIngredients.length > 0 ? (
             <ul className="divide-y divide-gray-200">
-              {sortedIngredients.map(ing => (
+              {filteredIngredients.map(ing => (
                 <li key={ing.ID} className="border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors">
                   <div 
                     className="p-4 flex justify-between items-center cursor-pointer" 
@@ -414,9 +473,25 @@ export default function Ingredients({ onMenuClick }) {
                 </li>
               ))}
             </ul>
-          ) : (
+          ) : sortedIngredients.length === 0 ? (
             <div className="p-12 text-center text-slate-500">
               No ingredients found. Add one to get started.
+            </div>
+          ) : (
+            <div className="p-12 text-center text-slate-500 flex flex-col items-center justify-center gap-3">
+              <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
+                <Search className="w-6 h-6" />
+              </div>
+              <div>
+                <p className="font-semibold text-slate-700">No ingredients matching &ldquo;{searchQuery}&rdquo;</p>
+                <p className="text-xs text-slate-400 mt-1">Try checking the spelling, chemical formula, or PubChem CID.</p>
+              </div>
+              <button
+                onClick={() => setSearchQuery('')}
+                className="mt-1 px-4 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg border border-emerald-200/60 transition"
+              >
+                Clear Search Filter
+              </button>
             </div>
           )}
         </div>
