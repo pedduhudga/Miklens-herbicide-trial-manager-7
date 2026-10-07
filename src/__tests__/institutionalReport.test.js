@@ -121,4 +121,60 @@ describe('Miklens Bio Institutional Report System', () => {
     const pdfFilename = await generateInstitutionalPDF(data);
     expect(pdfFilename).toContain('.pdf');
   });
+
+  it('uses exclusively real data from the selected trial without leaking hardcoded sample values', () => {
+    const customTrial = {
+      ID: 'tr-cotton-99',
+      TrialCode: 'MB/COT/2026/01',
+      FormulationName: 'Herbicide Bio-Ultra',
+      Crop: 'Cotton',
+      Variety: 'Bt Cotton RCH-2',
+      Location: 'Bhopal R&D Research Station, MP',
+      GPSLatitude: '23.2599° N',
+      GPSLongitude: '77.4126° E',
+      InvestigatorName: 'Dr. Rajesh Sharma',
+      WeedSpecies: 'Echinochloa colona, Cyperus rotundus',
+      Dosage: '40 mL/L',
+      Observations: JSON.stringify([
+        { daa: 0, date: '2026-08-01', weedCover: 90, sampleCount: 150 },
+        { daa: 7, date: '2026-08-08', weedCover: 15, weedMortalityPct: 83.33, sampleCount: 25, phytotoxicityScore10: 1.0 },
+        { daa: 14, date: '2026-08-15', weedCover: 20, weedMortalityPct: 77.78, sampleCount: 30 }
+      ])
+    };
+
+    const data = buildInstitutionalReportData(customTrial, {
+      trials: [customTrial],
+      projects: []
+    });
+
+    // Check that it uses customTrial's real metadata
+    expect(data.docControl.crop).toBe('Cotton');
+    expect(data.docControl.variety).toBe('Bt Cotton RCH-2');
+    expect(data.docControl.locationName).toBe('Bhopal R&D Research Station, MP');
+    expect(data.docControl.latitude).toBe('23.2599° N');
+    expect(data.docControl.longitude).toBe('77.4126° E');
+    expect(data.docControl.preparedBy).toBe('Dr. Rajesh Sharma');
+
+    // Ensure zero leak of hardcoded sample values
+    const serialized = JSON.stringify(data).toLowerCase();
+    expect(serialized).not.toContain('pineapple');
+    expect(serialized).not.toContain('jackfruit');
+    expect(serialized).not.toContain('senthilraja');
+    expect(serialized).not.toContain('manoj');
+    expect(serialized).not.toContain('commelina');
+    expect(serialized).not.toContain('karnataka');
+
+    // Check weed flora uses actual weeds
+    const speciesNames = data.weedFloraTable.map(w => w.scientificName);
+    expect(speciesNames).toContain('Echinochloa colona');
+    expect(speciesNames).toContain('Cyperus rotundus');
+
+    // Check single trial treatment mapping: only 1 treatment, no synthetic farmers check
+    expect(data.treatments.length).toBe(1);
+    expect(data.treatments[0].productName).toBe('Herbicide Bio-Ultra');
+    expect(data.treatments[0].dosePerLitre).toBe('40 mL/L');
+
+    // Check mortality at 7 DAT reflects real logged 83.33%
+    expect(data.treatmentMetrics[0].mortalityKey).toBe(83.33);
+  });
 });

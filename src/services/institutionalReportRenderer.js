@@ -28,6 +28,7 @@ import {
   WidthType
 } from 'docx';
 import { saveAs } from 'file-saver';
+import { getPhytotoxicityDescription } from '../utils/botanicalTaxonomy.js';
 
 // Colors
 const MIKLENS_GREEN = [5, 150, 105];       // Emerald
@@ -366,26 +367,43 @@ export async function generateInstitutionalPDF(reportData) {
   doc.setTextColor(51, 65, 85);
 
   const t1 = reportData.treatmentMetrics[0];
-  const t2 = reportData.treatmentMetrics[1] || t1;
-  const tCtrl = reportData.treatmentMetrics[reportData.treatmentMetrics.length - 1] || t1;
+  const t2 = reportData.treatmentMetrics.length > 1 ? reportData.treatmentMetrics[1] : null;
+  const tCtrl = reportData.treatmentMetrics.find(t => t.productName.toLowerCase().includes('control') || t.productName.toLowerCase().includes('untreated')) || null;
 
-  const narrativeP1 = `The trial was conducted in pineapple intercropped in a jackfruit orchard naturally infested with a mixed population of weeds. The herbicide treatments were applied as a post-emergence spray over the crop canopy and existing weed flora to evaluate weed-control efficacy and crop safety. The predominant weed flora observed in the experimental plot included broadleaf weeds, grasses, and sedges, with ${reportData.dominantFloraName} being the dominant weed species.`;
+  const cropDescription = `${dc.crop}${dc.variety ? ` (cv. ${dc.variety})` : ''}${dc.intercrop ? ` intercropped with ${dc.intercrop}` : ''}`;
+  const narrativeP1 = `The trial was conducted in ${cropDescription} at ${dc.locationName} naturally infested with a mixed population of weeds, with ${reportData.dominantFloraName} as the primary targeted species. Herbicide treatments were applied as ${dc.applicationMethod} over the experimental area to evaluate bio-efficacy and crop safety under field conditions.`;
   doc.text(doc.splitTextToSize(narrativeP1, pw - 28), 14, curY);
 
   curY += 22;
-  const narrativeP2 = `Application of ${t1.productName} @ ${t1.dose} resulted in the highest weed mortality among the treatments, recording ${t1.mortality7.toFixed(2)}% mortality at 7 DAT, compared with ${t2.mortality7.toFixed(2)}% under ${t2.productName}. Weed density under ${t1.productName} decreased substantially from ${t1.density.pre.toFixed(2)} weeds m⁻² before treatment to ${t1.density.d7.toFixed(2)} weeds m⁻² at 7 DAT, indicating rapid post-emergence suppression and burndown of the existing weed population. Although weed density increased to ${t1.density.d15.toFixed(2)} and ${t1.density.d30.toFixed(2)} weeds m⁻² at 15 and 30 DAT, respectively, it remained substantially lower than the untreated control at all observation intervals.`;
+  let narrativeP2 = '';
+  if (t1.mortalityKey !== null && t1.mortalityKey !== undefined) {
+    narrativeP2 = `Application of ${t1.productName} @ ${t1.dose} recorded ${Number(t1.mortalityKey).toFixed(2)}% weed control at ${t1.keyDat} DAT.`;
+    if (t2 && t2.mortalityKey !== null && t2.mortalityKey !== undefined) {
+      narrativeP2 += ` In comparison, ${t2.productName} recorded ${Number(t2.mortalityKey).toFixed(2)}% control at the same evaluation interval.`;
+    }
+    if (t1.density.pre > 0 && t1.density.d7 !== null) {
+      narrativeP2 += ` Weed density under ${t1.productName} changed from ${t1.density.pre.toFixed(2)} weeds m⁻² before treatment to ${t1.density.d7.toFixed(2)} weeds m⁻² post-application.`;
+    }
+  } else {
+    narrativeP2 = `Application of ${t1.productName} @ ${t1.dose} demonstrated weed suppression across monitored observation intervals. Pre-treatment weed density was recorded at ${t1.density.pre.toFixed(2)} weeds m⁻².`;
+  }
   doc.text(doc.splitTextToSize(narrativeP2, pw - 28), 14, curY);
 
-  curY += 26;
-  const narrativeP3 = `${t2.productName} also reduced weed density during the observation period, recording ${t2.density.d7.toFixed(2)}, ${t2.density.d15.toFixed(2)}, and ${t2.density.d30.toFixed(2)} weeds m⁻² at 7, 15, and 30 DAT, respectively. However, at 7 and 30 DAT, ${t1.productName} maintained superior overall suppression of the weed population. Furthermore, ${t1.productName} recorded the lowest total weed biomass, with fresh and dry weed weights of ${t1.biomass.fresh.toFixed(2)} and ${t1.biomass.dry.toFixed(2)} g m⁻², respectively, compared with ${t2.biomass.fresh.toFixed(2)} and ${t2.biomass.dry.toFixed(2)} g m⁻² under ${t2.productName} and ${tCtrl.biomass.fresh.toFixed(2)} and ${tCtrl.biomass.dry.toFixed(2)} g m⁻² in the untreated control.`;
+  curY += 24;
+  let narrativeP3 = '';
+  if (t1.biomass.hasBiomass) {
+    narrativeP3 = `Total weed biomass under ${t1.productName} recorded fresh weight of ${t1.biomass.fresh.toFixed(2)} g m⁻² and dry weight of ${t1.biomass.dry.toFixed(2)} g m⁻².`;
+    if (tCtrl && tCtrl.biomass.hasBiomass) {
+      narrativeP3 += ` Untreated control recorded fresh and dry weed weights of ${tCtrl.biomass.fresh.toFixed(2)} and ${tCtrl.biomass.dry.toFixed(2)} g m⁻², respectively.`;
+    }
+  } else {
+    narrativeP3 = `Observations over time demonstrated consistent weed suppression throughout the trial duration. Weed density and vegetative canopy were monitored according to the standard institutional evaluation protocol.`;
+  }
   doc.text(doc.splitTextToSize(narrativeP3, pw - 28), 14, curY);
 
-  curY += 26;
-  const narrativeP4 = `The untreated control recorded zero weed mortality, while weed density increased progressively from ${tCtrl.density.pre.toFixed(2)} weeds m⁻² before treatment to ${tCtrl.density.d30.toFixed(2)} weeds m⁻² at 30 DAT, confirming aggressive, unrestricted weed competition in the absence of chemical intervention.`;
-  doc.text(doc.splitTextToSize(narrativeP4, pw - 28), 14, curY);
-
-  curY += 16;
-  const narrativeP5 = `With respect to crop safety, ${t1.productName} recorded a crop phytotoxicity score of ${t1.phytotoxicity.mean.toFixed(2)} at 7 DAT (on the standard 0–10 scale), corresponding to a moderate level of injury characterized by temporary leaf tip chlorosis and superficial necrotic spots on pineapple foliage. Full recovery was observed in subsequent assessments. In conclusion, ${t1.productName} demonstrated outstanding bio-efficacy and rapid burndown suppression.`;
+  curY += 22;
+  const phytoDesc = getPhytotoxicityDescription(t1.phytotoxicity.mean);
+  const narrativeP5 = `With respect to crop safety, ${t1.productName} recorded a crop phytotoxicity score of ${t1.phytotoxicity.mean.toFixed(2)} on the standard 0–10 scale (${phytoDesc.injuryLevel}: ${phytoDesc.symptoms}) on ${dc.crop} foliage. No persistent adverse crop effects or irreversible stunting was observed. In conclusion, the evaluation confirms the bio-efficacy and crop selectivity profile of ${t1.productName}.`;
   doc.text(doc.splitTextToSize(narrativeP5, pw - 28), 14, curY);
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -417,7 +435,7 @@ export async function generateInstitutionalPDF(reportData) {
   curY += 4;
   doc.setFontSize(8.5);
   doc.setFont('helvetica', 'normal');
-  doc.text(`Method of Application: ${dc.applicationMethod} using knapsack sprayer fitted with flood-jet nozzle. Spray volume: 450 L/ha.`, 14, curY);
+  doc.text(`Method of Application: ${dc.applicationMethod}. Water Volume: ${dc.sprayVolume}. Weather: ${dc.weatherContext}.`, 14, curY, { maxWidth: pw - 28 });
 
   curY += 12;
   doc.setFontSize(11);
@@ -690,15 +708,20 @@ export async function generateInstitutionalPDF(reportData) {
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(51, 65, 85);
 
-  const inf1 = `1. Knockdown Bio-Efficacy: ${t1.productName} exhibited rapid post-emergence activity with ${t1.mortality7.toFixed(2)}% mortality within 7 DAT, substantially outperforming standard commercial farmer practice (${t2.mortality7.toFixed(2)}%).`;
+  const inf1 = t2 && t2.mortalityKey !== null
+    ? `1. Bio-Efficacy: ${t1.productName} exhibited effective post-emergence weed control (${t1.mortality7.toFixed(2)}% at ${t1.keyDat} DAT), compared with ${t2.productName} (${t2.mortality7.toFixed(2)}%).`
+    : `1. Bio-Efficacy: ${t1.productName} @ ${t1.dose} exhibited strong post-emergence suppression with ${t1.mortality7.toFixed(2)}% weed control recorded at ${t1.keyDat} DAT.`;
   doc.text(doc.splitTextToSize(inf1, pw - 28), 14, curY);
 
   curY += 12;
-  const inf2 = `2. Biomass Reduction: Both fresh weight (${t1.biomass.fresh.toFixed(2)} g m⁻²) and oven-dry weight (${t1.biomass.dry.toFixed(2)} g m⁻²) demonstrated over 59% weed dry matter reduction compared to untreated check (${tCtrl.biomass.dry.toFixed(2)} g m⁻²).`;
+  const inf2 = t1.biomass.hasBiomass
+    ? `2. Biomass Reduction: Weed fresh weight (${t1.biomass.fresh.toFixed(2)} g m⁻²) and oven-dry weight (${t1.biomass.dry.toFixed(2)} g m⁻²) reflected substantial vegetative matter suppression under field evaluation.`
+    : `2. Population Suppression: Weed density progression over time confirmed effective canopy suppression under ${t1.productName} treatment plots.`;
   doc.text(doc.splitTextToSize(inf2, pw - 28), 14, curY);
 
   curY += 12;
-  const inf3 = `3. Crop Selectivity: Moderate initial phytotoxicity (Score ${t1.phytotoxicity.mean.toFixed(2)}) is transient contact leaf spotting that does not impair apical meristem development or plant survival.`;
+  const phytoInfo = getPhytotoxicityDescription(t1.phytotoxicity.mean);
+  const inf3 = `3. Crop Selectivity: Crop safety rating of ${t1.phytotoxicity.mean.toFixed(2)} / 10 indicates ${phytoInfo.injuryLevel.toLowerCase()} impact on ${dc.crop} (${phytoInfo.symptoms}), confirming acceptable crop selectivity under field conditions.`;
   doc.text(doc.splitTextToSize(inf3, pw - 28), 14, curY);
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -716,7 +739,7 @@ export async function generateInstitutionalPDF(reportData) {
   curY += 8;
   doc.setFontSize(9);
   doc.setFont('helvetica', 'bold');
-  doc.text('Plate 1: Phyto-toxicity (leaf chlorosis and necrosis) observed on Crop foliage @ 7 DAT', 14, curY);
+  doc.text(`Plate 1: Field observations on ${dc.crop} foliage post-application`, 14, curY);
 
   curY += 4;
   // Photo Frame 1
@@ -727,7 +750,10 @@ export async function generateInstitutionalPDF(reportData) {
   doc.setFontSize(9);
   doc.setFont('helvetica', 'italic');
   doc.setTextColor(148, 163, 184);
-  doc.text('[ In-situ High-Resolution Image Plate: Crop Foliage Phytotoxicity @ 7 DAT ]', pw / 2, curY + 42, { align: 'center' });
+  const p1Text = reportData.photoUrls.length > 0
+    ? `[ In-situ Field Image Plate: ${reportData.photoUrls[0].label || 'Field Trial Plot'} ]`
+    : `[ In-situ Field Image Plate: ${dc.crop} Plot Evaluation ]`;
+  doc.text(p1Text, pw / 2, curY + 42, { align: 'center' });
 
   curY += 92;
   doc.setFontSize(9);
@@ -738,7 +764,7 @@ export async function generateInstitutionalPDF(reportData) {
   doc.setFontSize(8);
   doc.setFont('helvetica', 'italic');
   doc.setTextColor(71, 85, 105);
-  doc.text('(Note: The trial location experienced intermittent daily rainfall throughout the study period)', 14, curY);
+  doc.text(`(Weather context: ${dc.weatherContext})`, 14, curY);
 
   curY += 4;
   // Photo Frame 2
@@ -749,7 +775,10 @@ export async function generateInstitutionalPDF(reportData) {
   doc.setFontSize(9);
   doc.setFont('helvetica', 'italic');
   doc.setTextColor(148, 163, 184);
-  doc.text(`[ In-situ High-Resolution Image Plate: ${t1.productName} Field Plot Efficacy Canopy ]`, pw / 2, curY + 42, { align: 'center' });
+  const p2Text = reportData.photoUrls.length > 1
+    ? `[ In-situ Field Image Plate: ${reportData.photoUrls[1].label || t1.productName} ]`
+    : `[ In-situ Field Image Plate: ${t1.productName} Field Plot Efficacy Canopy ]`;
+  doc.text(p2Text, pw / 2, curY + 42, { align: 'center' });
 
   // ═══════════════════════════════════════════════════════════════════════════
   // PAGES 11–15: APPENDICES — RAW QUADRAT SAMPLING & REPLICATE DATA
@@ -1010,7 +1039,7 @@ export async function generateInstitutionalDocx(reportData) {
             heading: HeadingLevel.HEADING_2
           }),
           new Paragraph({
-            text: `To evaluate the weed-control efficacy and crop selectivity of ${reportData.treatments[0]?.productName || 'Test Product'} under field conditions.`
+            text: `To evaluate the weed-control efficacy and crop selectivity of ${reportData.treatments[0]?.productName || 'Test Product'} on ${dc.crop} under field conditions.`
           }),
           new Paragraph({ text: '' }),
           new Table({
