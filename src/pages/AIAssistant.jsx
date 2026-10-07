@@ -2,12 +2,17 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppState } from '../hooks/useAppState.jsx';
 import TopBar from '../components/TopBar.jsx';
-import { Sparkles, SendHorizontal, Trash2, Copy, Check, Paperclip, X, Mic, MicOff, Image as ImageIcon, Search, PlusCircle, MessageSquare, FlaskConical, Target, TrendingUp, Cpu, Volume2, VolumeX, Sliders, ShieldAlert, Clock, Bot, Zap } from 'lucide-react';
+import { 
+  Sparkles, SendHorizontal, Trash2, Copy, Check, Paperclip, X, Mic, MicOff, 
+  Image as ImageIcon, Search, PlusCircle, MessageSquare, FlaskConical, Target, 
+  TrendingUp, Cpu, Volume2, VolumeX, Sliders, ShieldAlert, Clock, Bot, Zap,
+  Activity, Stethoscope, CloudSun, CheckCircle2, ArrowRight
+} from 'lucide-react';
 import { safeJsonParse } from '../utils/helpers.js';
 import { sanitizeAiContent } from '../utils/sanitize.js';
 import { _callGeminiApiWithRetries, callGeminiApiStream, resetGeminiState } from '../services/ai.js';
 import { generateTextWithAI } from '../services/multiProviderAI.js';
-import { getAiChatSessions, saveAiChatSession, deleteAiChatSession, addFormulation, validateCategoryDataOperation } from '../services/dataLayer.js';
+import { getAiChatSessions, saveAiChatSession, deleteAiChatSession, addFormulation, updateTrial, validateCategoryDataOperation } from '../services/dataLayer.js';
 import { calculateFormulationCost } from '../utils/costUtils.js';
 import { getCategoryConfig, getPrimaryObservationField } from '../utils/categoryConfig.js';
 import { 
@@ -21,6 +26,8 @@ import { buildAIMemoryContext } from '../utils/aiMemory.js';
 import { compressAIContext } from '../utils/aiContextCompressor.js';
 import { DEFAULT_GEMINI_MODEL } from '../utils/aiConstants.js';
 import { findDuplicateFormulation } from '../utils/formulationDuplicateUtils.js';
+import { detectAndExecuteAgronomicTool, toolAuditTrialDoctor, toolCheckSprayWindow, toolRunAnova, toolEvaluateColbyAndCost, toolParseVoiceScout } from '../services/aiTools.js';
+import { analyzeWeedCover } from '../utils/imageAnalysis.js';
 import ChatArtifactRenderer from '../components/ChatArtifactRenderer.jsx';
 
 const THINKING_PHASES = [
@@ -116,7 +123,7 @@ function parseMessageContent(content) {
   // Clean away any suggestions code block so it doesn't show up in text
   const cleanText = content.replace(/```(?:suggestions?|followups?)\s*\[[\s\S]*?\]\s*```/gi, '').trim();
 
-  const blockRegex = /```(?:formula|json|artifact(?::\w+)?|chart|doseresponse|launch_trial)?\s*(\{[\s\S]*?\})\s*```/gi;
+  const blockRegex = /```(?:formula|json|artifact(?::\w+)?|chart|doseresponse|launch_trial|anova|spray_window|trial_doctor|voice_scout)?\s*(\{[\s\S]*?\})\s*```/gi;
   const parts = [];
   let lastIndex = 0;
   let match;
@@ -132,18 +139,29 @@ function parseMessageContent(content) {
 
     if (!parsed) continue;
 
-    // 1. Check for Interactive Visual Artifact blocks (Charts, Dose-Response, 1-Click Launchers, Feasibility cards)
+    // 1. Check for Interactive Visual Artifact blocks
     const isChartArtifact = parsed.artifactType === 'chart' || parsed.chartType || (Array.isArray(parsed.datasets) && Array.isArray(parsed.labels));
     const isDoseResponseArtifact = parsed.artifactType === 'doseresponse' || parsed.artifactType === 'dose_response' || (parsed.ed50 !== undefined && parsed.formula);
     const isLaunchTrialArtifact = parsed.artifactType === 'launch_trial' || parsed.artifactType === 'launchtrial' || parsed.launchTrial;
     const isFeasibilityArtifact = parsed.artifactType === 'feasibility' || parsed.artifactType === 'formula_feasibility' || (parsed.predictedEfficacyAvg !== undefined && Array.isArray(parsed.susceptibleWeeds));
+    const isAnovaArtifact = parsed.artifactType === 'anova' || (parsed.fStatistic !== undefined && Array.isArray(parsed.treatments));
+    const isSprayWindowArtifact = parsed.artifactType === 'spray_window' || (parsed.currentScore !== undefined && Array.isArray(parsed.topWindows));
+    const isTrialDoctorArtifact = parsed.artifactType === 'trial_doctor' || (parsed.healthScore !== undefined && Array.isArray(parsed.issues));
+    const isVoiceScoutArtifact = parsed.artifactType === 'voice_scout' || (parsed.plot && parsed.efficacy !== undefined && parsed.formulation);
 
-    if (isChartArtifact || isDoseResponseArtifact || isLaunchTrialArtifact || isFeasibilityArtifact) {
-      const textBefore = content.substring(lastIndex, match.index);
+    if (isChartArtifact || isDoseResponseArtifact || isLaunchTrialArtifact || isFeasibilityArtifact || isAnovaArtifact || isSprayWindowArtifact || isTrialDoctorArtifact || isVoiceScoutArtifact) {
+      const textBefore = cleanText.substring(lastIndex, match.index);
       if (textBefore.trim()) {
         parts.push({ type: 'text', text: textBefore });
       }
-      const artifactType = isChartArtifact ? 'chart' : (isDoseResponseArtifact ? 'doseresponse' : (isFeasibilityArtifact ? 'feasibility' : 'launch_trial'));
+      const artifactType = isChartArtifact ? 'chart' :
+        isDoseResponseArtifact ? 'doseresponse' :
+        isFeasibilityArtifact ? 'feasibility' :
+        isAnovaArtifact ? 'anova' :
+        isSprayWindowArtifact ? 'spray_window' :
+        isTrialDoctorArtifact ? 'trial_doctor' :
+        isVoiceScoutArtifact ? 'voice_scout' :
+        'launch_trial';
       parts.push({
         type: 'artifact',
         artifactType,
@@ -368,8 +386,9 @@ export default function AIAssistant({ onMenuClick }) {
   const [copied, setCopied] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [attachedImage, setAttachedImage] = useState(null); // { base64, mimeType, name }
+  const [attachedImage, setAttachedImage] = useState(null); // { base64, mimeType, name, pixelSensor }
   const [isListening, setIsListening] = useState(false);
+  const [isFieldWalkMode, setIsFieldWalkMode] = useState(false);
   const [savedFormulas, setSavedFormulas] = useState({});
   const [speakingMsgIdx, setSpeakingMsgIdx] = useState(null);
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
@@ -531,11 +550,26 @@ export default function AIAssistant({ onMenuClick }) {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => {
+    reader.onload = async (ev) => {
       const dataUrl = ev.target.result;
       const [header, base64] = dataUrl.split(',');
       const mimeType = header.match(/:(.*?);/)?.[1] || 'image/jpeg';
-      setAttachedImage({ base64, mimeType, name: file.name });
+
+      // Immediately run in-browser pixel vegetation sensor
+      let pixelSensor = null;
+      try {
+        const pix = await analyzeWeedCover(dataUrl, true);
+        pixelSensor = {
+          greenRatio: Math.round((pix.greenRatio || 0) * 100),
+          deadRatio: Math.round((pix.deadRatio || 0) * 100),
+          vari: pix.vari !== undefined ? Number(pix.vari).toFixed(3) : null,
+          verdict: pix.pixelVerdict || ''
+        };
+      } catch (err) {
+        console.warn('[AI Assistant] In-browser pixel sensor failed:', err);
+      }
+
+      setAttachedImage({ base64, mimeType, name: file.name, pixelSensor });
     };
     reader.readAsDataURL(file);
     e.target.value = '';
@@ -569,6 +603,156 @@ export default function AIAssistant({ onMenuClick }) {
     recognition.onerror = () => setIsListening(false);
     recognition.start();
     setIsListening(true);
+  };
+
+  const toggleFieldWalkMode = () => {
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Voice recognition not supported in this browser', type: 'error' } }));
+      return;
+    }
+
+    if (isFieldWalkMode) {
+      setIsFieldWalkMode(false);
+      recognitionRef.current?.stop();
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Field Walk Mode paused', type: 'info' } }));
+      return;
+    }
+
+    setIsFieldWalkMode(true);
+    window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: '🎙️ Field Walk Mode Active: Speak plot observations hands-free', type: 'success' } }));
+
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new SR();
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.lang = 'en-US';
+    recognitionRef.current = recognition;
+
+    recognition.onresult = async (ev) => {
+      const lastResultIndex = ev.results.length - 1;
+      const transcript = ev.results[lastResultIndex][0]?.transcript?.trim();
+      if (!transcript) return;
+
+      console.log('[Field Walk] Captured voice scout utterance:', transcript);
+
+      const scoutData = toolParseVoiceScout({ transcript }, { trials: state.trials || [] });
+      if (scoutData && scoutData.success) {
+        const obs = scoutData.data;
+
+        if ('speechSynthesis' in window) {
+          try {
+            window.speechSynthesis.cancel();
+            const speakText = `Observation logged for ${obs.plot}. ${obs.efficacy} percent control with ${obs.formulation}.`;
+            const utterance = new SpeechSynthesisUtterance(speakText);
+            utterance.rate = 1.05;
+            window.speechSynthesis.speak(utterance);
+          } catch (speakErr) {
+            console.warn('[Field Walk] Speech synthesis failed:', speakErr);
+          }
+        }
+
+        const assistantMsg = `🎙️ **Field Walk Scout Note Captured**\n\nSpoken observation: *"${transcript}"*\n\n\`\`\`artifact\n${JSON.stringify(scoutData.artifact)}\n\`\`\``;
+
+        const currentSession = (state.aiChatSessions || []).find(s => s.id === state.currentAiChatSessionId);
+        const currentTurns = currentSession?.messages || [];
+        const updatedTurns = [
+          ...currentTurns,
+          { role: 'user', content: `🎙️ [Field Scout Voice]: "${transcript}"` },
+          {
+            role: 'assistant',
+            content: assistantMsg,
+            meta: { timestamp: new Date().toLocaleTimeString(), model: 'Field Walk Scout Engine' }
+          }
+        ];
+
+        let sId = state.currentAiChatSessionId || Date.now().toString();
+        let updatedSessions = [...(state.aiChatSessions || [])];
+        const sIdx = updatedSessions.findIndex(s => s.id === sId);
+        if (sIdx !== -1) {
+          updatedSessions[sIdx] = { ...updatedSessions[sIdx], messages: updatedTurns };
+        } else {
+          updatedSessions.unshift({
+            id: sId,
+            title: `Field Walk: ${obs.plot}`,
+            messages: updatedTurns,
+            timestamp: Date.now(),
+            category: activeCategory
+          });
+        }
+        updateState({ aiChatSessions: updatedSessions, currentAiChatSessionId: sId });
+      }
+    };
+
+    recognition.onerror = (e) => {
+      console.warn('[Field Walk] Voice recognition error:', e);
+      if (e.error !== 'no-speech') {
+        setIsFieldWalkMode(false);
+      }
+    };
+
+    recognition.onend = () => {
+      if (recognitionRef.current && isFieldWalkMode) {
+        try {
+          recognitionRef.current.start();
+        } catch (e) {}
+      }
+    };
+
+    try {
+      recognition.start();
+    } catch (e) {
+      console.warn('Recognition start failed:', e);
+    }
+  };
+
+  const handleSaveVoiceObservation = async (obsData) => {
+    if (isViewer) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Viewer role cannot save trial observations.', type: 'error' } }));
+      return;
+    }
+
+    try {
+      const targetTrial = (state.trials || []).find(t => 
+        t.ID === obsData.matchedTrialId ||
+        (t.FormulationName && obsData.formulation && t.FormulationName.toLowerCase().includes(obsData.formulation.toLowerCase()))
+      ) || (state.trials || [])[0];
+
+      if (!targetTrial) {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'No trial found to attach observation to.', type: 'error' } }));
+        return;
+      }
+
+      const existingEff = safeJsonParse(targetTrial.EfficacyDataJSON, []);
+      const newObs = {
+        plot: obsData.plot || 'Plot 1',
+        daa: Number(obsData.daa ?? 7),
+        controlPct: Number(obsData.efficacy ?? 80),
+        cropInjury: obsData.cropInjury || 'None',
+        notes: obsData.notes || 'Recorded via Field Walk Scout',
+        timestamp: new Date().toISOString()
+      };
+
+      const updatedEff = [...existingEff, newObs];
+      const updatedTrial = {
+        ...targetTrial,
+        EfficacyDataJSON: JSON.stringify(updatedEff)
+      };
+
+      await updateTrial(updatedTrial, getAppState);
+
+      const updatedTrials = (state.trials || []).map(t => t.ID === targetTrial.ID ? updatedTrial : t);
+      updateState({ trials: updatedTrials });
+
+      window.dispatchEvent(new CustomEvent('app:toast', { 
+        detail: { 
+          msg: `✓ Observation successfully saved to trial ${targetTrial.FormulationName || targetTrial.ID} (Plot ${obsData.plot})!`, 
+          type: 'success' 
+        } 
+      }));
+    } catch (err) {
+      console.error('[AI Assistant] Failed to save observation:', err);
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Failed to save: ${err.message}`, type: 'error' } }));
+    }
   };
 
   const sendMessage = useCallback(async (text) => {
@@ -633,6 +817,21 @@ export default function AIAssistant({ onMenuClick }) {
 
     const startTime = Date.now();
     try {
+      // === AGENTIC AGRONOMIC TOOL EXECUTION LAYER ===
+      const toolContext = {
+        trials: state.trials || [],
+        formulations: state.formulations || [],
+        ingredients: state.ingredients || [],
+        activeCategory
+      };
+
+      let executedTool = null;
+      try {
+        executedTool = await detectAndExecuteAgronomicTool(userMsg, toolContext);
+      } catch (toolErr) {
+        console.warn('[AI Assistant] Tool intent execution error:', toolErr);
+      }
+
       // === SMART QUERY-AWARE CONTEXT ENGINE ===
       // 1. Build full database knowledge base
       const { contextString: memoryContext, stats: memStats } = buildAIMemoryContext(
@@ -662,6 +861,17 @@ export default function AIAssistant({ onMenuClick }) {
       const rawPast = newHistory.slice(-11, -1);
       const isFollowUp = rawPast.length > 0;
       const turnCount = Math.floor(rawPast.length / 2) + 1;
+
+      const toolGrounding = executedTool && executedTool.result?.success
+        ? `\n\nREAL-TIME VERIFIED AGRONOMIC TOOL EXECUTION RESULT:
+Tool Name: ${executedTool.toolName}
+Calculated Ground Truth: ${JSON.stringify(executedTool.result.data)}
+MANDATORY INTERACTIVE ARTIFACT: You MUST embed this exact artifact block in your response:
+\`\`\`artifact
+${JSON.stringify(executedTool.result.artifact)}
+\`\`\`
+Directly cite and synthesize these verified calculations in your scientific explanation.`
+        : '';
 
       const systemCtx = `You are the Senior Principal ${config.name} Research Director and Chief Agronomist at Miklens Bio, serving as the definitive expert AI research engine with direct access to this organization's complete ${config.name} trial and formulation database.
 
@@ -768,6 +978,8 @@ At the very end of your response, provide 2 to 3 concise, highly relevant follow
 ["Follow-up question 1", "Follow-up question 2", "Follow-up question 3"]
 \`\`\`
 
+${toolGrounding}
+
 ${compressedContext}`;
 
       const conversationTurns = [];
@@ -801,10 +1013,20 @@ ${compressedContext}`;
         }
       }
 
-      // Add current user prompt
+      // Add current user prompt with objective pixel sensor grounding if image attached
       const currentParts = [{ text: userMsg }];
       if (img) {
         currentParts.push({ inlineData: { data: img.base64, mimeType: img.mimeType } });
+        if (img.pixelSensor) {
+          currentParts.push({
+            text: `OBJECTIVE PIXEL SENSOR GROUND TRUTH (IN-BROWSER SENSOR MEASUREMENTS):
+- Green living weed tissue ratio: ${img.pixelSensor.greenRatio}%
+- Necrotic/dead desiccation tissue ratio: ${img.pixelSensor.deadRatio}%
+- VARI Vegetation Index: ${img.pixelSensor.vari}
+- Sensor Ground Truth Verdict: "${img.pixelSensor.verdict}"
+Anchor your weed species diagnosis, burn rate, and living cover estimates strictly to these physical sensor measurements.`
+          });
+        }
       }
 
       if (sanitizedTurns.length > 0 && sanitizedTurns[sanitizedTurns.length - 1].role === 'user') {
@@ -858,8 +1080,26 @@ ${compressedContext}`;
             const fallbackPrompt = `${systemCtx}\n\nUser: ${userMsg}`;
             reply = await generateTextWithAI(fallbackPrompt, systemCtx);
           } catch (fallbackErr) {
-            throw new Error(`AI analysis error: ${geminiErr.message}. (Fallback error: ${fallbackErr.message})`);
+            // If an agentic tool was executed, deliver its verified output even if LLM fails!
+            if (executedTool && executedTool.result?.success) {
+              const art = executedTool.result.artifact;
+              const title = art.artifactType === 'anova' ? '📊 One-Way ANOVA Statistical Analysis'
+                : art.artifactType === 'spray_window' ? '🌦️ Spray Weather Window Advisor'
+                : art.artifactType === 'trial_doctor' ? '🩺 Trial Doctor Diagnostic Audit'
+                : '🧪 Colby Synergy & Recipe Feasibility';
+              reply = `### ${title}\n\nAnalysis executed directly against current verified database records:\n\n\`\`\`artifact\n${JSON.stringify(art)}\n\`\`\``;
+            } else {
+              throw new Error(`AI analysis error: ${geminiErr.message}. (Fallback error: ${fallbackErr.message})`);
+            }
           }
+        }
+      }
+
+      // Ensure artifact block is included if tool was executed
+      if (executedTool && executedTool.result?.artifact) {
+        const artType = executedTool.result.artifact.artifactType;
+        if (!reply.includes(artType)) {
+          reply = `${reply.trim()}\n\n\`\`\`artifact\n${JSON.stringify(executedTool.result.artifact)}\n\`\`\``;
         }
       }
 
@@ -1365,6 +1605,89 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
             </div>
           </div>
 
+          {/* Agronomic Superpowers Action Strip */}
+          <div className="px-3 py-2 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex items-center justify-between gap-2 overflow-x-auto text-xs border-b border-indigo-900/50 shadow-inner">
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="font-extrabold uppercase tracking-wider text-[10px] text-emerald-400 flex items-center gap-1">
+                <Sparkles className="w-3 h-3" /> AI Superpowers:
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5 overflow-x-auto">
+              <button
+                type="button"
+                onClick={() => sendMessage(`Run a comprehensive Trial Doctor diagnostic audit across all ${config.name.toLowerCase()} trials in the database. Identify data inconsistencies, abnormal efficacy spikes, weather failure correlations, and herbicide resistance risks.`)}
+                className="px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 font-semibold flex items-center gap-1 shrink-0 transition active:scale-95 text-[11px] cursor-pointer"
+                title="Audit database for data entry bugs, weather failures, and resistance risks"
+              >
+                <Stethoscope className="w-3.5 h-3.5 text-rose-400" />
+                <span>🩺 Trial Doctor Audit</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => sendMessage(`Check live spray weather window and Delta-T conditions for our field trial location today and tomorrow. What are the optimal application hours with minimal drift and evaporation risk?`)}
+                className="px-2.5 py-1 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/40 font-semibold flex items-center gap-1 shrink-0 transition active:scale-95 text-[11px] cursor-pointer"
+                title="Live Open-Meteo Delta-T and spray window forecast"
+              >
+                <CloudSun className="w-3.5 h-3.5 text-sky-400" />
+                <span>🌦️ Spray Window</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => sendMessage(`Run a one-way ANOVA statistical variance test comparing our top formulations for ${uniqueTargets[0] || 'dominant weed'}. Calculate the F-statistic, p-value (p < 0.05 significance), and treatment means table.`)}
+                className="px-2.5 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 font-semibold flex items-center gap-1 shrink-0 transition active:scale-95 text-[11px] cursor-pointer"
+                title="Run statistical ANOVA and Tukey HSD test"
+              >
+                <Activity className="w-3.5 h-3.5 text-indigo-400" />
+                <span>📊 Run ANOVA Test</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => sendMessage(`Evaluate Colby synergy and ingredient batch cost (₹/L) for combining our top systemic herbicide with a bio-penetrant adjuvant. Provide predicted weed sensitivity spectrum and check for chemical antagonism.`)}
+                className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 font-semibold flex items-center gap-1 shrink-0 transition active:scale-95 text-[11px] cursor-pointer"
+                title="Colby tank-mix synergy & commercial ingredient costing"
+              >
+                <FlaskConical className="w-3.5 h-3.5 text-emerald-400" />
+                <span>🧪 Colby Synergy & Cost</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={toggleFieldWalkMode}
+                className={`px-2.5 py-1 rounded-lg border font-semibold flex items-center gap-1 shrink-0 transition active:scale-95 text-[11px] cursor-pointer ${
+                  isFieldWalkMode
+                    ? 'bg-emerald-600 text-white border-emerald-400 shadow-md shadow-emerald-500/30'
+                    : 'bg-white/10 hover:bg-white/20 text-slate-200 border-white/20'
+                }`}
+                title="Hands-free continuous conversational voice field scout"
+              >
+                <Mic className={`w-3.5 h-3.5 ${isFieldWalkMode ? 'text-white animate-pulse' : 'text-emerald-400'}`} />
+                <span>{isFieldWalkMode ? '🎙️ Field Walk Active' : '🎙️ Field Walk Mode'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Active Field Walk Mode Status Banner */}
+          {isFieldWalkMode && (
+            <div className="px-4 py-2 bg-emerald-700 text-white flex items-center justify-between text-xs font-semibold animate-pulse shadow-inner">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-white animate-ping" />
+                <span>Field Walk Mode Active: Speak plot observations hands-free (e.g. "Plot 3, Glycyl 10ml, 85% control").</span>
+              </div>
+              <button
+                type="button"
+                onClick={toggleFieldWalkMode}
+                className="px-2.5 py-1 bg-emerald-900/80 hover:bg-emerald-950 text-emerald-100 rounded text-[11px] font-bold cursor-pointer"
+              >
+                Pause Field Walk
+              </button>
+            </div>
+          )}
+
           {/* Collapsible Trial Outcome Simulator Drawer */}
           {isSimulatorOpen && (
             <div className="border-b border-indigo-100 bg-gradient-to-b from-indigo-50/70 to-white p-4 transition-all">
@@ -1792,6 +2115,8 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                               key={pIdx}
                               artifactType={part.artifactType}
                               data={part.data}
+                              onPromptClick={(p) => sendMessage(p)}
+                              onSaveObservation={handleSaveVoiceObservation}
                             />
                           );
                         }
@@ -1985,10 +2310,17 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
               </p>
             )}
             {attachedImage && (
-              <div className="flex items-center gap-2 mb-2 px-3 py-1.5 bg-blue-50 border border-blue-100 rounded-lg">
-                <ImageIcon className="w-4 h-4 text-blue-500 shrink-0" />
-                <span className="text-xs text-blue-700 font-medium truncate flex-1">{attachedImage.name}</span>
-                <button onClick={() => setAttachedImage(null)} className="text-blue-400 hover:text-red-500">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-xl text-xs shadow-2xs">
+                <div className="flex items-center gap-2 min-w-0">
+                  <ImageIcon className="w-4 h-4 text-blue-600 shrink-0" />
+                  <span className="text-blue-800 font-semibold truncate max-w-[200px]">{attachedImage.name}</span>
+                  {attachedImage.pixelSensor && (
+                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                      🟢 Green: {attachedImage.pixelSensor.greenRatio}% | 🍂 Necrotic: {attachedImage.pixelSensor.deadRatio}% | VARI: {attachedImage.pixelSensor.vari}
+                    </span>
+                  )}
+                </div>
+                <button onClick={() => setAttachedImage(null)} className="text-blue-400 hover:text-red-500 p-1">
                   <X className="w-3.5 h-3.5" />
                 </button>
               </div>

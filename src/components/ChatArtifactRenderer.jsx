@@ -1,7 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Chart from 'chart.js/auto';
 import { useNavigate } from 'react-router-dom';
-import { Rocket, Sliders, TrendingUp, BarChart2, Download, FlaskConical, Check } from 'lucide-react';
+import { 
+  Rocket, Sliders, TrendingUp, BarChart2, Download, FlaskConical, Check, 
+  Activity, AlertTriangle, CloudSun, Stethoscope, Mic, CheckCircle2, 
+  ShieldAlert, Sparkles, ArrowRight, Thermometer, Wind, Droplets, Calendar
+} from 'lucide-react';
 
 /**
  * Renders an interactive Chart.js visualization directly inside a chat bubble.
@@ -128,7 +132,6 @@ function InChatDoseResponseWidget({ data }) {
   const [currentDose, setCurrentDose] = useState(initialDose);
 
   // 4-Parameter Log-Logistic Sigmoid Model (0% base to 100% max)
-  // Efficacy(x) = 100 / (1 + (x / ED50)^(-slope))
   const predictedEff = Math.min(
     Math.max(Math.round(100 / (1 + Math.pow(currentDose / ed50, -slope))), 0),
     100
@@ -273,6 +276,7 @@ function InChatFeasibilityWidget({ data }) {
   const isDuplicate = !!data.isDuplicate;
   const duplicateName = data.duplicateOf || '';
   const duplicateId = data.duplicateId || '';
+  const costPerLiter = data.costPerLiter || null;
   
   const susceptible = Array.isArray(data.susceptibleWeeds) ? data.susceptibleWeeds : [];
   const moderate = Array.isArray(data.moderateWeeds) ? data.moderateWeeds : [];
@@ -301,10 +305,15 @@ function InChatFeasibilityWidget({ data }) {
           </div>
           <div>
             <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block">
-              AI Efficacy & Weed Spectrum Prediction
+              AI Colby Synergy & Spectrum Prediction
             </span>
             <h4 className="font-extrabold text-sm text-white flex items-center gap-2">
               {formulaName}
+              {costPerLiter && (
+                <span className="text-[11px] font-mono font-bold px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 rounded-md">
+                  Cost: {costPerLiter}
+                </span>
+              )}
             </h4>
           </div>
         </div>
@@ -326,6 +335,17 @@ function InChatFeasibilityWidget({ data }) {
             >
               "{duplicateName}"
             </button>. Avoid redundant field plots!
+          </div>
+        </div>
+      )}
+
+      {/* Antagonism Warning Badge */}
+      {data.hasAntagonism && (
+        <div className="mb-3 p-2.5 bg-rose-500/20 border border-rose-400/40 rounded-xl text-rose-200 flex items-start gap-2">
+          <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+          <div className="text-[11px] leading-tight">
+            <strong className="text-rose-100">Biochemical Antagonism Alert: </strong>
+            {data.antagonismReason || 'Components may inhibit mutual absorption.'}
           </div>
         </div>
       )}
@@ -373,7 +393,7 @@ function InChatFeasibilityWidget({ data }) {
           Target Weed Spectrum Breakdown
         </span>
 
-        {/* Susceptible (High Control >85%) */}
+        {/* Susceptible */}
         {susceptible.length > 0 && (
           <div className="bg-emerald-950/40 border border-emerald-500/30 rounded-xl p-2.5">
             <div className="flex items-center gap-1.5 text-emerald-400 font-bold text-[11px] mb-1">
@@ -389,7 +409,7 @@ function InChatFeasibilityWidget({ data }) {
           </div>
         )}
 
-        {/* Moderate / Suppression */}
+        {/* Moderate */}
         {moderate.length > 0 && (
           <div className="bg-amber-950/30 border border-amber-500/30 rounded-xl p-2.5">
             <div className="flex items-center gap-1.5 text-amber-400 font-bold text-[11px] mb-1">
@@ -405,11 +425,11 @@ function InChatFeasibilityWidget({ data }) {
           </div>
         )}
 
-        {/* Tolerant / Requires Partner */}
+        {/* Tolerant */}
         {tolerant.length > 0 && (
           <div className="bg-rose-950/30 border border-rose-500/30 rounded-xl p-2.5">
             <div className="flex items-center gap-1.5 text-rose-400 font-bold text-[11px] mb-1">
-              <span>🔴 Tolerant / Resistant (Requires Tank-Mix Partner):</span>
+              <span>🔴 Tolerant / Resistant (Requires Partner):</span>
             </div>
             <div className="flex flex-wrap gap-1">
               {tolerant.map((w, i) => (
@@ -441,9 +461,366 @@ function InChatFeasibilityWidget({ data }) {
 }
 
 /**
+ * Superpower Widget 1: Interactive ANOVA Statistical Analysis Card
+ */
+function InChatAnovaWidget({ data }) {
+  const treatments = Array.isArray(data.treatments) ? data.treatments : [];
+  const isSignificant = !!data.isSignificant;
+
+  return (
+    <div className="my-3 p-4 bg-white rounded-2xl border border-indigo-200/90 shadow-xs text-xs not-prose max-w-full">
+      <div className="flex items-center justify-between gap-2 pb-2.5 mb-3 border-b border-indigo-100">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-xl bg-indigo-50 border border-indigo-200 flex items-center justify-center text-indigo-600">
+            <Activity className="w-4 h-4" />
+          </div>
+          <div>
+            <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider block">
+              Statistical Biometrics Engine
+            </span>
+            <h4 className="font-extrabold text-sm text-slate-900">
+              One-Way ANOVA: {data.target || 'Efficacy Comparison'}
+            </h4>
+          </div>
+        </div>
+        <span className={`text-[10px] font-extrabold px-2.5 py-1 rounded-full border ${
+          isSignificant 
+            ? 'bg-emerald-50 text-emerald-800 border-emerald-300' 
+            : 'bg-amber-50 text-amber-800 border-amber-300'
+        }`}>
+          {isSignificant ? 'p < 0.05 (Significant Difference)' : 'p ≥ 0.05 (No Significant Diff)'}
+        </span>
+      </div>
+
+      {/* Key Metric Strip */}
+      <div className="grid grid-cols-3 gap-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200/80 mb-3 text-center">
+        <div>
+          <span className="text-[10px] font-bold text-slate-400 block uppercase">F-Statistic</span>
+          <span className="text-base font-black text-slate-800 font-mono">{data.fStatistic || '—'}</span>
+        </div>
+        <div>
+          <span className="text-[10px] font-bold text-slate-400 block uppercase">P-Value</span>
+          <span className={`text-base font-black font-mono ${isSignificant ? 'text-emerald-700' : 'text-slate-800'}`}>
+            {data.pValue || '—'}
+          </span>
+        </div>
+        <div>
+          <span className="text-[10px] font-bold text-slate-400 block uppercase">Grand Mean</span>
+          <span className="text-base font-black text-indigo-700 font-mono">{data.grandMean}%</span>
+        </div>
+      </div>
+
+      {/* Treatment Ranking Bar List */}
+      {treatments.length > 0 && (
+        <div className="space-y-2 mb-3">
+          <div className="text-[11px] font-bold text-slate-600 flex justify-between">
+            <span>Treatment Means ({treatments.length} Formulations)</span>
+            <span>Mean Control %</span>
+          </div>
+          <div className="space-y-1.5">
+            {treatments.map((t, idx) => (
+              <div key={idx} className="p-2 bg-white rounded-lg border border-slate-200/80 shadow-2xs">
+                <div className="flex justify-between items-center text-xs mb-1">
+                  <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                    <span className="w-4 h-4 rounded-full bg-slate-100 text-slate-600 font-mono text-[10px] flex items-center justify-center font-bold">
+                      {idx + 1}
+                    </span>
+                    {t.name}
+                  </span>
+                  <span className="font-mono font-extrabold text-slate-900 bg-slate-100 px-2 py-0.5 rounded text-xs">
+                    {t.mean}%
+                  </span>
+                </div>
+                <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${
+                      idx === 0 ? 'bg-emerald-500' : idx === 1 ? 'bg-teal-500' : 'bg-slate-400'
+                    }`}
+                    style={{ width: `${Math.min(100, Math.max(0, t.mean))}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="text-[10px] text-slate-400 italic text-right">
+        Computed across {data.trialCount || 0} plot trials via statsUtils.js ANOVA engine.
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Superpower Widget 2: Interactive Spray Weather Window Heatmap Card
+ */
+function InChatSprayWindowWidget({ data }) {
+  const topWindows = Array.isArray(data.topWindows) ? data.topWindows : [];
+  const best = data.bestWindow || null;
+
+  return (
+    <div className="my-3 p-4 bg-gradient-to-br from-sky-50 to-emerald-50/40 rounded-2xl border border-sky-200/80 shadow-xs text-xs not-prose max-w-full">
+      <div className="flex items-center justify-between gap-2 pb-2.5 mb-3 border-b border-sky-100">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-xl bg-sky-500/20 border border-sky-400/30 flex items-center justify-center text-sky-700">
+            <CloudSun className="w-4 h-4" />
+          </div>
+          <div>
+            <span className="text-[10px] font-bold text-sky-800 uppercase tracking-wider block">
+              Biometeorology & Spray Window Advisor
+            </span>
+            <h4 className="font-extrabold text-sm text-slate-900">
+              {data.location || 'Field Spray Readiness'}
+            </h4>
+          </div>
+        </div>
+        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-100 text-sky-800">
+          Live Open-Meteo
+        </span>
+      </div>
+
+      {/* Best Window Highlight Strip */}
+      {best && (
+        <div className="p-3 bg-white rounded-xl border border-emerald-300 shadow-2xs mb-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+          <div>
+            <div className="flex items-center gap-1.5 mb-0.5">
+              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 bg-emerald-600 text-white rounded-full">
+                Optimal Window: {best.hour}
+              </span>
+              <span className="text-xs font-bold text-emerald-800">Score {best.score}/100</span>
+            </div>
+            <div className="text-[11px] text-slate-600">
+              Optimal droplet kinetics with minimal drift and rapid cuticular absorption.
+            </div>
+          </div>
+          <div className="flex items-center gap-3 text-[11px] font-mono text-slate-700 shrink-0">
+            <span className="flex items-center gap-1" title="Delta-T">
+              <Droplets className="w-3.5 h-3.5 text-sky-600" /> ΔT {best.deltaT}
+            </span>
+            <span className="flex items-center gap-1" title="Temperature">
+              <Thermometer className="w-3.5 h-3.5 text-amber-600" /> {best.temp}
+            </span>
+            <span className="flex items-center gap-1" title="Windspeed">
+              <Wind className="w-3.5 h-3.5 text-teal-600" /> {best.wind}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Hourly Strip */}
+      {topWindows.length > 0 && (
+        <div className="space-y-1.5">
+          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+            Upcoming Viable Application Hours
+          </span>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {topWindows.slice(0, 3).map((w, i) => (
+              <div key={i} className="p-2 bg-white/90 rounded-xl border border-sky-100 shadow-2xs flex flex-col justify-between">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="font-extrabold text-slate-800 text-xs">{w.hour}</span>
+                  <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
+                    w.score >= 80 ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                  }`}>
+                    {w.score} pts
+                  </span>
+                </div>
+                <div className="text-[10px] text-slate-600 flex justify-between font-mono">
+                  <span>ΔT: {w.deltaT}</span>
+                  <span>{w.wind}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Superpower Widget 3: Proactive "Trial Doctor" Diagnostic Audit Card
+ */
+function InChatTrialDoctorWidget({ data, onPromptClick }) {
+  const issues = Array.isArray(data.issues) ? data.issues : [];
+  const healthScore = Number(data.healthScore || 85);
+
+  return (
+    <div className="my-3 p-4 bg-gradient-to-br from-slate-900 via-slate-950 to-indigo-950 text-white rounded-2xl border border-indigo-500/30 shadow-xl text-xs not-prose max-w-full">
+      <div className="flex items-center justify-between gap-2 pb-2.5 mb-3 border-b border-white/10">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-xl bg-rose-500/20 border border-rose-400/30 flex items-center justify-center text-rose-400">
+            <Stethoscope className="w-4 h-4" />
+          </div>
+          <div>
+            <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider block">
+              Autonomous Agronomic Auditor
+            </span>
+            <h4 className="font-extrabold text-sm text-white">
+              Trial Doctor Diagnostic Audit
+            </h4>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-bold text-slate-300">Health Score:</span>
+          <span className={`text-sm font-black px-2 py-0.5 rounded-lg font-mono ${
+            healthScore >= 80 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
+            healthScore >= 60 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
+            'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+          }`}>
+            {healthScore}/100
+          </span>
+        </div>
+      </div>
+
+      {/* Summary Counters */}
+      <div className="grid grid-cols-3 gap-2 mb-3">
+        <div className="p-2 bg-rose-950/40 border border-rose-500/30 rounded-xl text-center">
+          <span className="text-[10px] text-rose-300 block font-bold uppercase">Critical Discrepancies</span>
+          <span className="text-lg font-black text-rose-200 font-mono">{data.criticalCount || 0}</span>
+        </div>
+        <div className="p-2 bg-amber-950/40 border border-amber-500/30 rounded-xl text-center">
+          <span className="text-[10px] text-amber-300 block font-bold uppercase">Warnings</span>
+          <span className="text-lg font-black text-amber-200 font-mono">{data.warningCount || 0}</span>
+        </div>
+        <div className="p-2 bg-sky-950/40 border border-sky-500/30 rounded-xl text-center">
+          <span className="text-[10px] text-sky-300 block font-bold uppercase">Weather Insights</span>
+          <span className="text-lg font-black text-sky-200 font-mono">{data.insightCount || 0}</span>
+        </div>
+      </div>
+
+      {/* Discovered Issues */}
+      {issues.length > 0 && (
+        <div className="space-y-2">
+          {issues.map((iss, i) => (
+            <div key={i} className="p-3 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 transition">
+              <div className="flex items-start justify-between gap-2 mb-1">
+                <div className="flex items-center gap-1.5 font-bold text-xs">
+                  {iss.severity === 'critical' ? (
+                    <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                  ) : iss.severity === 'warning' ? (
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  ) : (
+                    <Sparkles className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                  )}
+                  <span className={
+                    iss.severity === 'critical' ? 'text-rose-300' :
+                    iss.severity === 'warning' ? 'text-amber-300' : 'text-sky-300'
+                  }>
+                    {iss.title}
+                  </span>
+                </div>
+                <span className="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded bg-white/10 text-slate-400 shrink-0">
+                  {iss.severity}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-300 leading-relaxed mb-2">
+                {iss.description}
+              </p>
+              {iss.actionPrompt && onPromptClick && (
+                <button
+                  type="button"
+                  onClick={() => onPromptClick(iss.actionPrompt)}
+                  className="text-[10px] font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition"
+                >
+                  <span>Resolve with AI</span>
+                  <ArrowRight className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Superpower Widget 4: Hands-Free Voice Field Scout Observation Confirmation Card
+ */
+function InChatVoiceScoutWidget({ data, onSaveObservation }) {
+  const [saved, setSaved] = useState(false);
+
+  const handleSave = () => {
+    setSaved(true);
+    if (onSaveObservation) {
+      onSaveObservation(data);
+    }
+  };
+
+  return (
+    <div className="my-3 p-4 bg-gradient-to-br from-emerald-50 to-teal-50/40 rounded-2xl border border-emerald-300 shadow-xs text-xs not-prose max-w-full">
+      <div className="flex items-center justify-between gap-2 pb-2.5 mb-2.5 border-b border-emerald-200/80">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-xl bg-emerald-600 text-white flex items-center justify-center">
+            <Mic className="w-4 h-4" />
+          </div>
+          <div>
+            <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider block">
+              Field Walk Voice Scout
+            </span>
+            <h4 className="font-extrabold text-sm text-slate-900">
+              Observation Logged for {data.plot || 'Plot'}
+            </h4>
+          </div>
+        </div>
+        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+          DAA {data.daa ?? 7}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 mb-2.5">
+        <div className="p-2 bg-white rounded-lg border border-emerald-100">
+          <span className="text-[10px] font-bold text-slate-400 block">Formulation</span>
+          <span className="font-bold text-slate-800">{data.formulation || 'Candidate Formula'}</span>
+        </div>
+        <div className="p-2 bg-white rounded-lg border border-emerald-100">
+          <span className="text-[10px] font-bold text-slate-400 block">Efficacy / Control</span>
+          <span className="font-black text-emerald-700 font-mono text-sm">{data.efficacy}%</span>
+        </div>
+      </div>
+
+      {data.notes && (
+        <div className="p-2.5 bg-white/80 rounded-lg border border-emerald-100 text-slate-700 mb-3 text-[11px] italic">
+          "{data.notes}"
+        </div>
+      )}
+
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] text-slate-500 italic">
+          Audible confirmation delivered via Web Speech.
+        </span>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saved}
+          className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 transition shadow-sm ${
+            saved
+              ? 'bg-emerald-700 text-white cursor-default'
+              : 'bg-emerald-600 hover:bg-emerald-700 text-white active:scale-95'
+          }`}
+        >
+          {saved ? (
+            <>
+              <Check className="w-3.5 h-3.5" />
+              <span>Saved to Plot</span>
+            </>
+          ) : (
+            <>
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Confirm & Save</span>
+            </>
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
  * Main Artifact Dispatcher: Parses and renders specialized interactive in-chat widgets
  */
-export default function ChatArtifactRenderer({ artifactType, data }) {
+export default function ChatArtifactRenderer({ artifactType, data, onPromptClick, onSaveObservation }) {
   if (!artifactType || !data) return null;
 
   switch (artifactType.toLowerCase()) {
@@ -458,8 +835,15 @@ export default function ChatArtifactRenderer({ artifactType, data }) {
     case 'feasibility':
     case 'formula_feasibility':
       return <InChatFeasibilityWidget data={data} />;
+    case 'anova':
+      return <InChatAnovaWidget data={data} />;
+    case 'spray_window':
+      return <InChatSprayWindowWidget data={data} />;
+    case 'trial_doctor':
+      return <InChatTrialDoctorWidget data={data} onPromptClick={onPromptClick} />;
+    case 'voice_scout':
+      return <InChatVoiceScoutWidget data={data} onSaveObservation={onSaveObservation} />;
     default:
       return null;
   }
 }
-

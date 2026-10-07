@@ -129,8 +129,9 @@ export async function fbAdd(collectionName, data, userId) {
   const record = cleanForFirestore({
     ...data,
     ID: id,
-    CreatedBy: userId || data.CreatedBy || "",
-    _createdAt: serverTimestamp(),
+    CreatedBy: data.CreatedBy || userId || "",
+    UpdatedBy: userId || data.UpdatedBy || "",
+    _createdAt: data._createdAt || serverTimestamp(),
     _updatedAt: serverTimestamp(),
   });
   await setDoc(doc(db, collectionName, id), record);
@@ -472,7 +473,7 @@ export async function fbImportAll(dataMap, userId) {
 
 // ─── Category-aware data loading ─────────────────────────────────────────────
 
-export async function fbGetAllData(allowedUids, category = 'herbicide', sharedWithUid = null) {
+export async function fbGetAllData(allowedUids, category = 'herbicide', sharedWithUid = null, loadAllIngredients = true) {
   const trialsCol = getCategoryCollection(category, 'trials');
   const formulationsCol = getCategoryCollection(category, 'formulations');
   const ingredientsCol = getCategoryCollection(category, 'ingredients');
@@ -492,7 +493,7 @@ export async function fbGetAllData(allowedUids, category = 'herbicide', sharedWi
     await Promise.all([
       wrapPromise(trialsCol, fbGetAll(trialsCol, allowedUids, sharedWithUid)),
       wrapPromise(formulationsCol, fbGetAll(formulationsCol, allowedUids, sharedWithUid)),
-      wrapPromise(ingredientsCol, fbGetAll(ingredientsCol, allowedUids, sharedWithUid)),
+      wrapPromise(ingredientsCol, fbGetAll(ingredientsCol, loadAllIngredients ? null : allowedUids, loadAllIngredients ? null : sharedWithUid)),
       wrapPromise('organisations', fbGetOrganisations(allowedUids)),
       wrapPromise(projectsCol, fbGetAll(projectsCol, allowedUids, sharedWithUid)),
       wrapPromise(blocksCol, fbGetAll(blocksCol, allowedUids, sharedWithUid))
@@ -533,6 +534,9 @@ export async function fbCatGetIngredients(category, userId, sharedWithUid = null
 }
 export async function fbCatAddIngredient(category, data, userId) {
   return fbAdd(getCategoryCollection(category, 'ingredients'), data, userId);
+}
+export async function fbCatDeleteIngredient(category, id) {
+  return fbDelete(getCategoryCollection(category, 'ingredients'), id);
 }
 
 export async function fbCatGetProjects(category, userId, sharedWithUid = null) {

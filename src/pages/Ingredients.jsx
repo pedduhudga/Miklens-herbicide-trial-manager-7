@@ -4,14 +4,22 @@ import { useAuth } from '../hooks/useAuth.js';
 import TopBar from '../components/TopBar.jsx';
 import Modal from '../components/Modal.jsx';
 import { addIngredient, deleteIngredient } from '../services/dataLayer.js';
-import { Edit, Trash2, Plus, Search, ChevronDown, ChevronUp, FlaskConical, Share2 } from 'lucide-react';
+import { hasAccess } from '../utils/categoryConfig.js';
+import { Edit, Trash2, Plus, Search, ChevronDown, ChevronUp, FlaskConical, Share2, ShieldCheck } from 'lucide-react';
 
 export default function Ingredients({ onMenuClick }) {
   const { state, updateState, getAppState } = useAppState();
-  const { isViewer, user, isAdmin } = useAuth();
-  const isOwnData = (record) => {
+  const { isViewer: authIsViewer, user, isAdmin } = useAuth();
+
+  // Any scientist or user with herbicide category write access can add and edit ingredients
+  const hasHerbicideWrite = isAdmin || hasAccess(user, 'herbicide', 'write');
+  const hasHerbicideRead = isAdmin || hasAccess(user, 'herbicide', 'read');
+  const isViewer = !hasHerbicideWrite;
+
+  const canEditIngredient = (record) => {
     if (isAdmin) return true;
-    if (!record) return true;
+    if (hasHerbicideWrite) return true;
+    if (!record) return false;
     const ownUid = user?.uid || user?.ID || user?.id;
     return !record.CreatedBy || record.CreatedBy === ownUid;
   };
@@ -183,17 +191,23 @@ export default function Ingredients({ onMenuClick }) {
 
   const handleSave = async (e) => {
     e.preventDefault();
-    if (isViewer) {
-      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Viewer role cannot modify or save ingredients.', type: 'error' } }));
+    if (!hasHerbicideWrite) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Permission Denied: Herbicide write permission required to modify ingredients.', type: 'error' } }));
       return;
     }
-    if (editingIngredient && !isOwnData(editingIngredient)) {
-      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: "Permission Denied: You cannot modify another user's ingredient.", type: 'error' } }));
+    if (editingIngredient && !canEditIngredient(editingIngredient)) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: "Permission Denied: You do not have permission to modify this ingredient.", type: 'error' } }));
       return;
     }
+    const ownUid = user?.uid || user?.ID || user?.id || '';
     const payload = {
+      ...(editingIngredient || {}),
       ...formData,
-      ID: editingIngredient ? editingIngredient.ID : Date.now().toString()
+      Category: editingIngredient?.Category || 'herbicide',
+      ID: editingIngredient ? editingIngredient.ID : Date.now().toString(),
+      CreatedBy: editingIngredient?.CreatedBy || ownUid,
+      UpdatedBy: ownUid,
+      _updatedAt: new Date().toISOString()
     };
 
     // Optimistic UI Update
@@ -216,13 +230,13 @@ export default function Ingredients({ onMenuClick }) {
   };
 
   const handleDelete = async (id) => {
-    if (isViewer) {
-      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Viewer role cannot delete ingredients.', type: 'error' } }));
+    if (!hasHerbicideWrite) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Permission Denied: Herbicide write permission required to delete ingredients.', type: 'error' } }));
       return;
     }
     const ingToDelete = state.ingredients?.find(i => i.ID === id);
-    if (ingToDelete && !isOwnData(ingToDelete)) {
-      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: "Permission Denied: You cannot delete another user's ingredient.", type: 'error' } }));
+    if (ingToDelete && !canEditIngredient(ingToDelete)) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: "Permission Denied: You do not have permission to delete this ingredient.", type: 'error' } }));
       return;
     }
     if (!window.confirm('Are you sure you want to delete this ingredient?')) return;
@@ -249,19 +263,25 @@ export default function Ingredients({ onMenuClick }) {
 
       <div className="flex-1 overflow-y-auto p-6 pb-24 max-w-4xl mx-auto w-full">
         <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6">
-          <h2 className="text-xl font-bold text-slate-800">Ingredients Library</h2>
-          {!isViewer && (
+          <div>
+            <h2 className="text-xl font-bold text-slate-800">Ingredients Library</h2>
+            <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1.5">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+              Shared Herbicide Catalog {hasHerbicideWrite ? '• Full Edit Access Granted' : '• Read-Only Mode'}
+            </p>
+          </div>
+          {hasHerbicideWrite && (
             <div className="flex items-center gap-3">
               <button
                 onClick={handleShareLibrary}
-                className="px-4 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-xl font-semibold border border-indigo-200/60 flex items-center gap-2 transition"
+                className="px-4 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-xl font-semibold border border-indigo-200/60 flex items-center gap-2 transition text-sm"
                 title={`Share all ingredients in the active category with other scientists`}
               >
                 <Share2 className="w-4 h-4" /> Share Library
               </button>
               <button
                 onClick={() => handleOpenModal()}
-                className="btn-primary px-4 py-2 rounded-xl shadow-md flex items-center gap-2 transition"
+                className="btn-primary px-4 py-2 rounded-xl shadow-md flex items-center gap-2 transition text-sm font-semibold"
               >
                 <Plus className="w-5 h-5" /> Add Ingredient
               </button>
@@ -306,19 +326,19 @@ export default function Ingredients({ onMenuClick }) {
                       </div>
                     </div>
                     <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
-                      {!isViewer && isOwnData(ing) && (
+                      {canEditIngredient(ing) && (
                         <>
                           <button
                             onClick={() => handleOpenModal(ing)}
                             className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition"
-                            title="Edit"
+                            title="Edit Ingredient"
                           >
                             <Edit className="w-5 h-5" />
                           </button>
                           <button
                             onClick={() => handleDelete(ing.ID)}
                             className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition"
-                            title="Delete"
+                            title="Delete Ingredient"
                           >
                             <Trash2 className="w-5 h-5" />
                           </button>

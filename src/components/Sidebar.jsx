@@ -177,7 +177,17 @@ export default function Sidebar({ isOpen, onClose }) {
     { to: "/settings", icon: <Settings className="w-5 h-5" />, label: "Settings" },
   ];
 
-  const filteredNavItems = navItems;
+  const filteredNavItems = navItems.filter((item) => {
+    // Only show Ingredient Costs to users with herbicide permission or admins
+    if (item.label === 'Ingredient Costs' && !isAdmin && !hasAccess(user, 'herbicide', 'read')) {
+      return false;
+    }
+    // Respect explicit tab permission disabling
+    if (user?.tabPermissions && user.tabPermissions[item.label] === false) {
+      return false;
+    }
+    return true;
+  });
 
   const filteredBottomItems = bottomItems;
 

@@ -26,7 +26,8 @@ export default function PermissionGuard({ tabName, onMenuClick, children }) {
   // 3. Check Category permission (if page is category-specific)
   const nonCategorySpecificTabs = ["All Categories", "Settings", "User Management", "Firebase Migration"];
   const isCategorySpecific = !nonCategorySpecificTabs.includes(tabName);
-  const hasCatAccess = isCategorySpecific ? hasAccess(user, activeCategory, 'read') : true;
+  const categoryToCheck = tabName === "Ingredient Costs" ? 'herbicide' : activeCategory;
+  const hasCatAccess = isCategorySpecific ? hasAccess(user, categoryToCheck, 'read') : true;
 
   // If both permissions are granted, render child component
   if (hasTabPermission && hasCatAccess) {
@@ -41,7 +42,9 @@ export default function PermissionGuard({ tabName, onMenuClick, children }) {
     errorMessage = `You do not have permission to view the "${tabName}" tab. Please contact your administrator for access.`;
   } else if (!hasCatAccess) {
     errorTitle = "Category Access Denied";
-    errorMessage = `You do not have permission to view trials in the "${catConfig.name}" category. Please switch to another category or contact your administrator.`;
+    errorMessage = tabName === "Ingredient Costs"
+      ? "You do not have permission to access ingredients in the Herbicide category. Please contact your administrator."
+      : `You do not have permission to view trials in the "${catConfig.name}" category. Please switch to another category or contact your administrator.`;
   }
 
   return (

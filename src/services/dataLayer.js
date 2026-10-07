@@ -21,6 +21,7 @@ import {
   VALID_CATEGORIES
 } from '../utils/categoryValidation.js';
 import { compressImage } from '../utils/photoUtils.js';
+import { hasAccess } from '../utils/categoryConfig.js';
 
 // ─── helper ──────────────────────────────────────────────────────────────────
 
@@ -303,6 +304,13 @@ function checkOwnership(collectionType, recordId, getAppState, action = 'edit') 
   const role = String(user.Role || user.role || '').toLowerCase();
   if (role === 'admin') return true; // admin bypass
 
+  // For ingredients: scientists who have herbicide write permission can edit/delete ingredients
+  if (collectionType === 'ingredients') {
+    if (hasAccess(user, 'herbicide', 'write')) {
+      return true;
+    }
+  }
+
   const ownUid = state.auth?.uid || user.ID || user.uid;
   if (!ownUid) return false;
 
@@ -345,8 +353,11 @@ export async function getAllData(payload, getAppState) {
   if (useFirebase) {
     const allowedUids = getAllowedUids(getAppState);
     const sharedWithUid = getSharedWithUid(getAppState);
-    console.log(`[DataLayer] Loading all data for category: ${category} (category-specific collections)`);
-    return fbDB.fbGetAllData(allowedUids, category, sharedWithUid);
+    const state = getAppState ? getAppState() : {};
+    const user = state.auth?.user;
+    const canSeeLibrary = isAdmin(getAppState) || hasAccess(user, category, 'read') || hasAccess(user, 'herbicide', 'read');
+    console.log(`[DataLayer] Loading all data for category: ${category} (canSeeIngredients: ${canSeeLibrary})`);
+    return fbDB.fbGetAllData(allowedUids, category, sharedWithUid, canSeeLibrary);
   }
   // For Google Sheets, apply category filtering on the response
   const data = await sheetDB.getAllData(payload, getAppState);
@@ -592,6 +603,12 @@ export async function getIngredients(payload, getAppState) {
   const category = enforceActiveCategory(payload, getAppState, 'getIngredients');
   const { useFirebase } = getConfig(getAppState);
   if (useFirebase) {
+    const state = getAppState ? getAppState() : {};
+    const user = state.auth?.user;
+    const canSeeLibrary = isAdmin(getAppState) || hasAccess(user, category, 'read') || hasAccess(user, 'herbicide', 'read');
+    if (canSeeLibrary) {
+      return fbDB.fbCatGetIngredients(category, null, null);
+    }
     const allowedUids = getAllowedUids(getAppState);
     const sharedWithUid = getSharedWithUid(getAppState);
     return fbDB.fbCatGetIngredients(category, allowedUids, sharedWithUid);
@@ -623,15 +640,17 @@ export async function deleteIngredient(payload, getAppState) {
   const category = enforceActiveCategory(payload, getAppState, 'deleteIngredient');
   const { useFirebase } = getConfig(getAppState);
   if (useFirebase) {
-    if (!checkOwnership('ingredients', payload.id || payload.ID, getAppState)) {
+    if (!checkOwnership('ingredients', payload.id || payload.ID, getAppState, 'delete')) {
       throw new Error("Permission Denied: You cannot delete another user's ingredient.");
     }
     // Validate the record belongs to active category if it has one
     const ingredientCategory = getRecordCategory('ingredients', payload, getAppState);
-    if (ingredientCategory !== category) {
+    if (ingredientCategory && ingredientCategory !== category) {
       throw new Error(`Category mismatch: Cannot delete ${ingredientCategory} ingredient when active category is ${category}`);
     }
-    const result = await fbDB.fbDeleteIngredient(payload.id || payload.ID);
+    const result = await (fbDB.fbCatDeleteIngredient
+      ? fbDB.fbCatDeleteIngredient(category, payload.id || payload.ID)
+      : fbDB.fbDeleteIngredient(payload.id || payload.ID));
     mirror('deleteIngredient', payload, getAppState);
     return result;
   }
