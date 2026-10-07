@@ -798,7 +798,7 @@ export default function Formulations({ onMenuClick }) {
 
     // Category validation before saving
     try {
-      const operation = editingFormulation ? 'updateFormulation' : 'addFormulation';
+      const operation = editingForm ? 'updateFormulation' : 'addFormulation';
       await validateCategoryDataOperation(operation, payload, getAppState);
     } catch (validationError) {
       if (validationError.validationError) {
@@ -810,8 +810,13 @@ export default function Formulations({ onMenuClick }) {
     }
 
     try {
-      await addFormulation(payload, getAppState);
-      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Formulation saved', type: 'success' } }));
+      if (editingForm) {
+        await updateFormulation(payload, getAppState);
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Formulation updated successfully', type: 'success' } }));
+      } else {
+        await addFormulation(payload, getAppState);
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Formulation saved', type: 'success' } }));
+      }
     } catch (err) {
       if (err.validationError) {
         const { showCategoryValidationToast } = await import('../components/CategoryValidationAlert.jsx');

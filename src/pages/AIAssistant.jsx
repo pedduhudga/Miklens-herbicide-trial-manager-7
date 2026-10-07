@@ -834,7 +834,7 @@ export default function AIAssistant({ onMenuClick }) {
 
       // === SMART QUERY-AWARE CONTEXT ENGINE ===
       // 1. Build full database knowledge base
-      const { contextString: memoryContext, stats: memStats } = buildAIMemoryContext(
+      const { contextString: memoryContext } = buildAIMemoryContext(
         state.trials,
         state.formulations,
         state.projects,
@@ -1089,7 +1089,7 @@ Anchor your weed species diagnosis, burn rate, and living cover estimates strict
                 : '🧪 Colby Synergy & Recipe Feasibility';
               reply = `### ${title}\n\nAnalysis executed directly against current verified database records:\n\n\`\`\`artifact\n${JSON.stringify(art)}\n\`\`\``;
             } else {
-              throw new Error(`AI analysis error: ${geminiErr.message}. (Fallback error: ${fallbackErr.message})`);
+              throw new Error(`AI analysis error: ${geminiErr.message}. (Fallback error: ${fallbackErr.message})`, { cause: geminiErr });
             }
           }
         }
@@ -1154,7 +1154,7 @@ Anchor your weed species diagnosis, burn rate, and living cover estimates strict
       setThinkingPhase(0);
       setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [isLoading, attachedImage, history, currentSessionId, allSessions, activeCategory, state.trials, state.projects, state.formulations, state.ingredients, primaryObsField, config, updateState, getAppState]);
+  }, [isLoading, attachedImage, history, currentSessionId, allSessions, activeCategory, state.trials, state.projects, state.formulations, state.ingredients, state.auth?.user, primaryObsField, config, updateState, getAppState]);
 
   // Handle prefilled prompt passed via route state (e.g. from Formulations tab or Linked Trials modal)
   useEffect(() => {

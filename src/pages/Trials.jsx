@@ -1950,7 +1950,11 @@ export default function Trials({ onMenuClick }) {
       bbchStage: '',
       phytotoxicityPct: '',
       phytotoxicityNotes: '',
-      sampleCount: ''
+      sampleCount: '',
+      weedMortalityPct: '',
+      phytotoxicityScore10: '',
+      freshBiomassGrams: '',
+      dryBiomassGrams: ''
     };
 
     catConfig.observationFields?.forEach(f => {
@@ -2148,12 +2152,20 @@ export default function Trials({ onMenuClick }) {
       phytotoxicityPct: obsForm.phytotoxicityPct !== '' && obsForm.phytotoxicityPct != null ? Number(obsForm.phytotoxicityPct) : undefined,
       phytotoxicityNotes: obsForm.phytotoxicityNotes || undefined,
       sampleCount: obsForm.sampleCount !== '' && obsForm.sampleCount != null ? Number(obsForm.sampleCount) : null,
-      potHeights: obsForm.potHeights && obsForm.potHeights.some(h => h !== '' && h !== null && h !== undefined) ? obsForm.potHeights : undefined
+      potHeights: obsForm.potHeights && obsForm.potHeights.some(h => h !== '' && h !== null && h !== undefined) ? obsForm.potHeights : undefined,
+      weedMortalityPct: obsForm.weedMortalityPct !== '' && obsForm.weedMortalityPct != null ? Number(obsForm.weedMortalityPct) : undefined,
+      phytotoxicityScore10: obsForm.phytotoxicityScore10 !== '' && obsForm.phytotoxicityScore10 != null ? Number(obsForm.phytotoxicityScore10) : undefined,
+      freshBiomassGrams: obsForm.freshBiomassGrams !== '' && obsForm.freshBiomassGrams != null ? Number(obsForm.freshBiomassGrams) : undefined,
+      dryBiomassGrams: obsForm.dryBiomassGrams !== '' && obsForm.dryBiomassGrams != null ? Number(obsForm.dryBiomassGrams) : undefined
     };
     // Remove undefined fields to keep records clean
     if (newObs.phytotoxicityPct === undefined) delete newObs.phytotoxicityPct;
     if (!newObs.phytotoxicityNotes) delete newObs.phytotoxicityNotes;
     if (!newObs.potHeights) delete newObs.potHeights;
+    if (newObs.weedMortalityPct === undefined) delete newObs.weedMortalityPct;
+    if (newObs.phytotoxicityScore10 === undefined) delete newObs.phytotoxicityScore10;
+    if (newObs.freshBiomassGrams === undefined) delete newObs.freshBiomassGrams;
+    if (newObs.dryBiomassGrams === undefined) delete newObs.dryBiomassGrams;
 
     catConfig.observationFields?.forEach(f => {
       const val = obsForm[f.key];

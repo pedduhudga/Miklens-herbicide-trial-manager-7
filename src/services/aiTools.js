@@ -5,7 +5,6 @@
 
 import { performANOVA } from '../utils/statsUtils.js';
 import { analyzeSprayWindow } from './sprayAdvisor.js';
-import { fitFourPLModel } from '../utils/doseResponseUtils.js';
 import { predictFormulaFeasibility } from '../utils/feasibilityEngine.js';
 import { calculateFormulationCost } from '../utils/costUtils.js';
 import { findDuplicateFormulation } from '../utils/formulationDuplicateUtils.js';
@@ -260,8 +259,9 @@ export async function toolEvaluateColbyAndCost({ ingredients, targetSpecies = ''
  * - Weather Failure Correlations (high temp / low humidity links to poor control)
  * - Herbicide Resistance Watchdog (repeated HRAC mode of action warnings)
  */
-export async function toolAuditTrialDoctor(options = {}, context) {
-  const { trials = [], activeCategory = 'herbicide' } = context;
+export async function toolAuditTrialDoctor(options = {}, context = {}) {
+  const ctx = context.trials ? context : options;
+  const { trials = [], activeCategory = 'herbicide' } = ctx;
 
   const catTrials = trials.filter(t => (t.Category || 'herbicide').toLowerCase() === activeCategory.toLowerCase());
 
@@ -356,6 +356,17 @@ export async function toolAuditTrialDoctor(options = {}, context) {
       title: `High Heat Stress Correlation (${highTempFailures.length} Trials Failed)`,
       description: `${highTempFailures.length} trial(s) involving [${formulas}] failed when temperature was ≥32°C at spray time. Recommend adding organosilicone penetrant or spraying early morning.`,
       actionPrompt: 'How can we adjust carrier volume or adjuvants for high heat spraying?'
+    });
+    insightCount++;
+  }
+
+  if (lowHumidityFailures.length >= 2) {
+    issues.push({
+      id: 'weather-low-humidity',
+      severity: 'insight',
+      title: `Low Humidity Evaporation Risk (${lowHumidityFailures.length} Trials Affected)`,
+      description: `${lowHumidityFailures.length} trials recorded low relative humidity (≤40%) at application, increasing droplet evaporation risk.`,
+      actionPrompt: 'What anti-evaporant adjuvants can prevent premature droplet dryout?'
     });
     insightCount++;
   }

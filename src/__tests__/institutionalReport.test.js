@@ -1,6 +1,15 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { getBotanicalTaxonomy, PHYTOTOXICITY_10_SCALE } from '../utils/botanicalTaxonomy.js';
 import { buildInstitutionalReportData } from '../services/institutionalReportBridge.js';
+import { generateInstitutionalPDF, generateInstitutionalDocx } from '../services/institutionalReportRenderer.js';
+
+vi.mock('file-saver', () => ({
+  saveAs: vi.fn()
+}));
+
+// Mock jsPDF save in node environment
+import jsPDF from 'jspdf';
+jsPDF.prototype.save = vi.fn();
 
 describe('Miklens Bio Institutional Report System', () => {
   it('correctly maps weed species to botanical taxonomy and family', () => {
@@ -85,5 +94,31 @@ describe('Miklens Bio Institutional Report System', () => {
     // Verify Botanical Flora Table
     expect(data.weedFloraTable.length).toBeGreaterThan(0);
     expect(data.weedFloraTable[0].botanicalFamily).toBeDefined();
+  });
+
+  it('generates institutional PDF and DOCX documents without throwing exceptions', async () => {
+    const mockTrial = {
+      ID: 'trial-mk-888',
+      ProjectID: 'proj-mk-2',
+      FormulationName: 'Knockout Herbicide',
+      Crop: 'Pineapple',
+      Dosage: '60 mL/L',
+      EfficacyDataJSON: JSON.stringify([
+        { daa: 0, date: '2026-06-19', weedCover: 85 },
+        { daa: 7, date: '2026-06-26', weedCover: 10, phytotoxicityPct: 40 },
+        { daa: 15, date: '2026-07-04', weedCover: 45 },
+        { daa: 30, date: '2026-07-19', weedCover: 60 }
+      ])
+    };
+
+    const data = buildInstitutionalReportData(mockTrial, { trials: [mockTrial], projects: [] });
+
+    // Test DOCX generation
+    const docxFilename = await generateInstitutionalDocx(data);
+    expect(docxFilename).toContain('.docx');
+
+    // Test PDF generation
+    const pdfFilename = await generateInstitutionalPDF(data);
+    expect(pdfFilename).toContain('.pdf');
   });
 });

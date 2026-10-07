@@ -6,7 +6,7 @@ export function getDriveFileId(photoOrUrl) {
   
   if (typeof photoOrUrl === 'object') {
     const directId = photoOrUrl.driveId || photoOrUrl.fileId || photoOrUrl.driveFileId;
-    if (typeof directId === 'string' && directId.length >= 15 && !directId.includes('/')) {
+    if (typeof directId === 'string' && directId.length >= 10 && !directId.includes('/')) {
       return directId;
     }
     const url = photoOrUrl.url || photoOrUrl.src || photoOrUrl.fileUrl || photoOrUrl.photoUrl || photoOrUrl.fileData;

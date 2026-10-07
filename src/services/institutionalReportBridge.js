@@ -40,9 +40,10 @@ export function buildInstitutionalReportData(targetData, globalState = {}, userO
   if (isProject) {
     subTrials = (globalState.trials || []).filter(t => String(t.ProjectID) === String(project.ID));
   } else {
-    // If single trial, find siblings in same project to form full treatment matrix (T1, T2, Control)
+    // If single trial, prioritize targetData as T1, then find siblings in same project
     if (project) {
-      subTrials = (globalState.trials || []).filter(t => String(t.ProjectID) === String(project.ID));
+      const siblings = (globalState.trials || []).filter(t => String(t.ProjectID) === String(project.ID) && String(t.ID) !== String(targetData.ID));
+      subTrials = [targetData, ...siblings];
     }
     if (subTrials.length === 0) {
       subTrials = [targetData];
@@ -156,7 +157,7 @@ export function buildInstitutionalReportData(targetData, globalState = {}, userO
   // Gather from observations' weedDetails, target weed, or botanical registry defaults
   const floraSet = new Map();
   subTrials.forEach(t => {
-    const obsList = safeJsonParse(t.Observations, []);
+    const obsList = safeJsonParse(t.EfficacyDataJSON || t.Observations, []);
     obsList.forEach(o => {
       if (Array.isArray(o.weedDetails)) {
         o.weedDetails.forEach(wd => {
@@ -209,7 +210,7 @@ export function buildInstitutionalReportData(targetData, globalState = {}, userO
 
   // For each treatment, gather real or auto-bridged observations
   const treatmentMetrics = treatments.map((trt, trtIdx) => {
-    const obsList = trt.trialObj ? safeJsonParse(trt.trialObj.Observations, []) : [];
+    const obsList = trt.trialObj ? safeJsonParse(trt.trialObj.EfficacyDataJSON || trt.trialObj.Observations, []) : [];
     
     // Sort observations by DAA
     const sortedObs = [...obsList].sort((a, b) => Number(a.daa || 0) - Number(b.daa || 0));

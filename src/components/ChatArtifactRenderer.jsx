@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Chart from 'chart.js/auto';
 import { useNavigate } from 'react-router-dom';
 import { 
   Rocket, Sliders, TrendingUp, BarChart2, Download, FlaskConical, Check, 
   Activity, AlertTriangle, CloudSun, Stethoscope, Mic, CheckCircle2, 
-  ShieldAlert, Sparkles, ArrowRight, Thermometer, Wind, Droplets, Calendar
+  ShieldAlert, Sparkles, ArrowRight, Thermometer, Wind, Droplets
 } from 'lucide-react';
 
 /**

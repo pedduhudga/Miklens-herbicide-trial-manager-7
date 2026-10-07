@@ -583,9 +583,9 @@ export async function generateInstitutionalPDF(reportData) {
       t.density.d30.toFixed(2)
     ]),
     theme: 'grid',
-    headStyles: { fillColor: MIKLENS_GREEN, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8, halign: 'center' },
-    styles: { fontSize: 7.5, cellPadding: 2, halign: 'center' },
-    columnStyles: { 0: { cellWidth: 16 }, 1: { cellWidth: 55, halign: 'left' }, 2: { cellWidth: 22 } }
+    headStyles: { fillColor: MIKLENS_GREEN, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7, halign: 'center' },
+    styles: { fontSize: 7, cellPadding: 1.5, halign: 'center' },
+    columnStyles: { 0: { cellWidth: 14 }, 1: { cellWidth: 50, halign: 'left' }, 2: { cellWidth: 20 }, 3: { cellWidth: 30 } }
   });
 
   curY = doc.lastAutoTable.finalY + 6;
@@ -659,8 +659,8 @@ export async function generateInstitutionalPDF(reportData) {
       ['Total', `${(anova.dfBetween || 2) + (anova.dfWithin || 12)}`, `${((anova.ssBetween || 14210.5) + (anova.ssWithin || 1012.3)).toFixed(2)}`, '-', '-', '-', '-']
     ],
     theme: 'grid',
-    headStyles: { fillColor: [30, 41, 59], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
-    styles: { fontSize: 7.5, cellPadding: 2, halign: 'center' },
+    headStyles: { fillColor: [30, 41, 59], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7 },
+    styles: { fontSize: 6.8, cellPadding: 1.5, halign: 'center' },
     columnStyles: { 0: { halign: 'left', fontStyle: 'bold' } }
   });
 
@@ -797,7 +797,7 @@ export async function generateInstitutionalPDF(reportData) {
   doc.setTextColor(...MIKLENS_DARK);
   doc.text('7.2 7 DAT Observation — Quadrat Counts & Per-Plant Phytotoxicity Scores', 14, curY);
 
-  (reportData.rawQuadratData.d7 || []).slice(0, 2).forEach(trData => {
+  (reportData.rawQuadratData.d7 || []).forEach(trData => {
     curY += 5;
     doc.setFontSize(8.5);
     doc.setFont('helvetica', 'bold');
@@ -1026,10 +1026,10 @@ export async function generateInstitutionalDocx(reportData) {
               }),
               ...reportData.treatments.map(t => new TableRow({
                 children: [
-                  new TableCell({ children: [new Paragraph(t.trNo)] }),
-                  new TableCell({ children: [new Paragraph(t.productName)] }),
-                  new TableCell({ children: [new Paragraph(t.dosePerLitre)] }),
-                  new TableCell({ children: [new Paragraph(t.method)] })
+                  new TableCell({ children: [new Paragraph({ text: String(t.trNo || '') })] }),
+                  new TableCell({ children: [new Paragraph({ text: String(t.productName || '') })] }),
+                  new TableCell({ children: [new Paragraph({ text: String(t.dosePerLitre || '') })] }),
+                  new TableCell({ children: [new Paragraph({ text: String(t.method || '') })] })
                 ]
               }))
             ]
@@ -1053,11 +1053,11 @@ export async function generateInstitutionalDocx(reportData) {
               }),
               ...reportData.treatmentMetrics.map(t => new TableRow({
                 children: [
-                  new TableCell({ children: [new Paragraph(t.productName)] }),
-                  new TableCell({ children: [new Paragraph(t.mortality7.toFixed(2))] }),
-                  new TableCell({ children: [new Paragraph(t.density.d30.toFixed(2))] }),
-                  new TableCell({ children: [new Paragraph(t.biomass.dry.toFixed(2))] }),
-                  new TableCell({ children: [new Paragraph(t.phytotoxicity.mean.toFixed(2))] })
+                  new TableCell({ children: [new Paragraph({ text: String(t.productName || '') })] }),
+                  new TableCell({ children: [new Paragraph({ text: String(t.mortality7 != null ? Number(t.mortality7).toFixed(2) : '0.00') })] }),
+                  new TableCell({ children: [new Paragraph({ text: String(t.density?.d30 != null ? Number(t.density.d30).toFixed(2) : '0.00') })] }),
+                  new TableCell({ children: [new Paragraph({ text: String(t.biomass?.dry != null ? Number(t.biomass.dry).toFixed(2) : '0.00') })] }),
+                  new TableCell({ children: [new Paragraph({ text: String(t.phytotoxicity?.mean != null ? Number(t.phytotoxicity.mean).toFixed(2) : '0.00') })] })
                 ]
               }))
             ]
@@ -1080,10 +1080,10 @@ export async function generateInstitutionalDocx(reportData) {
               }),
               ...reportData.weedFloraTable.map(w => new TableRow({
                 children: [
-                  new TableCell({ children: [new Paragraph(String(w.sNo))] }),
-                  new TableCell({ children: [new Paragraph(w.scientificName)] }),
-                  new TableCell({ children: [new Paragraph(w.commonName)] }),
-                  new TableCell({ children: [new Paragraph(w.botanicalFamily)] })
+                  new TableCell({ children: [new Paragraph({ text: String(w.sNo != null ? w.sNo : '') })] }),
+                  new TableCell({ children: [new Paragraph({ text: String(w.scientificName || '') })] }),
+                  new TableCell({ children: [new Paragraph({ text: String(w.commonName || '') })] }),
+                  new TableCell({ children: [new Paragraph({ text: String(w.botanicalFamily || '') })] })
                 ]
               }))
             ]
