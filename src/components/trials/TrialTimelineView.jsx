@@ -18,6 +18,7 @@ const TrialTimelineView = memo(function TrialTimelineView({
   onMoveToProject,
   onExportPdf,
   onExportSciPdf,
+  onExportInstitutionalDossier,
   onExportPpt,
   onExportHtml,
   onExportTxt,
@@ -88,6 +89,7 @@ const TrialTimelineView = memo(function TrialTimelineView({
                   onMoveToProject={onMoveToProject}
                   onExportPdf={onExportPdf}
                   onExportSciPdf={onExportSciPdf}
+                  onExportInstitutionalDossier={onExportInstitutionalDossier}
                   onExportPpt={onExportPpt}
                   onExportHtml={onExportHtml}
                   onExportTxt={onExportTxt}

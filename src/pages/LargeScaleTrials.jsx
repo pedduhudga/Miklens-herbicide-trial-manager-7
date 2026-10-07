@@ -4407,6 +4407,15 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
                             onMoveToProject={onMoveToProject}
                              onExportPdf={(trial) => checkDownload(generateComprehensivePdf, trial, { formulations: state.formulations })}
                              onExportSciPdf={(trial) => checkDownload(generateScientificReport, trial, { formulations: state.formulations })}
+                             onExportInstitutionalDossier={async (trial, fmt) => {
+                               const { buildInstitutionalReportData } = await import('../services/institutionalReportBridge.js');
+                               const { generateInstitutionalPDF, generateInstitutionalDocx } = await import('../services/institutionalReportRenderer.js');
+                               try {
+                                 const data = buildInstitutionalReportData(trial, state);
+                                 if (fmt === 'pdf') await generateInstitutionalPDF(data);
+                                 else await generateInstitutionalDocx(data);
+                               } catch (err) { console.error(err); }
+                             }}
                              onExportPpt={(trial) => checkDownload(generatePpt, trial)}
                              onExportHtml={(trial) => checkDownload(exportHtmlReport, trial)}
                              onExportTxt={() => {}}

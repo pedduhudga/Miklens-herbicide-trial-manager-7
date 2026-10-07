@@ -1,5 +1,5 @@
 import React, { memo, useMemo, useCallback, useState, useEffect, useRef } from 'react';
-import { Calendar, MapPin, FlaskConical, Activity, Image as ImageIcon, ChevronLeft, ChevronRight, Edit, MoreVertical, Eye, Copy, FolderOpen, FileDown, ScanLine, MonitorPlay, Archive, FileCode, FileSpreadsheet, Share2, BrainCircuit, Trash2, Camera, CheckCircle, Clock, Pencil, CloudSun, Sparkles, Maximize2, Minimize2, X } from 'lucide-react';
+import { Calendar, MapPin, FlaskConical, Activity, Image as ImageIcon, ChevronLeft, ChevronRight, Edit, MoreVertical, Eye, Copy, FolderOpen, FileDown, ScanLine, MonitorPlay, Archive, FileCode, FileSpreadsheet, Share2, BrainCircuit, Trash2, Camera, CheckCircle, Clock, Pencil, CloudSun, Sparkles, Maximize2, Minimize2, X, ShieldCheck, FileText } from 'lucide-react';
 import { safeJsonParse } from '../utils/helpers.js';
 import { formatDateTime } from '../utils/dateUtils.js';
 import { calculateEffectiveControlDays } from '../utils/trialLifecycle.js';
@@ -57,6 +57,7 @@ const TrialCard = memo(function TrialCard({
   onMoveToProject,
   onExportPdf,
   onExportSciPdf,
+  onExportInstitutionalDossier,
   onExportPpt,
   onExportHtml,
   onExportTxt,
@@ -387,6 +388,16 @@ const TrialCard = memo(function TrialCard({
     onToggleMenu(null);
   }, [onExportPdf, trial, onToggleMenu]);
 
+  const handleExportInstitutionalPdf = useCallback(() => {
+    onExportInstitutionalDossier && onExportInstitutionalDossier(trial, 'pdf');
+    onToggleMenu(null);
+  }, [onExportInstitutionalDossier, trial, onToggleMenu]);
+
+  const handleExportInstitutionalDocx = useCallback(() => {
+    onExportInstitutionalDossier && onExportInstitutionalDossier(trial, 'docx');
+    onToggleMenu(null);
+  }, [onExportInstitutionalDossier, trial, onToggleMenu]);
+
   const handleExportSciPdf = useCallback(() => {
     onExportSciPdf(trial);
     onToggleMenu(null);
@@ -606,6 +617,32 @@ const TrialCard = memo(function TrialCard({
                   {canDownloadTrial && (
                     <>
                       <hr className="my-1 border-slate-100" />
+                      {onExportInstitutionalDossier && (
+                        <>
+                          <button
+                            onClick={handleExportInstitutionalPdf}
+                            className="w-full flex items-center justify-between px-3 py-2 text-xs text-emerald-800 bg-emerald-50/70 hover:bg-emerald-100 font-semibold transition"
+                            title="15-Page Miklens Bio Institutional Regulatory Dossier (PDF)"
+                          >
+                            <span className="flex items-center gap-2">
+                              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              <span className="truncate">Institutional Dossier (PDF)</span>
+                            </span>
+                            <span className="text-[9px] bg-emerald-200/80 text-emerald-800 px-1.5 py-0.5 rounded font-extrabold uppercase shrink-0">15p</span>
+                          </button>
+                          <button
+                            onClick={handleExportInstitutionalDocx}
+                            className="w-full flex items-center justify-between px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 transition"
+                            title="15-Page Miklens Bio Institutional Regulatory Dossier (Word DOCX)"
+                          >
+                            <span className="flex items-center gap-2">
+                              <FileText className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+                              <span className="truncate">Institutional Dossier (DOCX)</span>
+                            </span>
+                            <span className="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-semibold uppercase shrink-0">DOCX</span>
+                          </button>
+                        </>
+                      )}
                       <button onClick={handleExportPdf} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
                         <FileDown className="w-3.5 h-3.5 text-red-500" /> Comprehensive PDF
                       </button>

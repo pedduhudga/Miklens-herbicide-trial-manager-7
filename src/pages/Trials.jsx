@@ -16,7 +16,7 @@ import {
   QrCode, BrainCircuit, TrendingDown, Download, RefreshCw, Leaf,
   Navigation, FolderOpen, Lock, Unlock,
   FileDown, Share2, MoreVertical, FileSpreadsheet,
-  FileCode, MonitorPlay, Archive, Pencil, ScanLine, Crop, Clock, Calculator, Loader2
+  FileCode, MonitorPlay, Archive, Pencil, ScanLine, Crop, Clock, Calculator, Loader2, ShieldCheck
 } from 'lucide-react';
 import { safeJsonParse } from '../utils/helpers.js';
 import { resolvePhotoSrc, getPhotoThumbnailSrc, isPhotoBroken, getDriveFileId, compressImage } from '../utils/photoUtils.js';
@@ -58,6 +58,8 @@ import { fetchWeather, fetchSoilData } from '../services/weather.js';
 import { EPPO_CODES, BBCH_STAGES, lookupEPPO } from '../utils/eppoBBCHData.js';
 import { exportToARM, importARMCSV } from '../services/armExporter.js';
 import { detectOutliers } from '../utils/statsUtils.js';
+import { buildInstitutionalReportData } from '../services/institutionalReportBridge.js';
+import { generateInstitutionalPDF, generateInstitutionalDocx } from '../services/institutionalReportRenderer.js';
 
 const getAutomaticPotPrefix = (targetTrial, allTrials) => {
   if (!targetTrial || !allTrials) return '';
@@ -5840,6 +5842,40 @@ If none are present, write "None".`;
     }
   }, [activeCategory]);
 
+  // Miklens Bio Institutional Bio-Efficacy & Phytotoxicity Dossier (15-Page Regulatory Protocol)
+  const handleExportInstitutionalDossier = useCallback(async (trial, format = 'pdf') => {
+    if (!canDownload) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Download permission is disabled for your account.', type: 'error' } }));
+      return;
+    }
+    const t = trial || detailTrial;
+    if (!t) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Trial data not found.', type: 'error' } }));
+      return;
+    }
+
+    window.dispatchEvent(new CustomEvent('app:toast', {
+      detail: { msg: `Generating 15-Page Miklens Bio Institutional Dossier (${format.toUpperCase()})...`, type: 'info' }
+    }));
+
+    try {
+      const dossierData = buildInstitutionalReportData(t, state);
+      if (format === 'pdf') {
+        await generateInstitutionalPDF(dossierData);
+      } else {
+        await generateInstitutionalDocx(dossierData);
+      }
+      window.dispatchEvent(new CustomEvent('app:toast', {
+        detail: { msg: `Miklens Bio Dossier (${format.toUpperCase()}) generated successfully!`, type: 'success' }
+      }));
+    } catch (err) {
+      console.error('Failed to generate institutional dossier:', err);
+      window.dispatchEvent(new CustomEvent('app:toast', {
+        detail: { msg: `Failed to generate dossier: ${err.message}`, type: 'error' }
+      }));
+    }
+  }, [canDownload, detailTrial, state]);
+
   const handleAiSingleGenerate = useCallback(async (trial) => {
     if (isViewer) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Viewer role cannot generate AI reports.', type: 'error' } }));
@@ -6433,6 +6469,7 @@ If none are present, write "None".`;
                                 onMoveToProject={handleMoveToProject}
                                 onExportPdf={handleExportPdf}
                                 onExportSciPdf={handleExportSciPdf}
+                                onExportInstitutionalDossier={handleExportInstitutionalDossier}
                                 onExportPpt={handleExportPpt}
                                 onExportHtml={exportHtmlSlide}
                                 onExportTxt={exportTxtReport}
@@ -6509,6 +6546,7 @@ If none are present, write "None".`;
                                 onMoveToProject={handleMoveToProject}
                                 onExportPdf={handleExportPdf}
                                 onExportSciPdf={handleExportSciPdf}
+                                onExportInstitutionalDossier={handleExportInstitutionalDossier}
                                 onExportPpt={handleExportPpt}
                                 onExportHtml={exportHtmlSlide}
                                 onExportTxt={exportTxtReport}
@@ -6562,6 +6600,7 @@ If none are present, write "None".`;
                 onMoveToProject={handleMoveToProject}
                 onExportPdf={handleExportPdf}
                 onExportSciPdf={handleExportSciPdf}
+                onExportInstitutionalDossier={handleExportInstitutionalDossier}
                 onExportPpt={handleExportPpt}
                 onExportHtml={exportHtmlSlide}
                 onExportTxt={exportTxtReport}
@@ -6599,6 +6638,7 @@ If none are present, write "None".`;
                       onMoveToProject={handleMoveToProject}
                       onExportPdf={handleExportPdf}
                       onExportSciPdf={handleExportSciPdf}
+                      onExportInstitutionalDossier={handleExportInstitutionalDossier}
                       onExportPpt={handleExportPpt}
                       onExportHtml={exportHtmlSlide}
                       onExportTxt={exportTxtReport}
@@ -7302,6 +7342,34 @@ If none are present, write "None".`;
                     {exportMenuOpen && (
                       <div className="absolute right-0 top-10 z-50 bg-white rounded-xl shadow-2xl border border-slate-200 min-w-52 py-1">
                         <p className="px-3 py-1.5 text-xs font-bold text-slate-400 uppercase">Export This Trial</p>
+                        <button
+                          onClick={() => {
+                            handleExportInstitutionalDossier(detailTrial, 'pdf');
+                            setExportMenuOpen(false);
+                          }}
+                          className="w-full flex items-center justify-between px-3 py-2 text-sm text-emerald-800 bg-emerald-50/70 hover:bg-emerald-100 font-semibold transition"
+                          title="15-Page Miklens Bio Institutional Regulatory Dossier (PDF)"
+                        >
+                          <span className="flex items-center gap-2.5">
+                            <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <span>Institutional Dossier (PDF)</span>
+                          </span>
+                          <span className="text-[10px] bg-emerald-200 text-emerald-800 px-1.5 py-0.5 rounded font-extrabold uppercase shrink-0">15p</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            handleExportInstitutionalDossier(detailTrial, 'docx');
+                            setExportMenuOpen(false);
+                          }}
+                          className="w-full flex items-center justify-between px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition"
+                          title="15-Page Miklens Bio Institutional Regulatory Dossier (Word DOCX)"
+                        >
+                          <span className="flex items-center gap-2.5">
+                            <FileText className="w-4 h-4 text-teal-600 shrink-0" />
+                            <span>Institutional Dossier (DOCX)</span>
+                          </span>
+                          <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-semibold uppercase shrink-0">DOCX</span>
+                        </button>
                         <button onClick={() => { triggerExportWithCustomisation(() => handleExportPdf(detailTrial)); setExportMenuOpen(false); }} className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50">
                           <FileDown className="w-4 h-4 text-red-500" /> Comprehensive PDF
                         </button>
@@ -8811,6 +8879,45 @@ If none are present, write "None".`;
               {detailTab === 'export' && (
                 <div className="space-y-3">
                   <h3 className="font-semibold text-slate-700 flex items-center gap-2"><FileDown className="w-4 h-4 text-slate-500" /> Export Options</h3>
+
+                  {/* Miklens Bio Institutional Dossier (15-Page Regulatory Protocol) */}
+                  <div className="bg-gradient-to-br from-emerald-950 via-slate-900 to-teal-950 rounded-2xl border border-emerald-500/40 p-4 shadow-sm text-white">
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-emerald-400 shrink-0">
+                          <ShieldCheck className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <span className="text-[9px] font-extrabold uppercase tracking-wider text-emerald-400 bg-emerald-950 px-1.5 py-0.5 rounded border border-emerald-500/30">
+                            Miklens Bio Regulatory R&amp;D Standard
+                          </span>
+                          <h4 className="text-sm font-bold text-white mt-0.5">
+                            Institutional Bio-Efficacy &amp; Phytotoxicity Dossier
+                          </h4>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-900/60 px-2 py-0.5 rounded border border-emerald-500/30 shrink-0">
+                        15-Page Protocol
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-300 mb-3 leading-relaxed">
+                      Complete corporate regulatory evaluation: Botanical weed flora, 5-quadrat sampling counts (Q1 to Q5), mortality % at 7 DAT, density progression, destructive dry biomass (g/m²), 0–10 crop phytotoxicity scale, and two-tier institutional sign-offs.
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => handleExportInstitutionalDossier(detailTrial, 'pdf')}
+                        className="py-2 px-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition shadow-sm active:scale-95"
+                      >
+                        <Download className="w-3.5 h-3.5" /> PDF Dossier (15p)
+                      </button>
+                      <button
+                        onClick={() => handleExportInstitutionalDossier(detailTrial, 'docx')}
+                        className="py-2 px-3 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition border border-white/20 active:scale-95"
+                      >
+                        <FileText className="w-3.5 h-3.5" /> Word (DOCX)
+                      </button>
+                    </div>
+                  </div>
 
                   {/* ── PDF REPORTS ── */}
                   <p className="text-xs font-bold text-slate-400 uppercase tracking-wider pt-1">PDF Reports</p>
