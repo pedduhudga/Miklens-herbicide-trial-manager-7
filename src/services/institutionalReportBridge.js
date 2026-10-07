@@ -50,23 +50,11 @@ export function sanitizeProductName(rawName, fallback = 'Miklens Bio Bio-Herbici
 }
 
 /**
- * Strict dosage sanitizer.
- * Cleans recipe mix formulas like "20+3ml BPD" -> "20 mL/L".
+ * Dosage resolver.
+ * Keeps dosage exactly as recorded in the trial data without altering or stripping user input.
  */
 export function sanitizeDosage(dose, fallback = 'As recommended') {
-  if (!dose || typeof dose !== 'string') return fallback;
-  let clean = dose.trim();
-
-  if (clean.includes('+')) {
-    const firstPart = clean.split('+')[0].trim();
-    if (/\d+/.test(firstPart)) {
-      clean = `${firstPart.replace(/[^\d.]/g, '')} mL/L`;
-    } else {
-      clean = firstPart;
-    }
-  }
-
-  return clean || fallback;
+  return dose || fallback;
 }
 
 /**

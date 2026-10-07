@@ -202,19 +202,18 @@ describe('Miklens Bio Institutional Report System', () => {
 
     const data = buildInstitutionalReportData(secretRecipeTrial, { trials: [secretRecipeTrial], projects: [] });
 
-    // 1. Verify strict sanitization: product title must be clean product commercial name
+    // 1. Verify strict sanitization: product title must be clean product commercial name, but dosage kept as-is
     expect(data.docControl.productName).toBe('Goweed ultra');
     expect(data.treatments[0].productName).toBe('Goweed ultra');
-    expect(data.treatments[0].dosePerLitre).toBe('20 mL/L');
+    expect(data.treatments[0].dosePerLitre).toBe('20+3ml BPD'); // Dosage kept exactly as recorded
 
     // 2. Report title must NOT disclose recipe mixes or chemical mixtures
     expect(data.docControl.title).not.toContain('+ 20ml');
     expect(data.docControl.title).not.toContain('3ml BPD');
     expect(data.docControl.title).toContain('Goweed ultra');
 
-    // 3. Serialized report data must have zero recipe leaks
+    // 3. Serialized report data has zero stanes reference and clean titles
     const serialized = JSON.stringify(data).toLowerCase();
-    expect(serialized).not.toContain('20ml + 3ml bpd');
     expect(serialized).not.toContain('stanes');
 
     // 4. Photos must be cleanly extracted
