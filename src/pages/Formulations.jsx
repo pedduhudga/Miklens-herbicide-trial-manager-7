@@ -1156,8 +1156,38 @@ export default function Formulations({ onMenuClick }) {
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         title={editingForm && !name.includes('(Copy)') ? 'Edit Formulation' : 'New Formulation'}
+        headerActions={
+          <button
+            type="submit"
+            form="formulation-modal-form"
+            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs transition"
+            title="Save Formulation"
+          >
+            <Check className="w-3.5 h-3.5" />
+            <span>Save</span>
+          </button>
+        }
+        footer={
+          <div className="flex items-center justify-between w-full gap-3">
+            <button
+              type="button"
+              onClick={() => setIsModalOpen(false)}
+              className="px-4 py-2 text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 rounded-xl font-semibold text-sm transition shadow-2xs"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              form="formulation-modal-form"
+              className="btn-primary px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 shadow-md hover:shadow-lg transition active:scale-95"
+            >
+              <Check className="w-4 h-4" />
+              <span>{editingForm && !name.includes('(Copy)') ? 'Save Changes' : 'Create Formulation'}</span>
+            </button>
+          </div>
+        }
       >
-        <form onSubmit={handleSave} className="space-y-6">
+        <form id="formulation-modal-form" onSubmit={handleSave} className="space-y-6">
           {/* Live Duplicate Warning Banner */}
           {duplicateFormMatch && (
             <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-xl text-amber-900 flex items-start gap-2.5 animate-in fade-in">
@@ -1244,7 +1274,7 @@ export default function Formulations({ onMenuClick }) {
               </div>
             </div>
 
-            <div className="space-y-3 max-h-[380px] overflow-y-auto p-0.5 pr-1">
+            <div className="space-y-3 p-0.5 pr-1">
               {ingredients.map((ing, index) => {
                 const cleanName = (ing.name || '').trim();
                 const matchedLib = cleanName ? findIngredientInLibrary(cleanName, state.ingredients || []) : null;
@@ -1465,19 +1495,20 @@ export default function Formulations({ onMenuClick }) {
             />
           </div>
 
-          <div className="pt-4 flex justify-end gap-3 border-t">
+          <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-200">
             <button
               type="button"
               onClick={() => setIsModalOpen(false)}
-              className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl font-medium"
+              className="px-4 py-2 text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 rounded-xl font-medium text-sm transition"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="btn-primary px-6 py-2 rounded-xl"
+              className="btn-primary px-6 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 shadow-md active:scale-95"
             >
-              Save Formulation
+              <Check className="w-4 h-4" />
+              <span>{editingForm && !name.includes('(Copy)') ? 'Save Changes' : 'Save Formulation'}</span>
             </button>
           </div>
         </form>
@@ -1488,8 +1519,28 @@ export default function Formulations({ onMenuClick }) {
         isOpen={isQuickAddIngOpen}
         onClose={() => setIsQuickAddIngOpen(false)}
         title="Add New Ingredient to Library"
+        footer={
+          <div className="flex items-center justify-between w-full gap-2">
+            <button
+              type="button"
+              onClick={() => setIsQuickAddIngOpen(false)}
+              className="px-4 py-2 text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 rounded-xl text-sm font-medium transition"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              form="quick-add-ingredient-form"
+              disabled={isSavingQuickIng}
+              className="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-sm font-bold shadow-xs transition active:scale-95 disabled:opacity-50 flex items-center gap-1.5"
+            >
+              <Plus className="w-4 h-4" />
+              {isSavingQuickIng ? 'Saving to Library...' : 'Save & Link to Recipe'}
+            </button>
+          </div>
+        }
       >
-        <form onSubmit={handleSaveQuickIngredient} className="space-y-4">
+        <form id="quick-add-ingredient-form" onSubmit={handleSaveQuickIngredient} className="space-y-4">
           <div className="p-3 bg-purple-50/70 border border-purple-200/80 rounded-xl text-xs text-purple-900 leading-relaxed">
             ✨ <strong>Quick Ingredient Creator:</strong> This ingredient and its unit price will be permanently saved to your <strong>{activeCategory}</strong> library and will automatically calculate recipe costs for all formulations.
           </div>
