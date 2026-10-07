@@ -177,4 +177,114 @@ describe('Miklens Bio Institutional Report System', () => {
     // Check mortality at 7 DAT reflects real logged 83.33%
     expect(data.treatmentMetrics[0].mortalityKey).toBe(83.33);
   });
+
+  it('strictly prevents formulation recipe leaks and secret mixture disclosure (e.g. Goweed ultra + 20ml + 3ml BPD)', async () => {
+    const secretRecipeTrial = {
+      ID: 'trial-f2809',
+      TrialCode: 'MB/RD/COE/2026/F2809',
+      FormulationName: 'Goweed ultra + 20ml + 3ml BPD',
+      Crop: 'Target Crop',
+      Dosage: '20+3ml BPD',
+      Location: '13.048329, 77.734435',
+      Temperature: '24.7',
+      Humidity: '74',
+      Rain: '0.1',
+      SoilTexture: 'Loam',
+      WeedSpecies: 'Cynodon dactylon, Centella asiatica',
+      Observations: JSON.stringify([
+        { daa: 0, date: '2026-07-02', weedCover: 80, notes: 'Dense green canopy prior to spray' },
+        { daa: 7, date: '2026-07-09', weedCover: 10, weedMortalityPct: 87.5, notes: 'Severe chlorosis and desiccation' }
+      ]),
+      PhotoURLs: JSON.stringify([
+        { url: 'https://storage.googleapis.com/test-trial/f2809-plot.jpg', label: 'Treated Plot at 7 DAT', date: '2026-07-09' }
+      ])
+    };
+
+    const data = buildInstitutionalReportData(secretRecipeTrial, { trials: [secretRecipeTrial], projects: [] });
+
+    // 1. Verify strict sanitization: product title must be clean product commercial name
+    expect(data.docControl.productName).toBe('Goweed ultra');
+    expect(data.treatments[0].productName).toBe('Goweed ultra');
+    expect(data.treatments[0].dosePerLitre).toBe('20 mL/L');
+
+    // 2. Report title must NOT disclose recipe mixes or chemical mixtures
+    expect(data.docControl.title).not.toContain('+ 20ml');
+    expect(data.docControl.title).not.toContain('3ml BPD');
+    expect(data.docControl.title).toContain('Goweed ultra');
+
+    // 3. Serialized report data must have zero recipe leaks
+    const serialized = JSON.stringify(data).toLowerCase();
+    expect(serialized).not.toContain('20ml + 3ml bpd');
+    expect(serialized).not.toContain('stanes');
+
+    // 4. Photos must be cleanly extracted
+    expect(data.photoUrls.length).toBe(1);
+    expect(data.photoUrls[0].url).toContain('f2809-plot.jpg');
+
+    // 5. PDF & DOCX generation must execute smoothly
+    const pdf = await generateInstitutionalPDF(data);
+    expect(pdf).toContain('.pdf');
+
+    const docx = await generateInstitutionalDocx(data);
+    expect(docx).toContain('.docx');
+  });
+
+  it('computes real single-trial progression analytics and incorporates rich scientific parameters', () => {
+    const singleTrial = {
+      ID: 'trial-weedrop-01',
+      TrialCode: 'MB/RD/COE/2026/F101',
+      TrialName: 'Weedrop (QE strong)',
+      FormulationName: 'Weedrop (QE strong)',
+      SiteType: 'Open field',
+      Crop: 'Non-Crop',
+      Location: '13.048181, 77.734413',
+      Dosage: '10 mL/L',
+      Temperature: '28.2',
+      Humidity: '55',
+      Windspeed: '9.3',
+      Rain: '0',
+      SoilDataJSON: JSON.stringify({ ph: '6.4', clay: '17', sand: '48', organicCarbon: '1.31', texture: 'Loam' }),
+      TargetWeed: 'Cynodon dactylon, Digitaria sanguinalis',
+      Observations: JSON.stringify([
+        { daa: 0, date: '2026-10-01', weedCover: 80, notes: 'Baseline uniform canopy' },
+        { daa: 3, date: '2026-10-04', weedCover: 35, notes: 'Rapid foliar yellowing' },
+        { daa: 7, date: '2026-10-08', weedCover: 8, notes: 'Advanced desiccation' },
+        { daa: 14, date: '2026-10-15', weedCover: 12, notes: 'Sustained control with minor regrowth' }
+      ]),
+      PhotoURLs: JSON.stringify([
+        { url: 'https://example.com/day0.jpg', date: '2026-10-01', label: 'Day 0 Pre-spray' },
+        { url: 'https://example.com/day7.jpg', date: '2026-10-08', label: 'Day 7 Plot Efficacy' }
+      ])
+    };
+
+    const data = buildInstitutionalReportData(singleTrial, { trials: [singleTrial], projects: [] });
+
+    // Verify rich scientific parameters
+    expect(data.docControl.soilProfile).toContain('pH: 6.4');
+    expect(data.docControl.soilProfile).toContain('Clay: 17%');
+    expect(data.docControl.weatherContext).toContain('28.2°C');
+    expect(data.docControl.weatherContext).toContain('55%');
+
+    // Verify single-trial progression statistics
+    const stats = data.statistics;
+    expect(stats.isSingleTrial).toBe(true);
+    expect(stats.progression.baselineCover).toBe(80);
+    expect(stats.progression.finalCover).toBe(12);
+    expect(stats.progression.netReduction).toBe(85); // (80-12)/80 = 85%
+    expect(stats.progression.peakControl).toBe(90); // 100 - (8/80)*100 = 90%
+    expect(stats.progression.peakDaa).toBe(7);
+    expect(stats.progression.meanControl).toBeGreaterThan(0);
+    expect(stats.progression.cv).toBeGreaterThan(0);
+
+    // Verify timeline
+    expect(data.treatmentTimeline.length).toBe(4);
+    expect(data.treatmentTimeline[0].status).toBe('Baseline');
+    expect(data.treatmentTimeline[2].status).toBe('Near-Complete Desiccation');
+
+    // Verify photo extraction
+    expect(data.photoUrls.length).toBe(2);
+    expect(data.photoUrls[0].url).toBe('https://example.com/day0.jpg');
+    expect(data.photoUrls[1].url).toBe('https://example.com/day7.jpg');
+  });
 });
+
