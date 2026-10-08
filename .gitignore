@@ -30,3 +30,4 @@ dist-ssr
 android/
 scratch/
 *.xlsx
+*.pdf
