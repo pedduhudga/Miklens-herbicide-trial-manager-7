@@ -710,28 +710,6 @@ export async function generateInstitutionalPDF(reportData) {
   doc.setTextColor(...MUTED_TEXT);
   doc.text(`Scientific Review Board Seal  |  Date: ${dc.reportDate}`, rightBoxX + 4, certPanelY + 38);
 
-  // Official Institutional Archival & GEP Certification Panel (Clean typography, zero QR code)
-  const auditCardY = certPanelY + certCardH + 6;
-  const auditCardH = 20;
-  doc.setFillColor(...ROW_ALT_BG);
-  doc.roundedRect(14, auditCardY, pw - 28, auditCardH, 1.5, 1.5, 'F');
-  doc.setDrawColor(...BORDER_RULE);
-  doc.setLineWidth(0.3);
-  doc.roundedRect(14, auditCardY, pw - 28, auditCardH, 1.5, 1.5, 'D');
-
-  doc.setFillColor(...MIKLENS_GREEN);
-  doc.rect(14, auditCardY, 3, auditCardH, 'F');
-
-  doc.setFontSize(7.5);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(...MIKLENS_GREEN);
-  doc.text('OFFICIAL GEP RECORD AUTHENTICATION & ARCHIVAL REGISTRY', 21, auditCardY + 5.5);
-
-  doc.setFontSize(7);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(...DARK_TEXT);
-  doc.text(`This evaluation dossier is an authenticated scientific record under Miklens Bio Archive Registry (MBRD-${year}-SEC).`, 21, auditCardY + 10.5);
-  doc.text(`Conforms to Good Experimental Practice (GEP), CIBRC bio-efficacy testing standards, and SOP ${dc.sopFormCode} protocol specifications.`, 21, auditCardY + 15);
 
   // Footer Rule
   doc.setDrawColor(...BORDER_RULE);
@@ -755,7 +733,7 @@ export async function generateInstitutionalPDF(reportData) {
   const tocRows = [
     ['1', 'EXECUTIVE SUMMARY & COMPREHENSIVE TRIAL SYNTHESIS', '2'],
     ['2', 'TRIAL OBJECTIVES, AGRONOMIC DESIGN & TRIAL CONDITIONS', '3'],
-    ['3', 'BIO-EFFICACY PROTOCOL, EVALUATION FORMULAS & VALIDITY', '4'],
+    ['3', 'BIO-EFFICACY EVALUATION PROTOCOL & PHYTOTOXICITY SCALE', '4'],
     ['4', 'TARGET FLORA PROFILE, BIO-EFFICACY RESULTS & INFERENCE', '5'],
     ['5', 'STATISTICAL RIGOR, ANOVA, TIMELINE & REGULATORY APPROVALS', '6'],
     ...(hasPhotos ? [['6', 'IN-SITU FIELD PHOTOGRAPHIC EVIDENCE GALLERY', '7']] : [])
@@ -937,28 +915,6 @@ export async function generateInstitutionalPDF(reportData) {
     }
   });
 
-  // 1.3 Executive Agronomic Takeaways & Regulatory Verdict
-  curY = execBenchY + execBenchH + 4;
-  doc.setFillColor(...LIGHT_GREEN_TINT);
-  doc.roundedRect(14, curY, pw - 28, 17, 1.5, 1.5, 'F');
-  doc.setDrawColor(...BORDER_EMERALD);
-  doc.setLineWidth(0.3);
-  doc.roundedRect(14, curY, pw - 28, 17, 1.5, 1.5, 'D');
-
-  doc.setFillColor(...MIKLENS_GREEN);
-  doc.rect(14, curY, 3, 17, 'F');
-
-  doc.setFontSize(7.2);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(...MIKLENS_GREEN);
-  doc.text('EXECUTIVE VERDICT & REGULATORY CLEARANCE STATUS', 20, curY + 4.5);
-
-  doc.setFontSize(6.8);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(...DARK_TEXT);
-  doc.text(`* High Field Bio-Efficacy: ${bestTrt.productName} demonstrated rapid post-emergence knockdown, meeting all bio-efficacy standards.`, 20, curY + 8.5);
-  doc.text(`* Verified Crop Tolerance: Absolute crop foliage selectivity confirmed on ${dc.cropDisplay} with zero persistent injury.`, 20, curY + 12.2);
-  doc.text('* Regulatory Recommendation: Recommended for institutional authorization and field application under standard GAP guidelines.', 20, curY + 15.8);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // PAGE 3: 2 TRIAL OBJECTIVES, AGRONOMIC DESIGN & TRIAL CONDITIONS
@@ -1259,12 +1215,12 @@ export async function generateInstitutionalPDF(reportData) {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // PAGE 4: 3 BIO-EFFICACY PROTOCOL, EVALUATION FORMULAS & VALIDITY
+  // PAGE 4: 3 BIO-EFFICACY EVALUATION PROTOCOL & PHYTOTOXICITY SCALE
   // ═══════════════════════════════════════════════════════════════════════════
   doc.addPage();
   curY = 24;
 
-  drawSectionBanner(doc, '3 BIO-EFFICACY PROTOCOL, EVALUATION FORMULAS & VALIDITY', curY);
+  drawSectionBanner(doc, '3 BIO-EFFICACY EVALUATION PROTOCOL & PHYTOTOXICITY SCALE', curY);
   curY += 7;
 
   doc.setFontSize(9);
@@ -1295,51 +1251,13 @@ export async function generateInstitutionalPDF(reportData) {
     }
   });
 
-  curY = doc.lastAutoTable.finalY + 4;
+  curY = doc.lastAutoTable.finalY + 8;
   doc.setFontSize(9);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(...MIKLENS_GREEN);
-  doc.text('3.2 Evaluation Methodology & Standardized Calculation Formulas', 14, curY);
+  doc.text(`3.2 Crop Phytotoxicity Scoring Scale (0-10 Detailed Institutional Scale on ${dc.crop})`, 14, curY);
 
-  curY += 3.5;
-  doc.setFontSize(7.8);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(...DARK_TEXT);
-  doc.text('Target Population Density & Scientific Evaluation Metrics:', 14, curY);
-  curY += 3.5;
-  doc.setFont('helvetica', 'normal');
-  const formulaIntro = doc.splitTextToSize('Target density was enumerated per unit area (No./m²) across scheduled observation intervals (0, 7, 15, and 30 DAT) using standardized quadrat sampling. Weed control efficiency, canopy reduction kinetics, and control longevity were evaluated according to established agrochemical research formulas:', pw - 28);
-  doc.text(formulaIntro, 14, curY);
-  curY += formulaIntro.length * 3.8 + 2.5;
-
-  // Formula Callout Card (Height 32mm)
-  const formulaCardH = 32;
-  doc.setFillColor(...LIGHT_GREEN_TINT);
-  doc.roundedRect(14, curY, pw - 28, formulaCardH, 1.5, 1.5, 'F');
-  doc.setDrawColor(...BORDER_EMERALD);
-  doc.setLineWidth(0.3);
-  doc.roundedRect(14, curY, pw - 28, formulaCardH, 1.5, 1.5, 'D');
-
-  doc.setFontSize(7.2);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(...MIKLENS_GREEN);
-  doc.text('Target Population Density (weeds/m²) = Total Target Weed Count / Sampled Quadrat Area (m²)', pw / 2, curY + 5.5, { align: 'center' });
-  doc.text('Abbott\'s Weed Control Efficiency (WCE %) = ((Control Density - Treated Density) / Control Density) x 100', pw / 2, curY + 11.5, { align: 'center' });
-  doc.text('In-Situ Canopy Bio-Efficacy (%) = ((Baseline Density at 0 DAT - Current Density at t DAT) / Baseline Density at 0 DAT) x 100', pw / 2, curY + 17.5, { align: 'center' });
-  doc.text('Henderson-Tilton Corrected Efficacy (%) = [1 - (T_post x C_pre) / (T_pre x C_post)] x 100', pw / 2, curY + 23.5, { align: 'center' });
-
-  doc.setFontSize(6.8);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(...DARK_TEXT);
-  doc.text('Regulatory Performance Threshold: Sustained Control Validated while WCE >= 70% | Rating: >=85% Excellent, 70-84.9% Good, 50-69.9% Fair', pw / 2, curY + 28.5, { align: 'center' });
-
-  curY += formulaCardH + 4.5;
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(...MIKLENS_GREEN);
-  doc.text(`Crop Phytotoxicity Scoring Scale (0-10 Detailed Institutional Scale on ${dc.crop})`, 14, curY);
-
-  curY += 2;
+  curY += 3;
   autoTable(doc, {
     startY: curY,
     margin: { left: 14, right: 14 },
@@ -1347,8 +1265,8 @@ export async function generateInstitutionalPDF(reportData) {
     head: [['Score', 'Injury Classification Level', 'Visual Diagnostic Symptoms Criteria']],
     body: reportData.phytotoxicityScale.map(s => [s.score, s.injuryLevel, s.symptoms]),
     theme: 'grid',
-    headStyles: { fillColor: SLATE_NAVY, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 6.8, halign: 'center', cellPadding: 1.6 },
-    styles: { fontSize: 6.5, cellPadding: 1.2, lineColor: BORDER_RULE, lineWidth: 0.2, textColor: DARK_TEXT },
+    headStyles: { fillColor: SLATE_NAVY, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7, halign: 'center', cellPadding: 2 },
+    styles: { fontSize: 6.8, cellPadding: 1.6, lineColor: BORDER_RULE, lineWidth: 0.2, textColor: DARK_TEXT },
     columnStyles: {
       0: { cellWidth: 14, halign: 'center', fontStyle: 'bold' },
       1: { cellWidth: 38, fontStyle: 'bold' },
@@ -1365,65 +1283,6 @@ export async function generateInstitutionalPDF(reportData) {
       }
     }
   });
-
-  curY = doc.lastAutoTable.finalY + 4;
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(...MIKLENS_GREEN);
-  doc.text('3.3 Formal Study Validity Statement', 14, curY);
-
-  curY += 2;
-  // Validation badge card
-  const boxW = pw - 28;
-  doc.setFillColor(...LIGHT_GREEN_TINT);
-  doc.roundedRect(14, curY, boxW, 16, 1.5, 1.5, 'F');
-  doc.setDrawColor(...BORDER_EMERALD);
-  doc.setLineWidth(0.3);
-  doc.roundedRect(14, curY, boxW, 16, 1.5, 1.5, 'D');
-
-  doc.setFillColor(...MIKLENS_GREEN);
-  doc.rect(14, curY, 2.5, 16, 'F');
-
-  const statements = [
-    '1. The treatments were applied according to the calibrated dose rates of the approved protocol.',
-    '2. No extraneous weather deviations or non-conformances occurred during the observation period.',
-    '3. This trial is certified as scientifically and regulatorily valid under Miklens Bio R&D standards.'
-  ];
-
-  doc.setFontSize(7.5);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(...DARK_TEXT);
-
-  statements.forEach((stmt, sIdx) => {
-    doc.setFillColor(...MIKLENS_GREEN);
-    doc.circle(18.5, curY + 4 + sIdx * 4.2, 0.7, 'F');
-    doc.text(stmt, 21.5, curY + 4.7 + sIdx * 4.2, { maxWidth: boxW - 12 });
-  });
-
-  // 3.4 Quality Assurance & Study Standards Compliance Card
-  curY += 20;
-  const qaCardY = curY;
-  const qaCardH = 18;
-  doc.setFillColor(...ROW_ALT_BG);
-  doc.roundedRect(14, qaCardY, pw - 28, qaCardH, 1.5, 1.5, 'F');
-  doc.setDrawColor(...BORDER_RULE);
-  doc.setLineWidth(0.3);
-  doc.roundedRect(14, qaCardY, pw - 28, qaCardH, 1.5, 1.5, 'D');
-
-  doc.setFillColor(...MIKLENS_GREEN);
-  doc.rect(14, qaCardY, 3, qaCardH, 'F');
-
-  doc.setFontSize(7.2);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(...MIKLENS_GREEN);
-  doc.text('3.4 Good Experimental Practice (GEP) & Scientific Quality Assurance', 20, qaCardY + 4.5);
-
-  doc.setFontSize(6.8);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(...DARK_TEXT);
-  doc.text('* Protocol Adherence: Execution conducted in strict compliance with Miklens Bio R&D SOP MB/COP8/2-06 and national testing guidelines.', 20, qaCardY + 8.5);
-  doc.text('* Quadrat Randomization: Fixed quadrat markers (0.5m x 0.5m / 1.0m2) established per plot to prevent observational bias and edge effects.', 20, qaCardY + 12.2);
-  doc.text('* Data Verification: All primary raw records independently verified with full audit traceability back to original field notebooks.', 20, qaCardY + 15.8);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // PAGE 5: 4 BOTANICAL TARGET FLORA, BIO-EFFICACY RESULTS & AGRONOMIC INFERENCE
@@ -1841,38 +1700,12 @@ export async function generateInstitutionalPDF(reportData) {
     }
   });
 
-  // 5.4 Good Agricultural Practice (GAP) Stewardship & Resistance Management
-  curY = doc.lastAutoTable.finalY + 4;
+  // 5.4 Formal Regulatory Sign-Off & Approvals
+  curY = doc.lastAutoTable.finalY + 8;
   doc.setFontSize(8.5);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(...MIKLENS_GREEN);
-  doc.text('5.4 Good Agricultural Practice (GAP) Stewardship & Resistance Management', 14, curY);
-
-  curY += 2.5;
-  const gapCardY = curY;
-  const gapCardH = 17;
-  doc.setFillColor(...ROW_ALT_BG);
-  doc.roundedRect(14, gapCardY, pw - 28, gapCardH, 1.5, 1.5, 'F');
-  doc.setDrawColor(...BORDER_RULE);
-  doc.setLineWidth(0.3);
-  doc.roundedRect(14, gapCardY, pw - 28, gapCardH, 1.5, 1.5, 'D');
-
-  doc.setFillColor(...SLATE_NAVY);
-  doc.rect(14, gapCardY, 3, gapCardH, 'F');
-
-  doc.setFontSize(6.8);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(...DARK_TEXT);
-  doc.text('* Optimal Timing: Apply during early active weed growth (2-6 leaf stage) when transpiration is active for maximum systemic / contact absorption.', 20, gapCardY + 4.5);
-  doc.text('* Water Quality & Spray Coverage: Use clean, non-turbid carrier water (pH 6.0-7.0) with calibrated spray volume (500 L/ha) to ensure uniform foliar coverage.', 20, gapCardY + 8.8);
-  doc.text('* Resistance Management: Alternate herbicide modes of action across seasons and integrate mechanical / cultural weed management to prevent resistant biotypes.', 20, gapCardY + 13.0);
-
-  // 5.5 Formal Regulatory Sign-Off & Approvals
-  curY = gapCardY + gapCardH + 5;
-  doc.setFontSize(8.5);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(...MIKLENS_GREEN);
-  doc.text('5.5 Regulatory Certification & Institutional Sign-Off Approvals', 14, curY);
+  doc.text('5.4 Regulatory Certification & Institutional Sign-Off Approvals', 14, curY);
 
   curY += 6;
   const signColW = 75;
@@ -2243,19 +2076,6 @@ export async function generateInstitutionalDocx(reportData) {
     }),
     new Paragraph({ text: '' }),
 
-    // Digital Record Authentication & GEP Audit Trail Card
-    createDocxCallout({
-      title: 'OFFICIAL DIGITAL RECORD AUTHENTICATION & GEP AUDIT TRAIL',
-      items: [
-        `• SOP Form Code: ${dc.sopFormCode}  |  Report Reference: ${dc.reportNo}  |  Protocol Ref: ${dc.protocolRefNo}`,
-        `• Target Crop: ${dc.cropDisplay}  |  Product: ${dc.productName}  |  Evaluation Date: ${dc.reportDate}`,
-        `• Lead Investigator: ${dc.preparedBy}  |  Reviewer: ${dc.approvedBy}`,
-        `• GEP Compliance: Authenticated and cryptographically tied to Miklens Bio Archive Registry (MBRD-${year}-SEC).`
-      ],
-      borderColor: HEX_EMERALD,
-      bgColor: HEX_LIGHT_GREEN
-    }),
-    new Paragraph({ text: '' }),
     new Paragraph({ children: [new PageBreak()] }),
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -2282,7 +2102,7 @@ export async function generateInstitutionalDocx(reportData) {
         ...[
           ['1', 'EXECUTIVE SUMMARY & COMPREHENSIVE TRIAL SYNTHESIS', '2'],
           ['2', 'TRIAL OBJECTIVES, AGRONOMIC DESIGN & TRIAL CONDITIONS', '3'],
-          ['3', 'BIO-EFFICACY PROTOCOL, EVALUATION FORMULAS & VALIDITY', '4'],
+          ['3', 'BIO-EFFICACY EVALUATION PROTOCOL & PHYTOTOXICITY SCALE', '4'],
           ['4', 'TARGET FLORA PROFILE, BIO-EFFICACY RESULTS & INFERENCE', '5'],
           ['5', 'STATISTICAL RIGOR, ANOVA, TIMELINE & REGULATORY APPROVALS', '6'],
           ...(hasPhotos ? [['6', 'IN-SITU FIELD PHOTOGRAPHIC EVIDENCE GALLERY', '7']] : [])
@@ -2368,21 +2188,6 @@ export async function generateInstitutionalDocx(reportData) {
     }),
     new Paragraph({ text: '' }),
 
-    // 1.3 Regulatory Verdict Callout
-    new Paragraph({
-      text: '1.3 Executive Agronomic Takeaways & Regulatory Verdict',
-      heading: HeadingLevel.HEADING_3
-    }),
-    createDocxCallout({
-      title: 'EXECUTIVE VERDICT & REGULATORY CLEARANCE STATUS',
-      items: [
-        `• High Field Bio-Efficacy: ${bestTrt.productName} demonstrated rapid post-emergence knockdown, meeting all bio-efficacy standards.`,
-        `• Verified Crop Tolerance: Absolute crop foliage selectivity confirmed on ${dc.cropDisplay} with zero persistent injury.`,
-        '• Regulatory Recommendation: Recommended for institutional authorization and field application under standard GAP guidelines.'
-      ],
-      borderColor: HEX_EMERALD,
-      bgColor: HEX_LIGHT_GREEN
-    }),
     new Paragraph({ children: [new PageBreak()] }),
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -2717,33 +2522,7 @@ export async function generateInstitutionalDocx(reportData) {
     new Paragraph({ text: '' }),
 
     new Paragraph({
-      text: '3.2 Evaluation Methodology & Standardized Calculation Formulas',
-      heading: HeadingLevel.HEADING_3
-    }),
-    new Paragraph({
-      children: [
-        new TextRun({
-          text: 'Target density was enumerated per unit area (No./m²) across scheduled observation intervals (0, 7, 15, and 30 DAT) using standardized quadrat sampling. Weed control efficiency, canopy reduction kinetics, and control longevity were evaluated according to established agrochemical research formulas:\n',
-          font: 'Arial'
-        })
-      ]
-    }),
-    createDocxCallout({
-      title: 'STANDARDIZED BIO-EFFICACY EVALUATION FORMULAS & CALCULATION METHODOLOGY',
-      items: [
-        { text: '• Target Population Density (weeds/m²) = Total Target Weed Count / Sampled Quadrat Area (m²)', bold: true, color: HEX_EMERALD },
-        { text: '• Abbott\'s Weed Control Efficiency (WCE %) = ((Control Density - Treated Density) / Control Density) × 100', bold: true, color: HEX_EMERALD },
-        { text: '• In-Situ Canopy Bio-Efficacy (%) = ((Baseline Density at 0 DAT - Current Density at t DAT) / Baseline Density at 0 DAT) × 100', bold: true, color: HEX_EMERALD },
-        { text: '• Henderson-Tilton Corrected Efficacy (%) = [1 - (T_post × C_pre) / (T_pre × C_post)] × 100', bold: true, color: HEX_EMERALD },
-        { text: 'Regulatory Performance Threshold: Sustained Control Validated while WCE ≥ 70% | Rating: ≥85% Excellent, 70–84.9% Good, 50–69.9% Fair', bold: true, color: HEX_DARK }
-      ],
-      borderColor: HEX_EMERALD,
-      bgColor: HEX_LIGHT_GREEN
-    }),
-    new Paragraph({ text: '' }),
-
-    new Paragraph({
-      text: `3.3 Crop Phytotoxicity Scoring Scale (0–10 Detailed Institutional Scale on ${dc.crop})`,
+      text: `3.2 Crop Phytotoxicity Scoring Scale (0–10 Detailed Institutional Scale on ${dc.crop})`,
       heading: HeadingLevel.HEADING_3
     }),
     new Table({
@@ -2767,31 +2546,6 @@ export async function generateInstitutionalDocx(reportData) {
     }),
     new Paragraph({ text: '' }),
 
-    new Paragraph({
-      text: '3.4 Formal Study Validity Statement & GEP Quality Assurance',
-      heading: HeadingLevel.HEADING_3
-    }),
-    createDocxCallout({
-      title: 'FORMAL STUDY VALIDITY CONFIRMATION',
-      items: [
-        '1. The treatments were applied according to the calibrated dose rates of the approved protocol.',
-        '2. No extraneous weather deviations or non-conformances occurred during the observation period.',
-        '3. This trial is certified as scientifically and regulatorily valid under Miklens Bio R&D standards.'
-      ],
-      borderColor: HEX_EMERALD,
-      bgColor: HEX_LIGHT_GREEN
-    }),
-    new Paragraph({ text: '' }),
-    createDocxCallout({
-      title: 'GOOD EXPERIMENTAL PRACTICE (GEP) & SCIENTIFIC QUALITY ASSURANCE',
-      items: [
-        '• Protocol Adherence: Execution conducted in strict compliance with Miklens Bio R&D SOP MB/COP8/2-06 and national testing guidelines.',
-        '• Quadrat Randomization: Fixed quadrat markers (0.5m x 0.5m / 1.0m²) established per plot to prevent observational bias and edge effects.',
-        '• Data Verification: All primary raw records independently verified with full audit traceability back to original field notebooks.'
-      ],
-      borderColor: HEX_SLATE,
-      bgColor: HEX_ROW_ALT
-    }),
     new Paragraph({ children: [new PageBreak()] }),
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -3221,26 +2975,9 @@ export async function generateInstitutionalDocx(reportData) {
     }),
     new Paragraph({ text: '' }),
 
-    // 5.4 GAP Stewardship Card
+    // 5.4 Formal Regulatory Sign-Off Block (Dual Column)
     new Paragraph({
-      text: '5.4 Good Agricultural Practice (GAP) Stewardship & Resistance Management',
-      heading: HeadingLevel.HEADING_3
-    }),
-    createDocxCallout({
-      title: 'GOOD AGRICULTURAL PRACTICE (GAP) STEWARDSHIP & RESISTANCE MANAGEMENT',
-      items: [
-        '• Optimal Timing: Apply during early active weed growth (2-6 leaf stage) when transpiration is active for maximum systemic / contact absorption.',
-        '• Water Quality & Spray Coverage: Use clean, non-turbid carrier water (pH 6.0-7.0) with calibrated spray volume (500 L/ha) to ensure uniform foliar coverage.',
-        '• Resistance Management: Alternate herbicide modes of action across seasons and integrate mechanical / cultural weed management to prevent resistant biotypes.'
-      ],
-      borderColor: HEX_SLATE,
-      bgColor: HEX_ROW_ALT
-    }),
-    new Paragraph({ text: '' }),
-
-    // 5.5 Formal Regulatory Sign-Off Block (Dual Column)
-    new Paragraph({
-      text: '5.5 Regulatory Certification & Institutional Sign-Off Approvals',
+      text: '5.4 Regulatory Certification & Institutional Sign-Off Approvals',
       heading: HeadingLevel.HEADING_3
     }),
     new Table({
