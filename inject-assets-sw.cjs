@@ -53,10 +53,17 @@ if (fs.existsSync(swPath)) {
   // Replace the STATIC_ASSETS array definition
   const staticAssetsRegex = /const\s+STATIC_ASSETS\s*=\s*\[[\s\S]*?\];/;
   const newArrayCode = `const STATIC_ASSETS = ${JSON.stringify(uniqueCacheList, null, 2)};`;
-  
   swContent = swContent.replace(staticAssetsRegex, newArrayCode);
+
+  // Bump cache version with build timestamp so client auto-detects new release
+  const buildTimestamp = Date.now();
+  swContent = swContent.replace(/const\s+CACHE_NAME\s*=\s*['"][^'"]+['"];/, `const CACHE_NAME = 'trial-manager-v3.0.${buildTimestamp}';`);
+  swContent = swContent.replace(/const\s+STATIC_CACHE\s*=\s*['"][^'"]+['"];/, `const STATIC_CACHE = 'static-v3.0.${buildTimestamp}';`);
+  swContent = swContent.replace(/const\s+DYNAMIC_CACHE\s*=\s*['"][^'"]+['"];/, `const DYNAMIC_CACHE = 'dynamic-v3.0.${buildTimestamp}';`);
+  swContent = swContent.replace(/const\s+IMAGE_CACHE\s*=\s*['"][^'"]+['"];/, `const IMAGE_CACHE = 'images-v3.0.${buildTimestamp}';`);
+
   fs.writeFileSync(swPath, swContent, 'utf8');
-  console.log(`🚀 Successfully injected ${uniqueCacheList.length} assets into dist/sw.js for full offline support!`);
+  console.log(`🚀 Successfully injected ${uniqueCacheList.length} assets and stamped v3.0.${buildTimestamp} into dist/sw.js for full offline support!`);
 } else {
   console.error('Error: dist/sw.js not found!');
   process.exit(1);

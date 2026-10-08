@@ -35,6 +35,7 @@ import { safeJsonParse } from "../utils/helpers.js";
 import { resolvePhotoSrc, getDriveFileId } from "../utils/photoUtils.js";
 import { validateEfficacyData } from "../utils/analysisUtils.js";
 import { analyzePhoto, generateTextWithAI } from "../services/multiProviderAI.js";
+import { requestWakeLock, releaseWakeLock, triggerHaptic } from "../utils/nativeCapabilities.js";
 
 const getAutomaticPotPrefix = (targetTrial, allTrials) => {
   if (!targetTrial || !allTrials) return '';
@@ -356,6 +357,18 @@ export default function PlotScanner({ onMenuClick }) {
 
   // Cropper modal state variables
   const [cropperOpen, setCropperOpen] = useState(false);
+  // Screen Wake Lock: Keep display awake when scanning or taking photos in the field
+  React.useEffect(() => {
+    if (scannerOpen || cameraModal) {
+      requestWakeLock();
+    } else {
+      releaseWakeLock();
+    }
+    return () => {
+      releaseWakeLock();
+    };
+  }, [scannerOpen, cameraModal]);
+
   const [cropSource, setCropSource] = useState(null);
   const cropCallbackRef = useRef(null);
 

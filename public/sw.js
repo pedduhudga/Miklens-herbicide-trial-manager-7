@@ -1,10 +1,10 @@
 // Service Worker for Miklens Trial Manager PWA
-// Version: 2.2.0 - Bypassed external Drive media & hardened FetchEvent against rejections
+// Version: 3.0.0 - Advanced PWA Engine with Navigation Preload, Immutable Chunk Cache & Instant Offline SPA
 
-const CACHE_NAME = 'trial-manager-v2.2.0';
-const STATIC_CACHE = 'static-v2.2.0';
-const DYNAMIC_CACHE = 'dynamic-v2.2.0';
-const IMAGE_CACHE = 'images-v2.2.0';
+const CACHE_NAME = 'trial-manager-v3.0.0';
+const STATIC_CACHE = 'static-v3.0.0';
+const DYNAMIC_CACHE = 'dynamic-v3.0.0';
+const IMAGE_CACHE = 'images-v3.0.0';
 
 // IndexedDB setup via Dexie for offline data
 importScripts('https://unpkg.com/dexie@4.4.4/dist/dexie.js');
@@ -23,54 +23,75 @@ db.version(1).stores({
   settings: 'ID'
 });
 
-// Core assets to cache immediately on install
-const PRECACHE_URLS = [
+// Assets injected during build for full offline support and instant loading
+const STATIC_ASSETS = [
   './',
   './index.html',
   './manifest.json',
   './favicon.svg',
+  './icons/icon-192x192.png',
+  './icons/icon-512x512.png'
 ];
 
-// Install event - cache core assets
+// Install event - precache all application bundles with error resilience
 self.addEventListener('install', (event) => {
-  console.log('[SW] Installing service worker v2.2.0');
+  console.log('[SW] Installing advanced service worker v3.0.0');
   event.waitUntil(
-    caches.open(STATIC_CACHE).then((cache) => {
-      console.log('[SW] Precaching core assets');
-      return cache.addAll(PRECACHE_URLS.map(url => new Request(url, { cache: 'reload' })));
-    }).catch(error => {
-      console.warn('[SW] Failed to cache some static assets:', error);
+    caches.open(STATIC_CACHE).then(async (cache) => {
+      console.log(`[SW] Precaching ${STATIC_ASSETS.length} application assets for instant offline speed`);
+      for (const url of STATIC_ASSETS) {
+        try {
+          await cache.add(new Request(url, { cache: 'reload' }));
+        } catch (err) {
+          // Non-fatal: individual asset miss does not fail overall SW install
+          console.warn('[SW] Non-fatal precache item skipped:', url, err.message);
+        }
+      }
     })
   );
-  // Activate immediately
+  // Activate immediately without waiting for old tabs to close
   self.skipWaiting();
-  console.log('[SW] Service worker installed and ready');
+  console.log('[SW] Service worker installed and activated');
 });
 
-// Activate event - cleanup old caches
+// Activate event - cleanup old caches & enable Navigation Preload
 self.addEventListener('activate', (event) => {
-  console.log('[SW] Activating service worker');
+  console.log('[SW] Activating service worker v3.0.0');
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
+    (async () => {
+      // Enable Navigation Preload if supported for zero-latency page loads
+      if (self.registration.navigationPreload) {
+        try {
+          await self.registration.navigationPreload.enable();
+          console.log('[SW] Navigation Preload enabled');
+        } catch (e) {
+          console.warn('[SW] Navigation Preload not supported/enabled:', e);
+        }
+      }
+
+      // Purge all outdated cache versions
+      const cacheNames = await caches.keys();
+      await Promise.all(
         cacheNames.map((cacheName) => {
-          // Clean up old version caches
-          if (cacheName !== STATIC_CACHE && 
-              cacheName !== DYNAMIC_CACHE && 
-              cacheName !== IMAGE_CACHE) {
-            console.log('[SW] Deleting old cache:', cacheName);
+          if (
+            cacheName !== STATIC_CACHE && 
+            cacheName !== DYNAMIC_CACHE && 
+            cacheName !== IMAGE_CACHE
+          ) {
+            console.log('[SW] Purging old cache:', cacheName);
             return caches.delete(cacheName);
           }
         })
       );
-    }).then(() => {
+
+      // Take control of all open clients immediately
       console.log('[SW] Claiming all clients');
-      return self.clients.claim();
-    })
+      await self.clients.claim();
+    })()
   );
 });
 
-// Fetch event - intelligent caching strategies
+// Fetch event - intelligent multi-tier caching strategies
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
@@ -80,12 +101,12 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Skip chrome-extension and other non-http(s) requests
+  // Skip non-http(s)
   if (!url.protocol.startsWith('http')) {
     return;
   }
 
-  // CRITICAL: Bypass Service Worker for external media / Google Drive / CDN imagery
+  // CRITICAL: Bypass Service Worker for external media / Google Drive / CDN imagery / tile layers
   // Letting the browser fetch them natively avoids CORS failures, opaque caching rejections, and net::ERR_FAILED
   if (
     url.hostname.includes('drive.google.com') ||
@@ -97,23 +118,38 @@ self.addEventListener('fetch', (event) => {
     return; // Native browser fetch!
   }
 
-  // Handle different resource types with different strategies
+  // 1. Navigation requests (HTML / SPA route changes) - Zero latency via Navigation Preload or Network First with instant SPA fallback
   if (isNavigationRequest(request, url)) {
-    // Navigation & HTML requests - Network First to ensure index.html always has latest asset hashes
-    event.respondWith(networkFirst(request, DYNAMIC_CACHE));
-  } else if (isStaticAsset(url)) {
-    // Static assets (JS, CSS, fonts) - Cache First
-    event.respondWith(cacheFirst(request));
-  } else if (isImage(url)) {
-    // Images - Cache First with network fallback
-    event.respondWith(cacheFirst(request, IMAGE_CACHE));
-  } else if (isApiRequest(url)) {
-    // API requests - Network First (always try fresh)
-    event.respondWith(networkFirst(request, DYNAMIC_CACHE));
-  } else {
-    // Other requests - Stale While Revalidate
-    event.respondWith(staleWhileRevalidate(request, DYNAMIC_CACHE));
+    event.respondWith(handleNavigationRequest(event, request));
+    return;
   }
+
+  // 2. Content-hashed static assets (/assets/*-[hash].js|css) - Pure Cache First (Super Speed, 0ms)
+  if (isImmutableHashedAsset(url)) {
+    event.respondWith(cacheFirstImmutable(request, STATIC_CACHE));
+    return;
+  }
+
+  // 3. Other static assets (icons, fonts, static scripts) - Cache First with background revalidation
+  if (isStaticAsset(url)) {
+    event.respondWith(cacheFirst(request, STATIC_CACHE));
+    return;
+  }
+
+  // 4. Images - Cache First
+  if (isImage(url)) {
+    event.respondWith(cacheFirst(request, IMAGE_CACHE));
+    return;
+  }
+
+  // 5. API requests - Network First
+  if (isApiRequest(url)) {
+    event.respondWith(networkFirst(request, DYNAMIC_CACHE));
+    return;
+  }
+
+  // 6. Other requests - Stale While Revalidate
+  event.respondWith(staleWhileRevalidate(request, DYNAMIC_CACHE));
 });
 
 // Helper: Check if request is navigation / HTML
@@ -122,6 +158,65 @@ function isNavigationRequest(request, url) {
          url.pathname === '/' ||
          url.pathname.endsWith('/index.html') ||
          request.headers.get('accept')?.includes('text/html');
+}
+
+// Helper: Check if asset is an immutable hashed Vite bundle
+function isImmutableHashedAsset(url) {
+  return url.pathname.includes('/assets/') && /\-[A-Za-z0-9_\-]{8,}\.(js|css|woff2|png|svg)$/.test(url.pathname);
+}
+
+// Handler for Navigation requests using Navigation Preload
+async function handleNavigationRequest(event, request) {
+  try {
+    // 1. Check if preload response is available from Navigation Preload
+    const preloadResponse = await event.preloadResponse;
+    if (preloadResponse) {
+      caches.open(DYNAMIC_CACHE).then(cache => cache.put(request, preloadResponse.clone())).catch(() => {});
+      return preloadResponse;
+    }
+
+    // 2. Try network fetch
+    const networkResponse = await fetch(request);
+    if (networkResponse && networkResponse.ok) {
+      const cache = await caches.open(DYNAMIC_CACHE);
+      cache.put(request, networkResponse.clone()).catch(() => {});
+      return networkResponse;
+    }
+  } catch (err) {
+    console.log('[SW] Network navigation failed, falling back to cache:', request.url);
+  }
+
+  // 3. Instant fallback to cached index.html for SPA offline routing
+  const cachedIndex = await caches.match('./index.html') || await caches.match('./') || await caches.match('/index.html');
+  if (cachedIndex) {
+    return cachedIndex;
+  }
+
+  return new Response('Miklens Trial Manager is offline. Please connect to the internet to load new data.', {
+    status: 503,
+    statusText: 'Offline',
+    headers: { 'Content-Type': 'text/plain' }
+  });
+}
+
+// Strategy: Cache First for immutable content-hashed Vite chunks (/assets/index-*.js)
+async function cacheFirstImmutable(request, cacheName = STATIC_CACHE) {
+  const cachedResponse = await caches.match(request);
+  if (cachedResponse) {
+    return cachedResponse; // 0ms Instant Response!
+  }
+
+  try {
+    const networkResponse = await fetch(request);
+    if (networkResponse && networkResponse.ok) {
+      const cache = await caches.open(cacheName);
+      cache.put(request, networkResponse.clone()).catch(() => {});
+    }
+    return networkResponse;
+  } catch (error) {
+    console.warn('[SW] Immutable fetch failed:', request.url);
+    throw error;
+  }
 }
 
 // Helper: Check if request is for static asset
@@ -168,7 +263,6 @@ async function cacheFirst(request, cacheName = STATIC_CACHE) {
     return networkResponse;
   } catch (error) {
     console.warn('[SW] Cache First failed for:', request.url);
-    // Return offline fallback for images
     if (isImage(new URL(request.url))) {
       const fallback = await caches.match('./favicon.svg');
       if (fallback) return fallback;

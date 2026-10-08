@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useAppState } from './useAppState.jsx';
 import { processSyncQueue } from '../services/sync.js';
 import { flushMirrorQueue } from '../services/sheetMirror.js';
+import { setAppBadgeCount, triggerHaptic } from '../utils/nativeCapabilities.js';
 
 export function useSync() {
   const { state, dispatch, getAppState, updateState } = useAppState();
@@ -22,6 +23,7 @@ export function useSync() {
     const handleOnline = () => {
       setIsOnline(true);
       updateState({ isOnline: true });
+      triggerHaptic('success');
       showToast('Back online! Syncing data...', 'info');
       flushMirrorQueue(getAppState);
     };
@@ -29,6 +31,7 @@ export function useSync() {
     const handleOffline = () => {
       setIsOnline(false);
       updateState({ isOnline: false });
+      triggerHaptic('warning');
       showToast('Offline Mode Active', 'info');
     };
 
@@ -127,6 +130,11 @@ export function useSync() {
   }, [dispatch]);
 
   const pendingCount = (state.syncQueue || []).filter(s => s.status === 'pending' || s.status === 'failed').length;
+
+  // Sync native app badge with pending offline changes count
+  useEffect(() => {
+    setAppBadgeCount(pendingCount);
+  }, [pendingCount]);
 
   return {
     isOnline,

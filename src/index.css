@@ -90,12 +90,23 @@ html, body {
     touch-action: manipulation;
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
+    overscroll-behavior-y: none;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Safe Area Inset Variables for Notched & Dynamic Island Devices */
+:root {
+    --sat: env(safe-area-inset-top, 0px);
+    --sab: env(safe-area-inset-bottom, 0px);
+    --sal: env(safe-area-inset-left, 0px);
+    --sar: env(safe-area-inset-right, 0px);
 }
 
 #root {
     overflow-x: hidden;
     max-width: 100%;
     width: 100%;
+    min-height: 100dvh;
     position: relative;
 }
 
@@ -113,14 +124,28 @@ body {
     -moz-osx-font-smoothing: grayscale;
     letter-spacing: -0.01em;
 
-    /* PWA Mobile Optimizations */
-    overscroll-behavior-y: contain;
+    /* PWA Mobile Native App Optimizations */
+    overscroll-behavior: none;
     -webkit-tap-highlight-color: transparent;
     -webkit-touch-callout: none;
 }
 
-button, a, select, input {
-    -webkit-tap-highlight-color: transparent;
+/* Prevent accidental text highlight on UI chrome and navigation */
+button, nav, header, [role="button"], [role="tab"] {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+}
+
+/* Ensure text selection works in research tables and inputs */
+input, textarea, select, [contenteditable="true"], .selectable-text, table, td, th {
+    -webkit-user-select: text !important;
+    user-select: text !important;
+}
+
+/* Eliminate tap highlight on all interactive items */
+*, *:before, *:after {
+    -webkit-tap-highlight-color: transparent !important;
 }
 
 /* Base styles imported from legacy */

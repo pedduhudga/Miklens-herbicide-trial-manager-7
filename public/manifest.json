@@ -1,19 +1,34 @@
 {
   "name": "Miklens Trial Manager",
   "short_name": "TrialManager",
-  "description": "Professional agricultural research platform for tracking, evaluating, and reporting on herbicide efficacy trials",
-  "version": "1.0.0",
+  "description": "Professional agricultural research platform for tracking, evaluating, and reporting on bio-efficacy trials",
+  "version": "3.0.0",
   "id": "com.miklens.trialmanager",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
+  "display_override": [
+    "window-controls-overlay",
+    "standalone",
+    "minimal-ui"
+  ],
   "orientation": "portrait-primary",
-  "background_color": "#1f9d8f",
-  "theme_color": "#1a8f5c",
-  "categories": ["productivity", "utilities", "business"],
+  "background_color": "#ecfdf5",
+  "theme_color": "#059669",
+  "categories": [
+    "productivity",
+    "business",
+    "utilities",
+    "science"
+  ],
   "lang": "en",
   "dir": "ltr",
   "prefer_related_applications": false,
+  "launch_handler": {
+    "client_mode": "auto"
+  },
+  "capture_links": "existing-client-navigate",
+  "handle_links": "preferred",
   "icons": [
     {
       "src": "./favicon.svg",
@@ -72,34 +87,33 @@
   ],
   "shortcuts": [
     {
-      "name": "Dashboard",
+      "name": "Field Dashboard",
       "short_name": "Dashboard",
-      "description": "View trial dashboard",
+      "description": "View trial metrics, active tests & KPIs",
       "url": "./index.html#/",
-      "icons": [{ "src": "./favicon.svg", "sizes": "96x96" }]
+      "icons": [{ "src": "./icons/icon-96x96.png", "sizes": "96x96", "type": "image/png" }]
     },
     {
-      "name": "New Trial",
+      "name": "New Field Trial",
       "short_name": "New Trial",
-      "description": "Create a new trial",
+      "description": "Start a new bio-efficacy field evaluation",
       "url": "./index.html#/trials?action=new",
-      "icons": [{ "src": "./favicon.svg", "sizes": "96x96" }]
+      "icons": [{ "src": "./icons/icon-96x96.png", "sizes": "96x96", "type": "image/png" }]
     },
     {
-      "name": "Scanner",
+      "name": "Plot Scanner",
       "short_name": "Scanner",
-      "description": "Scan plot QR code",
+      "description": "Scan plot QR markers to log observations",
       "url": "./index.html#/scanner",
-      "icons": [{ "src": "./favicon.svg", "sizes": "96x96" }]
+      "icons": [{ "src": "./icons/icon-96x96.png", "sizes": "96x96", "type": "image/png" }]
     },
     {
-      "name": "Reports",
+      "name": "Evaluation Reports",
       "short_name": "Reports",
-      "description": "View reports",
+      "description": "Generate scientific dossiers & statistical reports",
       "url": "./index.html#/reports",
-      "icons": [{ "src": "./favicon.svg", "sizes": "96x96" }]
+      "icons": [{ "src": "./icons/icon-96x96.png", "sizes": "96x96", "type": "image/png" }]
     }
   ],
-  "related_applications": [],
-  "generated": true
+  "related_applications": []
 }
