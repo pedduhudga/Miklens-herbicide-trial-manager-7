@@ -1,7 +1,7 @@
 import React from 'react';
 
-// Base skeleton animation class
-const skeletonClass = "animate-pulse bg-slate-200 rounded";
+// Base skeleton animation class with hardware-accelerated shimmer
+const skeletonClass = "skeleton-shimmer rounded";
 
 // Reusable skeleton primitives
 export function SkeletonBox({ className = "", width = "w-full", height = "h-4" }) {

@@ -181,8 +181,8 @@ export default function SyncStatus() {
           import('../utils/nativeCapabilities.js').then(m => m.triggerHaptic('light')).catch(() => {});
           setIsExpanded(!isExpanded);
         }}
-        className={`flex items-center gap-1.5 px-3 py-1.5 md:px-3 md:py-2 rounded-xl text-xs font-semibold border transition shadow-sm touch-manipulation ${
-          config.color + (config.pulse ? ' animate-pulse' : '')
+        className={`flex items-center gap-1.5 px-3 py-1.5 md:px-3 md:py-2 rounded-xl text-xs font-semibold border transition shadow-sm touch-manipulation btn-interactive ${
+          config.color + (config.pulse ? ' animate-micro-pulse' : '')
         }`}
         title={`Sync Status: ${config.label}`}
         aria-label={`Sync Status: ${config.label}`}
@@ -196,7 +196,7 @@ export default function SyncStatus() {
 
       {/* Expanded Panel - responsive width */}
       {isExpanded && (
-        <div className="absolute right-0 top-full mt-2 w-[calc(100vw-32px)] md:w-72 bg-white rounded-xl shadow-lg border border-slate-200 z-50 overflow-hidden max-w-sm">
+        <div className="absolute right-0 top-full mt-2 w-[calc(100vw-32px)] md:w-72 bg-white rounded-xl shadow-lg border border-slate-200 z-50 overflow-hidden max-w-sm animate-scale-in">
           <div className="p-4 border-b border-slate-100">
             <div className="flex items-center justify-between">
               <h4 className="font-bold text-slate-800">Sync Status</h4>

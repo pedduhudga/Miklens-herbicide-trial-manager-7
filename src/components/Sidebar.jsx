@@ -191,7 +191,7 @@ export default function Sidebar({ isOpen, onClose }) {
 
   const filteredBottomItems = bottomItems;
 
-  const sidebarClass = `sidebar bg-white/95 backdrop-blur-xl w-[280px] md:w-72 flex-shrink-0 border-r border-slate-200/50 shadow-[4px_0_32px_rgba(0,0,0,0.08)] flex flex-col fixed inset-y-0 left-0 z-50 md:z-30 md:relative md:translate-x-0 transition-transform duration-300 ease-out ${
+  const sidebarClass = `sidebar bg-white/95 backdrop-blur-xl w-[280px] md:w-72 flex-shrink-0 border-r border-slate-200/50 shadow-[4px_0_32px_rgba(0,0,0,0.08)] flex flex-col fixed inset-y-0 left-0 z-50 md:z-30 md:relative md:translate-x-0 transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
     isOpen ? 'translate-x-0' : '-translate-x-full'
   }`;
 
@@ -200,7 +200,7 @@ export default function Sidebar({ isOpen, onClose }) {
       {/* Mobile Backdrop */}
       {isOpen && (
         <div
-          className="fixed inset-0 bg-black/20 z-20 md:hidden"
+          className="fixed inset-0 bg-black/40 backdrop-blur-xs z-40 md:hidden animate-fade-in"
           onClick={onClose}
         />
       )}

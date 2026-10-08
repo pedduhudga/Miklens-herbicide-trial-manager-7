@@ -43,7 +43,7 @@ export default function TopBar({ title, onMenuClick }) {
       <button
         onClick={onMenuClick}
         aria-label="Toggle menu"
-        className="md:hidden -ml-2 p-2.5 rounded-xl text-slate-600 hover:bg-slate-100 active:bg-slate-200 transition-colors touch-manipulation"
+        className="md:hidden -ml-2 p-2.5 rounded-xl text-slate-600 hover:bg-slate-100 btn-interactive touch-manipulation"
       >
         <Menu className="w-6 h-6" />
       </button>
@@ -55,7 +55,7 @@ export default function TopBar({ title, onMenuClick }) {
       <div className="flex items-center gap-2">
         <button
           onClick={toggleHighContrast}
-          className={`p-2 rounded-xl border transition touch-manipulation ${
+          className={`p-2 rounded-xl border transition btn-interactive touch-manipulation ${
             highContrast 
               ? 'bg-amber-100 border-amber-300 text-amber-800 shadow-sm' 
               : 'border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-50'

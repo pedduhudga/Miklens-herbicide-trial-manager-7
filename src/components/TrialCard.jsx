@@ -485,7 +485,7 @@ const TrialCard = memo(function TrialCard({
     <div
       id={`trial-card-${trial.ID}`}
       onClick={handleCardClick}
-      className={`cv-auto bg-white rounded-xl shadow-sm relative transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md cursor-pointer flex flex-col
+      className={`cv-auto bg-white rounded-xl shadow-sm relative transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md active:scale-[0.99] touch-manipulation cursor-pointer flex flex-col
         ${resultBorderClass}
         ${isHighlighted ? 'ring-4 ring-amber-400 border-amber-500 shadow-xl animate-pulse scale-[1.01] z-10' : isSelected ? 'border-2 border-emerald-500 ring-2 ring-emerald-100' : 'border border-slate-100 hover:border-emerald-300'}`}
     >

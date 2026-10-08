@@ -150,7 +150,7 @@ export default function CategorySelector() {
                 className={`
                   relative group rounded-2xl p-6 text-left text-white transition-all duration-300
                   ${colors.card} ${canAccess ? colors.hover : 'opacity-50 cursor-not-allowed grayscale'}
-                  ${canAccess ? `hover:scale-[1.03] hover:shadow-2xl ${colors.glow}` : ''}
+                  ${canAccess ? `hover:scale-[1.02] active:scale-[0.98] hover:shadow-2xl ${colors.glow} touch-manipulation` : ''}
                   ${isLast && canAccess ? `ring-3 ${colors.ring} ring-offset-2` : ''}
                   shadow-lg
                 `}

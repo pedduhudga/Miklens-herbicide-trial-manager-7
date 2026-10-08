@@ -58,7 +58,7 @@ export default function BottomNav({ onMoreClick }) {
                 <div className="relative">
                   {item.icon}
                   {isActive && (
-                    <span className={`absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full ${colors.fab}`} />
+                    <span className={`absolute -bottom-1 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full ${colors.fab} animate-pop-in`} />
                   )}
                 </div>
                 <span className="text-[11px] font-semibold mt-0.5">{item.label}</span>

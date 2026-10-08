@@ -172,4 +172,18 @@ describe('PWA Manifest & Service Worker Static Verification', () => {
     expect(swContent).toContain('respondWith');
     expect(swContent).toContain('CACHE_NAME');
   });
+
+  it('index.css contains GPU-accelerated micro-animations & prefers-reduced-motion', () => {
+    const cssPath = path.resolve(__dirname, '../../src/index.css');
+    const cssContent = fs.readFileSync(cssPath, 'utf8');
+
+    expect(cssContent).toContain('pageEnter');
+    expect(cssContent).toContain('slideDown');
+    expect(cssContent).toContain('slideUp');
+    expect(cssContent).toContain('modalPopIn');
+    expect(cssContent).toContain('scanLoop');
+    expect(cssContent).toContain('skeleton-shimmer');
+    expect(cssContent).toContain('card-interactive');
+    expect(cssContent).toContain('prefers-reduced-motion');
+  });
 });

@@ -3,6 +3,16 @@
 @theme {
   --animate-float: float 6s ease-in-out infinite;
   --animate-glow: glow 2s ease infinite;
+  --animate-scan-loop: scanLoop 2.5s ease-in-out infinite;
+  --animate-fade-in: fadeIn 0.2s ease-out forwards;
+  --animate-slide-down: slideDown 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-slide-up: slideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-modal-pop: modalPopIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-page-enter: pageEnter 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-scale-in: scaleIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-pop-in: popIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-micro-pulse: microPulse 2s ease-in-out infinite;
+  --animate-shimmer: softShimmer 1.8s linear infinite;
 
   @keyframes float {
     0%, 100% { transform: translateY(0px); }
@@ -11,6 +21,47 @@
   @keyframes glow {
     0%, 100% { opacity: 0.6; }
     50% { opacity: 1; }
+  }
+  @keyframes scanLoop {
+    0%, 100% { transform: translate3d(0, 0, 0); opacity: 0.7; }
+    50% { transform: translate3d(0, calc(min(88vw, 460px) - 6px), 0); opacity: 1; }
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes slideDown {
+    0% { opacity: 0; transform: translate3d(0, -14px, 0) scale(0.97); }
+    100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+  }
+  @keyframes slideUp {
+    0% { opacity: 0; transform: translate3d(0, 24px, 0); }
+    100% { opacity: 1; transform: translate3d(0, 0, 0); }
+  }
+  @keyframes modalPopIn {
+    0% { opacity: 0; transform: scale(0.95) translate3d(0, 10px, 0); }
+    100% { opacity: 1; transform: scale(1) translate3d(0, 0, 0); }
+  }
+  @keyframes pageEnter {
+    0% { opacity: 0; transform: translate3d(0, 8px, 0); }
+    100% { opacity: 1; transform: translate3d(0, 0, 0); }
+  }
+  @keyframes scaleIn {
+    0% { opacity: 0; transform: scale(0.94); }
+    100% { opacity: 1; transform: scale(1); }
+  }
+  @keyframes popIn {
+    0% { opacity: 0; transform: scale(0.85); }
+    70% { transform: scale(1.04); }
+    100% { opacity: 1; transform: scale(1); }
+  }
+  @keyframes softShimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+  @keyframes microPulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.03); opacity: 0.88; }
   }
 }
 
@@ -280,4 +331,102 @@ input, textarea, select, [contenteditable="true"], .selectable-text, table, td, 
     .overflow-y-auto {
         padding-bottom: calc(5.5rem + env(safe-area-inset-bottom)) !important;
     }
+}
+
+/* ==========================================================================
+   Lightweight, GPU-Accelerated Micro-Animations (60-120fps Mobile Optimized)
+   Only composite layer properties (transform, opacity) - Zero reflow or repaint!
+   ========================================================================== */
+
+.animate-page-enter {
+  animation: pageEnter 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: opacity, transform;
+}
+
+.animate-slide-down {
+  animation: slideDown 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: opacity, transform;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: opacity, transform;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out forwards;
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transform-origin: center top;
+}
+
+.animate-pop-in {
+  animation: popIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transform-origin: center;
+}
+
+.animate-micro-pulse {
+  animation: microPulse 2s ease-in-out infinite;
+}
+
+/* Skeleton Shimmer - High performance background sweep */
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(226, 232, 240, 0.8) 0%,
+    rgba(248, 250, 252, 0.95) 50%,
+    rgba(226, 232, 240, 0.8) 100%
+  );
+  background-size: 200% 100%;
+  animation: softShimmer 1.8s linear infinite;
+}
+
+body.dark .skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(30, 41, 59, 0.8) 0%,
+    rgba(51, 65, 85, 0.95) 50%,
+    rgba(30, 41, 59, 0.8) 100%
+  );
+  background-size: 200% 100%;
+}
+
+/* Tactile Micro-Interactions (Fluid App Tap & Press Ergonomics) */
+.btn-interactive,
+.tap-feedback {
+  transition: transform 0.15s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.15s ease, background-color 0.15s ease;
+  touch-action: manipulation;
+}
+
+.btn-interactive:active,
+.tap-feedback:active {
+  transform: scale(0.97);
+}
+
+.card-interactive {
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease, border-color 0.2s ease;
+  touch-action: manipulation;
+}
+
+.card-interactive:hover {
+  transform: translate3d(0, -2px, 0);
+  box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.06), 0 4px 6px -2px rgba(0, 0, 0, 0.03);
+}
+
+.card-interactive:active {
+  transform: translate3d(0, 0, 0) scale(0.985);
+}
+
+/* Accessibility & Battery Saver: Respect Reduced Motion Preferences */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

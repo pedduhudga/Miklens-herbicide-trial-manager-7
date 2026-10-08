@@ -26,7 +26,7 @@ function StatCard({ icon: Icon, label, value, sub, color = 'emerald', onClick })
     red: 'bg-red-50 text-red-600',
   };
   return (
-    <button onClick={onClick} className="bg-white rounded-xl p-4 shadow-sm border border-slate-100 flex items-center gap-4 hover:shadow-md transition text-left w-full">
+    <button onClick={onClick} className="bg-white rounded-xl p-4 shadow-sm border border-slate-100 flex items-center gap-4 card-interactive text-left w-full touch-manipulation">
       <div className={`p-3 rounded-xl ${colors[color]}`}><Icon className="w-5 h-5" /></div>
       <div>
         <p className="text-2xl font-bold text-slate-800">{value}</p>
