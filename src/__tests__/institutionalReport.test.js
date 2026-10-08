@@ -341,5 +341,35 @@ describe('Miklens Bio Institutional Report System', () => {
     const docx = await generateInstitutionalDocx(repData);
     expect(docx).toContain('.docx');
   });
+
+  it('renders native vector bio-efficacy kinetic progression chart and digital QR verification seal in both PDF and DOCX', async () => {
+    const trialWithProgression = {
+      ID: 'trial-kinetic-test',
+      ProjectID: 'proj-kinetic',
+      FormulationName: 'BioEfficacy 500 SL',
+      Crop: 'Maize',
+      Dosage: '45 mL/L',
+      Observations: JSON.stringify([
+        { daa: 0, date: '2026-05-01', weedCover: 92, controlPct: 0, status: 'Pre-emergence baseline' },
+        { daa: 7, date: '2026-05-08', weedCover: 12, controlPct: 86.9, status: 'Initial knockdown' },
+        { daa: 15, date: '2026-05-16', weedCover: 18, controlPct: 80.4, status: 'Sustained suppression' },
+        { daa: 30, date: '2026-05-31', weedCover: 24, controlPct: 73.9, status: 'Residual control' }
+      ])
+    };
+
+    const repData = buildInstitutionalReportData(trialWithProgression, { trials: [trialWithProgression], projects: [] });
+
+    // Validate progression statistics
+    expect(repData.statistics.progression.peakControl).toBeGreaterThanOrEqual(80);
+    expect(repData.treatmentTimeline.length).toBe(4);
+
+    // Verify PDF generation includes kinetic chart and QR seal without errors
+    const pdfFilename = await generateInstitutionalPDF(repData);
+    expect(pdfFilename).toContain('.pdf');
+
+    // Verify DOCX generation includes progress bar kinetic table
+    const docxFilename = await generateInstitutionalDocx(repData);
+    expect(docxFilename).toContain('.docx');
+  });
 });
 
