@@ -285,5 +285,61 @@ describe('Miklens Bio Institutional Report System', () => {
     expect(data.photoUrls[0].url).toBe('https://example.com/day0.jpg');
     expect(data.photoUrls[1].url).toBe('https://example.com/day7.jpg');
   });
+
+  it('guarantees zero hardcoded Diuron / Farmers Practice and honors diverse trial designs', async () => {
+    // 1. Single demonstration plot with Goweed ultra and mixed weeds
+    const goweedTrial = {
+      ID: 'trial-gw-2809',
+      TrialCode: 'MB/RD/COE/2026/F2809',
+      FormulationName: 'Goweed ultra',
+      Crop: 'Open field / Non-Crop',
+      Dosage: '20+3ml BPD',
+      Location: '13.048329, 77.734435',
+      Design: 'RCBD',
+      Replications: 3,
+      WeedSpecies: 'Cynodon dactylon, Asiatic pennywort (centella asiatica), Unknown grass species (poaceae spp.)',
+      Observations: JSON.stringify([
+        { daa: 0, date: '2026-07-02', weedCover: 100, notes: 'Dense uniform weed mat' },
+        { daa: 7, date: '2026-07-09', weedCover: 5, weedMortalityPct: 95, cropPhytotoxicity: 0 },
+        { daa: 15, date: '2026-07-17', weedCover: 58, weedMortalityPct: 42, cropPhytotoxicity: 0 },
+        { daa: 30, date: '2026-08-01', weedCover: 76, weedMortalityPct: 24, cropPhytotoxicity: 0 }
+      ])
+    };
+
+    const repData = buildInstitutionalReportData(goweedTrial, { trials: [goweedTrial], projects: [] });
+
+    // Verify study design preserved
+    expect(repData.docControl.studyDesign).toContain('RCBD');
+
+    // Verify zero Diuron / Farmers Practice in treatment metrics
+    expect(repData.treatmentMetrics.length).toBe(1);
+    expect(repData.treatmentMetrics[0].productName).toBe('Goweed ultra');
+    expect(repData.treatmentMetrics[0].dose).toBe('20+3ml BPD');
+
+    const jsonText = JSON.stringify(repData);
+    expect(jsonText).not.toContain('Diuron');
+    expect(jsonText).not.toContain('Farmers Practice');
+    expect(jsonText).not.toContain('379.18');
+    expect(jsonText).not.toContain('812.37');
+
+    // Verify biomass absence is accurately flagged
+    expect(repData.hasBiomassData).toBe(false);
+
+    // Verify botanical taxonomy resolves Centella asiatica and Poaceae
+    const centella = repData.weedFloraTable.find(w => w.scientificName.toLowerCase().includes('centella'));
+    expect(centella).toBeDefined();
+    expect(centella.botanicalFamily).toBe('Apiaceae');
+
+    const poaceae = repData.weedFloraTable.find(w => w.scientificName.toLowerCase().includes('poaceae') || w.commonName.toLowerCase().includes('poaceae'));
+    expect(poaceae).toBeDefined();
+    expect(poaceae.botanicalFamily).toBe('Poaceae');
+
+    // Verify PDF & DOCX generation without error
+    const pdf = await generateInstitutionalPDF(repData);
+    expect(pdf).toContain('.pdf');
+
+    const docx = await generateInstitutionalDocx(repData);
+    expect(docx).toContain('.docx');
+  });
 });
 

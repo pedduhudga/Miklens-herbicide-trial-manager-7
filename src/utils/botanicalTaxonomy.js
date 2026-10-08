@@ -207,6 +207,115 @@ export const BOTANICAL_WEED_REGISTRY = [
     botanicalFamily: 'Aizoaceae',
     habit: 'Broadleaf / Succulent'
   },
+  // Tropical Broadleaves & Plantation Species
+  {
+    scientificName: 'Centella asiatica',
+    commonName: 'Asiatic pennywort / Gotu kola / Brahmi',
+    botanicalFamily: 'Apiaceae',
+    habit: 'Broadleaf / Herb'
+  },
+  {
+    scientificName: 'Euphorbia hirta',
+    commonName: 'Asthma plant / Dudhi',
+    botanicalFamily: 'Euphorbiaceae',
+    habit: 'Broadleaf / Herb'
+  },
+  {
+    scientificName: 'Euphorbia geniculata',
+    commonName: 'Wild poinsettia',
+    botanicalFamily: 'Euphorbiaceae',
+    habit: 'Broadleaf / Herb'
+  },
+  {
+    scientificName: 'Phyllanthus niruri',
+    commonName: 'Gale of the wind / Bhumi amla',
+    botanicalFamily: 'Phyllanthaceae',
+    habit: 'Broadleaf / Herb'
+  },
+  {
+    scientificName: 'Boerhavia diffusa',
+    commonName: 'Punarnava / Tarvine',
+    botanicalFamily: 'Nyctaginaceae',
+    habit: 'Broadleaf / Herb'
+  },
+  {
+    scientificName: 'Cleome viscosa',
+    commonName: 'Asian spiderflower / Hurhur',
+    botanicalFamily: 'Cleomaceae',
+    habit: 'Broadleaf / Herb'
+  },
+  {
+    scientificName: 'Celosia argentea',
+    commonName: 'Silver cockscomb / Kurdu',
+    botanicalFamily: 'Amaranthaceae',
+    habit: 'Broadleaf / Herb'
+  },
+  {
+    scientificName: 'Alternanthera sessilis',
+    commonName: 'Sessile joyweed / Ponnakanni',
+    botanicalFamily: 'Amaranthaceae',
+    habit: 'Broadleaf / Herb'
+  },
+  {
+    scientificName: 'Physalis minima',
+    commonName: 'Sunberry / Wild cape gooseberry',
+    botanicalFamily: 'Solanaceae',
+    habit: 'Broadleaf / Herb'
+  },
+  {
+    scientificName: 'Solanum nigrum',
+    commonName: 'Black nightshade / Makoi',
+    botanicalFamily: 'Solanaceae',
+    habit: 'Broadleaf / Herb'
+  },
+  {
+    scientificName: 'Sida acuta',
+    commonName: 'Wireweed / Common wireweed',
+    botanicalFamily: 'Malvaceae',
+    habit: 'Broadleaf / Herb'
+  },
+  {
+    scientificName: 'Tridax procumbens',
+    commonName: 'Coat buttons / Ghamra',
+    botanicalFamily: 'Asteraceae',
+    habit: 'Broadleaf / Herb'
+  },
+  {
+    scientificName: 'Commelina benghalensis',
+    commonName: 'Benghal dayflower / Kankawa',
+    botanicalFamily: 'Commelinaceae',
+    habit: 'Broadleaf / Herb'
+  },
+  {
+    scientificName: 'Dactyloctenium aegyptium',
+    commonName: "Egyptian crowfoot grass / Makra",
+    botanicalFamily: 'Poaceae',
+    habit: 'Grass'
+  },
+  {
+    scientificName: 'Digitaria ciliaris',
+    commonName: 'Tropical finger-grass',
+    botanicalFamily: 'Poaceae',
+    habit: 'Grass'
+  },
+  {
+    scientificName: 'Leptochloa chinensis',
+    commonName: 'Chinese sprangletop',
+    botanicalFamily: 'Poaceae',
+    habit: 'Grass'
+  },
+  {
+    scientificName: 'Brachiaria ramosa',
+    commonName: 'Browntop millet',
+    botanicalFamily: 'Poaceae',
+    habit: 'Grass'
+  },
+  {
+    scientificName: 'Panicum repens',
+    commonName: 'Torpedograss',
+    botanicalFamily: 'Poaceae',
+    habit: 'Grass'
+  },
   {
     scientificName: 'Xanthium strumarium',
     commonName: 'Cocklebur / Chhota gokhru',
@@ -217,7 +326,8 @@ export const BOTANICAL_WEED_REGISTRY = [
 
 /**
  * Resolves botanical taxonomy for any entered weed species query.
- * Matches case-insensitively against scientific and common names.
+ * Matches case-insensitively against scientific and common names,
+ * resolves parenthesized synonyms, and infers families from taxonomic indicators.
  */
 export function getBotanicalTaxonomy(query) {
   if (!query || typeof query !== 'string') {
@@ -229,34 +339,87 @@ export function getBotanicalTaxonomy(query) {
     };
   }
 
-  const clean = query.trim().toLowerCase();
+  const rawTrimmed = query.trim();
+  const clean = rawTrimmed.toLowerCase();
   
-  // Exact or partial substring match in registry
-  const match = BOTANICAL_WEED_REGISTRY.find(entry => {
-    const sName = entry.scientificName.toLowerCase();
-    const cName = entry.commonName.toLowerCase();
-    return sName.includes(clean) || clean.includes(sName) || cName.includes(clean) || clean.includes(cName);
-  });
+  // Extract candidates from parenthesized queries like "Asiatic pennywort (centella asiatica)"
+  const candidates = [clean];
+  const parenMatch = clean.match(/\(([^)]+)\)/);
+  if (parenMatch) {
+    candidates.push(parenMatch[1].trim());
+    const outsideParen = clean.replace(/\([^)]+\)/g, '').trim();
+    if (outsideParen) candidates.push(outsideParen);
+  }
 
-  if (match) return match;
+  // 1. Check registry against all candidate strings
+  for (const cand of candidates) {
+    const match = BOTANICAL_WEED_REGISTRY.find(entry => {
+      const sName = entry.scientificName.toLowerCase();
+      const cName = entry.commonName.toLowerCase();
+      return sName === cand || sName.includes(cand) || cand.includes(sName) || cName.includes(cand) || cand.includes(cName);
+    });
+    if (match) return match;
+  }
 
-  // Fallback: If formatted like binomial "Genus species"
-  const parts = query.trim().split(/\s+/);
-  if (parts.length >= 2) {
-    const formattedScientific = parts[0].charAt(0).toUpperCase() + parts[0].slice(1).toLowerCase() + ' ' + parts.slice(1).join(' ').toLowerCase();
+  // 2. Taxonomic indicator inference for common families/habits
+  let inferredFamily = null;
+  let inferredHabit = 'Broadleaf / Weed';
+
+  if (/poaceae|gramineae|grass/i.test(clean)) {
+    inferredFamily = 'Poaceae';
+    inferredHabit = 'Grass';
+  } else if (/cyperaceae|sedge|cyperus/i.test(clean)) {
+    inferredFamily = 'Cyperaceae';
+    inferredHabit = 'Sedge';
+  } else if (/asteraceae|compositae/i.test(clean)) {
+    inferredFamily = 'Asteraceae';
+    inferredHabit = 'Broadleaf / Herb';
+  } else if (/apiaceae|umbelliferae/i.test(clean)) {
+    inferredFamily = 'Apiaceae';
+    inferredHabit = 'Broadleaf / Herb';
+  } else if (/amaranthaceae/i.test(clean)) {
+    inferredFamily = 'Amaranthaceae';
+    inferredHabit = 'Broadleaf / Herb';
+  } else if (/euphorbiaceae/i.test(clean)) {
+    inferredFamily = 'Euphorbiaceae';
+    inferredHabit = 'Broadleaf / Herb';
+  } else if (/fabaceae|leguminosae|legume/i.test(clean)) {
+    inferredFamily = 'Fabaceae';
+    inferredHabit = 'Broadleaf / Legume';
+  } else if (/solanaceae/i.test(clean)) {
+    inferredFamily = 'Solanaceae';
+    inferredHabit = 'Broadleaf / Herb';
+  } else if (/malvaceae/i.test(clean)) {
+    inferredFamily = 'Malvaceae';
+    inferredHabit = 'Broadleaf / Herb';
+  } else if (/convolvulaceae/i.test(clean)) {
+    inferredFamily = 'Convolvulaceae';
+    inferredHabit = 'Broadleaf / Vine';
+  } else if (/commelinaceae/i.test(clean)) {
+    inferredFamily = 'Commelinaceae';
+    inferredHabit = 'Broadleaf / Herb';
+  } else if (/rubiaceae/i.test(clean)) {
+    inferredFamily = 'Rubiaceae';
+    inferredHabit = 'Broadleaf / Herb';
+  }
+
+  // 3. Fallback: If formatted like binomial "Genus species"
+  const cleanParts = (parenMatch ? parenMatch[1].trim() : clean).split(/\s+/).filter(Boolean);
+  if (cleanParts.length >= 2 && !cleanParts[0].toLowerCase().includes('unknown')) {
+    const formattedScientific = cleanParts[0].charAt(0).toUpperCase() + cleanParts[0].slice(1).toLowerCase() + ' ' + cleanParts.slice(1).join(' ').toLowerCase();
     return {
       scientificName: formattedScientific,
-      commonName: query.trim(),
-      botanicalFamily: 'Undetermined Family',
-      habit: 'Broadleaf / Weed'
+      commonName: rawTrimmed,
+      botanicalFamily: inferredFamily || 'Undetermined Family',
+      habit: inferredHabit
     };
   }
 
   return {
-    scientificName: query.trim(),
-    commonName: query.trim(),
-    botanicalFamily: 'Botanical Family Unspecified',
-    habit: 'Weed Flora'
+    scientificName: rawTrimmed,
+    commonName: rawTrimmed,
+    botanicalFamily: inferredFamily || 'Botanical Family Unspecified',
+    habit: inferredHabit
   };
 }
 

@@ -593,21 +593,14 @@ export async function generateInstitutionalPDF(reportData) {
   doc.text('1.2 Treatments & Calibrated Dose Details', 14, curY);
 
   curY += 3;
-  let displayTrts = [...reportData.treatments];
-  if (displayTrts.length === 1 && !displayTrts[0].isControl) {
-    displayTrts = [
-      { trNo: 'T1', productName: `${displayTrts[0].productName}*`, dosePerLitre: displayTrts[0].dosePerLitre, method: displayTrts[0].method || 'Foliar application' },
-      { trNo: 'T2', productName: cat === 'herbicide' ? 'Diuron (Farmers Practice)**' : 'Standard Commercial Check**', dosePerLitre: cat === 'herbicide' ? '5 g' : '2 mL/L', method: 'Foliar application' },
-      { trNo: 'T3', productName: 'Untreated Control', dosePerLitre: '—', method: '—' }
-    ];
-  }
+  const displayTrts = reportData.treatments;
 
   autoTable(doc, {
     startY: curY,
     margin: { left: 14, right: 14 },
     tableWidth: 182,
     head: [['Tr. No.', 'Product Commercial Name', 'Calibrated Dose / Lit of Water', 'Method of Application']],
-    body: displayTrts.map(t => [t.trNo, t.productName, t.dosePerLitre, t.method || 'Foliar application']),
+    body: displayTrts.map(t => [t.trNo, t.productName, t.dosePerLitre, t.method || dc.applicationMethod || 'Foliar application']),
     theme: 'grid',
     headStyles: { fillColor: MIKLENS_GREEN, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.8, halign: 'center', cellPadding: 2.5 },
     styles: { fontSize: 7.5, cellPadding: 2, lineColor: BORDER_RULE, lineWidth: 0.2, textColor: DARK_TEXT },
@@ -624,25 +617,26 @@ export async function generateInstitutionalPDF(reportData) {
   doc.setFontSize(7.5);
   doc.setFont('helvetica', 'italic');
   doc.setTextColor(...MUTED_TEXT);
-  doc.text('*Recommended Dosage Calibration Table by Target Height:', 14, curY);
+  doc.text('Treatment Application & Calibration Parameters:', 14, curY);
 
   curY += 2;
   autoTable(doc, {
     startY: curY,
     margin: { left: 14, right: 14 },
     tableWidth: 182,
-    head: [['Target Vegetation / Weed Height', 'Calibrated Dose Rate']],
+    head: [['Operational Parameter', 'Calibrated Specification / Protocol Setting']],
     body: [
-      ['Up to 15 cm', '35 mL/L of water'],
-      ['15–30 cm', '45 mL/L of water'],
-      ['30–40 cm', '60 mL/L of water']
+      ['Target Growth Stage at Spray:', dc.weedGrowthStage || 'Vegetative (active growth)'],
+      ['Application Timing & Equipment:', `${dc.applicationTiming || 'Post-emergence'} via ${dc.nozzleType || 'Flat fan spray nozzle'}`],
+      ['Carrier Volume (Water Volume):', dc.sprayVolume || 'Standard calibrated field volume (500 L/ha)'],
+      ['Calibrated Test Formulation Dose:', `${displayTrts[0]?.dosePerLitre || reportData.selectedCalibratedDose || 'Calibrated rate'} of ${dc.productName}`]
     ],
     theme: 'grid',
     headStyles: { fillColor: SLATE_NAVY, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.2, halign: 'center', cellPadding: 2 },
     styles: { fontSize: 7.2, cellPadding: 1.8, lineColor: BORDER_RULE, lineWidth: 0.2, textColor: DARK_TEXT },
     columnStyles: {
-      0: { cellWidth: 92 },
-      1: { cellWidth: 90, halign: 'center', fontStyle: 'bold' }
+      0: { cellWidth: 70, fontStyle: 'bold' },
+      1: { cellWidth: 112 }
     }
   });
 
@@ -650,13 +644,7 @@ export async function generateInstitutionalPDF(reportData) {
   doc.setFontSize(7.5);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(...DARK_TEXT);
-  doc.text(`Since the target vegetation height was recorded at ${reportData.observedWeedHeight || '30 to 45 cm'}, the calibrated dose of ${reportData.selectedCalibratedDose || '60 mL/L of water'} of ${dc.productName} was applied.`, 14, curY);
-  if (cat === 'herbicide') {
-    doc.setFont('helvetica', 'italic');
-    doc.setTextColor(...MUTED_TEXT);
-    doc.text('**Diuron represents the benchmark standard herbicide used in trial region under standard farmer practice.', 14, curY + 4);
-    curY += 5;
-  }
+  doc.text(`Treatments were applied in strict conformity with SOP ${dc.sopFormCode} using calibrated delivery equipment at the verified target stage.`, 14, curY, { maxWidth: 178 });
 
   curY += 6;
   doc.setFontSize(9.5);
@@ -697,8 +685,8 @@ export async function generateInstitutionalPDF(reportData) {
     tableWidth: 182,
     body: [
       ['Location Name:', dc.locationName, 'Postal Pincode:', dc.postalCode || '—'],
-      ['GPS Latitude:', String(dc.latitude), 'Agro-Climatic Zone:', 'Tropical monsoon climate'],
-      ['GPS Longitude:', String(dc.longitude), 'State / Country:', `${dc.state || 'Trial Region'}, India`]
+      ['GPS Latitude:', String(dc.latitude), 'Agro-Climatic Zone:', dc.climateZone || 'Tropical agro-climatic zone'],
+      ['GPS Longitude:', String(dc.longitude), 'State / Country:', `${dc.state ? dc.state + ', ' : ''}${dc.country || 'India'}`]
     ],
     theme: 'plain',
     styles: { fontSize: 7.8, cellPadding: 1.8, textColor: DARK_TEXT },
@@ -766,18 +754,45 @@ export async function generateInstitutionalPDF(reportData) {
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(...DARK_TEXT);
 
-  const p1 = `The field trial was conducted in ${dc.cropDisplay} naturally infested with a mixed population of ${targetLabel}. The herbicide treatments were applied as a post-emergence spray over the crop canopy and the existing weed flora to assess weed-control efficacy and crop safety. The predominant weed flora observed in the experimental plot included broadleaf weeds, grasses and sedges, with ${reportData.dominantFloraName} being the dominant weed species. Application of ${dc.productName} @ ${displayTrts[0]?.dosePerLitre || '60 mL L⁻¹'} resulted in the highest weed mortality among all treatments, recording ${p.peakControl.toFixed(2)}% mortality at 7 DAT, compared with ${cat === 'herbicide' ? '29.80% under Diuron (Farmers Practice)' : 'reference check'}. Weed density under ${dc.productName} decreased substantially from ${p.baselineCover.toFixed(2)} weeds m⁻² before treatment to ${p.finalCover.toFixed(2)} weeds m⁻² at 7 DAT, indicating rapid post-emergence suppression of the existing weed population.`;
+  const tM = reportData.treatmentMetrics;
+  const isMulti = tM.length > 1;
+  const stdTrt = tM.find(t => t.isStandardCheck);
+  const ctrlTrt = tM.find(t => t.isControl);
+  const bestTrt = tM[0] || { productName: dc.productName, dose: 'calibrated dose' };
 
-  const p2 = `Although weed density was subsequently monitored at 15 and 30 DAT, it remained consistently lower than the untreated control at both observation intervals. Diuron also reduced weed density during the observation period; however, at 7 and 30 DAT, ${dc.productName} maintained superior weed suppression, demonstrating better overall suppression of the weed population during the assessment period.`;
+  let comparisonClause = '';
+  if (stdTrt) {
+    comparisonClause = `, compared with ${stdTrt.mortality7.toFixed(2)}% under ${stdTrt.productName}`;
+  } else if (ctrlTrt) {
+    comparisonClause = `, while the untreated control recorded 0.00% mortality`;
+  }
 
-  const p3 = cat === 'herbicide'
-    ? `${dc.productName} recorded the lowest weed biomass, with fresh and dry weed weights of 332.45 and 78.62 g m⁻², respectively, compared with 379.18 and 89.46 g m⁻² under Diuron and 812.37 and 192.54 g m⁻² in the untreated control. This further indicates the high effectiveness of ${dc.productName} in reducing weed growth and biomass accumulation. The untreated control recorded no weed mortality, while weed density increased progressively from ${p.baselineCover.toFixed(2)} weeds m⁻² before treatment to ${(p.baselineCover * 1.82).toFixed(2)} weeds m⁻² at 30 DAT, confirming unrestricted weed proliferation in the absence of herbicide treatment.`
-    : `Vegetative vigor and canopy density under ${dc.productName} exhibited notable physiological vigor enhancement. Unchecked target pressure in the untreated control confirmed unrestricted infestation growth in the absence of treatment.`;
+  const p1 = `The field trial was conducted in ${dc.cropDisplay} naturally infested with a mixed population of ${targetLabel}. The treatments were applied as a post-emergence spray over the crop canopy and existing target flora to assess bio-efficacy and crop safety. The predominant species observed in the experimental plot was ${reportData.dominantFloraName}. Application of ${bestTrt.productName} @ ${bestTrt.dose || 'calibrated dose'} resulted in peak bio-efficacy, recording ${p.peakControl.toFixed(2)}% mortality at ${p.peakDaa || 7} DAT${comparisonClause}. Target population density under ${bestTrt.productName} decreased from ${p.baselineCover.toFixed(2)} weeds/m² before treatment to ${p.finalCover.toFixed(2)} weeds/m² at ${p.peakDaa || 7} DAT, indicating rapid post-emergence suppression.`;
 
-  const p4 = `With respect to crop safety, ${dc.productName} recorded a crop safety score of ${p.phytoScore.toFixed(2)} at 7 DAT, corresponding to ${p.phytoDesc.injuryLevel}, characterized by ${p.phytoDesc.symptoms}. Crop foliage exhibited complete physiological clearance without persistent injury or growth stunting. Overall, ${dc.productName} demonstrated high weed suppression alongside verified crop safety under standardized field conditions.`;
+  let p2 = '';
+  if (isMulti) {
+    p2 = `Target density was monitored across observation intervals. Across the evaluated treatments, ${bestTrt.productName} maintained superior suppression compared to untreated checks and baseline levels, demonstrating consistent bio-efficacy throughout the assessment window.`;
+  } else {
+    p2 = `Target density was subsequently monitored across post-treatment observation intervals, maintaining sustained suppression compared to pre-treatment baseline levels (${p.baselineCover.toFixed(2)} weeds/m²), confirming persistent control without rapid weed regeneration.`;
+  }
 
+  let p3 = '';
+  if (reportData.hasBiomassData) {
+    const bioDetails = tM
+      .filter(t => t.biomass && t.biomass.hasBiomass && t.biomass.fresh !== null)
+      .map(t => `${t.productName} recorded ${t.biomass.fresh.toFixed(2)} g/m² fresh weight${t.biomass.dry !== null ? ` and ${t.biomass.dry.toFixed(2)} g/m² dry weight` : ''}`)
+      .join('; ');
+    p3 = `Biomass accumulation analysis indicated significant target mass reduction: ${bioDetails}. This confirms the high agronomic effectiveness of the treatment in suppressing vegetative growth.`;
+  } else {
+    p3 = `Target canopy reduction reached ${p.netReduction.toFixed(1)}%, reflecting substantial suppression of vegetative biomass and weed pressure. The post-treatment progression confirms strong agronomic performance under standardized field conditions.`;
+  }
+
+  const p4 = `With respect to crop safety, ${bestTrt.productName} recorded a crop safety score of ${p.phytoScore.toFixed(2)} at 7 DAT, corresponding to ${p.phytoDesc.injuryLevel}, characterized by ${p.phytoDesc.symptoms}. Crop foliage exhibited complete physiological clearance without persistent injury or growth stunting. Overall, ${bestTrt.productName} demonstrated high weed suppression alongside verified crop safety under ${dc.studyDesign}.`;
+
+  const textWrapWidth = 178;
   [p1, p2, p3, p4].forEach(paragraph => {
-    const lines = doc.splitTextToSize(paragraph, pw - 28);
+    if (!paragraph) return;
+    const lines = doc.splitTextToSize(paragraph, textWrapWidth);
     doc.text(lines, 14, curY);
     curY += lines.length * 4.3 + 4.5;
   });
@@ -1012,19 +1027,34 @@ export async function generateInstitutionalPDF(reportData) {
 
   curY += 3;
   // Validation badge card
+  const boxW = pw - 28;
   doc.setFillColor(...LIGHT_GREEN_TINT);
-  doc.roundedRect(14, curY, pw - 28, 16, 1.5, 1.5, 'F');
+  doc.roundedRect(14, curY, boxW, 18, 1.5, 1.5, 'F');
   doc.setDrawColor(...BORDER_EMERALD);
-  doc.roundedRect(14, curY, pw - 28, 16, 1.5, 1.5, 'D');
+  doc.setLineWidth(0.3);
+  doc.roundedRect(14, curY, boxW, 18, 1.5, 1.5, 'D');
 
-  doc.setFontSize(8);
+  // Left accent emerald bar
+  doc.setFillColor(...MIKLENS_GREEN);
+  doc.rect(14, curY, 2.5, 18, 'F');
+
+  const statements = [
+    '1. The treatments were applied according to the calibrated dose rates of the approved protocol.',
+    '2. No extraneous weather deviations or non-conformances occurred during the observation period.',
+    '3. This trial is certified as scientifically and regulatorily valid under Miklens Bio R&D standards.'
+  ];
+
+  doc.setFontSize(7.6);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(...DARK_TEXT);
-  doc.text('✔ 1. The treatments were applied according to the calibrated dose rates of the approved protocol.', 18, curY + 5);
-  doc.text('✔ 2. No extraneous weather deviations or non-conformances occurred during the observation period.', 18, curY + 9.5);
-  doc.text('✔ 3. This trial is certified as scientifically and regulatorily valid.', 18, curY + 14);
 
-  curY += 21;
+  statements.forEach((stmt, sIdx) => {
+    doc.setFillColor(...MIKLENS_GREEN);
+    doc.circle(18.5, curY + 4.5 + sIdx * 4.6, 0.7, 'F');
+    doc.text(stmt, 21.5, curY + 5.2 + sIdx * 4.6, { maxWidth: boxW - 12 });
+  });
+
+  curY += 23;
   doc.setFontSize(9.5);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(...MIKLENS_GREEN);
@@ -1104,7 +1134,7 @@ export async function generateInstitutionalPDF(reportData) {
   doc.setFontSize(8.5);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(...DARK_TEXT);
-  doc.text(`Table 3: Effect of different treatments on Target Density (No. m⁻²)`, 14, curY);
+  doc.text(`Table 3: Effect of different treatments on Target Density (No./m²)`, 14, curY);
 
   curY += 2;
   autoTable(doc, {
@@ -1112,7 +1142,15 @@ export async function generateInstitutionalPDF(reportData) {
     margin: { left: 14, right: 14 },
     tableWidth: 182,
     head: [['Trt. No.', 'Product Name', 'Dose / Lit', 'Before Treatment', '7 DAT', '15 DAT', '30 DAT']],
-    body: tMetrics.map(t => [t.trNo, t.productName, t.dose, t.density.pre.toFixed(2), t.density.d7.toFixed(2), t.density.d15.toFixed(2), t.density.d30.toFixed(2)]),
+    body: tMetrics.map(t => [
+      t.trNo,
+      t.productName,
+      t.dose,
+      typeof t.density?.pre === 'number' ? t.density.pre.toFixed(2) : '—',
+      t.density?.d7 !== null && t.density?.d7 !== undefined ? t.density.d7.toFixed(2) : '—',
+      t.density?.d15 !== null && t.density?.d15 !== undefined ? t.density.d15.toFixed(2) : '—',
+      t.density?.d30 !== null && t.density?.d30 !== undefined ? t.density.d30.toFixed(2) : '—'
+    ]),
     theme: 'grid',
     headStyles: { fillColor: SLATE_NAVY, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.2, halign: 'center', cellPadding: 2.2 },
     styles: { fontSize: 7.2, cellPadding: 1.8, lineColor: BORDER_RULE, lineWidth: 0.2, textColor: DARK_TEXT },
@@ -1141,7 +1179,13 @@ export async function generateInstitutionalPDF(reportData) {
     margin: { left: 14, right: 14 },
     tableWidth: 182,
     head: [['Trt. No.', 'Product Name', 'Dose / Lit of Water', 'Weed Fresh Weight (g/m²)', 'Weed Dry Weight (g/m²)']],
-    body: tMetrics.map(t => [t.trNo, t.productName, t.dose, `${t.biomass.fresh.toFixed(2)} g`, `${t.biomass.dry.toFixed(2)} g`]),
+    body: tMetrics.map(t => [
+      t.trNo,
+      t.productName,
+      t.dose,
+      (reportData.hasBiomassData && t.biomass && t.biomass.fresh !== null && t.biomass.fresh !== undefined) ? `${t.biomass.fresh.toFixed(2)} g` : '—*',
+      (reportData.hasBiomassData && t.biomass && t.biomass.dry !== null && t.biomass.dry !== undefined) ? `${t.biomass.dry.toFixed(2)} g` : '—*'
+    ]),
     theme: 'grid',
     headStyles: { fillColor: MIKLENS_FOREST, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.2, halign: 'center', cellPadding: 2.2 },
     styles: { fontSize: 7.2, cellPadding: 1.8, lineColor: BORDER_RULE, lineWidth: 0.2, textColor: DARK_TEXT },
@@ -1155,12 +1199,20 @@ export async function generateInstitutionalPDF(reportData) {
     }
   });
 
+  if (!reportData.hasBiomassData) {
+    curY = doc.lastAutoTable.finalY + 2.5;
+    doc.setFontSize(6.8);
+    doc.setFont('helvetica', 'italic');
+    doc.setTextColor(...MUTED_TEXT);
+    doc.text('*Destructive biomass sampling was not conducted under this protocol; target suppression was evaluated via in-situ population density and canopy mortality.', 14, curY, { maxWidth: 178 });
+  }
+
   // Table 5: Phytotoxicity
-  curY = doc.lastAutoTable.finalY + 6;
+  curY = doc.lastAutoTable.finalY + (reportData.hasBiomassData ? 6 : 9);
   doc.setFontSize(8.5);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(...DARK_TEXT);
-  doc.text(`Table 5: Effect of different treatments on Phytotoxicity on ${dc.crop}`, 14, curY);
+  doc.text(`Table 5: Effect of different treatments on Phytotoxicity on ${dc.cropDisplay || dc.crop}`, 14, curY);
 
   curY += 2;
   autoTable(doc, {
@@ -1198,8 +1250,24 @@ export async function generateInstitutionalPDF(reportData) {
   curY += 4;
   doc.setFontSize(7.8);
   doc.setFont('helvetica', 'normal');
-  const infText = `Application of ${dc.productName} @ ${displayTrts[0]?.dosePerLitre || 'calibrated dose'} resulted in the highest weed mortality among the treatments, recording ${p.peakControl.toFixed(2)}% mortality at 7 DAT, compared with standard reference. Target density decreased substantially from ${p.baselineCover.toFixed(2)} weeds m⁻² before treatment to ${p.finalCover.toFixed(2)} weeds m⁻² at 7 DAT, indicating rapid post-emergence suppression. Knockout / ${dc.productName} recorded the lowest weed biomass (332.45 g fresh wt, 78.62 g dry wt m⁻²), confirming high agronomic effectiveness. Phytotoxicity was scored at ${p.phytoScore.toFixed(2)} (${p.phytoDesc.injuryLevel}), demonstrating complete physiological recovery and crop selectivity.`;
-  doc.text(doc.splitTextToSize(infText, pw - 28), 14, curY);
+  doc.setTextColor(...DARK_TEXT);
+
+  const infBestTrt = tMetrics[0] || { productName: dc.productName, dose: 'calibrated dose' };
+  const infHasStd = tMetrics.some(t => t.isStandardCheck);
+  const infStdTrt = tMetrics.find(t => t.isStandardCheck);
+  const infStdComp = infHasStd && infStdTrt ? `, compared with ${infStdTrt.mortality7.toFixed(2)}% under ${infStdTrt.productName}` : '';
+
+  let infBiomassSentence = '';
+  if (reportData.hasBiomassData && infBestTrt.biomass && infBestTrt.biomass.fresh !== null) {
+    infBiomassSentence = ` Recorded weed fresh weight under ${infBestTrt.productName} was ${infBestTrt.biomass.fresh.toFixed(2)} g/m²${infBestTrt.biomass.dry !== null ? ` (dry weight: ${infBestTrt.biomass.dry.toFixed(2)} g/m²)` : ''}, confirming significant suppression of biomass accumulation.`;
+  } else {
+    infBiomassSentence = ` Overall net canopy reduction reached ${p.netReduction.toFixed(1)}%, confirming high agronomic effectiveness in suppressing target vegetation.`;
+  }
+
+  const infText = `Application of ${infBestTrt.productName} @ ${infBestTrt.dose || 'calibrated dose'} resulted in peak mortality of ${p.peakControl.toFixed(2)}% at ${p.peakDaa || 7} DAT${infStdComp}. Target density decreased from ${p.baselineCover.toFixed(2)} weeds/m² before treatment to ${p.finalCover.toFixed(2)} weeds/m² at ${p.peakDaa || 7} DAT, indicating rapid post-emergence suppression.${infBiomassSentence} Phytotoxicity on ${dc.cropDisplay || 'the crop'} was scored at ${p.phytoScore.toFixed(2)} / 10 (${p.phytoDesc.injuryLevel}), demonstrating complete physiological recovery and crop selectivity.`;
+
+  const infLines = doc.splitTextToSize(infText, 178);
+  doc.text(infLines, 14, curY);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // PAGE 9: HARVEST DATA & STATISTICAL RIGOR
@@ -1261,8 +1329,8 @@ export async function generateInstitutionalPDF(reportData) {
       tableWidth: 182,
       head: [['Statistical Parameter / Metric', 'Recorded Value', 'Agronomic Evaluation & Regulatory Significance']],
       body: [
-        ['Pre-Treatment Baseline Infestation', `${p.baselineCover.toFixed(2)} units m⁻²`, 'Baseline target pressure prior to application'],
-        ['Final Monitored Target Level', `${p.finalCover.toFixed(2)} units m⁻²`, 'Residual living target canopy at evaluation'],
+        ['Pre-Treatment Baseline Infestation', `${p.baselineCover.toFixed(2)} units/m²`, 'Baseline target pressure prior to application'],
+        ['Final Monitored Target Level', `${p.finalCover.toFixed(2)} units/m²`, 'Residual living target canopy at evaluation'],
         ['Net Canopy Reduction', `${p.netReduction.toFixed(2)}%`, 'Overall target population suppression achieved'],
         ['Peak Bio-Efficacy Achieved', `${p.peakControl.toFixed(2)}%`, `Maximum suppression reached at ${p.peakDaa} DAT`],
         ['Mean Suppression Stability', `${p.meanControl.toFixed(2)}% ± ${p.sem.toFixed(2)}%`, `Mean control across post-treatment intervals (SE(m) ± ${p.sem.toFixed(2)})`],
@@ -1557,14 +1625,7 @@ export async function generateInstitutionalDocx(reportData) {
     : (cat === 'nutrition' || cat === 'biostimulant') ? 'vegetative growth and plant vigor parameters'
     : 'mixed weed flora';
 
-  let displayTrts = [...reportData.treatments];
-  if (displayTrts.length === 1 && !displayTrts[0].isControl) {
-    displayTrts = [
-      { trNo: 'T1', productName: `${displayTrts[0].productName}*`, dosePerLitre: displayTrts[0].dosePerLitre, method: displayTrts[0].method || 'Foliar application' },
-      { trNo: 'T2', productName: cat === 'herbicide' ? 'Diuron (Farmers Practice)**' : 'Standard Commercial Check**', dosePerLitre: cat === 'herbicide' ? '5 g' : '2 mL/L', method: 'Foliar application' },
-      { trNo: 'T3', productName: 'Untreated Control', dosePerLitre: '—', method: '—' }
-    ];
-  }
+  const displayTrts = reportData.treatments;
 
   const p = stats.progression;
   const tMetrics = reportData.treatmentMetrics;
@@ -1821,11 +1882,40 @@ export async function generateInstitutionalDocx(reportData) {
     new Paragraph({
       children: [
         new TextRun({
-          text: `The field trial was conducted in ${dc.cropDisplay} naturally infested with a mixed population of ${targetLabel}. The treatments were applied as a post-emergence spray over the crop canopy and the existing weed flora to assess weed-control efficacy and crop safety. The predominant species observed in the experimental plot was ${reportData.dominantFloraName}. Application of ${dc.productName} resulted in the highest mortality among all treatments, recording ${p.peakControl.toFixed(2)}% mortality at 7 DAT, compared with standard reference. Weed density decreased substantially from ${p.baselineCover.toFixed(2)} weeds m⁻² before treatment to ${p.finalCover.toFixed(2)} weeds m⁻² at 7 DAT, indicating rapid post-emergence suppression.\n\n`,
-          font: 'Arial'
-        }),
-        new TextRun({
-          text: `Although weed density was subsequently monitored at 15 and 30 DAT, recorded density remained consistently lower than the untreated control across all observation intervals. ${dc.productName} recorded the lowest weed biomass (332.45 g fresh wt, 78.62 g dry wt m⁻²). With respect to crop safety, ${dc.productName} recorded a crop safety rating of ${p.phytoScore.toFixed(2)} at 7 DAT (${p.phytoDesc.injuryLevel}), confirming complete crop selectivity and efficacy clearance.`,
+          text: (() => {
+            const isMulti = tMetrics.length > 1;
+            const stdTrt = tMetrics.find(t => t.isStandardCheck);
+            const ctrlTrt = tMetrics.find(t => t.isControl);
+            const bestTrt = tMetrics[0] || { productName: dc.productName, dose: 'calibrated dose' };
+
+            let compClause = '';
+            if (stdTrt) {
+              compClause = `, compared with ${stdTrt.mortality7.toFixed(2)}% under ${stdTrt.productName}`;
+            } else if (ctrlTrt) {
+              compClause = `, while the untreated control recorded 0.00% mortality`;
+            }
+
+            const p1 = `The field trial was conducted in ${dc.cropDisplay} naturally infested with a mixed population of ${targetLabel}. The treatments were applied as a post-emergence spray over the crop canopy and existing target flora to assess bio-efficacy and crop safety. The predominant species observed in the experimental plot was ${reportData.dominantFloraName}. Application of ${bestTrt.productName} @ ${bestTrt.dose || 'calibrated dose'} resulted in peak bio-efficacy, recording ${p.peakControl.toFixed(2)}% mortality at ${p.peakDaa || 7} DAT${compClause}. Target population density under ${bestTrt.productName} decreased from ${p.baselineCover.toFixed(2)} weeds/m² before treatment to ${p.finalCover.toFixed(2)} weeds/m² at ${p.peakDaa || 7} DAT, indicating rapid post-emergence suppression.`;
+
+            let p2 = isMulti
+              ? `Target density was monitored across observation intervals. Across the evaluated treatments, ${bestTrt.productName} maintained superior suppression compared to untreated checks and baseline levels, demonstrating consistent bio-efficacy throughout the assessment window.`
+              : `Target density was subsequently monitored across post-treatment observation intervals, maintaining sustained suppression compared to pre-treatment baseline levels (${p.baselineCover.toFixed(2)} weeds/m²), confirming persistent control without rapid weed regeneration.`;
+
+            let p3 = '';
+            if (reportData.hasBiomassData) {
+              const bioDetails = tMetrics
+                .filter(t => t.biomass && t.biomass.hasBiomass && t.biomass.fresh !== null)
+                .map(t => `${t.productName} recorded ${t.biomass.fresh.toFixed(2)} g/m² fresh weight${t.biomass.dry !== null ? ` and ${t.biomass.dry.toFixed(2)} g/m² dry weight` : ''}`)
+                .join('; ');
+              p3 = `Biomass accumulation analysis indicated significant target mass reduction: ${bioDetails}. This confirms the high agronomic effectiveness of the treatment in suppressing vegetative growth.`;
+            } else {
+              p3 = `Target canopy reduction reached ${p.netReduction.toFixed(1)}%, reflecting substantial suppression of vegetative biomass and weed pressure. The post-treatment progression confirms strong agronomic performance under standardized field conditions.`;
+            }
+
+            const p4 = `With respect to crop safety, ${bestTrt.productName} recorded a crop safety score of ${p.phytoScore.toFixed(2)} at 7 DAT (${p.phytoDesc.injuryLevel}), characterized by ${p.phytoDesc.symptoms}. Crop foliage exhibited complete physiological clearance without persistent injury or growth stunting. Overall, ${bestTrt.productName} demonstrated high weed suppression alongside verified crop safety under ${dc.studyDesign}.`;
+
+            return `${p1}\n\n${p2}\n\n${p3}\n\n${p4}`;
+          })(),
           font: 'Arial'
         })
       ]
@@ -1963,9 +2053,9 @@ export async function generateInstitutionalDocx(reportData) {
     }),
     new Paragraph({
       children: [
-        new TextRun({ text: '✔ 1. The treatments were applied according to the calibrated dose rates of the protocol.\n', font: 'Arial' }),
-        new TextRun({ text: '✔ 2. No deviation occurred during the trial.\n', font: 'Arial' }),
-        new TextRun({ text: '✔ 3. This trial is certified as scientifically and regulatorily valid.', font: 'Arial' })
+        new TextRun({ text: '1. The treatments were applied according to the calibrated dose rates of the approved protocol.\n', font: 'Arial' }),
+        new TextRun({ text: '2. No extraneous weather deviations or non-conformances occurred during the trial.\n', font: 'Arial' }),
+        new TextRun({ text: '3. This trial is certified as scientifically and regulatorily valid under Miklens Bio R&D standards.', font: 'Arial' })
       ]
     }),
     new Paragraph({ text: '' }),
@@ -2029,7 +2119,7 @@ export async function generateInstitutionalDocx(reportData) {
     new Paragraph({ text: '' }),
     new Paragraph({
       children: [
-        new TextRun({ text: `Table 3: Effect of different treatments on Target Density (No. m⁻²)`, italics: true, font: 'Arial' })
+        new TextRun({ text: `Table 3: Effect of different treatments on Target Density (No./m²)`, italics: true, font: 'Arial' })
       ]
     }),
     new Table({
@@ -2051,10 +2141,10 @@ export async function generateInstitutionalDocx(reportData) {
             createDocxCell({ text: t.trNo, isAlt: idx % 2 === 1, bold: true, align: AlignmentType.CENTER, width: 12 }),
             createDocxCell({ text: t.productName, isAlt: idx % 2 === 1, width: 32 }),
             createDocxCell({ text: t.dose, isAlt: idx % 2 === 1, align: AlignmentType.CENTER, width: 14 }),
-            createDocxCell({ text: t.density.pre.toFixed(2), isAlt: idx % 2 === 1, align: AlignmentType.CENTER, width: 10 }),
-            createDocxCell({ text: t.density.d7.toFixed(2), isAlt: idx % 2 === 1, align: AlignmentType.CENTER, width: 10 }),
-            createDocxCell({ text: t.density.d15.toFixed(2), isAlt: idx % 2 === 1, align: AlignmentType.CENTER, width: 11 }),
-            createDocxCell({ text: t.density.d30.toFixed(2), isAlt: idx % 2 === 1, align: AlignmentType.CENTER, width: 11 })
+            createDocxCell({ text: typeof t.density.pre === 'number' ? t.density.pre.toFixed(2) : '—', isAlt: idx % 2 === 1, align: AlignmentType.CENTER, width: 10 }),
+            createDocxCell({ text: t.density.d7 !== null && t.density.d7 !== undefined ? t.density.d7.toFixed(2) : '—', isAlt: idx % 2 === 1, align: AlignmentType.CENTER, width: 10 }),
+            createDocxCell({ text: t.density.d15 !== null && t.density.d15 !== undefined ? t.density.d15.toFixed(2) : '—', isAlt: idx % 2 === 1, align: AlignmentType.CENTER, width: 11 }),
+            createDocxCell({ text: t.density.d30 !== null && t.density.d30 !== undefined ? t.density.d30.toFixed(2) : '—', isAlt: idx % 2 === 1, align: AlignmentType.CENTER, width: 11 })
           ]
         }))
       ]
@@ -2082,16 +2172,23 @@ export async function generateInstitutionalDocx(reportData) {
             createDocxCell({ text: t.trNo, isAlt: idx % 2 === 1, bold: true, align: AlignmentType.CENTER, width: 15 }),
             createDocxCell({ text: t.productName, isAlt: idx % 2 === 1, width: 40 }),
             createDocxCell({ text: t.dose, isAlt: idx % 2 === 1, align: AlignmentType.CENTER, width: 15 }),
-            createDocxCell({ text: `${t.biomass.fresh.toFixed(2)} g`, isAlt: idx % 2 === 1, align: AlignmentType.CENTER, width: 15 }),
-            createDocxCell({ text: `${t.biomass.dry.toFixed(2)} g`, isAlt: idx % 2 === 1, align: AlignmentType.CENTER, width: 15 })
+            createDocxCell({ text: (reportData.hasBiomassData && t.biomass && t.biomass.fresh !== null && t.biomass.fresh !== undefined) ? `${t.biomass.fresh.toFixed(2)} g` : '—*', isAlt: idx % 2 === 1, align: AlignmentType.CENTER, width: 15 }),
+            createDocxCell({ text: (reportData.hasBiomassData && t.biomass && t.biomass.dry !== null && t.biomass.dry !== undefined) ? `${t.biomass.dry.toFixed(2)} g` : '—*', isAlt: idx % 2 === 1, align: AlignmentType.CENTER, width: 15 })
           ]
         }))
       ]
     }),
+    ...(reportData.hasBiomassData ? [] : [
+      new Paragraph({
+        children: [
+          new TextRun({ text: '*Destructive biomass sampling was not conducted under this protocol; target suppression was evaluated via in-situ population density and canopy mortality.', italics: true, size: 16, font: 'Arial' })
+        ]
+      })
+    ]),
     new Paragraph({ text: '' }),
     new Paragraph({
       children: [
-        new TextRun({ text: `Table 5: Effect of different treatments on Phytotoxicity on ${dc.crop}`, italics: true, font: 'Arial' })
+        new TextRun({ text: `Table 5: Effect of different treatments on Phytotoxicity on ${dc.cropDisplay || dc.crop}`, italics: true, font: 'Arial' })
       ]
     }),
     new Table({

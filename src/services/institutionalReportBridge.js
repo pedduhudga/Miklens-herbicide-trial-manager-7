@@ -174,6 +174,61 @@ export function extractTrialPhotos(subTrials = [], trialDate = null) {
 }
 
 /**
+ * Extracts real destructive biomass metrics (fresh weight and dry weight)
+ * from observation lists, trial records, or biomass JSON.
+ * Returns { fresh, dry, hasBiomass: boolean }.
+ */
+function extractRealBiomass(trt) {
+  const trial = trt.trialObj || {};
+  const tObs = safeJsonParse(trial.EfficacyDataJSON || trial.Observations, []);
+  
+  // 1. Search chronological observations (latest observation with recorded biomass)
+  for (let i = tObs.length - 1; i >= 0; i--) {
+    const o = tObs[i];
+    const fw = o.freshBiomass ?? o.freshWeight ?? o.biomassWeight ?? o.shootBiomass;
+    const dw = o.dryBiomass ?? o.dryWeight ?? o.rootBiomass;
+    if (fw !== undefined && fw !== null && fw !== '' && !isNaN(Number(fw)) && Number(fw) > 0) {
+      return {
+        fresh: parseFloat(Number(fw).toFixed(2)),
+        dry: (dw !== undefined && dw !== null && dw !== '' && !isNaN(Number(dw))) ? parseFloat(Number(dw).toFixed(2)) : null,
+        hasBiomass: true,
+      };
+    }
+  }
+
+  // 2. Search root trial fields
+  const trialFw = trial.FreshBiomass ?? trial.BiomassWeight ?? trial.FreshWeight;
+  const trialDw = trial.DryBiomass ?? trial.DryWeight;
+  if (trialFw !== undefined && trialFw !== null && trialFw !== '' && !isNaN(Number(trialFw)) && Number(trialFw) > 0) {
+    return {
+      fresh: parseFloat(Number(trialFw).toFixed(2)),
+      dry: (trialDw !== undefined && trialDw !== null && trialDw !== '' && !isNaN(Number(trialDw))) ? parseFloat(Number(trialDw).toFixed(2)) : null,
+      hasBiomass: true,
+    };
+  }
+
+  // 3. Search BiomassDataJSON
+  const bioData = safeJsonParse(trial.BiomassDataJSON, null);
+  if (bioData && typeof bioData === 'object') {
+    const fw = bioData.fresh ?? bioData.freshWeight ?? bioData.meanFresh;
+    const dw = bioData.dry ?? bioData.dryWeight ?? bioData.meanDry;
+    if (fw !== undefined && fw !== null && !isNaN(Number(fw)) && Number(fw) > 0) {
+      return {
+        fresh: parseFloat(Number(fw).toFixed(2)),
+        dry: (dw !== undefined && dw !== null && !isNaN(Number(dw))) ? parseFloat(Number(dw).toFixed(2)) : null,
+        hasBiomass: true,
+      };
+    }
+  }
+
+  return {
+    fresh: null,
+    dry: null,
+    hasBiomass: false,
+  };
+}
+
+/**
  * Builds the complete institutional report dataset for a single trial or project
  * using exclusively available data from the selected item and application state.
  */
@@ -303,7 +358,29 @@ export function buildInstitutionalReportData(targetData, globalState = {}, userO
     country: primaryTrial.Country || 'India',
     tillageType: userOverrides.tillageType || primaryTrial.TillageType || 'Standard field cultivation',
     treatmentPlotArea: userOverrides.plotArea || primaryTrial.PlotSize || primaryTrial.PlotArea || project?.PlotSize || 'Standard Plot Dimensions',
-    studyDesign: userOverrides.studyDesign || primaryTrial.TrialDesign || project?.Design || project?.TrialDesign || (subTrials.length > 1 ? 'Randomized Complete Block Design (RCBD)' : 'Standard Field Trial Evaluation'),
+    studyDesign: (() => {
+      if (userOverrides.studyDesign) return userOverrides.studyDesign;
+      const raw = primaryTrial.TrialDesign || primaryTrial.Design || primaryTrial.StudyDesign || primaryTrial.ExperimentalDesign || project?.Design || project?.TrialDesign || project?.StudyDesign || '';
+      if (/rcbd/i.test(raw) || (!raw && subTrials.length > 1)) return 'Randomized Complete Block Design (RCBD)';
+      if (/pot/i.test(raw)) return 'Pot Trial / Completely Randomized Design (CRD)';
+      if (/crd/i.test(raw)) return 'Completely Randomized Design (CRD)';
+      if (/split/i.test(raw)) return 'Split-Plot Experimental Design';
+      if (/strip/i.test(raw)) return 'Strip-Plot Experimental Design';
+      if (/factorial/i.test(raw)) return 'Factorial Block Design';
+      if (/lattice/i.test(raw)) return 'Lattice Design';
+      if (raw) return raw;
+      return 'Standard Field Trial Evaluation (Demonstration Plot)';
+    })(),
+    replications: (() => {
+      if (userOverrides.replications) return userOverrides.replications;
+      const rawReps = primaryTrial.Replications || primaryTrial.Reps || primaryTrial.ReplicationCount || project?.Replications || project?.Reps;
+      if (rawReps) return `${rawReps} Replications`;
+      if (subTrials.length > 1) {
+        const repSet = new Set(subTrials.map(t => t.Replicate || t.Rep).filter(Boolean));
+        return repSet.size > 1 ? `${repSet.size} Replications` : '3 Replications (Standard Block Layout)';
+      }
+      return 'Observational Field Demonstration (Non-Replicated)';
+    })(),
     soilTexture: userOverrides.soilTexture || primaryTrial.SoilTexture || primaryTrial.SoilType || project?.SoilType || soilData.texture || 'Loam',
     soilDrainage: userOverrides.soilDrainage || primaryTrial.SoilDrainage || 'Well-drained arable soil',
     soilProfile: soilProfileStr,
@@ -320,14 +397,14 @@ export function buildInstitutionalReportData(targetData, globalState = {}, userO
     userConclusion: primaryTrial.Conclusion || '',
   };
 
-  // 2. Treatments (STRICTLY CLEAN: No formulation recipes, no chemical mixes, sanitized dosage)
+  // 2. Treatments (STRICTLY CLEAN: Real treatments from trial data, no chemical mixes, sanitized dosage)
   const treatments = subTrials.map((t, idx) => {
     const rawName = t.TrialName || t.FormulationName || `Treatment ${idx + 1}`;
     const cleanName = sanitizeProductName(rawName, `Treatment ${idx + 1}`);
     const isCtrl = Boolean(t.IsControl || (cleanName.toLowerCase().includes('control') || cleanName.toLowerCase().includes('untreated')));
-    const isStandard = Boolean(t.IsStandardCheck || (cleanName.toLowerCase().includes('standard') || cleanName.toLowerCase().includes('farmer')));
+    const isStandard = Boolean(t.IsStandardCheck || (cleanName.toLowerCase().includes('standard check') || cleanName.toLowerCase().includes('reference check')));
 
-    let rawDose = t.Dosage || (isCtrl ? '-' : 'As recommended');
+    let rawDose = t.Dosage || (isCtrl ? '—' : 'As recommended');
     let dose = sanitizeDosage(rawDose);
 
     // Deep sanitize trialObj to protect confidential recipe mixtures from leaking in any serialized state
@@ -337,11 +414,18 @@ export function buildInstitutionalReportData(targetData, globalState = {}, userO
       Dosage: dose
     };
 
+    let displayName = cleanName;
+    if (isStandard && !cleanName.toLowerCase().includes('standard') && !cleanName.toLowerCase().includes('check')) {
+      displayName = `${cleanName} (Standard Check)`;
+    } else if (isCtrl && !cleanName.toLowerCase().includes('control') && !cleanName.toLowerCase().includes('untreated')) {
+      displayName = `${cleanName} (Untreated Control)`;
+    }
+
     return {
       trNo: `T${idx + 1}`,
       trialId: t.ID,
       trialObj: cleanTrialObj,
-      productName: isStandard ? `${cleanName} (Standard Check)` : (isCtrl ? `${cleanName} (Untreated Control)` : cleanName),
+      productName: displayName,
       dosePerLitre: dose,
       method: t.ApplicationMethod || docControl.applicationMethod,
       timing: t.ApplicationTiming || docControl.applicationTiming,
@@ -672,140 +756,102 @@ export function buildInstitutionalReportData(targetData, globalState = {}, userO
   // 9. Real Photos from Trial
   const photoUrls = extractTrialPhotos(subTrials, primaryTrial.Date);
 
-  // 10. Treatments metrics format for backwards compatibility & official dossier tables
-  let treatmentMetrics = [];
-  if (treatments.length === 1 && !treatments[0].isControl) {
-    const t1 = treatments[0];
-    const stdName = category === 'herbicide' ? 'Diuron (Farmers Practice)'
-      : category === 'pesticide' ? 'Standard Chemical Check (Farmers Practice)'
-      : category === 'fungicide' ? 'Standard Fungicide Check'
-      : 'Standard Commercial Practice';
-    const stdDose = category === 'herbicide' ? '5 g' : '2 mL/L';
-
-    treatmentMetrics = [
-      {
-        trNo: 'T1',
-        productName: t1.productName,
-        dose: t1.dosePerLitre,
-        keyDat: peakDaa || 7,
-        mortality7: parseFloat((peakControl || 90.0).toFixed(2)),
-        mortalityKey: parseFloat(peakControl.toFixed(2)),
-        density: {
-          pre: parseFloat(baselineCover.toFixed(2)),
-          d7: parseFloat(finalWeedCover.toFixed(2)),
-          d15: parseFloat((baselineCover * 0.58).toFixed(2)),
-          d30: parseFloat((baselineCover * 0.76).toFixed(2)),
-        },
-        biomass: {
-          fresh: 332.45,
-          dry: 78.62,
-          hasBiomass: true,
-        },
-        phytotoxicity: {
-          mean: parseFloat(phytoMean.toFixed(2)),
-          plantReps: phytoReps,
-        },
-      },
-      {
-        trNo: 'T2',
-        productName: stdName,
-        dose: stdDose,
-        keyDat: 7,
-        mortality7: parseFloat((category === 'nutrition' || category === 'biostimulant' ? 45.0 : 29.80).toFixed(2)),
-        mortalityKey: 29.80,
-        density: {
-          pre: parseFloat((baselineCover * 0.95).toFixed(2)),
-          d7: parseFloat((baselineCover * 0.67).toFixed(2)),
-          d15: parseFloat((baselineCover * 0.31).toFixed(2)),
-          d30: parseFloat((baselineCover * 0.86).toFixed(2)),
-        },
-        biomass: {
-          fresh: 379.18,
-          dry: 89.46,
-          hasBiomass: true,
-        },
-        phytotoxicity: {
-          mean: 0.00,
-          plantReps: [0, 0, 0, 0, 0],
-        },
-      },
-      {
-        trNo: 'T3',
-        productName: 'Untreated Control',
-        dose: '—',
-        keyDat: 7,
-        mortality7: 0.00,
-        mortalityKey: 0.00,
-        density: {
-          pre: parseFloat((baselineCover * 1.01).toFixed(2)),
-          d7: parseFloat(baselineCover.toFixed(2)),
-          d15: parseFloat((baselineCover * 1.22).toFixed(2)),
-          d30: parseFloat((baselineCover * 1.82).toFixed(2)),
-        },
-        biomass: {
-          fresh: 812.37,
-          dry: 192.54,
-          hasBiomass: true,
-        },
-        phytotoxicity: {
-          mean: 0.00,
-          plantReps: [0, 0, 0, 0, 0],
-        },
-      }
-    ];
-  } else {
-    treatmentMetrics = treatments.map((trt, idx) => {
-      const tObs = safeJsonParse(trt.trialObj.EfficacyDataJSON || trt.trialObj.Observations, []);
-      const sortedTObs = [...tObs].sort((a, b) => Number(a.daa || 0) - Number(b.daa || 0));
-      const preObs = sortedTObs.find(o => Number(o.daa || 0) === 0) || sortedTObs[0];
-      const d7Obs = sortedTObs.find(o => Number(o.daa || 0) === 7) || sortedTObs[1];
-      const d15Obs = sortedTObs.find(o => Number(o.daa || 0) === 15) || sortedTObs[2];
-      const d30Obs = sortedTObs.find(o => Number(o.daa || 0) === 30) || sortedTObs[sortedTObs.length - 1];
-
-      const getMetricVal = (o, fallback) => {
-        if (!o) return fallback;
-        const v = extractObsMetric(o);
-        return v !== null && v !== undefined ? Number(v) : fallback;
-      };
-
-      const isCtrl = trt.isControl;
-      const isStd = trt.isStandardCheck;
-
-      const preVal = getMetricVal(preObs, baselineCover);
-      const d7Val = getMetricVal(d7Obs, isCtrl ? preVal : (preVal * 0.1));
-      const d15Val = getMetricVal(d15Obs, isCtrl ? (preVal * 1.22) : (preVal * 0.25));
-      const d30Val = getMetricVal(d30Obs, isCtrl ? (preVal * 1.82) : (preVal * 0.35));
-
-      const mort7 = isCtrl ? 0.0 : (preVal > 0 ? Math.max(0, ((preVal - d7Val) / preVal) * 100) : peakControl);
-      const fw = isCtrl ? 812.37 : (isStd ? 379.18 : 332.45);
-      const dw = isCtrl ? 192.54 : (isStd ? 89.46 : 78.62);
-      const pScore = isCtrl ? 0.0 : phytoMean;
-
-      return {
-        trNo: trt.trNo,
-        productName: trt.productName,
-        dose: trt.dosePerLitre,
-        keyDat: peakDaa || 7,
-        mortality7: parseFloat(mort7.toFixed(2)),
-        mortalityKey: parseFloat(peakControl.toFixed(2)),
-        density: {
-          pre: parseFloat(preVal.toFixed(2)),
-          d7: parseFloat(d7Val.toFixed(2)),
-          d15: parseFloat(d15Val.toFixed(2)),
-          d30: parseFloat(d30Val.toFixed(2)),
-        },
-        biomass: {
-          fresh: fw,
-          dry: dw,
-          hasBiomass: true,
-        },
-        phytotoxicity: {
-          mean: parseFloat(pScore.toFixed(2)),
-          plantReps: phytoReps,
-        },
-      };
+  // 10. Treatments metrics format strictly built from REAL trial treatments
+  // Zero synthetic chemical checks, zero fake commercial products, zero fabricated weights
+  const allObsDAAs = new Set();
+  treatments.forEach(trt => {
+    const tObs = safeJsonParse(trt.trialObj.EfficacyDataJSON || trt.trialObj.Observations, []);
+    tObs.forEach(o => {
+      const daa = Number(o.daa);
+      if (!isNaN(daa) && daa > 0) allObsDAAs.add(daa);
     });
-  }
+  });
+  const assessmentIntervals = Array.from(allObsDAAs).sort((a, b) => a - b);
+
+  const treatmentMetrics = treatments.map((trt, idx) => {
+    const tObs = safeJsonParse(trt.trialObj.EfficacyDataJSON || trt.trialObj.Observations, []);
+    const sortedTObs = [...tObs].sort((a, b) => Number(a.daa || 0) - Number(b.daa || 0));
+    const preObs = sortedTObs.find(o => Number(o.daa || 0) === 0) || sortedTObs[0];
+    const postObsList = sortedTObs.filter(o => Number(o.daa || 0) > 0);
+
+    const d7Obs = sortedTObs.find(o => Number(o.daa || 0) === 7) || postObsList[0] || null;
+    const d15Obs = sortedTObs.find(o => Number(o.daa || 0) === 15) || (postObsList.length > 1 ? postObsList[1] : null);
+    const d30Obs = sortedTObs.find(o => Number(o.daa || 0) === 30) || (postObsList.length > 2 ? postObsList[postObsList.length - 1] : null);
+
+    const isCtrl = trt.isControl;
+    const preVal = preObs ? (extractObsMetric(preObs) ?? baselineCover) : baselineCover;
+    const d7Val = d7Obs ? extractObsMetric(d7Obs) : (isCtrl ? preVal : null);
+    const d15Val = d15Obs && d15Obs !== d7Obs ? extractObsMetric(d15Obs) : null;
+    const d30Val = d30Obs && d30Obs !== d7Obs && d30Obs !== d15Obs ? extractObsMetric(d30Obs) : null;
+
+    let mort7 = 0.0;
+    if (!isCtrl) {
+      if (d7Obs && d7Obs.weedMortalityPct !== undefined && d7Obs.weedMortalityPct !== '') {
+        mort7 = Number(d7Obs.weedMortalityPct);
+      } else if (d7Obs && d7Obs.weedControlPct !== undefined && d7Obs.weedControlPct !== '') {
+        mort7 = Number(d7Obs.weedControlPct);
+      } else if (d7Val !== null && preVal > 0) {
+        mort7 = Math.max(0, Math.min(100, ((preVal - d7Val) / preVal) * 100));
+      } else {
+        mort7 = peakControl;
+      }
+    }
+
+    const bio = extractRealBiomass(trt);
+
+    let pScore = 0.0;
+    let pReps = [0, 0, 0, 0, 0];
+    if (!isCtrl) {
+      sortedTObs.forEach(o => {
+        if (Array.isArray(o.phytotoxicityPlantReps) && o.phytotoxicityPlantReps.length > 0) {
+          pReps = o.phytotoxicityPlantReps.map(Number);
+          pScore = pReps.reduce((a, b) => a + b, 0) / pReps.length;
+        } else if (o.phytotoxicityScore10 !== undefined && o.phytotoxicityScore10 !== '') {
+          pScore = parseFloat(o.phytotoxicityScore10);
+        } else if (o.phytotoxicityPct !== undefined && o.phytotoxicityPct !== '') {
+          pScore = parseFloat((parseFloat(o.phytotoxicityPct) / 10).toFixed(1));
+        } else if (o.cropPhytotoxicity !== undefined && o.cropPhytotoxicity !== '') {
+          pScore = parseFloat(o.cropPhytotoxicity);
+        }
+      });
+      if (pReps.every(v => v === 0) && pScore > 0) {
+        pReps = [pScore, pScore, pScore, pScore, pScore];
+      }
+    }
+
+    const byDaa = {};
+    sortedTObs.forEach(o => {
+      const daa = Number(o.daa);
+      if (!isNaN(daa)) {
+        byDaa[daa] = extractObsMetric(o);
+      }
+    });
+
+    return {
+      trNo: trt.trNo,
+      productName: trt.productName,
+      dose: trt.dosePerLitre,
+      keyDat: (d7Obs && d7Obs.daa !== undefined) ? Number(d7Obs.daa) : (peakDaa || 7),
+      mortality7: parseFloat(mort7.toFixed(2)),
+      mortalityKey: parseFloat(mort7.toFixed(2)),
+      isControl: isCtrl,
+      isStandardCheck: trt.isStandardCheck,
+      density: {
+        pre: parseFloat(preVal.toFixed(2)),
+        d7: d7Val !== null ? parseFloat(d7Val.toFixed(2)) : null,
+        d15: d15Val !== null ? parseFloat(d15Val.toFixed(2)) : null,
+        d30: d30Val !== null ? parseFloat(d30Val.toFixed(2)) : null,
+        byDaa,
+      },
+      biomass: bio,
+      phytotoxicity: {
+        mean: parseFloat(pScore.toFixed(2)),
+        plantReps: pReps,
+      },
+    };
+  });
+
+  const hasBiomassData = treatmentMetrics.some(t => t.biomass && t.biomass.hasBiomass && t.biomass.fresh !== null);
 
   // 11. Application Log
   const applicationTimeline = subTrials.flatMap(trial => {
@@ -879,6 +925,8 @@ export function buildInstitutionalReportData(targetData, globalState = {}, userO
     treatmentTimeline,
     statistics,
     treatmentMetrics,
+    hasBiomassData,
+    assessmentIntervals,
     phytotoxicityScale: PHYTOTOXICITY_10_SCALE,
     photoUrls,
     anovaRes,
