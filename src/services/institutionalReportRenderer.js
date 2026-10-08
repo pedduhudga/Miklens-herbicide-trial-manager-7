@@ -225,15 +225,10 @@ function drawEfficacyKineticChart(doc, reportData, startX, startY, chartW, chart
   doc.setTextColor(...DARK_TEXT);
   doc.text('5.2 Bio-Efficacy Kinetic Progression & Suppression Dynamics (% WCE)', startX + 5, startY + 5.5);
 
-  doc.setFontSize(6.2);
-  doc.setFont('helvetica', 'italic');
-  doc.setTextColor(...MUTED_TEXT);
-  doc.text('In-Situ Chronological Progression vs Untreated Check (0 DAT -> 30 DAT)', startX + 5, startY + 9.2);
-
   // Plot Area Geometry
   const plotLeft = startX + 16;
   const plotRight = startX + chartW - 12;
-  const plotTop = startY + 13;
+  const plotTop = startY + 12;
   const plotBottom = startY + chartH - 7;
   const plotW = plotRight - plotLeft;
   const plotH = plotBottom - plotTop;
@@ -359,10 +354,10 @@ function drawEfficacyKineticChart(doc, reportData, startX, startY, chartW, chart
     doc.setFillColor(255, 255, 255);
     doc.circle(x, y, 0.5, 'F');
 
-    doc.setFontSize(6.0);
+    doc.setFontSize(5.8);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(...MIKLENS_GREEN);
-    const labelY = pt.controlPct >= 85 ? y - 2.5 : y - 2.2;
+    const labelY = pt.controlPct >= 85 ? Math.max(startY + 8.5, y - 2.2) : y - 2.2;
     doc.text(`${pt.controlPct.toFixed(1)}%`, x, labelY, { align: 'center' });
   });
 
@@ -425,12 +420,12 @@ function applyRunningHeadersAndFooters(doc, reportData) {
     doc.setTextColor(...MIKLENS_GREEN);
     doc.text(`SOP: ${dc.sopFormCode}`, 31, 10.3, { align: 'center' });
 
-    doc.setFontSize(8.5);
+    doc.setFontSize(7.6);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(...DARK_TEXT);
-    doc.text('MIKLENS BIO RESEARCH & DEVELOPMENT CENTRE', pw / 2 + 10, 10.5, { align: 'center' });
+    doc.text('MIKLENS BIO RESEARCH & DEVELOPMENT CENTRE', 50, 10.5);
 
-    doc.setFontSize(7.5);
+    doc.setFontSize(7.2);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(...MUTED_TEXT);
     doc.text(`Report No: ${dc.reportNo}`, pw - 14, 10.5, { align: 'right' });
@@ -472,7 +467,6 @@ export async function generateInstitutionalPDF(reportData) {
   const dc = reportData.docControl;
   const cat = (reportData.category || 'herbicide').toLowerCase();
   const year = new Date().getFullYear();
-  const qrDataUrl = await generateDossierQRCode(dc);
 
   const targetLabel = cat === 'pesticide' ? 'pest population'
     : cat === 'fungicide' ? 'fungal disease symptoms'
@@ -716,66 +710,28 @@ export async function generateInstitutionalPDF(reportData) {
   doc.setTextColor(...MUTED_TEXT);
   doc.text(`Scientific Review Board Seal  |  Date: ${dc.reportDate}`, rightBoxX + 4, certPanelY + 38);
 
-  // Digital Record Verification & GEP Compliance QR Seal Container
-  const qrSealY = certPanelY + certCardH + 5;
-  const qrSealH = 31;
-  doc.setFillColor(255, 255, 255);
-  doc.roundedRect(14, qrSealY, pw - 28, qrSealH, 2, 2, 'F');
+  // Official Institutional Archival & GEP Certification Panel (Clean typography, zero QR code)
+  const auditCardY = certPanelY + certCardH + 6;
+  const auditCardH = 20;
+  doc.setFillColor(...ROW_ALT_BG);
+  doc.roundedRect(14, auditCardY, pw - 28, auditCardH, 1.5, 1.5, 'F');
   doc.setDrawColor(...BORDER_RULE);
   doc.setLineWidth(0.3);
-  doc.roundedRect(14, qrSealY, pw - 28, qrSealH, 2, 2, 'D');
+  doc.roundedRect(14, auditCardY, pw - 28, auditCardH, 1.5, 1.5, 'D');
 
-  // Emerald left accent border strip
   doc.setFillColor(...MIKLENS_GREEN);
-  doc.roundedRect(14, qrSealY, 3, qrSealH, 1, 1, 'F');
+  doc.rect(14, auditCardY, 3, auditCardH, 'F');
 
-  // If QR code was generated, render it on the left
-  const qrBoxSize = 25;
-  const qrX = 20;
-  const qrY = qrSealY + 3;
-  if (qrDataUrl) {
-    doc.addImage(qrDataUrl, 'PNG', qrX, qrY, qrBoxSize, qrBoxSize);
-  }
-
-  // QR Meta Text
-  const textX = qrX + qrBoxSize + 6;
-  doc.setFontSize(8);
+  doc.setFontSize(7.5);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(...DARK_TEXT);
-  doc.text('OFFICIAL DIGITAL RECORD AUTHENTICATION & GEP AUDIT TRAIL', textX, qrSealY + 7);
+  doc.setTextColor(...MIKLENS_GREEN);
+  doc.text('OFFICIAL GEP RECORD AUTHENTICATION & ARCHIVAL REGISTRY', 21, auditCardY + 5.5);
 
-  doc.setFontSize(6.8);
+  doc.setFontSize(7);
   doc.setFont('helvetica', 'normal');
-  doc.setTextColor(...MUTED_TEXT);
-  doc.text('Scan via any mobile device or QR reader to verify protocol integrity, investigator authorization,', textX, qrSealY + 12);
-  doc.text(`and data compliance against Miklens Bio Archive Registry for SOP ${dc.sopFormCode}.`, textX, qrSealY + 16);
-
-  // Security Hash / Metadata Micro-Badges
-  const badgeY = qrSealY + 20;
-  const badgeItems = [
-    { label: 'RECORD ID', val: dc.reportNo },
-    { label: 'GEP STATUS', val: 'AUDITED & VALID' },
-    { label: 'ARCHIVE REGISTRY', val: `MBRD-${year}-SEC` }
-  ];
-
-  badgeItems.forEach((b, bIdx) => {
-    const bX = textX + bIdx * 45;
-    doc.setFillColor(...ROW_ALT_BG);
-    doc.roundedRect(bX, badgeY, 41, 7, 1, 1, 'F');
-    doc.setDrawColor(...BORDER_RULE);
-    doc.setLineWidth(0.2);
-    doc.roundedRect(bX, badgeY, 41, 7, 1, 1, 'D');
-
-    doc.setFontSize(5.5);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(...MUTED_TEXT);
-    doc.text(b.label, bX + 2.5, badgeY + 2.7);
-
-    doc.setFontSize(6.2);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(bIdx === 1 ? MIKLENS_GREEN[0] : DARK_TEXT[0], bIdx === 1 ? MIKLENS_GREEN[1] : DARK_TEXT[1], bIdx === 1 ? MIKLENS_GREEN[2] : DARK_TEXT[2]);
-    doc.text(b.val, bX + 2.5, badgeY + 5.7);
-  });
+  doc.setTextColor(...DARK_TEXT);
+  doc.text(`This evaluation dossier is an authenticated scientific record under Miklens Bio Archive Registry (MBRD-${year}-SEC).`, 21, auditCardY + 10.5);
+  doc.text(`Conforms to Good Experimental Practice (GEP), CIBRC bio-efficacy testing standards, and SOP ${dc.sopFormCode} protocol specifications.`, 21, auditCardY + 15);
 
   // Footer Rule
   doc.setDrawColor(...BORDER_RULE);
@@ -860,7 +816,7 @@ export async function generateInstitutionalPDF(reportData) {
   const cardColW = (pw - 28) / 3;
   const kpiItems = [
     { label: 'PEAK BIO-EFFICACY', val: `${p.peakControl.toFixed(1)}% Mortality`, sub: `Achieved at ${p.peakDaa} DAT` },
-    { label: 'NET CANOPY REDUCTION', val: `${p.netReduction.toFixed(1)}% Net Reduction`, sub: `Baseline ${p.baselineCover}% → ${p.finalCover}%` },
+    { label: 'NET CANOPY REDUCTION', val: `${p.netReduction.toFixed(1)}% Net Reduction`, sub: `Baseline ${p.baselineCover}% -> ${p.finalCover}%` },
     { label: 'CROP SAFETY CLEARANCE', val: `${p.phytoScore.toFixed(1)} / 10 Score`, sub: `Rating: ${p.phytoDesc.injuryLevel}` }
   ];
 
@@ -1183,20 +1139,22 @@ export async function generateInstitutionalPDF(reportData) {
     }
   });
 
-  curY = doc.lastAutoTable.finalY + 3;
+  curY = doc.lastAutoTable.finalY + 4;
   doc.setFontSize(9);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(...MIKLENS_GREEN);
   doc.text('2.7 Application of the Product & Delivery Method', 14, curY);
 
-  curY += 2;
+  curY += 3.5;
   doc.setFontSize(7.5);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(...DARK_TEXT);
-  doc.text(`Treatments were applied in strict conformity with SOP ${dc.sopFormCode} using calibrated delivery equipment (${dc.applicationMethod || 'foliar spray'}) under verified atmospheric conditions.`, 14, curY, { maxWidth: 178 });
+  const appDeliveryLines = doc.splitTextToSize(`Treatments were applied in strict conformity with SOP ${dc.sopFormCode} using calibrated delivery equipment (${dc.applicationMethod || 'foliar spray'}) under verified atmospheric conditions.`, 178);
+  doc.text(appDeliveryLines, 14, curY);
+  curY += appDeliveryLines.length * 3.8 + 2;
 
-  if (reportData.applicationTimeline && reportData.applicationTimeline.length > 0 && curY < 235) {
-    curY += 4;
+  if (reportData.applicationTimeline && reportData.applicationTimeline.length > 0 && curY < 225) {
+    curY += 2;
     autoTable(doc, {
       startY: curY,
       margin: { left: 14, right: 14 },
@@ -1229,10 +1187,11 @@ export async function generateInstitutionalPDF(reportData) {
         8: { cellWidth: 26 }
       }
     });
+    curY = doc.lastAutoTable.finalY;
   }
 
   // 2.8 Pre-Application Spray Calibration & Atmospheric Verification Checklist
-  curY = (doc.lastAutoTable ? doc.lastAutoTable.finalY : curY) + 4;
+  curY += 4;
   if (curY < 230) {
     const checkCardY = curY;
     const checkCardH = 22;
@@ -1349,34 +1308,36 @@ export async function generateInstitutionalPDF(reportData) {
   doc.text('Target Population Density & Scientific Evaluation Metrics:', 14, curY);
   curY += 3.5;
   doc.setFont('helvetica', 'normal');
-  doc.text('Target density was enumerated per unit area (No./m²) across scheduled observation intervals (0, 7, 15, and 30 DAT) using standardized quadrat sampling. Weed control efficiency, canopy reduction kinetics, and control longevity were evaluated according to established agrochemical research formulas:', 14, curY, { maxWidth: pw - 28 });
+  const formulaIntro = doc.splitTextToSize('Target density was enumerated per unit area (No./m²) across scheduled observation intervals (0, 7, 15, and 30 DAT) using standardized quadrat sampling. Weed control efficiency, canopy reduction kinetics, and control longevity were evaluated according to established agrochemical research formulas:', pw - 28);
+  doc.text(formulaIntro, 14, curY);
+  curY += formulaIntro.length * 3.8 + 2.5;
 
-  curY += 8;
-  // Formula Callout Card (Height 31mm)
+  // Formula Callout Card (Height 32mm)
+  const formulaCardH = 32;
   doc.setFillColor(...LIGHT_GREEN_TINT);
-  doc.roundedRect(14, curY, pw - 28, 31, 1.5, 1.5, 'F');
+  doc.roundedRect(14, curY, pw - 28, formulaCardH, 1.5, 1.5, 'F');
   doc.setDrawColor(...BORDER_EMERALD);
   doc.setLineWidth(0.3);
-  doc.roundedRect(14, curY, pw - 28, 31, 1.5, 1.5, 'D');
+  doc.roundedRect(14, curY, pw - 28, formulaCardH, 1.5, 1.5, 'D');
 
   doc.setFontSize(7.2);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(...MIKLENS_GREEN);
   doc.text('Target Population Density (weeds/m²) = Total Target Weed Count / Sampled Quadrat Area (m²)', pw / 2, curY + 5.5, { align: 'center' });
-  doc.text('Abbott\'s Weed Control Efficiency (WCE %) = ((Control Density - Treated Density) / Control Density) × 100', pw / 2, curY + 11.5, { align: 'center' });
-  doc.text('In-Situ Canopy Bio-Efficacy (%) = ((Baseline Density at 0 DAT - Current Density at t DAT) / Baseline Density at 0 DAT) × 100', pw / 2, curY + 17.5, { align: 'center' });
-  doc.text('Henderson-Tilton Corrected Efficacy (%) = [1 - (T_post × C_pre) / (T_pre × C_post)] × 100', pw / 2, curY + 23.5, { align: 'center' });
+  doc.text('Abbott\'s Weed Control Efficiency (WCE %) = ((Control Density - Treated Density) / Control Density) x 100', pw / 2, curY + 11.5, { align: 'center' });
+  doc.text('In-Situ Canopy Bio-Efficacy (%) = ((Baseline Density at 0 DAT - Current Density at t DAT) / Baseline Density at 0 DAT) x 100', pw / 2, curY + 17.5, { align: 'center' });
+  doc.text('Henderson-Tilton Corrected Efficacy (%) = [1 - (T_post x C_pre) / (T_pre x C_post)] x 100', pw / 2, curY + 23.5, { align: 'center' });
 
   doc.setFontSize(6.8);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(...DARK_TEXT);
-  doc.text('Regulatory Performance Threshold: Sustained Control Validated while WCE ≥ 70% | Rating: ≥85% Excellent, 70–84.9% Good, 50–69.9% Fair', pw / 2, curY + 28.5, { align: 'center' });
+  doc.text('Regulatory Performance Threshold: Sustained Control Validated while WCE >= 70% | Rating: >=85% Excellent, 70-84.9% Good, 50-69.9% Fair', pw / 2, curY + 28.5, { align: 'center' });
 
-  curY += 34;
+  curY += formulaCardH + 4.5;
   doc.setFontSize(9);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(...MIKLENS_GREEN);
-  doc.text(`Crop Phytotoxicity Scoring Scale (0–10 Detailed Institutional Scale on ${dc.crop})`, 14, curY);
+  doc.text(`Crop Phytotoxicity Scoring Scale (0-10 Detailed Institutional Scale on ${dc.crop})`, 14, curY);
 
   curY += 2;
   autoTable(doc, {
@@ -1929,16 +1890,6 @@ export async function generateInstitutionalPDF(reportData) {
   doc.text('REPORT PREPARED & CERTIFIED BY:', signLeftX, curY);
   doc.text('REVIEWED & INSTITUTIONALLY APPROVED BY:', signRightX, curY);
 
-  // Center Mini-QR Verification Stamp
-  if (qrDataUrl) {
-    const miniQrW = 16;
-    const miniQrX = pw / 2 - miniQrW / 2;
-    doc.addImage(qrDataUrl, 'PNG', miniQrX, curY + 6, miniQrW, miniQrW);
-    doc.setFontSize(5.2);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(...MIKLENS_GREEN);
-    doc.text('GEP AUDITED', pw / 2, curY + 24.5, { align: 'center' });
-  }
 
   doc.setFontSize(8.5);
   doc.setFont('helvetica', 'bold');

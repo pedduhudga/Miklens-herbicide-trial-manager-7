@@ -342,7 +342,7 @@ describe('Miklens Bio Institutional Report System', () => {
     expect(docx).toContain('.docx');
   });
 
-  it('renders native vector bio-efficacy kinetic progression chart and digital QR verification seal in both PDF and DOCX', async () => {
+  it('renders native vector bio-efficacy kinetic progression chart and GEP archival certification in both PDF and DOCX', async () => {
     const trialWithProgression = {
       ID: 'trial-kinetic-test',
       ProjectID: 'proj-kinetic',
