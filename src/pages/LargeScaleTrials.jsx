@@ -2629,10 +2629,19 @@ Rules:
  
     const formMatch = state.formulations?.find(f => f.Name === subTrialForm.FormulationName);
     const isEdit = !!editingSubTrial;
+    const isControlOrCheck = subTrialForm.IsControl || 
+                             subTrialForm.FormulationName === 'Untreated Check' || 
+                             subTrialForm.FormulationName === 'Commercial Standard Check' ||
+                             subTrialForm.FormulationName?.toLowerCase().includes('check') ||
+                             subTrialForm.FormulationName?.toLowerCase().includes('control');
 
-    if (!isEdit) {
+    if (!isEdit && !isControlOrCheck) {
+      if (!subTrialForm.FormulationName) {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Please select a formulation or control check.', type: 'error' } }));
+        return;
+      }
       if (!formMatch || !isFormulationEligibleForTrial(formMatch)) {
-        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'A linked approved formulation is mandatory to create a sub-trial spot. Please select from the list.', type: 'error' } }));
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Please select an approved formulation or standard check from the list.', type: 'error' } }));
         return;
       }
     }
@@ -2640,6 +2649,8 @@ Rules:
     const payload = {
       ...(isEdit ? editingSubTrial : {}),
       ...subTrialForm,
+      Lat: subTrialForm.Lat?.trim() || '',
+      Lon: subTrialForm.Lon?.trim() || '',
       Category: activeCategory,
       ProjectID: activeProjectId,
       FormulationID: formMatch?.ID || '',
@@ -3088,6 +3099,86 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
     }
   };
 
+  // Instant Quick Master Export Handler for all document formats
+  const handleQuickMasterExport = async (format) => {
+    if (!canDownload) {
+      toast('Download permission is disabled for your account.', 'error');
+      return;
+    }
+    if (!activeProjectId || !activeProject) {
+      toast('Please select a project first.', 'warning');
+      return;
+    }
+
+    try {
+      const largeScaleData = await fbGetLargeScaleData(activeProjectId).catch(() => null);
+      const reportOptions = {
+        format,
+        project: activeProject,
+        category: activeCategory,
+        largeScaleData,
+        formulations: state.formulations || [],
+        aiSummary: activeProject?._aiMasterSummary,
+        analysis: projectAnalysis
+      };
+
+      if (format === 'pdf-comprehensive') {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Generating Master Comprehensive PDF...', type: 'info' } }));
+        await generateMasterComprehensivePdf(activeProject, subTrials, reportOptions);
+        return;
+      }
+      if (format === 'pdf-scientific') {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Generating Master Scientific Report...', type: 'info' } }));
+        await generateMasterScientificReport(activeProject, subTrials, reportOptions);
+        return;
+      }
+      if (format === 'ppt') {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Generating Master PowerPoint deck...', type: 'info' } }));
+        await generateMasterPpt(activeProject, subTrials);
+        return;
+      }
+      if (format === 'csv') {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Exporting Master CSV dataset...', type: 'info' } }));
+        await exportMasterCSV(activeProject, subTrials);
+        return;
+      }
+      if (format === 'docx') {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Generating Master Word document...', type: 'info' } }));
+        await exportMasterDocx(activeProject, subTrials);
+        return;
+      }
+      if (format === 'html') {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Generating standalone HTML dossier...', type: 'info' } }));
+        await exportMasterHtml(activeProject, subTrials);
+        return;
+      }
+      if (format === 'arm') {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Generating ARM exchange file...', type: 'info' } }));
+        const blob = exportToARM(subTrials, activeCategory, activeProject);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `ARM_Export_${activeProject?.Name || 'Master'}_${activeCategory}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'ARM file exported successfully!', type: 'success' } }));
+        return;
+      }
+      if (format === 'excel') {
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Building Master Excel Workbook...', type: 'info' } }));
+        const reportData = await buildReportData(activeProjectId, subTrials, reportOptions, getAppState());
+        await generateProjectExcel(reportData, reportOptions);
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Master Excel Workbook downloaded!', type: 'success' } }));
+        return;
+      }
+    } catch (err) {
+      console.error('[LargeScaleTrials] Quick export error:', err);
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Export failed: ${err.message}`, type: 'error' } }));
+    }
+  };
+
   const handleBulkDeleteSubTrials = async () => {
     if (isViewer) {
       toast('Viewer role cannot delete sub-trials.', 'error');
@@ -3238,6 +3329,16 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
                 />
                 <button
                   onClick={() => {
+                    setViewMode('gis');
+                    setDashboardTab('reports');
+                  }}
+                  className="px-4 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs active:scale-95"
+                  title="Open Master Reports & Exports Hub"
+                >
+                  <FileText className="w-4 h-4 text-purple-600" /> Export Reports
+                </button>
+                <button
+                  onClick={() => {
                     setEditingSubTrial(null);
                     const matchedForm = state.formulations?.find(f =>
                       f.Name.toLowerCase() === activeProject?.Name?.toLowerCase() ||
@@ -3250,7 +3351,7 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
                     });
                     setIsSubTrialModalOpen(true);
                   }}
-                  className={`px-4 py-2 ${theme.bg} text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm`}
+                  className={`px-4 py-2 ${theme.bg} text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer active:scale-95`}
                 >
                   <Plus className="w-4 h-4" /> Add Sub-Trial / Spot
                 </button>
@@ -4697,24 +4798,30 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
                 // Full Width GIS Maps and Master Analytics
                 <div className="space-y-6">
                   {/* Dashboard Navigation Tabs */}
-                  <div className="flex bg-slate-200/50 p-1 rounded-xl w-fit">
+                  <div className="flex bg-slate-200/50 p-1 rounded-xl w-fit flex-wrap gap-1">
                     <button
                       onClick={() => setDashboardTab('map')}
-                      className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${dashboardTab === 'map' ? 'bg-white ${theme.textDark} shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                      className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${dashboardTab === 'map' ? `bg-white ${theme.textDark} shadow-sm` : 'text-slate-500 hover:text-slate-800'}`}
                     >
                       <MapIcon className="inline-block w-3.5 h-3.5 mr-1" /> GIS Satellite Map
                     </button>
                     <button
                       onClick={() => setDashboardTab('charts')}
-                      className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${dashboardTab === 'charts' ? 'bg-white ${theme.textDark} shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                      className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${dashboardTab === 'charts' ? `bg-white ${theme.textDark} shadow-sm` : 'text-slate-500 hover:text-slate-800'}`}
                     >
                       <BarChart2 className="inline-block w-3.5 h-3.5 mr-1" /> Efficacy Curves
                     </button>
                     <button
                       onClick={() => setDashboardTab('ai')}
-                      className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${dashboardTab === 'ai' ? 'bg-white ${theme.textDark} shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                      className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${dashboardTab === 'ai' ? `bg-white ${theme.textDark} shadow-sm` : 'text-slate-500 hover:text-slate-800'}`}
                     >
-                      <Sparkles className="inline-block w-3.5 h-3.5 mr-1" /> Master Report
+                      <Sparkles className="inline-block w-3.5 h-3.5 mr-1" /> AI Synthesis & ANOVA
+                    </button>
+                    <button
+                      onClick={() => setDashboardTab('reports')}
+                      className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${dashboardTab === 'reports' ? 'bg-white text-purple-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                    >
+                      <FileText className="inline-block w-3.5 h-3.5 mr-1 text-purple-600" /> Master Reports & Exports
                     </button>
                   </div>
 
@@ -4948,6 +5055,346 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
                       </div>
                     </div>
                   )}
+
+                  {/* Tab: Master Reports & Exports Hub */}
+                  {dashboardTab === 'reports' && (
+                    <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 space-y-6">
+                      {/* Executive Header */}
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-purple-700 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-200">
+                              Master Study Dossier Hub
+                            </span>
+                            <span className="text-xs text-slate-400 font-mono">
+                              {subTrials.length} Monitoring Spots
+                            </span>
+                          </div>
+                          <h3 className="font-bold text-slate-900 text-lg mt-1 flex items-center gap-2">
+                            <FileText className="w-5 h-5 text-purple-600" />
+                            {activeProject?.Name || 'Large Scale Field Study'}
+                          </h3>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            Generate official agronomic study dossiers, regulatory filings, statistical summaries, and slide decks across all sub-trial zones.
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            onClick={() => {
+                              if (!canDownload) { toast('Download permission is disabled.', 'error'); return; }
+                              setProReportModalOpen(true);
+                            }}
+                            className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer active:scale-95"
+                          >
+                            <SlidersHorizontal className="w-3.5 h-3.5" />
+                            Custom Report Builder
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Study Pre-Flight Readiness Bar */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase block">Spatial Mapping</span>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <MapPin className="w-4 h-4 text-emerald-600" />
+                            <span className="text-sm font-black text-slate-800">
+                              {subTrials.filter(s => s.Lat && s.Lon).length} / {subTrials.length}
+                            </span>
+                            <span className="text-[10px] text-slate-500">mapped</span>
+                          </div>
+                        </div>
+
+                        <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase block">DAA Assessment Visits</span>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <Activity className="w-4 h-4 text-blue-600" />
+                            <span className="text-sm font-black text-slate-800">
+                              {subTrials.reduce((acc, st) => acc + safeJsonParse(st.EfficacyDataJSON, []).length, 0)}
+                            </span>
+                            <span className="text-[10px] text-slate-500">logs recorded</span>
+                          </div>
+                        </div>
+
+                        <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase block">Harvest Pickings</span>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <Leaf className="w-4 h-4 text-amber-600" />
+                            <span className="text-sm font-black text-slate-800">
+                              {subTrials.reduce((acc, st) => acc + (safeJsonParse(st.HarvestDataJSON, {}).pickings || []).length, 0)}
+                            </span>
+                            <span className="text-[10px] text-slate-500">pickings</span>
+                          </div>
+                        </div>
+
+                        <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase block">AI Executive Narrative</span>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <Sparkles className="w-4 h-4 text-purple-600" />
+                            <span className="text-xs font-bold text-slate-800 truncate">
+                              {activeProject?._aiMasterSummary ? 'Synthesized' : 'Pending'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Primary Document Generation Grid */}
+                      <div className="space-y-3">
+                        <span className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
+                          Official Publications & Executive Reports
+                        </span>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                          {/* 1. Comprehensive Master PDF */}
+                          <div className="p-4 rounded-2xl border border-slate-200 bg-white hover:border-emerald-300 hover:shadow-md transition group flex flex-col justify-between">
+                            <div>
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center font-bold">
+                                  <FileText className="w-5 h-5" />
+                                </div>
+                                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-bold">
+                                  PDF
+                                </span>
+                              </div>
+                              <h4 className="font-bold text-sm text-slate-900 group-hover:text-emerald-700 transition">
+                                Comprehensive Master Dossier
+                              </h4>
+                              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                                Complete field study publication with company header, microclimate parameters, treatment table, DAA timeline curves, harvest yields, and photographic documentation.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleQuickMasterExport('pdf-comprehensive')}
+                              className="mt-4 w-full py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-xs cursor-pointer active:scale-95"
+                            >
+                              <Download className="w-3.5 h-3.5" /> Download Comprehensive PDF
+                            </button>
+                          </div>
+
+                          {/* 2. Scientific Report PDF */}
+                          <div className="p-4 rounded-2xl border border-slate-200 bg-white hover:border-sky-300 hover:shadow-md transition group flex flex-col justify-between">
+                            <div>
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="w-9 h-9 rounded-xl bg-sky-50 text-sky-700 flex items-center justify-center font-bold">
+                                  <BarChart2 className="w-5 h-5" />
+                                </div>
+                                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-sky-100 text-sky-800 font-bold">
+                                  PDF
+                                </span>
+                              </div>
+                              <h4 className="font-bold text-sm text-slate-900 group-hover:text-sky-700 transition">
+                                Institutional Scientific Report
+                              </h4>
+                              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                                Research paper format with one-way ANOVA F-statistic table, Tukey HSD post-hoc groupings, treatment CV%, and scientific efficacy progression charts.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleQuickMasterExport('pdf-scientific')}
+                              className="mt-4 w-full py-2 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-xs cursor-pointer active:scale-95"
+                            >
+                              <Download className="w-3.5 h-3.5" /> Download Scientific PDF
+                            </button>
+                          </div>
+
+                          {/* 3. Multi-Sheet Excel Workbook */}
+                          <div className="p-4 rounded-2xl border border-slate-200 bg-white hover:border-emerald-300 hover:shadow-md transition group flex flex-col justify-between">
+                            <div>
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center font-bold">
+                                  <TrendingUp className="w-5 h-5" />
+                                </div>
+                                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-bold">
+                                  XLSX
+                                </span>
+                              </div>
+                              <h4 className="font-bold text-sm text-slate-900 group-hover:text-emerald-700 transition">
+                                Master Multi-Sheet Excel Workbook
+                              </h4>
+                              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                                Comprehensive workbook containing formatted sheets for Master Study Details, Replicate Treatments, Longitudinal DAA Observations, and Picking Yield Totals.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleQuickMasterExport('excel')}
+                              className="mt-4 w-full py-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-xs cursor-pointer active:scale-95"
+                            >
+                              <Download className="w-3.5 h-3.5" /> Download Excel Workbook (.xlsx)
+                            </button>
+                          </div>
+
+                          {/* 4. PowerPoint Deck */}
+                          <div className="p-4 rounded-2xl border border-slate-200 bg-white hover:border-amber-300 hover:shadow-md transition group flex flex-col justify-between">
+                            <div>
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="w-9 h-9 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center font-bold">
+                                  <SlidersHorizontal className="w-5 h-5" />
+                                </div>
+                                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 font-bold">
+                                  PPTX
+                                </span>
+                              </div>
+                              <h4 className="font-bold text-sm text-slate-900 group-hover:text-amber-700 transition">
+                                Executive Slide Deck
+                              </h4>
+                              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                                Ready-to-present widescreen slide deck with study setup, treatment comparisons, high-resolution plot images, and statistical findings.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleQuickMasterExport('ppt')}
+                              className="mt-4 w-full py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-xs cursor-pointer active:scale-95"
+                            >
+                              <Download className="w-3.5 h-3.5" /> Download PowerPoint Deck (.pptx)
+                            </button>
+                          </div>
+
+                          {/* 5. ARM Exchange CSV */}
+                          <div className="p-4 rounded-2xl border border-slate-200 bg-white hover:border-teal-300 hover:shadow-md transition group flex flex-col justify-between">
+                            <div>
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="w-9 h-9 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center font-bold">
+                                  <Layers className="w-5 h-5" />
+                                </div>
+                                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-teal-100 text-teal-800 font-bold">
+                                  ARM CSV
+                                </span>
+                              </div>
+                              <h4 className="font-bold text-sm text-slate-900 group-hover:text-teal-700 transition">
+                                ARM Data Exchange File
+                              </h4>
+                              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                                Formatted for import directly into Agricultural Research Manager (ARM) software for GEP/GLP regulatory registration compliance.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleQuickMasterExport('arm')}
+                              className="mt-4 w-full py-2 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-xs cursor-pointer active:scale-95"
+                            >
+                              <Download className="w-3.5 h-3.5" /> Export ARM CSV Exchange
+                            </button>
+                          </div>
+
+                          {/* 6. Word Document DOCX */}
+                          <div className="p-4 rounded-2xl border border-slate-200 bg-white hover:border-indigo-300 hover:shadow-md transition group flex flex-col justify-between">
+                            <div>
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-700 flex items-center justify-center font-bold">
+                                  <BookOpen className="w-5 h-5" />
+                                </div>
+                                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-800 font-bold">
+                                  DOCX
+                                </span>
+                              </div>
+                              <h4 className="font-bold text-sm text-slate-900 group-hover:text-indigo-700 transition">
+                                Formal Word Document
+                              </h4>
+                              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                                Editable Microsoft Word (.docx) document formatted with standard agricultural trial sections, tables, and narrative blocks for custom editing.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleQuickMasterExport('docx')}
+                              className="mt-4 w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-xs cursor-pointer active:scale-95"
+                            >
+                              <Download className="w-3.5 h-3.5" /> Download Word Document (.docx)
+                            </button>
+                          </div>
+
+                          {/* 7. Flat CSV Dataset */}
+                          <div className="p-4 rounded-2xl border border-slate-200 bg-white hover:border-purple-300 hover:shadow-md transition group flex flex-col justify-between">
+                            <div>
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="w-9 h-9 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center font-bold">
+                                  <Hash className="w-5 h-5" />
+                                </div>
+                                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-purple-100 text-purple-800 font-bold">
+                                  CSV
+                                </span>
+                              </div>
+                              <h4 className="font-bold text-sm text-slate-900 group-hover:text-purple-700 transition">
+                                Raw Data Matrix (CSV)
+                              </h4>
+                              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                                Unformatted tabular CSV matrix suitable for statistical analysis in R, SAS, JMP, Python pandas, or external data pipelines.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleQuickMasterExport('csv')}
+                              className="mt-4 w-full py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-xs cursor-pointer active:scale-95"
+                            >
+                              <Download className="w-3.5 h-3.5" /> Download Raw CSV Dataset
+                            </button>
+                          </div>
+
+                          {/* 8. Standalone HTML Dossier */}
+                          <div className="p-4 rounded-2xl border border-slate-200 bg-white hover:border-slate-300 hover:shadow-md transition group flex flex-col justify-between">
+                            <div>
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="w-9 h-9 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center font-bold">
+                                  <Leaf className="w-5 h-5" />
+                                </div>
+                                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-slate-200 text-slate-800 font-bold">
+                                  HTML
+                                </span>
+                              </div>
+                              <h4 className="font-bold text-sm text-slate-900 group-hover:text-slate-700 transition">
+                                Standalone Web Dossier
+                              </h4>
+                              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                                Portable HTML file that can be opened in any web browser without needing internet or app access. Perfect for emailing to stakeholders.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleQuickMasterExport('html')}
+                              className="mt-4 w-full py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-xs cursor-pointer active:scale-95"
+                            >
+                              <Download className="w-3.5 h-3.5" /> Export Standalone HTML
+                            </button>
+                          </div>
+
+                          {/* 9. Pro Report Configurator Modal */}
+                          <div className="p-4 rounded-2xl border-2 border-dashed border-purple-200 bg-purple-50/50 hover:bg-purple-50 hover:border-purple-300 transition flex flex-col justify-between">
+                            <div>
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="w-9 h-9 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold">
+                                  <SlidersHorizontal className="w-5 h-5" />
+                                </div>
+                                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-purple-200 text-purple-900 font-bold">
+                                  Custom
+                                </span>
+                              </div>
+                              <h4 className="font-bold text-sm text-purple-950">
+                                Institutional Customizer
+                              </h4>
+                              <p className="text-xs text-purple-700 mt-1 leading-relaxed">
+                                Fine-tune document sections, include/exclude raw replicate tables, select branding logos, and customize investigator signatures.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!canDownload) { toast('Download permission is disabled.', 'error'); return; }
+                                setProReportModalOpen(true);
+                              }}
+                              className="mt-4 w-full py-2 bg-purple-700 hover:bg-purple-800 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-xs cursor-pointer active:scale-95"
+                            >
+                              <SlidersHorizontal className="w-3.5 h-3.5" /> Configure Custom Report
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 // Full Width Directory view
@@ -5158,10 +5605,20 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
               <label className="block text-slate-600 font-bold mb-1">Treatment Formulation</label>
               <select
                 value={subTrialForm.FormulationName}
-                onChange={e => setSubTrialForm(p => ({ ...p, FormulationName: e.target.value }))}
+                onChange={e => {
+                  const val = e.target.value;
+                  const isCheck = val.toLowerCase().includes('check') || val.toLowerCase().includes('control');
+                  setSubTrialForm(p => ({
+                    ...p,
+                    FormulationName: val,
+                    IsControl: isCheck || p.IsControl
+                  }));
+                }}
                 className="w-full px-3 py-2 border rounded-lg focus:outline-none bg-white text-xs"
               >
                 <option value="">-- Choose Formulation --</option>
+                <option value="Untreated Check">Untreated Check (Control)</option>
+                <option value="Commercial Standard Check">Commercial Standard Check</option>
                 {(editingSubTrial ? state.formulations : state.formulations?.filter(isFormulationEligibleForTrial))?.map(f => <option key={f.ID} value={f.Name}>{f.Name}</option>)}
               </select>
             </div>
@@ -5208,39 +5665,60 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
           {/* Coordinates Block */}
           <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
             <div className="flex justify-between items-center mb-2">
-              <span className="font-bold text-slate-700 text-[10px] uppercase">GPS Coordinates</span>
-              <button
-                type="button"
-                onClick={handleGetGPS}
-                className={`text-[10px] ${theme.textDark} font-bold bg-white px-2 py-0.5 rounded border flex items-center gap-0.5`}
-              >
-                {gpsFetching ? 'Fetching...' : 'Get GPS Point'}
-              </button>
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-slate-700 text-[10px] uppercase">GPS Coordinates</span>
+                <span className="text-[9px] text-slate-400 font-normal">(Optional)</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {(subTrialForm.Lat || subTrialForm.Lon) && (
+                  <button
+                    type="button"
+                    onClick={() => setSubTrialForm(p => ({ ...p, Lat: '', Lon: '' }))}
+                    className="text-[9px] text-slate-400 hover:text-red-500 underline"
+                  >
+                    Clear GPS
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleGetGPS}
+                  className={`text-[10px] ${theme.textDark} font-bold bg-white px-2 py-0.5 rounded border flex items-center gap-0.5 cursor-pointer`}
+                >
+                  {gpsFetching ? 'Fetching...' : 'Get GPS Point'}
+                </button>
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-[9px] text-slate-500 font-bold">Latitude</label>
+                <label className="text-[9px] text-slate-500 font-bold flex justify-between">
+                  <span>Latitude</span>
+                  <span className="text-slate-400 font-normal">Optional</span>
+                </label>
                 <input
                   type="text"
-                  required
-                  placeholder="e.g. 20.5937"
+                  placeholder="e.g. 20.5937 (optional)"
                   value={subTrialForm.Lat}
                   onChange={e => setSubTrialForm(p => ({ ...p, Lat: e.target.value }))}
-                  className="w-full px-2 py-1.5 bg-white border rounded"
+                  className="w-full px-2 py-1.5 bg-white border rounded text-xs"
                 />
               </div>
               <div>
-                <label className="text-[9px] text-slate-500 font-bold">Longitude</label>
+                <label className="text-[9px] text-slate-500 font-bold flex justify-between">
+                  <span>Longitude</span>
+                  <span className="text-slate-400 font-normal">Optional</span>
+                </label>
                 <input
                   type="text"
-                  required
-                  placeholder="e.g. 78.9629"
+                  placeholder="e.g. 78.9629 (optional)"
                   value={subTrialForm.Lon}
                   onChange={e => setSubTrialForm(p => ({ ...p, Lon: e.target.value }))}
-                  className="w-full px-2 py-1.5 bg-white border rounded"
+                  className="w-full px-2 py-1.5 bg-white border rounded text-xs"
                 />
               </div>
             </div>
+            <p className="text-[9px] text-slate-400 mt-1.5 italic">
+              GPS coordinates are optional. You can save this spot now and assign or update GPS points anytime.
+            </p>
             {gpsAccuracy !== null && (
               <div className={`mt-2 text-[10px] ${theme.textDark} font-bold ${theme.bgLight} px-2 py-1 rounded border ${theme.border}/50 flex items-center justify-between`}>
                 <span>Accuracy:</span>
