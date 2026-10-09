@@ -1169,16 +1169,16 @@ export default function Trials({ onMenuClick }) {
               updated.Rain = c.precipitation ?? prev.Rain;
             }
             if (soil) {
-              updated.SoilPH = soil.soilPH ?? prev.SoilPH;
-              updated.SoilClay = soil.soilClay ?? prev.SoilClay;
-              updated.SoilSand = soil.soilSand ?? prev.SoilSand;
-              updated.SoilOC = soil.soilOC ?? prev.SoilOC;
-              updated.SoilTexture = soil.soilTexture ?? prev.SoilTexture;
+              if (soil.soilPH != null && soil.soilPH !== '') updated.SoilPH = soil.soilPH;
+              if (soil.soilClay != null && soil.soilClay !== '') updated.SoilClay = soil.soilClay;
+              if (soil.soilSand != null && soil.soilSand !== '') updated.SoilSand = soil.soilSand;
+              if (soil.soilOC != null && soil.soilOC !== '') updated.SoilOC = soil.soilOC;
+              if (soil.soilTexture != null && soil.soilTexture !== '') updated.SoilTexture = soil.soilTexture;
             }
             return updated;
           });
           
-          window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `GPS, weather & soil synced! (Accuracy: ±${accuracy.toFixed(1)}m)`, type: 'success' } }));
+          window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `GPS & microclimate synced! (Accuracy: ±${accuracy.toFixed(1)}m)`, type: 'success' } }));
         } catch (error) { 
           console.error("Weather/soil sync error:", error);
           window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Location synced (±${accuracy.toFixed(1)}m), weather/soil fetch failed`, type: 'info' } })); 

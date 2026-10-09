@@ -2504,15 +2504,15 @@ Rules:
           updated.Rain = c.precipitation?.toString() || '';
         }
         if (soil) {
-          updated.SoilPH = soil.soilPH?.toString() || '';
-          updated.SoilClay = soil.soilClay?.toString() || '';
-          updated.SoilSand = soil.soilSand?.toString() || '';
-          updated.SoilOC = soil.soilOC?.toString() || '';
-          updated.SoilTexture = soil.soilTexture || '';
+          if (soil.soilPH != null && soil.soilPH !== '') updated.SoilPH = soil.soilPH.toString();
+          if (soil.soilClay != null && soil.soilClay !== '') updated.SoilClay = soil.soilClay.toString();
+          if (soil.soilSand != null && soil.soilSand !== '') updated.SoilSand = soil.soilSand.toString();
+          if (soil.soilOC != null && soil.soilOC !== '') updated.SoilOC = soil.soilOC.toString();
+          if (soil.soilTexture != null && soil.soilTexture !== '') updated.SoilTexture = soil.soilTexture;
         }
         return updated;
       });
-      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Weather & soil parameters synced!', type: 'success' } }));
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Weather & microclimate synced!', type: 'success' } }));
     } catch (err) {
       console.error(err);
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Weather & soil sync failed.', type: 'error' } }));

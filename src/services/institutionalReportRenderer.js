@@ -1055,9 +1055,9 @@ export async function generateInstitutionalPDF(reportData) {
     margin: { left: 14, right: 14 },
     tableWidth: 182,
     body: [
-      ['Soil Texture:', dc.soilTexture || 'Loamy soil', 'Soil Drainage:', dc.soilDrainage || 'Good'],
-      ['Soil pH Reaction:', dc.soilPH || '6.8 (Neutral)', 'Organic Carbon (%):', dc.soilOC || '0.75%'],
-      ['Soil Profile Type:', dc.soilProfile || 'Deep alluvial horizon', 'Tillage Condition:', dc.tillageType || 'Conventional']
+      ['Soil Texture:', dc.soilTexture || '—', 'Soil Drainage:', dc.soilDrainage || '—'],
+      ['Soil pH Reaction:', dc.soilPH || '—', 'Organic Carbon (%):', dc.soilOC ? (String(dc.soilOC).includes('%') ? dc.soilOC : `${dc.soilOC}%`) : '—'],
+      ['Soil Profile Type:', dc.soilProfile && dc.soilProfile !== '—' ? dc.soilProfile : '—', 'Tillage Condition:', dc.tillageType || '—']
     ],
     theme: 'plain',
     styles: { fontSize: 7.5, cellPadding: 1.4, textColor: DARK_TEXT },
@@ -2327,25 +2327,25 @@ export async function generateInstitutionalDocx(reportData) {
         new TableRow({
           children: [
             createDocxCell({ text: 'Soil Texture:', bold: true, width: 25, textColor: HEX_MUTED }),
-            createDocxCell({ text: dc.soilTexture || 'Loamy soil', width: 25, bold: true }),
+            createDocxCell({ text: dc.soilTexture || '—', width: 25, bold: true }),
             createDocxCell({ text: 'Soil Drainage:', bold: true, width: 25, textColor: HEX_MUTED }),
-            createDocxCell({ text: dc.soilDrainage || 'Good', width: 25, bold: true })
+            createDocxCell({ text: dc.soilDrainage || '—', width: 25, bold: true })
           ]
         }),
         new TableRow({
           children: [
             createDocxCell({ text: 'Soil pH Reaction:', bold: true, width: 25, textColor: HEX_MUTED }),
-            createDocxCell({ text: dc.soilPH || '6.8 (Neutral)', width: 25, bold: true }),
+            createDocxCell({ text: dc.soilPH || '—', width: 25, bold: true }),
             createDocxCell({ text: 'Organic Carbon (%):', bold: true, width: 25, textColor: HEX_MUTED }),
-            createDocxCell({ text: dc.soilOC || '0.75%', width: 25, bold: true })
+            createDocxCell({ text: dc.soilOC ? (String(dc.soilOC).includes('%') ? dc.soilOC : `${dc.soilOC}%`) : '—', width: 25, bold: true })
           ]
         }),
         new TableRow({
           children: [
             createDocxCell({ text: 'Soil Profile Type:', bold: true, width: 25, textColor: HEX_MUTED }),
-            createDocxCell({ text: dc.soilProfile || 'Deep alluvial horizon', width: 25, bold: true }),
+            createDocxCell({ text: dc.soilProfile && dc.soilProfile !== '—' ? dc.soilProfile : '—', width: 25, bold: true }),
             createDocxCell({ text: 'Tillage Condition:', bold: true, width: 25, textColor: HEX_MUTED }),
-            createDocxCell({ text: dc.tillageType || 'Conventional', width: 25, bold: true })
+            createDocxCell({ text: dc.tillageType || '—', width: 25, bold: true })
           ]
         })
       ]

@@ -229,45 +229,15 @@ export async function fetchSoilData(lat, lon, date = null) {
             console.warn("Open-Meteo soil fetch failed:", e);
         }
 
-        // Deterministic location-based Soil Properties fallback (for pH, Clay, Sand, OC, Texture)
-        const pH = parseFloat((6.2 + (Math.sin(latNum * 12.3) * Math.cos(lonNum * 8.7) * 1.3)).toFixed(1));
-        const finalPH = Math.max(4.5, Math.min(8.5, pH));
-
-        const clay = Math.max(8, Math.min(48, Math.round(22 + (Math.sin(latNum * 7.5) * 12))));
-        const sand = Math.max(10, Math.min(80, Math.round(40 + (Math.cos(lonNum * 9.2) * 18))));
-        
-        const totalPhysical = clay + sand;
-        let adjustedClay = clay;
-        let adjustedSand = sand;
-        if (totalPhysical > 90) {
-            const scale = 90 / totalPhysical;
-            adjustedClay = Math.round(clay * scale);
-            adjustedSand = Math.round(sand * scale);
-        }
-
-        const oc = parseFloat(Math.max(0.2, Math.min(3.5, 1.2 + (Math.sin((latNum + lonNum) * 5.4) * 0.8))).toFixed(2));
-
-        let texture = 'Loam';
-        if (adjustedClay > 28 && adjustedSand < 45) {
-            texture = 'Clay Loam';
-        } else if (adjustedClay > 35) {
-            texture = 'Clay';
-        } else if (adjustedSand > 55) {
-            texture = 'Sandy Loam';
-        } else if (adjustedSand > 80) {
-            texture = 'Sand';
-        } else if (adjustedClay < 15 && adjustedSand < 30) {
-            texture = 'Silt';
-        }
-
+        // Return real physical measurements if available; do NOT fabricate hardcoded or pseudo-random soil chemical data
         return {
             soilTemp: temp !== null ? parseFloat(temp.toFixed(1)) : null,
             soilMoisture: moisture !== null ? parseFloat(moisture.toFixed(1)) : null,
-            soilPH: finalPH,
-            soilClay: adjustedClay,
-            soilSand: adjustedSand,
-            soilOC: oc,
-            soilTexture: texture
+            soilPH: null,
+            soilClay: null,
+            soilSand: null,
+            soilOC: null,
+            soilTexture: null
         };
     } catch (e) {
         console.error("fetchSoilData failed:", e);

@@ -94,14 +94,14 @@ export function getHerbicideStatus(weedCover, baseVal, prevVal) {
  * Formats structured soil profile string.
  */
 export function formatSoilProfile(soil) {
-  if (!soil || Object.keys(soil).length === 0) return 'Standard arable loam';
+  if (!soil || Object.keys(soil).length === 0) return '—';
   const parts = [];
   if (soil.ph) parts.push(`pH: ${soil.ph}`);
   if (soil.clay) parts.push(`Clay: ${soil.clay}%`);
   if (soil.sand) parts.push(`Sand: ${soil.sand}%`);
   if (soil.organicCarbon || soil.oc) parts.push(`OC: ${soil.organicCarbon || soil.oc}`);
   if (soil.texture) parts.push(`Texture: ${soil.texture}`);
-  return parts.join(' | ') || 'Standard arable loam';
+  return parts.join(' | ') || '—';
 }
 
 /**
@@ -381,9 +381,13 @@ export function buildInstitutionalReportData(targetData, globalState = {}, userO
       }
       return 'Observational Field Demonstration (Non-Replicated)';
     })(),
-    soilTexture: userOverrides.soilTexture || primaryTrial.SoilTexture || primaryTrial.SoilType || project?.SoilType || soilData.texture || 'Loam',
-    soilDrainage: userOverrides.soilDrainage || primaryTrial.SoilDrainage || 'Well-drained arable soil',
+    soilTexture: userOverrides.soilTexture || primaryTrial.SoilTexture || primaryTrial.SoilType || project?.SoilType || soilData.texture || '',
+    soilDrainage: userOverrides.soilDrainage || primaryTrial.SoilDrainage || '',
     soilProfile: soilProfileStr,
+    soilPH: userOverrides.soilPH || primaryTrial.SoilPH || soilData.ph || '',
+    soilOC: userOverrides.soilOC || primaryTrial.SoilOC || soilData.organicCarbon || soilData.oc || '',
+    soilClay: userOverrides.soilClay || primaryTrial.SoilClay || soilData.clay || '',
+    soilSand: userOverrides.soilSand || primaryTrial.SoilSand || soilData.sand || '',
     applicationMethod: userOverrides.applicationMethod || primaryTrial.ApplicationMethod || 'Post-emergence foliar application',
     applicationTiming: primaryTrial.ApplicationTiming || 'Post-emergence (Active weed growth)',
     weedGrowthStage: primaryTrial.WeedGrowthStage || primaryTrial.CropStage || 'Vegetative to active tillering',
