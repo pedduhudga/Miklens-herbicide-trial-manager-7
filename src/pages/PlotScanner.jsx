@@ -36,6 +36,7 @@ import { resolvePhotoSrc, getDriveFileId } from "../utils/photoUtils.js";
 import { validateEfficacyData } from "../utils/analysisUtils.js";
 import { analyzePhoto, generateTextWithAI } from "../services/multiProviderAI.js";
 import { requestWakeLock, releaseWakeLock, triggerHaptic } from "../utils/nativeCapabilities.js";
+import { fetchObservationWeather } from "../services/weather.js";
 
 const getAutomaticPotPrefix = (targetTrial, allTrials) => {
   if (!targetTrial || !allTrials) return '';
@@ -688,10 +689,16 @@ export default function PlotScanner({ onMenuClick }) {
       bbchStage: aiData.bbchStage || '',
       sampleCount: 1,
       ...(weatherData ? {
-        weatherTemp: weatherData.temp,
-        weatherHumidity: weatherData.hum,
-        weatherWind: weatherData.wind,
-        weatherRain: weatherData.rain
+        weatherTemp: weatherData.temp ?? null,
+        weatherHumidity: weatherData.humidity ?? weatherData.hum ?? null,
+        weatherWind: weatherData.wind ?? null,
+        weatherRain: weatherData.rain ?? 0,
+        soilTemp: weatherData.soilTemp ?? null,
+        soilMoisture: weatherData.soilMoisture ?? null,
+        cumulativeRainSinceApp: weatherData.cumulativeRainSinceApp ?? null,
+        gddSinceApp: weatherData.gddSinceApp ?? null,
+        agronomicWeatherImpact: weatherData.agronomicImpact || null,
+        weatherSource: weatherData.provider || 'Auto-Weather'
       } : {})
     };
 
@@ -718,6 +725,17 @@ export default function PlotScanner({ onMenuClick }) {
         ...existing,
         sampleCount: count + 1,
         [primaryObsField]: Number(mergedPrimaryValue.toFixed(2)),
+        ...(weatherData ? {
+          weatherTemp: weatherData.temp ?? existing.weatherTemp,
+          weatherHumidity: (weatherData.humidity ?? weatherData.hum) ?? existing.weatherHumidity,
+          weatherWind: weatherData.wind ?? existing.weatherWind,
+          weatherRain: weatherData.rain ?? existing.weatherRain,
+          soilTemp: weatherData.soilTemp ?? existing.soilTemp,
+          soilMoisture: weatherData.soilMoisture ?? existing.soilMoisture,
+          cumulativeRainSinceApp: weatherData.cumulativeRainSinceApp ?? existing.cumulativeRainSinceApp,
+          gddSinceApp: weatherData.gddSinceApp ?? existing.gddSinceApp,
+          agronomicWeatherImpact: weatherData.agronomicImpact || existing.agronomicWeatherImpact
+        } : {})
       };
       if (primaryObsField === 'weedCover') {
         mergedObs.weedCover = Number(mergedPrimaryValue.toFixed(2));
@@ -1069,47 +1087,17 @@ Rules:
         // Calculate Days After Application (DAA)
         const daa = calculateDAA(photoDate, trial.Date);
 
-        // Fetch weather conditions
-        const fetchWeatherForPhoto = async (lat, lon) => {
-          try {
-            const today = new Date().toISOString().split('T')[0];
-            let wUrl;
-            if (photoDate < today) {
-              wUrl = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&start_date=${photoDate}&end_date=${photoDate}&hourly=temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation&wind_speed_unit=kmh`;
-            } else {
-              wUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation&wind_speed_unit=kmh`;
-            }
-            const wr = await fetch(wUrl);
-            const wd = await wr.json();
-            let temp, hum, wind, rain;
-            if (photoDate < today && wd.hourly) {
-              const midday = wd.hourly.time?.findIndex(t => t.includes('T12:')) ?? 6;
-              const idx = midday >= 0 ? midday : 6;
-              temp = wd.hourly.temperature_2m?.[idx];
-              hum = wd.hourly.relative_humidity_2m?.[idx];
-              wind = wd.hourly.wind_speed_10m?.[idx];
-              rain = wd.hourly.precipitation?.[idx];
-            } else if (wd.current) {
-              temp = wd.current.temperature_2m;
-              hum = wd.current.relative_humidity_2m;
-              wind = wd.current.wind_speed_10m;
-              rain = wd.current.precipitation;
-            }
-            return { temp, hum, wind, rain };
-          } catch(we) {
-            console.warn('Weather fetch failed:', we.message);
-            return null;
-          }
-        };
-
+        // Fetch scientific observation microclimate + cumulative interval metrics
         let weatherInfo = null;
-        if (trial.Lat && trial.Lon) {
-          weatherInfo = await fetchWeatherForPhoto(trial.Lat, trial.Lon);
-        } else if (navigator.geolocation) {
+        const targetLat = trial.Lat;
+        const targetLon = trial.Lon;
+        if (targetLat && targetLon) {
+          weatherInfo = await fetchObservationWeather(targetLat, targetLon, photoDate, trial.Date, getAppState).catch(() => null);
+        } else if (typeof navigator !== 'undefined' && navigator.geolocation) {
           weatherInfo = await new Promise((resolve) => {
             navigator.geolocation.getCurrentPosition(
               async (pos) => {
-                const res = await fetchWeatherForPhoto(pos.coords.latitude.toFixed(8), pos.coords.longitude.toFixed(8));
+                const res = await fetchObservationWeather(pos.coords.latitude.toFixed(8), pos.coords.longitude.toFixed(8), photoDate, trial.Date, getAppState).catch(() => null);
                 resolve(res);
               },
               () => {
@@ -1118,8 +1106,8 @@ Rules:
               },
               {
                 enableHighAccuracy: true,
-                timeout: 10000,
-                maximumAge: 0
+                timeout: 8000,
+                maximumAge: 60000
               }
             );
           });

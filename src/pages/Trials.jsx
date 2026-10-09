@@ -54,7 +54,7 @@ import {
   exportTrialDocx,
   shareTrial as shareTrialFn,
 } from '../services/trialReports.js';
-import { fetchWeather, fetchSoilData } from '../services/weather.js';
+import { fetchWeather, fetchSoilData, fetchObservationWeather } from '../services/weather.js';
 import { EPPO_CODES, BBCH_STAGES, lookupEPPO } from '../utils/eppoBBCHData.js';
 import { exportToARM, importARMCSV } from '../services/armExporter.js';
 import { detectOutliers } from '../utils/statsUtils.js';
@@ -1711,25 +1711,31 @@ export default function Trials({ onMenuClick }) {
 
   // ── Fetch weather for observation date ─────────────────────────────
   const fetchObsWeather = useCallback(async (date) => {
-    if (!activeTrial?.Lat || !activeTrial?.Lon) return;
+    if (!activeTrial?.Lat || !activeTrial?.Lon) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Trial GPS coordinates required to auto-fetch weather.', type: 'info' } }));
+      return;
+    }
     try {
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${activeTrial.Lat}&longitude=${activeTrial.Lon}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation&wind_speed_unit=kmh`;
-      const r = await fetch(url);
-      const d = await r.json();
-      const c = d.current;
-      if (c) {
+      const wx = await fetchObservationWeather(activeTrial.Lat, activeTrial.Lon, date, activeTrial.Date, getAppState);
+      if (wx) {
         setObsForm(prev => ({ ...prev,
-          weatherTemp: c.temperature_2m ?? prev.weatherTemp,
-          weatherHumidity: c.relative_humidity_2m ?? prev.weatherHumidity,
-          weatherWind: c.wind_speed_10m ?? prev.weatherWind,
-          weatherRain: c.precipitation ?? prev.weatherRain,
+          weatherTemp: wx.temp !== null ? wx.temp : prev.weatherTemp,
+          weatherHumidity: wx.humidity !== null ? wx.humidity : prev.weatherHumidity,
+          weatherWind: wx.wind !== null ? wx.wind : prev.weatherWind,
+          weatherRain: wx.rain !== null ? wx.rain : prev.weatherRain,
+          cumulativeRainSinceApp: wx.cumulativeRainSinceApp ?? prev.cumulativeRainSinceApp,
+          gddSinceApp: wx.gddSinceApp ?? prev.gddSinceApp,
+          soilTemp: wx.soilTemp ?? prev.soilTemp,
+          soilMoisture: wx.soilMoisture ?? prev.soilMoisture,
+          agronomicWeatherImpact: wx.agronomicImpact ?? prev.agronomicWeatherImpact,
         }));
-        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Weather synced for observation', type: 'success' } }));
+        const summary = wx.intervalSummary ? ` (${wx.intervalSummary})` : '';
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Weather synced for ${wx.obsDate}${summary}`, type: 'success' } }));
       }
     } catch(e) {
-      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Weather fetch failed', type: 'info' } }));
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Weather fetch failed: ' + e.message, type: 'warning' } }));
     }
-  }, [activeTrial]);
+  }, [activeTrial, getAppState]);
 
   // ── Detect statistical outliers ────────────────────────────────────
   const isObservationOutlier = useCallback((obs, daa) => {
@@ -2217,7 +2223,12 @@ export default function Trials({ onMenuClick }) {
       weedMortalityPct: obsForm.weedMortalityPct !== '' && obsForm.weedMortalityPct != null ? Number(obsForm.weedMortalityPct) : undefined,
       phytotoxicityScore10: obsForm.phytotoxicityScore10 !== '' && obsForm.phytotoxicityScore10 != null ? Number(obsForm.phytotoxicityScore10) : undefined,
       freshBiomassGrams: obsForm.freshBiomassGrams !== '' && obsForm.freshBiomassGrams != null ? Number(obsForm.freshBiomassGrams) : undefined,
-      dryBiomassGrams: obsForm.dryBiomassGrams !== '' && obsForm.dryBiomassGrams != null ? Number(obsForm.dryBiomassGrams) : undefined
+      dryBiomassGrams: obsForm.dryBiomassGrams !== '' && obsForm.dryBiomassGrams != null ? Number(obsForm.dryBiomassGrams) : undefined,
+      cumulativeRainSinceApp: obsForm.cumulativeRainSinceApp !== '' && obsForm.cumulativeRainSinceApp != null ? Number(obsForm.cumulativeRainSinceApp) : undefined,
+      gddSinceApp: obsForm.gddSinceApp !== '' && obsForm.gddSinceApp != null ? Number(obsForm.gddSinceApp) : undefined,
+      soilTemp: obsForm.soilTemp !== '' && obsForm.soilTemp != null ? Number(obsForm.soilTemp) : undefined,
+      soilMoisture: obsForm.soilMoisture !== '' && obsForm.soilMoisture != null ? Number(obsForm.soilMoisture) : undefined,
+      agronomicWeatherImpact: obsForm.agronomicWeatherImpact || undefined
     };
     // Remove undefined fields to keep records clean
     if (newObs.phytotoxicityPct === undefined) delete newObs.phytotoxicityPct;
@@ -2227,6 +2238,11 @@ export default function Trials({ onMenuClick }) {
     if (newObs.phytotoxicityScore10 === undefined) delete newObs.phytotoxicityScore10;
     if (newObs.freshBiomassGrams === undefined) delete newObs.freshBiomassGrams;
     if (newObs.dryBiomassGrams === undefined) delete newObs.dryBiomassGrams;
+    if (newObs.cumulativeRainSinceApp === undefined) delete newObs.cumulativeRainSinceApp;
+    if (newObs.gddSinceApp === undefined) delete newObs.gddSinceApp;
+    if (newObs.soilTemp === undefined) delete newObs.soilTemp;
+    if (newObs.soilMoisture === undefined) delete newObs.soilMoisture;
+    if (!newObs.agronomicWeatherImpact) delete newObs.agronomicWeatherImpact;
 
     catConfig.observationFields?.forEach(f => {
       const val = obsForm[f.key];
@@ -3226,60 +3242,52 @@ export default function Trials({ onMenuClick }) {
 
       const daa = calculateDAA(photoDate, targetTrial.Date);
 
-      // Auto-fetch weather — always attempt, using stored GPS or browser location
-      const fetchWeatherForPhoto = async (lat, lon) => {
+      // Auto-fetch observation-day microclimate + cumulative interval metrics
+      let resolvedLat = targetTrial?.Lat || null;
+      let resolvedLon = targetTrial?.Lon || null;
+      if (!resolvedLat || !resolvedLon) {
+        if (typeof navigator !== 'undefined' && navigator.geolocation) {
+          try {
+            const pos = await new Promise((res, rej) => {
+              navigator.geolocation.getCurrentPosition(res, rej, {
+                enableHighAccuracy: true,
+                timeout: 5000,
+                maximumAge: 60000
+              });
+            });
+            resolvedLat = pos.coords.latitude.toFixed(8);
+            resolvedLon = pos.coords.longitude.toFixed(8);
+          } catch (geoErr) {
+            console.warn('[Photo Weather] Geolocation fallback unavailable:', geoErr.message);
+          }
+        }
+      }
+
+      let photoWeather = null;
+      if (resolvedLat && resolvedLon) {
         try {
-          // Use historical hourly data if photoDate is in the past, otherwise current
-          const today = new Date().toISOString().split('T')[0];
-          let wUrl;
-          if (photoDate < today) {
-            wUrl = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&start_date=${photoDate}&end_date=${photoDate}&hourly=temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation&wind_speed_unit=kmh`;
-          } else {
-            wUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation&wind_speed_unit=kmh`;
-          }
-          const wr = await fetch(wUrl);
-          const wd = await wr.json();
-          let temp, hum, wind, rain;
-          if (photoDate < today && wd.hourly) {
-            const midday = wd.hourly.time?.findIndex(t => t.includes('T12:')) ?? 6;
-            const idx = midday >= 0 ? midday : 6;
-            temp = wd.hourly.temperature_2m?.[idx];
-            hum = wd.hourly.relative_humidity_2m?.[idx];
-            wind = wd.hourly.wind_speed_10m?.[idx];
-            rain = wd.hourly.precipitation?.[idx];
-          } else if (wd.current) {
-            temp = wd.current.temperature_2m;
-            hum = wd.current.relative_humidity_2m;
-            wind = wd.current.wind_speed_10m;
-            rain = wd.current.precipitation;
-          }
-          if (temp != null) {
-            setObsForm(prev => ({ ...prev,
-              weatherTemp: temp ?? prev.weatherTemp,
-              weatherHumidity: hum ?? prev.weatherHumidity,
-              weatherWind: wind ?? prev.weatherWind,
-              weatherRain: rain ?? prev.weatherRain,
+          photoWeather = await fetchObservationWeather(resolvedLat, resolvedLon, photoDate, targetTrial.Date, getAppState);
+          if (photoWeather) {
+            setObsForm(prev => ({
+              ...prev,
+              weatherTemp: photoWeather.temp !== null ? photoWeather.temp : prev.weatherTemp,
+              weatherHumidity: photoWeather.humidity !== null ? photoWeather.humidity : prev.weatherHumidity,
+              weatherWind: photoWeather.wind !== null ? photoWeather.wind : prev.weatherWind,
+              weatherRain: photoWeather.rain !== null ? photoWeather.rain : prev.weatherRain,
+              cumulativeRainSinceApp: photoWeather.cumulativeRainSinceApp ?? prev.cumulativeRainSinceApp,
+              gddSinceApp: photoWeather.gddSinceApp ?? prev.gddSinceApp,
+              soilTemp: photoWeather.soilTemp ?? prev.soilTemp,
+              soilMoisture: photoWeather.soilMoisture ?? prev.soilMoisture,
+              agronomicWeatherImpact: photoWeather.agronomicImpact ?? prev.agronomicWeatherImpact,
             }));
           }
-        } catch(we) { console.warn('Weather fetch failed:', we.message); }
-      };
-
-      if (targetTrial?.Lat && targetTrial?.Lon) {
-        await fetchWeatherForPhoto(targetTrial.Lat, targetTrial.Lon);
-      } else if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          pos => fetchWeatherForPhoto(pos.coords.latitude.toFixed(8), pos.coords.longitude.toFixed(8)),
-          () => console.warn('Geolocation denied — weather not fetched'),
-          {
-            enableHighAccuracy: true,
-            timeout: 15000,
-            maximumAge: 0
-          }
-        );
+        } catch (we) {
+          console.warn('[Photo Weather] Auto-fetch failed:', we.message);
+        }
       }
 
       const photoKeyToUpdate = driveUrl || dataUrl;
-      await updatePhotoAiStatus(targetTrial.ID, photoKeyToUpdate, 'processing');
+      await updatePhotoAiStatus(targetTrial.ID, photoKeyToUpdate, 'processing', '', null, photoWeather);
       
       // Safety timeout for photo analysis (max 30s) so UI doesn't hang in "Analyzing"
       const analyzePromise = analyzePhoto(dataUrl, {
@@ -3303,9 +3311,10 @@ export default function Trials({ onMenuClick }) {
       }
 
       if (result.success) {
-        await createObservationFromAI(targetTrial, daa, result.data, photoDate, photoKeyToUpdate);
-        await updatePhotoAiStatus(targetTrial.ID, photoKeyToUpdate, 'completed', '', result.data);
-        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `AI complete! Logged ${result.data.weeds?.length || result.data.targets?.length || 0} targets at DAA ${daa}`, type: 'success' } }));
+        await createObservationFromAI(targetTrial, daa, result.data, photoDate, photoKeyToUpdate, photoWeather);
+        await updatePhotoAiStatus(targetTrial.ID, photoKeyToUpdate, 'completed', '', result.data, photoWeather);
+        const wxSummary = photoWeather?.intervalSummary ? ` [${photoWeather.intervalSummary}]` : '';
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `AI complete! Logged ${result.data.weeds?.length || result.data.targets?.length || 0} targets at DAA ${daa}${wxSummary}`, type: 'success' } }));
         // Auto-run cover detection in background
         detectWeedCoverAI(dataUrl).then(coverResult => {
           if (coverResult?.cover != null) {
@@ -3313,7 +3322,7 @@ export default function Trials({ onMenuClick }) {
           }
         }).catch(() => {});
       } else {
-        await updatePhotoAiStatus(targetTrial.ID, photoKeyToUpdate, 'failed', result.error || 'AI analysis skipped');
+        await updatePhotoAiStatus(targetTrial.ID, photoKeyToUpdate, 'failed', result.error || 'AI analysis skipped', null, photoWeather);
         window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'AI analysis: ' + (result.error || 'Skipped'), type: 'warning' } }));
       }
     } catch (e) {
@@ -3519,7 +3528,7 @@ export default function Trials({ onMenuClick }) {
   };
 
   // ── AI PHOTO ANALYSIS ─────────────────────────────────────────────
-  const createObservationFromAI = async (trial, daa, aiData, obsDate = null, photoUrl = null) => {
+  const createObservationFromAI = async (trial, daa, aiData, obsDate = null, photoUrl = null, weatherData = null) => {
     const latestTrial = getAppState().trials.find(t => t.ID === trial.ID) || trial;
     const trialCat = latestTrial.Category || activeCategory;
     const catConfig = getCategoryConfig(trialCat);
@@ -3686,7 +3695,17 @@ export default function Trials({ onMenuClick }) {
       status: 'Analyzed',
       source: 'AI',
       photoUrl: photoUrl || '',
-      bbchStage: aiData.bbchStage || ''
+      bbchStage: aiData.bbchStage || '',
+      weatherTemp: (weatherData?.temp !== undefined && weatherData?.temp !== null) ? weatherData.temp : (obsForm?.weatherTemp || ''),
+      weatherHumidity: (weatherData?.humidity !== undefined && weatherData?.humidity !== null) ? weatherData.humidity : (obsForm?.weatherHumidity || ''),
+      weatherWind: (weatherData?.wind !== undefined && weatherData?.wind !== null) ? weatherData.wind : (obsForm?.weatherWind || ''),
+      weatherRain: (weatherData?.rain !== undefined && weatherData?.rain !== null) ? weatherData.rain : (obsForm?.weatherRain || ''),
+      soilTemp: weatherData?.soilTemp ?? null,
+      soilMoisture: weatherData?.soilMoisture ?? null,
+      cumulativeRainSinceApp: weatherData?.cumulativeRainSinceApp ?? null,
+      gddSinceApp: weatherData?.gddSinceApp ?? null,
+      agronomicWeatherImpact: weatherData?.agronomicImpact || null,
+      weatherSource: weatherData?.provider || (weatherData ? 'Auto-Weather' : null),
     };
 
     // Save all dynamic metrics fields directly into the observation
@@ -3712,6 +3731,15 @@ export default function Trials({ onMenuClick }) {
         ...existing,
         sampleCount: count + 1,
         [primaryObsField]: Number(mergedPrimaryValue.toFixed(2)),
+        weatherTemp: (weatherData?.temp !== undefined && weatherData?.temp !== null) ? weatherData.temp : existing.weatherTemp,
+        weatherHumidity: (weatherData?.humidity !== undefined && weatherData?.humidity !== null) ? weatherData.humidity : existing.weatherHumidity,
+        weatherWind: (weatherData?.wind !== undefined && weatherData?.wind !== null) ? weatherData.wind : existing.weatherWind,
+        weatherRain: (weatherData?.rain !== undefined && weatherData?.rain !== null) ? weatherData.rain : existing.weatherRain,
+        soilTemp: (weatherData?.soilTemp !== undefined && weatherData?.soilTemp !== null) ? weatherData.soilTemp : existing.soilTemp,
+        soilMoisture: (weatherData?.soilMoisture !== undefined && weatherData?.soilMoisture !== null) ? weatherData.soilMoisture : existing.soilMoisture,
+        cumulativeRainSinceApp: (weatherData?.cumulativeRainSinceApp !== undefined && weatherData?.cumulativeRainSinceApp !== null) ? weatherData.cumulativeRainSinceApp : existing.cumulativeRainSinceApp,
+        gddSinceApp: (weatherData?.gddSinceApp !== undefined && weatherData?.gddSinceApp !== null) ? weatherData.gddSinceApp : existing.gddSinceApp,
+        agronomicWeatherImpact: weatherData?.agronomicImpact || existing.agronomicWeatherImpact,
       };
       if (primaryObsField === 'weedCover') {
         mergedObs.weedCover = Number(mergedPrimaryValue.toFixed(2));
@@ -4451,8 +4479,12 @@ Rules:
         const trial = getAppState().trials.find(t => t.ID === trialId);
         if (trial) {
           if (success && data) {
-            await createObservationFromAI(trial, daa, data, photoDate, imageData);
-            await updatePhotoAiStatus(trialId, imageData, 'completed', '', data);
+            let batchWx = null;
+            if (trial.Lat && trial.Lon) {
+              batchWx = await fetchObservationWeather(trial.Lat, trial.Lon, photoDate, trial.Date, getAppState).catch(() => null);
+            }
+            await createObservationFromAI(trial, daa, data, photoDate, imageData, batchWx);
+            await updatePhotoAiStatus(trialId, imageData, 'completed', '', data, batchWx);
           } else {
             await updatePhotoAiStatus(trialId, imageData, 'failed', error || 'AI analysis skipped');
           }
@@ -4568,9 +4600,14 @@ Rules:
       }, (msg) => window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg, type: 'info' } })));
 
       if (result.success) {
-        await createObservationFromAI(activeTrial, daa, result.data, photoDate, photoSrc);
-        await updatePhotoAiStatus(activeTrial.ID, photoSrc, 'completed', '', result.data);
-        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `AI complete! Detected ${result.data.weeds?.length || result.data.targets?.length || 0} targets at DAA ${daa}. Observation saved.`, type: 'success' } }));
+        let singleWx = null;
+        if (activeTrial.Lat && activeTrial.Lon) {
+          singleWx = await fetchObservationWeather(activeTrial.Lat, activeTrial.Lon, photoDate, activeTrial.Date, getAppState).catch(() => null);
+        }
+        await createObservationFromAI(activeTrial, daa, result.data, photoDate, photoSrc, singleWx);
+        await updatePhotoAiStatus(activeTrial.ID, photoSrc, 'completed', '', result.data, singleWx);
+        const wxSummary = singleWx?.intervalSummary ? ` [${singleWx.intervalSummary}]` : '';
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `AI complete! Detected ${result.data.weeds?.length || result.data.targets?.length || 0} targets at DAA ${daa}${wxSummary}. Observation saved.`, type: 'success' } }));
       } else {
         await updatePhotoAiStatus(activeTrial.ID, photoSrc, 'failed', result.error || 'AI analysis skipped');
         window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'AI analysis failed: ' + (result.error || 'Unknown error'), type: 'error' } }));
@@ -8241,13 +8278,52 @@ If none are present, write "None".`;
                                   </div>
                                 </div>
                               )}
-                              {/* Observation-level weather strip */}
-                              {(obs.weatherTemp || obs.weatherWind || obs.weatherRain) && (
-                                <div className="mt-2 border-t pt-2 flex flex-wrap gap-3 text-[10px] text-slate-500">
-                                  {obs.weatherTemp && <span>🌡 {obs.weatherTemp}°C</span>}
-                                  {obs.weatherHumidity && <span>💧 {obs.weatherHumidity}%</span>}
-                                  {obs.weatherWind && <span>💨 {obs.weatherWind} km/h</span>}
-                                  {obs.weatherRain && parseFloat(obs.weatherRain) > 0 && <span>🌧 {obs.weatherRain} mm</span>}
+                              {/* Observation-level weather strip & microclimate tracking */}
+                              {(obs.weatherTemp || obs.weatherWind || obs.weatherRain || obs.cumulativeRainSinceApp || obs.gddSinceApp || obs.soilMoisture) && (
+                                <div className="mt-2 border-t pt-2 space-y-1.5">
+                                  <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                                    <span className="font-bold text-slate-400 uppercase tracking-wider text-[9px] mr-0.5">Microclimate:</span>
+                                    {obs.weatherTemp != null && obs.weatherTemp !== '' && (
+                                      <span className="bg-amber-50 text-amber-800 px-1.5 py-0.5 rounded border border-amber-200 font-semibold" title="Ambient air temperature on evaluation day">
+                                        🌡️ {obs.weatherTemp}°C
+                                      </span>
+                                    )}
+                                    {obs.weatherHumidity != null && obs.weatherHumidity !== '' && (
+                                      <span className="bg-blue-50 text-blue-800 px-1.5 py-0.5 rounded border border-blue-200 font-semibold" title="Relative humidity on evaluation day">
+                                        💧 {obs.weatherHumidity}% RH
+                                      </span>
+                                    )}
+                                    {obs.weatherWind != null && obs.weatherWind !== '' && (
+                                      <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded border border-slate-200 font-semibold" title="Wind speed">
+                                        💨 {obs.weatherWind} km/h
+                                      </span>
+                                    )}
+                                    {obs.weatherRain != null && obs.weatherRain !== '' && parseFloat(obs.weatherRain) > 0 && (
+                                      <span className="bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded border border-indigo-200 font-semibold" title="Precipitation on observation day">
+                                        🌧️ {obs.weatherRain} mm
+                                      </span>
+                                    )}
+                                    {obs.cumulativeRainSinceApp != null && (
+                                      <span className="bg-cyan-50 text-cyan-800 px-1.5 py-0.5 rounded border border-cyan-200 font-semibold" title="Total cumulative rainfall since Day 0 spray">
+                                        🌧️ Cumul. Rain: {obs.cumulativeRainSinceApp} mm
+                                      </span>
+                                    )}
+                                    {obs.gddSinceApp != null && (
+                                      <span className="bg-emerald-50 text-emerald-800 px-1.5 py-0.5 rounded border border-emerald-200 font-semibold" title="Growing Degree Days accumulated since spray (Base 10°C)">
+                                        📈 {obs.gddSinceApp} GDD
+                                      </span>
+                                    )}
+                                    {obs.soilMoisture != null && (
+                                      <span className="bg-stone-50 text-stone-700 px-1.5 py-0.5 rounded border border-stone-200 font-semibold" title="Soil volumetric moisture content">
+                                        🌱 Soil Moisture: {obs.soilMoisture}%
+                                      </span>
+                                    )}
+                                  </div>
+                                  {obs.agronomicWeatherImpact && (
+                                    <div className="text-[10px] text-slate-600 bg-slate-50 rounded-md px-2 py-1 border border-slate-200/80 leading-relaxed">
+                                      <span className="font-semibold text-slate-700">Agronomic Condition:</span> {obs.agronomicWeatherImpact}
+                                    </div>
+                                  )}
                                 </div>
                               )}
                               {/* Climate risk flags */}
@@ -8466,6 +8542,13 @@ If none are present, write "None".`;
                                 )}
                               </div>
                               {photo.date && <p className="text-[10px] text-slate-400">{formatPhotoDate(photo.date)}</p>}
+                              {photo.weather && (
+                                <p className="text-[9px] text-slate-500 font-medium flex items-center gap-1.5 flex-wrap mt-0.5">
+                                  {photo.weather.temp != null && <span>🌡️ {photo.weather.temp}°C</span>}
+                                  {photo.weather.humidity != null && <span>💧 {photo.weather.humidity}%</span>}
+                                  {photo.weather.cumulativeRainSinceApp != null && <span className="text-cyan-700 font-semibold">🌧️ {photo.weather.cumulativeRainSinceApp}mm rain</span>}
+                                </p>
+                              )}
                             </div>
                              <div className="px-2 pb-2 flex gap-1 flex-wrap">
                               {photo.aiData && (

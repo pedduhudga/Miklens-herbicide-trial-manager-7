@@ -36,7 +36,7 @@ import { isFormulationEligibleForTrial } from '../utils/formulationTrialUtils.js
 import { performANOVA, performTwoWayANOVA, performTukeyHSD } from '../utils/statsUtils.js';
 import { EPPO_CODES, BBCH_STAGES, lookupEPPO } from '../utils/eppoBBCHData.js';
 import { exportToARM, importARMCSV } from '../services/armExporter.js';
-import { fetchWeather as fetchWeatherService, fetchSoilData } from '../services/weather.js';
+import { fetchWeather as fetchWeatherService, fetchSoilData, fetchObservationWeather } from '../services/weather.js';
 import { fbGetLargeScaleData } from '../services/largeScaleService.js';
 import { GEMINI_FALLBACK_MODELS } from '../utils/aiConstants.js';
 
@@ -1350,7 +1350,11 @@ export default function LargeScaleTrials({ onMenuClick }) {
         });
 
         if (result.success) {
-          await createObservationFromAI(targetTrial, daa, result.data, photoDate, driveUrl || dataUrl);
+          let photoWeather = null;
+          if (targetTrial.Lat && targetTrial.Lon) {
+            photoWeather = await fetchObservationWeather(targetTrial.Lat, targetTrial.Lon, photoDate, targetTrial.Date, getAppState).catch(() => null);
+          }
+          await createObservationFromAI(targetTrial, daa, result.data, photoDate, driveUrl || dataUrl, photoWeather);
         }
       }
     } catch (e) {
@@ -1362,7 +1366,7 @@ export default function LargeScaleTrials({ onMenuClick }) {
     }
   };
 
-  const createObservationFromAI = async (trial, daa, aiData, obsDate = null, photoUrl = null) => {
+  const createObservationFromAI = async (trial, daa, aiData, obsDate = null, photoUrl = null, weatherData = null) => {
     const latestTrial = state.trials.find(t => t.ID === trial.ID) || trial;
     const trialCat = latestTrial.Category || activeCategory;
     const catConfig = getCategoryConfig(trialCat);
@@ -1528,7 +1532,19 @@ export default function LargeScaleTrials({ onMenuClick }) {
       status: 'Analyzed',
       source: 'AI',
       photoUrl: photoUrl || '',
-      bbchStage: aiData.bbchStage || ''
+      bbchStage: aiData.bbchStage || '',
+      ...(weatherData ? {
+        weatherTemp: weatherData.temp ?? null,
+        weatherHumidity: weatherData.humidity ?? weatherData.hum ?? null,
+        weatherWind: weatherData.wind ?? null,
+        weatherRain: weatherData.rain ?? 0,
+        soilTemp: weatherData.soilTemp ?? null,
+        soilMoisture: weatherData.soilMoisture ?? null,
+        cumulativeRainSinceApp: weatherData.cumulativeRainSinceApp ?? null,
+        gddSinceApp: weatherData.gddSinceApp ?? null,
+        agronomicWeatherImpact: weatherData.agronomicImpact || null,
+        weatherSource: weatherData.provider || 'Auto-Weather'
+      } : {})
     };
 
     // Save all dynamic metrics fields directly into the observation
@@ -1555,6 +1571,17 @@ export default function LargeScaleTrials({ onMenuClick }) {
         ...existing,
         sampleCount: count + 1,
         weedCover: Number(mergedPrimaryValue.toFixed(2)),
+        ...(weatherData ? {
+          weatherTemp: weatherData.temp ?? existing.weatherTemp,
+          weatherHumidity: (weatherData.humidity ?? weatherData.hum) ?? existing.weatherHumidity,
+          weatherWind: weatherData.wind ?? existing.weatherWind,
+          weatherRain: weatherData.rain ?? existing.weatherRain,
+          soilTemp: weatherData.soilTemp ?? existing.soilTemp,
+          soilMoisture: weatherData.soilMoisture ?? existing.soilMoisture,
+          cumulativeRainSinceApp: weatherData.cumulativeRainSinceApp ?? existing.cumulativeRainSinceApp,
+          gddSinceApp: weatherData.gddSinceApp ?? existing.gddSinceApp,
+          agronomicWeatherImpact: weatherData.agronomicImpact || existing.agronomicWeatherImpact
+        } : {})
       };
 
       // Average all dynamic metrics

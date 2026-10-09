@@ -125,8 +125,16 @@ Field Notes / Observations: ${t.Notes || t.Description || 'Normal application be
         const daa = o.daa ?? o.day ?? o.DAA ?? 'N/A';
         const ctrl = o.controlPct ?? o.control ?? o.efficacy ?? o[primaryObsField] ?? 'N/A';
         const injury = o.cropInjury ? `Crop Injury: ${o.cropInjury}` : null;
+        const wxTemp = (o.weatherTemp != null && o.weatherTemp !== '') ? `${o.weatherTemp}°C` : null;
+        const wxHum = (o.weatherHumidity != null && o.weatherHumidity !== '') ? `${o.weatherHumidity}% RH` : null;
+        const cumulRain = (o.cumulativeRainSinceApp != null && o.cumulativeRainSinceApp !== '') ? `Cumul Rain: ${o.cumulativeRainSinceApp}mm` : null;
+        const gdd = (o.gddSinceApp != null && o.gddSinceApp !== '') ? `${o.gddSinceApp} GDD` : null;
+        const soil = (o.soilMoisture != null && o.soilMoisture !== '') ? `Soil Moisture: ${o.soilMoisture}%` : null;
+        const wxSummary = [wxTemp, wxHum, cumulRain, gdd, soil].filter(Boolean).join(' | ');
+        const wxLine = wxSummary ? `[Microclimate: ${wxSummary}]` : null;
+        const impact = o.agronomicWeatherImpact ? `Agronomic Condition: ${o.agronomicWeatherImpact}` : null;
         const notes = o.notes ? `Notes: "${o.notes}"` : null;
-        return `• DAA ${daa}: Control: ${ctrl}%, ${[injury, notes].filter(Boolean).join(', ')}`;
+        return `• DAA ${daa}: Control: ${ctrl}%, ${[wxLine, impact, injury, notes].filter(Boolean).join(', ')}`;
       }).join('\n');
 
       const obsText = `TRIAL OBSERVATION TIMELINE FOR ${trialLink}
