@@ -535,9 +535,18 @@ export default function Formulations({ onMenuClick }) {
 
   // ── ROUTING & FOCUS EFFECT ──────────────────────────────────────────
   useEffect(() => {
-    const searchParams = new URLSearchParams(location.search);
-    const focusId = searchParams.get('focus');
-    if (focusId) {
+    let focusId = location.state?.focusFormula;
+    if (!focusId) {
+      const searchParams = new URLSearchParams(location.search);
+      focusId = searchParams.get('focus');
+    }
+    if (!focusId) {
+      const hash = location.hash || window.location.hash || '';
+      if (hash.includes('focus=')) {
+        focusId = hash.match(/focus=([^&#\s]+)/i)?.[1];
+      }
+    }
+    if (focusId && state.formulations?.length) {
       const cleanFocus = decodeURIComponent(focusId).trim().toLowerCase();
       const formToFocus = (state.formulations || []).find(f => {
         const fid = String(f.ID || '').trim().toLowerCase();
@@ -576,7 +585,36 @@ export default function Formulations({ onMenuClick }) {
         };
       }
     }
-  }, [location.search, state.formulations]);
+  }, [location.search, location.hash, location.state, state.formulations]);
+
+  // Direct Event Listener for instant cross-tab navigation
+  useEffect(() => {
+    const handleNavigate = (e) => {
+      const fId = e.detail?.formulaId;
+      if (!fId || !state.formulations?.length) return;
+      const cleanFocus = decodeURIComponent(fId).trim().toLowerCase();
+      const formToFocus = state.formulations.find(f => {
+        const fid = String(f.ID || '').trim().toLowerCase();
+        const fcode = String(f.Code || '').trim().toLowerCase();
+        const fname = String(f.Name || '').trim().toLowerCase();
+        return fid === cleanFocus || fcode === cleanFocus || fname === cleanFocus ||
+               (cleanFocus.length > 2 && fname.includes(cleanFocus)) ||
+               (fname.length > 2 && cleanFocus.includes(fname));
+      });
+      if (formToFocus) {
+        setSearchTerm('');
+        setPerformanceFilter('all');
+        setHighlightFormId(formToFocus.ID);
+        setQuickPeekForm(formToFocus);
+        setTimeout(() => {
+          const el = document.getElementById(`form-card-${formToFocus.ID}`);
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 200);
+      }
+    };
+    window.addEventListener('app:navigate_to_formulation', handleNavigate);
+    return () => window.removeEventListener('app:navigate_to_formulation', handleNavigate);
+  }, [state.formulations]);
 
   // Form State
   const [name, setName] = useState('');

@@ -115,15 +115,15 @@ export function sanitizeAiContent(content, options = {}) {
     const isTrialLink = safeUrl.includes('/trials') || safeUrl.startsWith('trial:');
 
     if (isFormulationLink && focusId) {
-      return `<a href="${safeUrl}" data-formula-id="${focusId}" class="formula-redirect-link inline-flex items-center gap-1.5 font-bold px-2.5 py-1 rounded-lg border border-purple-300 bg-purple-50 hover:bg-purple-100 text-purple-900 shadow-2xs hover:shadow-xs cursor-pointer transition text-xs my-0.5" rel="noopener noreferrer">${text}</a>`;
+      return `<a href="${safeUrl}" data-formula-id="${focusId}" class="formula-redirect-link inline-flex items-center gap-1.5 font-bold px-2 py-0.5 rounded-md border border-purple-200/90 bg-purple-50/80 hover:bg-purple-100 hover:border-purple-300 text-purple-800 hover:text-purple-950 transition text-xs cursor-pointer align-baseline shadow-2xs" rel="noopener noreferrer" title="View formulation recipe & details">${text}</a>`;
     }
 
     if (isTrialLink && focusId) {
-      return `<a href="${safeUrl}" data-trial-id="${focusId}" class="trial-redirect-link inline-flex items-center gap-1.5 font-bold px-2.5 py-1 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 shadow-2xs hover:shadow-xs cursor-pointer transition text-xs my-0.5" rel="noopener noreferrer">${text}</a>`;
+      return `<a href="${safeUrl}" data-trial-id="${focusId}" class="trial-redirect-link inline-flex items-center gap-1.5 font-bold px-2 py-0.5 rounded-md border border-emerald-200/90 bg-emerald-50/80 hover:bg-emerald-100 hover:border-emerald-300 text-emerald-800 hover:text-emerald-950 transition text-xs cursor-pointer align-baseline shadow-2xs" rel="noopener noreferrer" title="Open field plot trial details">${text}</a>`;
     }
 
     if (focusId && !isFormulationLink) {
-      return `<a href="${safeUrl}" data-trial-id="${focusId}" class="trial-redirect-link inline-flex items-center gap-1.5 font-bold px-2.5 py-1 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 shadow-2xs hover:shadow-xs cursor-pointer transition text-xs my-0.5" rel="noopener noreferrer">${text}</a>`;
+      return `<a href="${safeUrl}" data-trial-id="${focusId}" class="trial-redirect-link inline-flex items-center gap-1.5 font-bold px-2 py-0.5 rounded-md border border-emerald-200/90 bg-emerald-50/80 hover:bg-emerald-100 hover:border-emerald-300 text-emerald-800 hover:text-emerald-950 transition text-xs cursor-pointer align-baseline shadow-2xs" rel="noopener noreferrer" title="Open field plot trial details">${text}</a>`;
     }
 
     const appliedClass = linkClass ? linkClass : 'font-semibold text-emerald-700 hover:text-emerald-900 underline transition';

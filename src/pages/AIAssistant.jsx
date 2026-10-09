@@ -924,25 +924,32 @@ ${JSON.stringify(executedTool.result.artifact)}
 Directly cite and synthesize these verified calculations in your scientific explanation.`
         : '';
 
-      const systemCtx = `You are the Senior Principal ${config.name} Research Director and Chief Agronomist at Miklens Bio, serving as the definitive expert AI research engine with direct access to this organization's complete ${config.name} trial and formulation database.
+      const systemCtx = `You are the Chief Scientific Officer & Senior Principal ${config.name} Agronomist at Miklens Bio, serving as the organization's definitive expert AI research and trial intelligence engine with direct access to this organization's complete verified ${config.name} database.
 
-YOUR MISSION: Answer questions about trials, formulations, weeds/targets, efficacy, weather effects, control days, investigators, locations, or field experiment history using ONLY the verified database provided below.
+YOUR MISSION: Deliver authoritative, PhD-level agronomic evaluations of field plot trials, formulation chemistry, target weed efficacy, weather interactions, control duration longevity, and trial histories using ONLY the verified database provided below.
 ZERO HALLUCINATION POLICY: Every fact, number, trial ID, dosage, and efficacy percentage MUST come directly from the real database. Never invent data or assume trials that do not exist.
 
-CRITICAL ANTI-REPETITION & CONVERSATION CONTINUITY (CONVERSATION TURN: ${turnCount}):
-${isFollowUp ? `1. ZERO REPETITIVE GREETINGS: This is an ACTIVE CONTINUING DIALOGUE (Turn ${turnCount}). Under NO circumstances say "Hello!", "Hello again!", "As your Senior Principal...", or re-introduce yourself. Start directly with the substantive answer in the very first sentence.
-2. NEVER REPEAT LEADERBOARD TABLES: A leaderboard or ranking table was ALREADY presented to the user in earlier turn(s). DO NOT re-list or duplicate the leaderboard table! The user is asking a follow-up to drill down, compare, or make a decision.
-3. DECISIVE EXECUTIVE JUDGMENT (WHEN ASKED "AMONG THESE WHICH IS BEST?"):
-   - Deliver an immediate, authoritative, and unambiguous choice in your opening sentence.
-   - For example, if comparing [🧪 Formula: Glycyl](#/formulations?focus=1783319817942), [🧪 Formula: BPD](#/formulations?focus=BPD), and [🧪 Formula: GOWEED ULTRA + MICROWEED](#/formulations?focus=1783405027091):
-     * Announce the undisputed #1 overall winner immediately: **[🧪 Formula: Glycyl]** is the premier choice for grass/rhizome suppression (100% kill rate, 38-day finalized control) because it translocates systemically into perennial root networks (Cynodon dactylon) without needing complex tank mixing.
-     * Contrast [🧪 Formula: BPD]: Excellent performance but functions primarily as a penetrant/bio-adjuvant blend rather than a standalone commercial standard.
-     * Contrast [🧪 Formula: GOWEED ULTRA + MICROWEED]: Clearly highlight that if the target is **broadleaf weeds or mixed weed spectrum**, this synergy blend is the superior choice (100% kill, 26-day control).
-     * Provide a crisp, 2-line "Bottom-Line Agronomic Recommendation" summarizing which to deploy in which field condition.
-4. ZERO ROBOTIC BOILERPLATE CLOSINGS:
-   - NEVER end messages with repetitive robotic templates like "Would you like me to run a dose-response simulation for a specific weed target, or perhaps suggest a custom formulation upgrade...".
-   - End with a sharp, natural, contextual closing or stop cleanly.` : `1. CONCISE & AUTHORITATIVE OPENING: Skip robotic greetings ("Hello! As the Senior Principal..."). Begin directly with the core scientific answer.
-2. LEADERBOARD TABLES: Provide a markdown table ONLY when the user explicitly requests an initial benchmark, ranking, leaderboard, or comparison across trials.`}
+ADVANCED SCIENTIFIC & AGRONOMIC SYNTHESIS STANDARD:
+1. DECISIVE EXECUTIVE VERDICT (OPENING SENTENCE):
+   - Always lead with a clear, definitive scientific conclusion in the very first sentence. Never begin with robotic introductions ("Hello!", "As your Senior Principal...").
+   - Explicitly identify the top-performing treatment, its demonstrated longevity (e.g. 38d sustained control), and target weed spectrum.
+2. BIOCHEMICAL MODE OF ACTION (MoA) & PHYSIOLOGY:
+   - Provide deep physiological rationale: cite HRAC Groups (e.g., HRAC 9 EPSP synthase inhibitor, HRAC 14 PPO cell-membrane disruptor, HRAC 1/2 ACCase/ALS).
+   - Explain translocation kinetics: phloem/xylem systemic movement into underground rhizomes and tubers (Cynodon dactylon, Cyperus rotundus) vs rapid contact foliar desiccation.
+   - Explain adjuvant synergy: how organosilicone surfactants or bio-penetrants lower surface tension (<22 mN/m) to dissolve epicuticular waxes and facilitate rapid stomatal infiltration.
+3. PRACTICAL COMMERCIAL FIELD APPLICATION PROTOCOL:
+   - Always specify calibrated field application parameters:
+     * Water carrier volume: 350–500 L/ha for uniform canopy penetration.
+     * Droplet spectrum: Medium to Coarse (250–400 μm) to minimize drift while ensuring thorough foliar coverage.
+     * Meteorological Spray Window: Delta-T 2–8°C, relative humidity > 50%, wind speed < 12 km/h, rainfast window.
+     * Resistance Management (GEP/GAP): Alternating modes of action and tank-mix synergy.
+4. COMPACT & CLEAN BENCHMARK TABLES (WHEN COMPARING OR RANKING):
+   - Avoid oversized, wide spreadsheets. Keep comparison tables compact and sleek (max 4 columns) so they fit comfortably on mobile and desktop:
+     | Formulation | Target Weed | Max Efficacy & Control | Field Plot Trial Link |
+     | [🧪 Formula: Glycyl](#/formulations?focus=1783319817942) | Bermudagrass | 100% (38d Finalized) | [🔬 Trial: Glycyl @ 10ml (1783319817942)](#/trials?focus=1783319817942) |
+5. CRITICAL ANTI-REPETITION (CONVERSATION TURN: ${turnCount}):
+   ${isFollowUp ? `- ZERO REPETITIVE GREETINGS OR REDUNDANT TABLES: This is an ACTIVE CONTINUING DIALOGUE (Turn ${turnCount}). A leaderboard was already presented. Focus purely on drill-down comparison, tank-mix ratios, or field decision-making.
+   - When asked "Among these which is best?": Announce the undisputed #1 overall winner immediately in line 1, contrast alternatives, and finish with a crisp 2-line field recommendation.` : `- Begin directly with the core scientific answer. Avoid generic introductions.`}
 
 CRITICAL RULES:
 1. You are analyzing ${activeCategory.toUpperCase()} category data ONLY. Do NOT reference data from other categories (${['herbicide', 'fungicide', 'pesticide', 'nutrition', 'biostimulant'].filter(c => c !== activeCategory).join(', ')}).
@@ -1609,23 +1616,50 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
             <button onClick={() => setIsSidebarOpen(true)} className="md:hidden p-2 -ml-2 text-slate-500 hover:text-slate-800 rounded-lg">
               <MessageSquare className="w-5 h-5" />
             </button>
-            <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: config.color.hexLight, color: config.color.hex }}>
+            <div className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 shadow-inner" style={{ backgroundColor: config.color.hexLight, color: config.color.hex }}>
               <Sparkles className="w-5 h-5" />
             </div>
             <div className="flex-1 min-w-0 flex items-center gap-2">
               <div>
-                <h3 className="font-bold text-slate-800">{config.name} AI Agent</h3>
-                <p className="text-xs text-slate-500 truncate">
-                  Model: <span className="font-medium text-indigo-600">{modelName}</span>
-                  {!hasKey && <span className="ml-2 text-red-500 font-semibold">⚠ No API key</span>}
+                <h3 className="font-bold text-slate-800 flex items-center gap-2 text-sm sm:text-base">
+                  {config.name} AI Assistant
+                  <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200/80">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> 0-Quota Hybrid RAG
+                  </span>
+                </h3>
+                <p className="text-[11px] text-slate-500 truncate flex items-center gap-2">
+                  <span>Model: <strong className="font-medium text-indigo-600">{modelName}</strong></span>
+                  {!hasKey && <span className="text-red-500 font-semibold">⚠ No API key</span>}
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <button
+                type="button"
+                onClick={() => setIsSimulatorOpen(prev => !prev)}
+                className={`hidden md:flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-xl border transition cursor-pointer active:scale-95 ${
+                  isSimulatorOpen ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs' : 'bg-indigo-50/80 hover:bg-indigo-100 border-indigo-200 text-indigo-800'
+                }`}
+                title="Toggle Agronomic Outcome Simulator"
+              >
+                <Sliders className="w-3.5 h-3.5" />
+                <span>{isSimulatorOpen ? 'Close Lab' : 'Outcome Lab'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={toggleFieldWalkMode}
+                className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-xl border transition cursor-pointer active:scale-95 ${
+                  isFieldWalkMode ? 'bg-emerald-600 text-white border-emerald-500 shadow-xs' : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700'
+                }`}
+                title="Hands-free continuous conversational voice field scout"
+              >
+                <Mic className={`w-3.5 h-3.5 ${isFieldWalkMode ? 'text-white animate-pulse' : 'text-emerald-600'}`} />
+                <span>{isFieldWalkMode ? 'Field Walk ON' : 'Field Walk'}</span>
+              </button>
               <button
                 type="button"
                 onClick={handleNewChat}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 shadow-2xs transition active:scale-95 cursor-pointer"
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 shadow-2xs transition active:scale-95 cursor-pointer"
                 title="Start a new chat session"
               >
                 <PlusCircle className="w-3.5 h-3.5 text-emerald-600" />
@@ -1640,8 +1674,8 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                         type="text"
                         value={searchQuery}
                         onChange={e => setSearchQuery(e.target.value)}
-                        placeholder="Search messages..."
-                        className="text-xs outline-none bg-transparent w-32"
+                        placeholder="Search..."
+                        className="text-xs outline-none bg-transparent w-24 sm:w-32"
                         autoFocus
                       />
                       <button onClick={() => { setIsSearchOpen(false); setSearchQuery(''); }} className="text-slate-400 hover:text-slate-600">
@@ -1658,72 +1692,6 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                   </button>
                 </>
               )}
-            </div>
-          </div>
-
-          {/* Agronomic Superpowers Action Strip */}
-          <div className="px-3 py-2 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex items-center justify-between gap-2 overflow-x-auto text-xs border-b border-indigo-900/50 shadow-inner">
-            <div className="flex items-center gap-1.5 shrink-0">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="font-extrabold uppercase tracking-wider text-[10px] text-emerald-400 flex items-center gap-1">
-                <Sparkles className="w-3 h-3" /> AI Superpowers:
-              </span>
-            </div>
-
-            <div className="flex items-center gap-1.5 overflow-x-auto">
-              <button
-                type="button"
-                onClick={() => sendMessage(`Run a comprehensive Trial Doctor diagnostic audit across all ${config.name.toLowerCase()} trials in the database. Identify data inconsistencies, abnormal efficacy spikes, weather failure correlations, and herbicide resistance risks.`)}
-                className="px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 font-semibold flex items-center gap-1 shrink-0 transition active:scale-95 text-[11px] cursor-pointer"
-                title="Audit database for data entry bugs, weather failures, and resistance risks"
-              >
-                <Stethoscope className="w-3.5 h-3.5 text-rose-400" />
-                <span>🩺 Trial Doctor Audit</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => sendMessage(`Check live spray weather window and Delta-T conditions for our field trial location today and tomorrow. What are the optimal application hours with minimal drift and evaporation risk?`)}
-                className="px-2.5 py-1 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/40 font-semibold flex items-center gap-1 shrink-0 transition active:scale-95 text-[11px] cursor-pointer"
-                title="Live Open-Meteo Delta-T and spray window forecast"
-              >
-                <CloudSun className="w-3.5 h-3.5 text-sky-400" />
-                <span>🌦️ Spray Window</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => sendMessage(`Run a one-way ANOVA statistical variance test comparing our top formulations for ${uniqueTargets[0] || 'dominant weed'}. Calculate the F-statistic, p-value (p < 0.05 significance), and treatment means table.`)}
-                className="px-2.5 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 font-semibold flex items-center gap-1 shrink-0 transition active:scale-95 text-[11px] cursor-pointer"
-                title="Run statistical ANOVA and Tukey HSD test"
-              >
-                <Activity className="w-3.5 h-3.5 text-indigo-400" />
-                <span>📊 Run ANOVA Test</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => sendMessage(`Evaluate Colby synergy and ingredient batch cost (₹/L) for combining our top systemic herbicide with a bio-penetrant adjuvant. Provide predicted weed sensitivity spectrum and check for chemical antagonism.`)}
-                className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 font-semibold flex items-center gap-1 shrink-0 transition active:scale-95 text-[11px] cursor-pointer"
-                title="Colby tank-mix synergy & commercial ingredient costing"
-              >
-                <FlaskConical className="w-3.5 h-3.5 text-emerald-400" />
-                <span>🧪 Colby Synergy & Cost</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={toggleFieldWalkMode}
-                className={`px-2.5 py-1 rounded-lg border font-semibold flex items-center gap-1 shrink-0 transition active:scale-95 text-[11px] cursor-pointer ${
-                  isFieldWalkMode
-                    ? 'bg-emerald-600 text-white border-emerald-400 shadow-md shadow-emerald-500/30'
-                    : 'bg-white/10 hover:bg-white/20 text-slate-200 border-white/20'
-                }`}
-                title="Hands-free continuous conversational voice field scout"
-              >
-                <Mic className={`w-3.5 h-3.5 ${isFieldWalkMode ? 'text-white animate-pulse' : 'text-emerald-400'}`} />
-                <span>{isFieldWalkMode ? '🎙️ Field Walk Active' : '🎙️ Field Walk Mode'}</span>
-              </button>
             </div>
           </div>
 
@@ -2061,21 +2029,68 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
               const link = e.target.closest('a');
               if (!link) return;
               const href = link.getAttribute('href') || '';
+              const dataFormulaId = link.getAttribute('data-formula-id');
               const dataTrialId = link.getAttribute('data-trial-id');
-              let trialId = dataTrialId;
-              if (!trialId && href.includes('focus=')) {
-                try {
-                  const url = new URL(href, window.location.origin);
-                  trialId = url.searchParams.get('focus') || (href.match(/focus=([^&#]+)/)?.[1]);
-                } catch {
-                  trialId = href.match(/focus=([^&#]+)/)?.[1];
-                }
-              }
-              if (trialId) {
+
+              // 1. Direct Formulation Link Redirection
+              const isFormulaLink = !!dataFormulaId || href.includes('/formulations') || href.startsWith('formula:') || link.classList.contains('formula-redirect-link');
+              if (isFormulaLink) {
                 e.preventDefault();
                 e.stopPropagation();
-                navigate(`/trials?focus=${encodeURIComponent(trialId)}`);
-                window.dispatchEvent(new CustomEvent('app:navigate_to_trial', { detail: { trialId } }));
+                const rawId = dataFormulaId || href.match(/focus=([^&#\s]+)/i)?.[1] || '';
+                const cleanId = decodeURIComponent(rawId).trim();
+                if (cleanId) {
+                  navigate(`/formulations?focus=${encodeURIComponent(cleanId)}`, {
+                    state: { focusFormula: cleanId }
+                  });
+                  window.dispatchEvent(new CustomEvent('app:navigate_to_formulation', {
+                    detail: { formulaId: cleanId }
+                  }));
+                } else {
+                  navigate('/formulations');
+                }
+                return;
+              }
+
+              // 2. Direct Trial Link Redirection
+              const isTrialLink = !!dataTrialId || href.includes('/trials') || href.startsWith('trial:') || link.classList.contains('trial-redirect-link');
+              if (isTrialLink) {
+                e.preventDefault();
+                e.stopPropagation();
+                const rawId = dataTrialId || href.match(/focus=([^&#\s]+)/i)?.[1] || '';
+                const cleanId = decodeURIComponent(rawId).trim();
+                if (cleanId) {
+                  navigate(`/trials?focus=${encodeURIComponent(cleanId)}`, {
+                    state: { focusTrial: cleanId }
+                  });
+                  window.dispatchEvent(new CustomEvent('app:navigate_to_trial', {
+                    detail: { trialId: cleanId }
+                  }));
+                } else {
+                  navigate('/trials');
+                }
+                return;
+              }
+
+              // 3. Fallback: Any other internal link containing focus=
+              if (href.includes('focus=')) {
+                e.preventDefault();
+                e.stopPropagation();
+                const matched = href.match(/focus=([^&#\s]+)/i)?.[1];
+                if (matched) {
+                  const clean = decodeURIComponent(matched).trim();
+                  const isTrial = (state.trials || []).some(t => 
+                    String(t.ID || t.id || '').toLowerCase() === clean.toLowerCase() ||
+                    String(t.TrialID || '').toLowerCase() === clean.toLowerCase()
+                  );
+                  if (isTrial) {
+                    navigate(`/trials?focus=${encodeURIComponent(clean)}`, { state: { focusTrial: clean } });
+                    window.dispatchEvent(new CustomEvent('app:navigate_to_trial', { detail: { trialId: clean } }));
+                  } else {
+                    navigate(`/formulations?focus=${encodeURIComponent(clean)}`, { state: { focusFormula: clean } });
+                    window.dispatchEvent(new CustomEvent('app:navigate_to_formulation', { detail: { formulaId: clean } }));
+                  }
+                }
               }
             }}
           >
@@ -2191,9 +2206,9 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
 
                       {/* Follow-up Suggestions */}
                       {msg.role === 'assistant' && msg.suggestions && msg.suggestions.length > 0 && (
-                        <div className="mt-3.5 pt-2.5 border-t border-slate-100 flex flex-wrap gap-1.5 items-center not-prose">
-                          <span className="text-[11px] font-bold text-slate-500 flex items-center gap-1 mr-1">
-                            <Sparkles className="w-3 h-3 text-indigo-500" /> Follow-up:
+                        <div className="mt-3 pt-2.5 border-t border-slate-100 flex flex-wrap gap-1.5 items-center not-prose">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1 mr-1">
+                            <Sparkles className="w-3 h-3 text-indigo-500" /> Deep Dive:
                           </span>
                           {msg.suggestions.map((sug, sIdx) => (
                             <button
@@ -2201,9 +2216,10 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                               type="button"
                               onClick={() => sendMessage(sug)}
                               disabled={isLoading}
-                              className="text-xs px-2.5 py-1 rounded-full bg-gradient-to-r from-indigo-50/90 via-white to-purple-50/90 hover:from-indigo-100 hover:to-purple-100 text-indigo-900 border border-indigo-200/70 hover:border-indigo-300 font-medium transition shadow-2xs text-left cursor-pointer"
+                              className="text-[11px] px-2.5 py-1 rounded-full bg-slate-50 hover:bg-indigo-50 hover:border-indigo-200 text-slate-700 hover:text-indigo-900 border border-slate-200/90 font-medium transition shadow-2xs text-left cursor-pointer active:scale-95 flex items-center gap-1"
                             >
-                              {sug}
+                              <ArrowRight className="w-2.5 h-2.5 text-indigo-400 shrink-0" />
+                              <span>{sug}</span>
                             </button>
                           ))}
                         </div>
@@ -2320,50 +2336,74 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
             <div ref={messagesEndRef} />
           </div>
 
-          {/* R&D Quick-Action Studio Bar */}
-          <div className="px-3 py-2 bg-gradient-to-r from-slate-100 via-emerald-50/40 to-slate-100 border-t border-slate-200/80 flex items-center gap-2 overflow-x-auto custom-scrollbar text-xs">
-            <span className="font-bold text-slate-500 flex items-center gap-1 shrink-0 uppercase tracking-wider text-[10px]">
-              <Cpu className="w-3.5 h-3.5 text-indigo-500" /> R&D Studio:
+          {/* Unified Agronomic Quick-Action Strip */}
+          <div className="px-3 py-1.5 bg-slate-50/90 backdrop-blur border-t border-slate-200/80 flex items-center gap-1.5 overflow-x-auto text-xs no-scrollbar">
+            <span className="font-bold text-slate-400 flex items-center gap-1 shrink-0 uppercase tracking-wider text-[10px] mr-1">
+              <Sparkles className="w-3 h-3 text-emerald-600" /> Agronomic Tools:
             </span>
             <button
               type="button"
-              onClick={() => setIsSimulatorOpen(prev => !prev)}
-              className={`shrink-0 px-2.5 py-1 rounded-lg border transition font-semibold flex items-center gap-1.5 shadow-2xs ${isSimulatorOpen ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-indigo-50 border-indigo-200 text-indigo-800 hover:bg-indigo-100'}`}
+              onClick={() => sendMessage(`Run a comprehensive Trial Doctor diagnostic audit across all ${config.name.toLowerCase()} trials in the database. Identify data inconsistencies, abnormal efficacy spikes, weather failure correlations, and herbicide resistance risks.`)}
+              disabled={isLoading}
+              className="shrink-0 px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200/90 rounded-full text-slate-700 hover:text-slate-900 font-medium text-[11px] shadow-2xs hover:shadow-xs transition flex items-center gap-1 cursor-pointer active:scale-95"
             >
-              <Sliders className="w-3.5 h-3.5" />
-              {isSimulatorOpen ? 'Hide Simulator' : '🔮 Trial Outcome Simulator'}
+              <span>🩺</span> Trial Doctor
             </button>
             <button
               type="button"
-              onClick={() => sendMessage(`Benchmark our top performing ${config.name.toLowerCase()} formulations across all trials (both standard microplot and large-scale field trials). Which ones deliver the highest efficacy and win rate? Provide a clear performance leaderboard.`)}
+              onClick={() => sendMessage(`Check live spray weather window and Delta-T conditions for our field trial location today and tomorrow. What are the optimal application hours with minimal drift and evaporation risk?`)}
               disabled={isLoading}
-              className="shrink-0 px-2.5 py-1 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 hover:border-slate-300 transition text-slate-700 font-medium flex items-center gap-1.5 shadow-2xs"
+              className="shrink-0 px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200/90 rounded-full text-slate-700 hover:text-slate-900 font-medium text-[11px] shadow-2xs hover:shadow-xs transition flex items-center gap-1 cursor-pointer active:scale-95"
             >
-              <span>🏆</span> Benchmark Top Formulas
+              <span>🌦️</span> Spray Window
+            </button>
+            <button
+              type="button"
+              onClick={() => sendMessage(`Run a one-way ANOVA statistical variance test comparing our top formulations for ${uniqueTargets[0] || 'dominant weed'}. Calculate the F-statistic, p-value (p < 0.05 significance), and treatment means table.`)}
+              disabled={isLoading}
+              className="shrink-0 px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200/90 rounded-full text-slate-700 hover:text-slate-900 font-medium text-[11px] shadow-2xs hover:shadow-xs transition flex items-center gap-1 cursor-pointer active:scale-95"
+            >
+              <span>📊</span> ANOVA Stats
+            </button>
+            <button
+              type="button"
+              onClick={() => sendMessage(`Evaluate Colby synergy and ingredient batch cost (₹/L) for combining our top systemic herbicide with a bio-penetrant adjuvant. Provide predicted weed sensitivity spectrum and check for chemical antagonism.`)}
+              disabled={isLoading}
+              className="shrink-0 px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200/90 rounded-full text-slate-700 hover:text-slate-900 font-medium text-[11px] shadow-2xs hover:shadow-xs transition flex items-center gap-1 cursor-pointer active:scale-95"
+            >
+              <span>🧪</span> Colby Synergy
+            </button>
+            <button
+              type="button"
+              onClick={() => sendMessage(`Benchmark our top performing ${config.name.toLowerCase()} formulations across all trials. Which ones deliver the highest efficacy and win rate? Provide an executive summary and a compact comparison leaderboard.`)}
+              disabled={isLoading}
+              className="shrink-0 px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200/90 rounded-full text-slate-700 hover:text-slate-900 font-medium text-[11px] shadow-2xs hover:shadow-xs transition flex items-center gap-1 cursor-pointer active:scale-95"
+            >
+              <span>🏆</span> Benchmark Leaderboard
             </button>
             <button
               type="button"
               onClick={() => sendMessage(`Based on all historical ${config.name.toLowerCase()} trial results and ingredient synergy analysis from our inventory, suggest 2 novel, high-potential candidate formulations to test. Include exact ingredient recipes, predicted efficacy %, target spectrum, and scientific rationale.`)}
               disabled={isLoading}
-              className="shrink-0 px-2.5 py-1 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition text-emerald-800 font-semibold flex items-center gap-1.5 shadow-2xs"
+              className="shrink-0 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-full text-emerald-800 font-semibold text-[11px] shadow-2xs hover:shadow-xs transition flex items-center gap-1 cursor-pointer active:scale-95"
             >
-              <FlaskConical className="w-3.5 h-3.5 text-emerald-600" /> Suggest Novel Formulas
+              <FlaskConical className="w-3 h-3 text-emerald-600" /> Suggest Novel Formulas
             </button>
             <button
               type="button"
               onClick={() => sendMessage(`Analyze category gaps and weaknesses for ${config.name.toLowerCase()}: which targets, crop conditions, or locations have underperforming control? What formulation modifications or ingredient combinations would solve these gaps?`)}
               disabled={isLoading}
-              className="shrink-0 px-2.5 py-1 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 hover:border-slate-300 transition text-slate-700 font-medium flex items-center gap-1.5 shadow-2xs"
+              className="shrink-0 px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200/90 rounded-full text-slate-700 hover:text-slate-900 font-medium text-[11px] shadow-2xs hover:shadow-xs transition flex items-center gap-1 cursor-pointer active:scale-95"
             >
-              <Target className="w-3.5 h-3.5 text-rose-500" /> Category Gap Analysis
+              <span>🎯</span> Category Gaps
             </button>
             <button
               type="button"
               onClick={() => sendMessage(`Analyze the dosage response relationship across all ${config.name.toLowerCase()} trials. Which dosage levels achieved optimal efficacy without over-application or phytotoxicity?`)}
               disabled={isLoading}
-              className="shrink-0 px-2.5 py-1 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 hover:border-slate-300 transition text-slate-700 font-medium flex items-center gap-1.5 shadow-2xs"
+              className="shrink-0 px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200/90 rounded-full text-slate-700 hover:text-slate-900 font-medium text-[11px] shadow-2xs hover:shadow-xs transition flex items-center gap-1 cursor-pointer active:scale-95"
             >
-              <TrendingUp className="w-3.5 h-3.5 text-blue-500" /> Dosage Response Curve
+              <span>📈</span> Dosage Response
             </button>
           </div>
 

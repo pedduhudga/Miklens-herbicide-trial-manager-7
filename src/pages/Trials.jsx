@@ -493,6 +493,49 @@ export default function Trials({ onMenuClick }) {
     return () => window.removeEventListener('app:navigate_to_trial', handleNavigateToTrial);
   }, [state.trials, updateState]);
 
+  // --- Route & Location focus handler (e.g. from AI Assistant link clicks) ---
+  useEffect(() => {
+    let targetId = location.state?.focusTrial;
+    if (!targetId) {
+      const searchParams = new URLSearchParams(location.search);
+      targetId = searchParams.get('focus');
+    }
+    if (!targetId) {
+      const hash = location.hash || window.location.hash || '';
+      if (hash.includes('focus=')) {
+        targetId = hash.match(/focus=([^&#\s]+)/i)?.[1];
+      }
+    }
+    if (targetId && state.trials?.length) {
+      const cleanTarget = decodeURIComponent(String(targetId)).trim().toLowerCase();
+      const foundTrial = state.trials.find(t => 
+        String(t.ID || t.id || '').trim().toLowerCase() === cleanTarget ||
+        String(t.TrialID || '').trim().toLowerCase() === cleanTarget
+      );
+      if (foundTrial) {
+        setActiveTab('all');
+        setSearch('');
+        setFilterFormulation('');
+        setFilterResult('');
+        setFilterProject('');
+        setActiveTrial(foundTrial);
+        setDetailTab('info');
+        updateState({ highlightTrialId: foundTrial.ID || foundTrial.id });
+        let attempts = 0;
+        const scrollInterval = setInterval(() => {
+          attempts++;
+          const el = document.getElementById(`trial-card-${foundTrial.ID || foundTrial.id}`);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            clearInterval(scrollInterval);
+          } else if (attempts >= 10) {
+            clearInterval(scrollInterval);
+          }
+        }, 150);
+      }
+    }
+  }, [location.search, location.hash, location.state, state.trials, updateState]);
+
   // --- Formulation Quick-Peek Modal ---
   const [quickPeekForm, setQuickPeekForm] = useState(null);
 
