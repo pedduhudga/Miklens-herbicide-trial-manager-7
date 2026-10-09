@@ -1272,7 +1272,7 @@ export function renderTrialDesignMethodology(doc, reportData, y) {
     ['Sand (%)',     soilSource.SoilSand     ?? soilSource.soilSand],
     ['Organic C (%)',soilSource.SoilOC       ?? soilSource.soilOC],
     ['Texture',      soilSource.SoilTexture  ?? soilSource.soilTexture],
-  ].filter(([, v]) => v !== undefined && v !== null && v !== '');
+  ].filter(([, v]) => v !== undefined && v !== null && v !== '' && v !== '—' && v !== '-' && v !== 'N/A');
 
   if (soilFields.length > 0) {
     y = checkPageBreak(doc, y, ph, 30);

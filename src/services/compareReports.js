@@ -550,9 +550,14 @@ export function exportComparisonPdf(trialSeries, allDaa, aiSummaryText, activeCa
   ];
 
   const specHeaders = ['Parameter', ...trialSeries.map(s => s.trial.FormulationName)];
-  const specRows = fields.map(([label, getter]) => {
-    return [label, ...trialSeries.map(s => getter(s.trial))];
-  });
+  const specRows = fields
+    .map(([label, getter]) => [label, ...trialSeries.map(s => getter(s.trial))])
+    .filter(([label, ...vals]) => {
+      if (label.startsWith('Soil')) {
+        return vals.some(v => v && v !== '—' && v !== '-' && v !== 'N/A');
+      }
+      return true;
+    });
 
   autoTable(doc, {
     startY: y,

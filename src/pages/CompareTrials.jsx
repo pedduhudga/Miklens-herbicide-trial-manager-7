@@ -780,7 +780,15 @@ ${contextData}`;
                   ['Investigator', t => t.InvestigatorName || '—', Table],
                   ['Overall Assessment', t => t.Result || '—', Table],
                   ['Final Status', t => (t.IsCompleted === true || t.IsCompleted === 'true') ? 'Finalized' : 'Active', Table],
-                ].map(([label, getter, Icon]) => (
+                ].filter(([label, getter]) => {
+                  if (label.startsWith('Soil')) {
+                    return trialSeries.some(({ trial }) => {
+                      const v = getter(trial);
+                      return v && v !== '—' && v !== '-' && v !== 'N/A';
+                    });
+                  }
+                  return true;
+                }).map(([label, getter, Icon]) => (
                   <tr key={label} className="hover:bg-slate-50">
                     <td className="px-5 py-3 font-semibold text-slate-600 flex items-center gap-2">
                       {Icon && <Icon className="w-4 h-4 opacity-50" />}

@@ -1743,7 +1743,7 @@ export class AdvancedReportGenerator {
     // Filter out rows that have empty/N/A values
     const metadata = rawMetadata.filter(row => {
       const val = row[1];
-      return val !== undefined && val !== null && val !== '' && val !== 'N/A';
+      return val !== undefined && val !== null && val !== '' && val !== 'N/A' && val !== '—' && val !== '-';
     });
 
     metadata.forEach((row, index) => {

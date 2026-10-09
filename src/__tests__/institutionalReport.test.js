@@ -371,5 +371,41 @@ describe('Miklens Bio Institutional Report System', () => {
     const docxFilename = await generateInstitutionalDocx(repData);
     expect(docxFilename).toContain('.docx');
   });
+
+  it('completely omits soil profile sections and tables from PDF and DOCX when no soil data is recorded', async () => {
+    const trialWithoutSoil = {
+      ID: 'trial-no-soil-01',
+      TrialCode: 'MB/RD/COE/2026/NS01',
+      TrialName: 'EcoHerb Trial Without Soil Data',
+      FormulationName: 'EcoHerb 20 EC',
+      Crop: 'Soybean',
+      Location: '18.5204, 73.8567',
+      Dosage: '2.5 L/ha',
+      Temperature: '29.5',
+      Humidity: '60',
+      Windspeed: '7.2',
+      Rain: '0',
+      // Explicitly no soil fields or SoilDataJSON
+      Observations: JSON.stringify([
+        { daa: 0, date: '2026-08-01', weedCover: 90 },
+        { daa: 7, date: '2026-08-08', weedCover: 15, weedMortalityPct: 83.3 }
+      ])
+    };
+
+    const repData = buildInstitutionalReportData(trialWithoutSoil, { trials: [trialWithoutSoil], projects: [] });
+
+    // 1. DocControl should have clean empty/dash values, never hardcoded 'Standard arable loam'
+    expect(repData.docControl.soilProfile).toBe('—');
+    expect(repData.docControl.soilTexture).toBe('');
+    expect(repData.docControl.soilPH).toBe('');
+    expect(repData.docControl.soilOC).toBe('');
+
+    // 2. Both PDF and DOCX must render cleanly with section 2.5 omitted
+    const pdfFilename = await generateInstitutionalPDF(repData);
+    expect(pdfFilename).toContain('.pdf');
+
+    const docxFilename = await generateInstitutionalDocx(repData);
+    expect(docxFilename).toContain('.docx');
+  });
 });
 

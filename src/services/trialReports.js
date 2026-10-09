@@ -1578,13 +1578,13 @@ export async function generateComprehensivePdf(trial, options = {}) {
     y += 24;
   }
 
-  // Soil box
-  if (dataFields.soil && Object.keys(dataFields.soil).length > 0) {
+  // Soil box - only render if actual soil profile data exists
+  const sl = formatSoilProfile(dataFields.soil);
+  if (dataFields.soil && sl && sl !== '—') {
     if (y + 22 > ph - 20) { doc.addPage(); y = 20; }
     doc.setFillColor(...AMBER50); doc.rect(lx, y - 4, pw - 28, 20, 'F');
     doc.setFont(undefined, 'bold'); doc.text('Soil Profile (0-30 cm):', 16, y);
     doc.setFont(undefined, 'normal');
-    const sl = formatSoilProfile(dataFields.soil);
     doc.text(doc.splitTextToSize(sl, pw - 34), 16, y + 7);
     y += 24;
   }
@@ -2060,12 +2060,13 @@ export async function generateScientificReport(trial, options = {}) {
     doc.text(weatherStr, 16, y + 7);
     y += 24;
   }
-  if (dataFields.soil && Object.keys(dataFields.soil).length > 0) {
+  const sl2 = formatSoilProfile(dataFields.soil);
+  if (dataFields.soil && sl2 && sl2 !== '—') {
     if (y + 22 > ph - 20) { doc.addPage(); y = 20; }
     doc.setFillColor(...AMBER50); doc.rect(14, y - 4, pw - 28, 20, 'F');
     doc.setFont(undefined, 'bold'); doc.text('Soil Profile (0-30 cm):', 16, y);
     doc.setFont(undefined, 'normal');
-    doc.text(doc.splitTextToSize(formatSoilProfile(dataFields.soil), pw - 34), 16, y + 7);
+    doc.text(doc.splitTextToSize(sl2, pw - 34), 16, y + 7);
     y += 24;
   }
 
@@ -2535,7 +2536,12 @@ export function exportMultipleTrialsToCSV(trials, category = null) {
   const hasIrrigation = preparedTrials.some(t => t.IrrigationMethod && t.IrrigationMethod !== '—' && t.IrrigationMethod !== '-');
   const hasPlantPopulation = preparedTrials.some(t => t.PlantPopulation && t.PlantPopulation !== '—' && t.PlantPopulation !== '-');
   const hasYield = mainCatId === 'nutrition' || mainCatId === 'biostimulant' || preparedTrials.some(t => t.YieldValue || t.Yield);
-  const hasSoil = mainCatId === 'nutrition' || preparedTrials.some(t => t.SoilPH || t.SoilClay || t.SoilSand || t.SoilOC || t.SoilTexture || (t.SoilDataJSON && t.SoilDataJSON !== '{}'));
+  const hasSoil = preparedTrials.some(t => {
+    const s = safeJsonParse(t.SoilDataJSON, null);
+    const hasJsonSoil = s && Object.values(s).some(v => v !== null && v !== undefined && v !== '' && v !== '—' && v !== '-');
+    const hasFieldSoil = [t.SoilPH, t.SoilClay, t.SoilSand, t.SoilOC, t.SoilTexture].some(v => v !== null && v !== undefined && v !== '' && v !== '—' && v !== '-');
+    return Boolean(hasJsonSoil || hasFieldSoil);
+  });
 
   // 3. Category specific fields from mainCatConfig.specificFields
   const targetKey = mainCatConfig.targetField || (
@@ -3005,9 +3011,9 @@ export function exportFieldReportTxt(trial, projectName = '') {
     `Wind Speed:     ${trial.Windspeed || '—'} km/h`,
     `Rain:           ${trial.Rain || '—'} mm`,
   ];
-  if (dataFields.soil && Object.keys(dataFields.soil).length > 0) {
-    lines.push(sep, 'SOIL PROFILE (0-30 cm)', sep,
-      formatSoilProfile(dataFields.soil));
+  const slText = formatSoilProfile(dataFields.soil);
+  if (dataFields.soil && slText && slText !== '—') {
+    lines.push(sep, 'SOIL PROFILE (0-30 cm)', sep, slText);
   }
   if (efficacy.length) {
     lines.push(sep, 'EFFICACY OBSERVATIONS', sep);
@@ -3245,10 +3251,11 @@ export function exportHtmlReport(trial, projectName = '') {
   </tr>`;
   }).join('');
 
-  const soilHtml = dataFields.soil && Object.keys(dataFields.soil).length > 0 ? `
+  const slHtml = formatSoilProfile(dataFields.soil);
+  const soilHtml = (dataFields.soil && slHtml && slHtml !== '—') ? `
     <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:14px;margin-bottom:16px;">
       <p style="font-weight:700;color:#92400e;margin:0 0 6px;">Soil Profile (0-30 cm)</p>
-      <p style="margin:0;font-size:13px;">${formatSoilProfile(dataFields.soil)}</p>
+      <p style="margin:0;font-size:13px;">${slHtml}</p>
     </div>` : '';
 
   const html = `<!DOCTYPE html>
@@ -3710,9 +3717,10 @@ export async function exportTrialDocx(trial, options = {}) {
     <h2 style="color:${primaryHex};font-size:14pt;border-bottom:2px solid ${primaryHex};padding-bottom:4px;margin-top:24px;">Weather on Application Day</h2>
     <p style="font-size:11pt;">Temp: <strong>${trial.Temperature}°C</strong> &nbsp;|&nbsp; Humidity: <strong>${trial.Humidity || '—'}%</strong> &nbsp;|&nbsp; Wind: <strong>${trial.Windspeed || '—'} km/h</strong> &nbsp;|&nbsp; Rain: <strong>${trial.Rain || '—'} mm</strong></p>` : '';
 
-  const soilHtml = (dataFields.soil && Object.keys(dataFields.soil).length > 0) ? `
+  const slDocx = formatSoilProfile(dataFields.soil);
+  const soilHtml = (dataFields.soil && slDocx && slDocx !== '—') ? `
     <h2 style="color:${primaryHex};font-size:14pt;border-bottom:2px solid ${primaryHex};padding-bottom:4px;margin-top:24px;">Soil Profile (0-30 cm)</h2>
-    <p style="font-size:11pt;">${formatSoilProfile(dataFields.soil)}</p>` : '';
+    <p style="font-size:11pt;">${slDocx}</p>` : '';
 
   const timelineData = getTimelineData(efficacy, categoryId, trial);
   const docxObsHeadersHtml = timelineData.headers.map(h => `<th style="padding:6px 8px;text-align:left;">${h}</th>`).join('');
@@ -4358,7 +4366,10 @@ export async function generateMasterComprehensivePdf(project, subTrials, options
     doc.setFontSize(9);
     doc.text(`Location: ${st.Location || 'N/A'}  |  Dosage: ${st.Dosage || 'N/A'}  |  Plot: ${st.PlotNumber || 'N/A'}  |  Crop: ${stFields.crop}  |  Yield: ${stFields.yieldValue}`, 14, y); y += 6;
     doc.text(`Timing: ${stFields.applicationTiming}  |  Growth Stage: ${stFields.cropStage}  |  BBCH: ${stFields.bbchCode}  |  Method: ${stFields.applicationMethod}`, 14, y); y += 6;
-    doc.text(`Soil Profile: ${formatSoilProfile(stFields.soil)}`, 14, y, { maxWidth: pw - 28 }); y += 8;
+    const soilProf = formatSoilProfile(stFields.soil);
+    if (soilProf && soilProf !== '—') {
+      doc.text(`Soil Profile: ${soilProf}`, 14, y, { maxWidth: pw - 28 }); y += 8;
+    }
     if (st.Notes) {
       doc.text(`Notes: ${cleanReportText(st.Notes)}`, 14, y, { maxWidth: pw - 28 });
       y += 10;
@@ -4568,7 +4579,10 @@ export async function generateMasterScientificReport(project, subTrials, options
     const stFields = getAllTrialDataFields(st, { projects: [project] });
     doc.text(`Location: ${st.Location || 'N/A'}  |  Dosage: ${st.Dosage || 'N/A'}  |  Plot: ${st.PlotNumber || 'N/A'}  |  Yield: ${stFields.yieldValue}`, 14, y); y += 5;
     doc.text(`Timing: ${stFields.applicationTiming}  |  Growth Stage: ${stFields.cropStage}  |  BBCH: ${stFields.bbchCode}  |  Method: ${stFields.applicationMethod}`, 14, y); y += 5;
-    doc.text(`Soil Profile: ${formatSoilProfile(stFields.soil)}`, 14, y, { maxWidth: pw - 28 }); y += 7;
+    const soilProf2 = formatSoilProfile(stFields.soil);
+    if (soilProf2 && soilProf2 !== '—') {
+      doc.text(`Soil Profile: ${soilProf2}`, 14, y, { maxWidth: pw - 28 }); y += 7;
+    }
 
     const eff = validateEfficacy(safeJsonParse(st.EfficacyDataJSON, []));
     if (eff.length) {
@@ -5230,6 +5244,12 @@ export function exportMasterHtml(project, subTrials, options = {}) {
     <div style="background:#f8fafc;border:1px solid #cbd5e1;padding:12px;margin-bottom:16px;white-space:pre-wrap;line-height:1.45;">${htmlItalicizeScientificNames(aiSummary.replace(/</g, '&lt;').replace(/>/g, '&gt;'))}</div>
   ` : '';
 
+  const hasSoilInAnySubTrial = subTrials.some(st => {
+    const stFields = getAllTrialDataFields(st, { projects: [project] });
+    const s = formatSoilProfile(stFields.soil);
+    return s && s !== '—';
+  });
+
   const subTrialRowsHtml = subTrials.map(st => {
     const eff = validateEfficacy(safeJsonParse(st.EfficacyDataJSON, []));
     const wces = calcWCE(eff, categoryId, st);
@@ -5244,7 +5264,7 @@ export function exportMasterHtml(project, subTrials, options = {}) {
       <td style="border:1px solid #cbd5e1;padding:6px;">${stFields.crop}</td>
       <td style="border:1px solid #cbd5e1;padding:6px;">${stFields.yieldValue}</td>
       <td style="border:1px solid #cbd5e1;padding:6px;">${stFields.applicationTiming} / ${stFields.cropStage}</td>
-      <td style="border:1px solid #cbd5e1;padding:6px;">${formatSoilProfile(stFields.soil)}</td>
+      ${hasSoilInAnySubTrial ? `<td style="border:1px solid #cbd5e1;padding:6px;">${formatSoilProfile(stFields.soil)}</td>` : ''}
       <td style="border:1px solid #cbd5e1;padding:6px;">${st.Result || 'Pending'}</td>
       <td style="border:1px solid #cbd5e1;padding:6px;">${wceList}</td>
     </tr>`;
@@ -5274,7 +5294,7 @@ export function exportMasterHtml(project, subTrials, options = {}) {
           <th>Crop</th>
           <th>Yield</th>
           <th>Timing / Stage</th>
-          <th>Soil Profile</th>
+          ${hasSoilInAnySubTrial ? '<th>Soil Profile</th>' : ''}
           <th>Result</th>
           <th>${repConfig.primaryMetricLabel} (${repConfig.primaryMetricKey})</th>
         </tr>
@@ -5491,6 +5511,12 @@ export async function exportMasterDocx(project, subTrials, options = {}) {
     <div style="background:#f8fafc;border:1pt solid #cbd5e1;padding:8pt;margin-bottom:12pt;white-space:pre-wrap;line-height:1.4;">${aiSummary.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
   ` : '';
 
+  const hasSoilInAnySubTrialWord = subTrials.some(st => {
+    const stFields = getAllTrialDataFields(st, { projects: [project] });
+    const s = formatSoilProfile(stFields.soil);
+    return s && s !== '—';
+  });
+
   const subTrialRowsHtml = subTrials.map(st => {
     const eff = validateEfficacy(safeJsonParse(st.EfficacyDataJSON, []));
     const wces = calcWCE(eff, categoryId, st);
@@ -5505,7 +5531,7 @@ export async function exportMasterDocx(project, subTrials, options = {}) {
       <td style="border:1pt solid #cbd5e1;padding:4pt;">${stFields.crop}</td>
       <td style="border:1pt solid #cbd5e1;padding:4pt;">${stFields.yieldValue}</td>
       <td style="border:1pt solid #cbd5e1;padding:4pt;">${stFields.applicationTiming} / ${stFields.cropStage}</td>
-      <td style="border:1pt solid #cbd5e1;padding:4pt;">${formatSoilProfile(stFields.soil)}</td>
+      ${hasSoilInAnySubTrialWord ? `<td style="border:1pt solid #cbd5e1;padding:4pt;">${formatSoilProfile(stFields.soil)}</td>` : ''}
       <td style="border:1pt solid #cbd5e1;padding:4pt;">${st.Result || 'Pending'}</td>
       <td style="border:1pt solid #cbd5e1;padding:4pt;">${wceList}</td>
     </tr>`;
@@ -5575,7 +5601,7 @@ export async function exportMasterDocx(project, subTrials, options = {}) {
         <th style="background:${primaryHex};color:#fff;">Crop</th>
         <th style="background:${primaryHex};color:#fff;">Yield</th>
         <th style="background:${primaryHex};color:#fff;">Timing / Stage</th>
-        <th style="background:${primaryHex};color:#fff;">Soil Profile</th>
+        ${hasSoilInAnySubTrialWord ? `<th style="background:${primaryHex};color:#fff;">Soil Profile</th>` : ''}
         <th style="background:${primaryHex};color:#fff;">Result</th>
         <th style="background:${primaryHex};color:#fff;">${repConfig.primaryMetricLabel} (${repConfig.primaryMetricKey})</th>
       </tr>

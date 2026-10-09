@@ -1043,37 +1043,50 @@ export async function generateInstitutionalPDF(reportData) {
     }
   });
 
-  curY = doc.lastAutoTable.finalY + 3;
+  // 2.5 Edaphic Characteristics & Soil Profile Analysis (rendered ONLY if genuine soil data exists)
+  const hasSoilData = Boolean(
+    (dc.soilTexture && dc.soilTexture !== '—' && dc.soilTexture !== '-') ||
+    (dc.soilPH && dc.soilPH !== '—' && dc.soilPH !== '-') ||
+    (dc.soilOC && dc.soilOC !== '—' && dc.soilOC !== '-') ||
+    (dc.soilClay && dc.soilClay !== '—' && dc.soilClay !== '-') ||
+    (dc.soilSand && dc.soilSand !== '—' && dc.soilSand !== '-') ||
+    (dc.soilProfile && dc.soilProfile !== '—' && dc.soilProfile !== '-')
+  );
+
+  let nextSecNum = 5;
+  if (hasSoilData) {
+    curY = doc.lastAutoTable.finalY + 3;
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...MIKLENS_GREEN);
+    doc.text(`2.${nextSecNum++} Edaphic Characteristics & Soil Profile Analysis`, 14, curY);
+
+    curY += 2;
+    autoTable(doc, {
+      startY: curY,
+      margin: { left: 14, right: 14 },
+      tableWidth: 182,
+      body: [
+        ['Soil Texture:', dc.soilTexture || '—', 'Soil Drainage:', dc.soilDrainage || '—'],
+        ['Soil pH Reaction:', dc.soilPH || '—', 'Organic Carbon (%):', dc.soilOC ? (String(dc.soilOC).includes('%') ? dc.soilOC : `${dc.soilOC}%`) : '—'],
+        ['Soil Profile Type:', dc.soilProfile && dc.soilProfile !== '—' ? dc.soilProfile : '—', 'Tillage Condition:', dc.tillageType || '—']
+      ],
+      theme: 'plain',
+      styles: { fontSize: 7.5, cellPadding: 1.4, textColor: DARK_TEXT },
+      columnStyles: {
+        0: { fontStyle: 'bold', cellWidth: 38, textColor: MUTED_TEXT },
+        1: { cellWidth: 53, fontStyle: 'bold' },
+        2: { fontStyle: 'bold', cellWidth: 38, textColor: MUTED_TEXT },
+        3: { cellWidth: 53, fontStyle: 'bold' }
+      }
+    });
+  }
+
+  curY = (doc.lastAutoTable?.finalY || curY) + 3;
   doc.setFontSize(9);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(...MIKLENS_GREEN);
-  doc.text('2.5 Edaphic Characteristics & Soil Profile Analysis', 14, curY);
-
-  curY += 2;
-  autoTable(doc, {
-    startY: curY,
-    margin: { left: 14, right: 14 },
-    tableWidth: 182,
-    body: [
-      ['Soil Texture:', dc.soilTexture || '—', 'Soil Drainage:', dc.soilDrainage || '—'],
-      ['Soil pH Reaction:', dc.soilPH || '—', 'Organic Carbon (%):', dc.soilOC ? (String(dc.soilOC).includes('%') ? dc.soilOC : `${dc.soilOC}%`) : '—'],
-      ['Soil Profile Type:', dc.soilProfile && dc.soilProfile !== '—' ? dc.soilProfile : '—', 'Tillage Condition:', dc.tillageType || '—']
-    ],
-    theme: 'plain',
-    styles: { fontSize: 7.5, cellPadding: 1.4, textColor: DARK_TEXT },
-    columnStyles: {
-      0: { fontStyle: 'bold', cellWidth: 38, textColor: MUTED_TEXT },
-      1: { cellWidth: 53, fontStyle: 'bold' },
-      2: { fontStyle: 'bold', cellWidth: 38, textColor: MUTED_TEXT },
-      3: { cellWidth: 53, fontStyle: 'bold' }
-    }
-  });
-
-  curY = doc.lastAutoTable.finalY + 3;
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(...MIKLENS_GREEN);
-  doc.text('2.6 Meteorological & Atmospheric Field Parameters', 14, curY);
+  doc.text(`2.${nextSecNum++} Meteorological & Atmospheric Field Parameters`, 14, curY);
 
   curY += 2;
   const w = dc.weather;
@@ -1099,7 +1112,7 @@ export async function generateInstitutionalPDF(reportData) {
   doc.setFontSize(9);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(...MIKLENS_GREEN);
-  doc.text('2.7 Application of the Product & Delivery Method', 14, curY);
+  doc.text(`2.${nextSecNum++} Application of the Product & Delivery Method`, 14, curY);
 
   curY += 3.5;
   doc.setFontSize(7.5);
@@ -2317,43 +2330,59 @@ export async function generateInstitutionalDocx(reportData) {
     }),
     new Paragraph({ text: '' }),
 
-    new Paragraph({
-      text: '2.5 Edaphic Characteristics & Soil Profile Analysis',
-      heading: HeadingLevel.HEADING_3
-    }),
-    new Table({
-      width: { size: 100, type: WidthType.PERCENTAGE },
-      rows: [
-        new TableRow({
-          children: [
-            createDocxCell({ text: 'Soil Texture:', bold: true, width: 25, textColor: HEX_MUTED }),
-            createDocxCell({ text: dc.soilTexture || '—', width: 25, bold: true }),
-            createDocxCell({ text: 'Soil Drainage:', bold: true, width: 25, textColor: HEX_MUTED }),
-            createDocxCell({ text: dc.soilDrainage || '—', width: 25, bold: true })
-          ]
-        }),
-        new TableRow({
-          children: [
-            createDocxCell({ text: 'Soil pH Reaction:', bold: true, width: 25, textColor: HEX_MUTED }),
-            createDocxCell({ text: dc.soilPH || '—', width: 25, bold: true }),
-            createDocxCell({ text: 'Organic Carbon (%):', bold: true, width: 25, textColor: HEX_MUTED }),
-            createDocxCell({ text: dc.soilOC ? (String(dc.soilOC).includes('%') ? dc.soilOC : `${dc.soilOC}%`) : '—', width: 25, bold: true })
-          ]
-        }),
-        new TableRow({
-          children: [
-            createDocxCell({ text: 'Soil Profile Type:', bold: true, width: 25, textColor: HEX_MUTED }),
-            createDocxCell({ text: dc.soilProfile && dc.soilProfile !== '—' ? dc.soilProfile : '—', width: 25, bold: true }),
-            createDocxCell({ text: 'Tillage Condition:', bold: true, width: 25, textColor: HEX_MUTED }),
-            createDocxCell({ text: dc.tillageType || '—', width: 25, bold: true })
-          ]
-        })
-      ]
-    }),
-    new Paragraph({ text: '' }),
+    ...(Boolean(
+      (dc.soilTexture && dc.soilTexture !== '—' && dc.soilTexture !== '-') ||
+      (dc.soilPH && dc.soilPH !== '—' && dc.soilPH !== '-') ||
+      (dc.soilOC && dc.soilOC !== '—' && dc.soilOC !== '-') ||
+      (dc.soilClay && dc.soilClay !== '—' && dc.soilClay !== '-') ||
+      (dc.soilSand && dc.soilSand !== '—' && dc.soilSand !== '-') ||
+      (dc.soilProfile && dc.soilProfile !== '—' && dc.soilProfile !== '-')
+    ) ? [
+      new Paragraph({
+        text: '2.5 Edaphic Characteristics & Soil Profile Analysis',
+        heading: HeadingLevel.HEADING_3
+      }),
+      new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        rows: [
+          new TableRow({
+            children: [
+              createDocxCell({ text: 'Soil Texture:', bold: true, width: 25, textColor: HEX_MUTED }),
+              createDocxCell({ text: dc.soilTexture || '—', width: 25, bold: true }),
+              createDocxCell({ text: 'Soil Drainage:', bold: true, width: 25, textColor: HEX_MUTED }),
+              createDocxCell({ text: dc.soilDrainage || '—', width: 25, bold: true })
+            ]
+          }),
+          new TableRow({
+            children: [
+              createDocxCell({ text: 'Soil pH Reaction:', bold: true, width: 25, textColor: HEX_MUTED }),
+              createDocxCell({ text: dc.soilPH || '—', width: 25, bold: true }),
+              createDocxCell({ text: 'Organic Carbon (%):', bold: true, width: 25, textColor: HEX_MUTED }),
+              createDocxCell({ text: dc.soilOC ? (String(dc.soilOC).includes('%') ? dc.soilOC : `${dc.soilOC}%`) : '—', width: 25, bold: true })
+            ]
+          }),
+          new TableRow({
+            children: [
+              createDocxCell({ text: 'Soil Profile Type:', bold: true, width: 25, textColor: HEX_MUTED }),
+              createDocxCell({ text: dc.soilProfile && dc.soilProfile !== '—' ? dc.soilProfile : '—', width: 25, bold: true }),
+              createDocxCell({ text: 'Tillage Condition:', bold: true, width: 25, textColor: HEX_MUTED }),
+              createDocxCell({ text: dc.tillageType || '—', width: 25, bold: true })
+            ]
+          })
+        ]
+      }),
+      new Paragraph({ text: '' }),
+    ] : []),
 
     new Paragraph({
-      text: '2.6 Meteorological & Atmospheric Field Parameters',
+      text: Boolean(
+        (dc.soilTexture && dc.soilTexture !== '—' && dc.soilTexture !== '-') ||
+        (dc.soilPH && dc.soilPH !== '—' && dc.soilPH !== '-') ||
+        (dc.soilOC && dc.soilOC !== '—' && dc.soilOC !== '-') ||
+        (dc.soilClay && dc.soilClay !== '—' && dc.soilClay !== '-') ||
+        (dc.soilSand && dc.soilSand !== '—' && dc.soilSand !== '-') ||
+        (dc.soilProfile && dc.soilProfile !== '—' && dc.soilProfile !== '-')
+      ) ? '2.6 Meteorological & Atmospheric Field Parameters' : '2.5 Meteorological & Atmospheric Field Parameters',
       heading: HeadingLevel.HEADING_3
     }),
     new Table({
@@ -2380,7 +2409,14 @@ export async function generateInstitutionalDocx(reportData) {
     new Paragraph({ text: '' }),
 
     new Paragraph({
-      text: '2.7 Application Methodology & Operational Delivery',
+      text: Boolean(
+        (dc.soilTexture && dc.soilTexture !== '—' && dc.soilTexture !== '-') ||
+        (dc.soilPH && dc.soilPH !== '—' && dc.soilPH !== '-') ||
+        (dc.soilOC && dc.soilOC !== '—' && dc.soilOC !== '-') ||
+        (dc.soilClay && dc.soilClay !== '—' && dc.soilClay !== '-') ||
+        (dc.soilSand && dc.soilSand !== '—' && dc.soilSand !== '-') ||
+        (dc.soilProfile && dc.soilProfile !== '—' && dc.soilProfile !== '-')
+      ) ? '2.7 Application Methodology & Operational Delivery' : '2.6 Application Methodology & Operational Delivery',
       heading: HeadingLevel.HEADING_3
     }),
     new Paragraph({
