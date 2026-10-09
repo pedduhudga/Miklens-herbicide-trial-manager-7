@@ -6,7 +6,9 @@ import {
   Sparkles, SendHorizontal, Trash2, Copy, Check, Paperclip, X, Mic, MicOff, 
   Image as ImageIcon, Search, PlusCircle, MessageSquare, FlaskConical, Target, 
   TrendingUp, Cpu, Volume2, VolumeX, Sliders, ShieldAlert, Clock, Bot, Zap,
-  Activity, Stethoscope, CloudSun, CheckCircle2, ArrowRight
+  Activity, Stethoscope, CloudSun, CheckCircle2, ArrowRight, PanelLeftClose,
+  PanelLeftOpen, ChevronRight, Layers, Wrench, RefreshCw, BarChart2, ShieldCheck,
+  Compass, Info, Flame, Leaf, Award
 } from 'lucide-react';
 import { safeJsonParse } from '../utils/helpers.js';
 import { sanitizeAiContent } from '../utils/sanitize.js';
@@ -209,30 +211,34 @@ function parseMessageContent(content) {
  */
 function CandidateFormulaCard({ formula, config, onSave, isSaved, isViewer, onRefinePrompt }) {
   return (
-    <div className="my-3 p-4 bg-gradient-to-br from-emerald-50/90 to-teal-50/90 border border-emerald-300 rounded-2xl shadow-sm text-slate-800 not-prose">
-      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 mb-2.5">
+    <div className="my-4 p-4 sm:p-5 bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 text-white border border-emerald-500/30 rounded-2xl shadow-lg not-prose relative overflow-hidden">
+      {/* Subtle background glow */}
+      <div className="absolute -top-12 -right-12 w-36 h-36 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none" />
+
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 mb-3 relative z-10">
         <div>
-          <div className="flex flex-wrap items-center gap-2 mb-1">
-            <span className="text-[11px] font-bold uppercase tracking-wider px-2.5 py-0.5 bg-emerald-600 text-white rounded-full shadow-2xs flex items-center gap-1">
-              <FlaskConical className="w-3 h-3" /> Novel Candidate Formula
+          <div className="flex flex-wrap items-center gap-2 mb-1.5">
+            <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-full flex items-center gap-1">
+              <FlaskConical className="w-3 h-3 text-emerald-400" /> Novel Candidate Formula
             </span>
             {formula.PredictedEfficacy && (
-              <span className="text-[11px] font-bold px-2 py-0.5 bg-amber-100 text-amber-800 border border-amber-200 rounded-full flex items-center gap-1">
+              <span className="text-[10px] font-bold px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-full flex items-center gap-1">
                 ⭐ Predicted Efficacy: {formula.PredictedEfficacy}
               </span>
             )}
           </div>
-          <h4 className="text-base font-bold text-slate-900 flex items-center gap-2">
+          <h4 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
             {formula.Name}
             {formula.Code && (
-              <span className="font-mono text-xs font-semibold px-2 py-0.5 bg-slate-200 text-slate-700 rounded-md">
+              <span className="font-mono text-xs font-semibold px-2 py-0.5 bg-slate-800/80 text-emerald-300 border border-slate-700 rounded-md">
                 {formula.Code}
               </span>
             )}
           </h4>
           {formula.TargetSpecs && (
-            <p className="text-xs text-slate-600 mt-0.5">
-              <span className="font-semibold text-slate-700">Target Spectrum:</span> {formula.TargetSpecs}
+            <p className="text-xs text-slate-300 mt-1 flex items-center gap-1.5">
+              <Target className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span><strong className="text-white">Target Spectrum:</strong> {formula.TargetSpecs}</span>
             </p>
           )}
         </div>
@@ -241,17 +247,17 @@ function CandidateFormulaCard({ formula, config, onSave, isSaved, isViewer, onRe
           type="button"
           onClick={() => onSave(formula)}
           disabled={isSaved || isViewer}
-          className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm shrink-0 ${
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md shrink-0 cursor-pointer ${
             isSaved
-              ? 'bg-emerald-700 text-white cursor-default'
+              ? 'bg-emerald-600 text-white cursor-default'
               : isViewer
-              ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
-              : 'bg-emerald-600 hover:bg-emerald-700 text-white active:scale-95'
+              ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+              : 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-extrabold active:scale-95'
           }`}
         >
           {isSaved ? (
             <>
-              <Check className="w-4 h-4 text-emerald-200" /> Saved to Formulations
+              <Check className="w-4 h-4 text-white" /> Saved to Formulations
             </>
           ) : (
             <>
@@ -263,16 +269,18 @@ function CandidateFormulaCard({ formula, config, onSave, isSaved, isViewer, onRe
 
       {/* Ingredients Recipe Table */}
       {Array.isArray(formula.Ingredients) && formula.Ingredients.length > 0 && (
-        <div className="bg-white/90 rounded-xl border border-emerald-200/80 overflow-hidden mb-2.5">
-          <div className="px-3 py-1.5 bg-emerald-100/60 text-[11px] font-bold text-emerald-900 flex justify-between items-center">
-            <span>Proposed Recipe Ingredients</span>
-            <span>{formula.Ingredients.length} Components</span>
+        <div className="bg-slate-900/80 rounded-xl border border-slate-700/80 overflow-hidden mb-3 relative z-10">
+          <div className="px-3 py-1.5 bg-slate-800/80 text-[11px] font-bold text-emerald-300 flex justify-between items-center border-b border-slate-700/50">
+            <span className="flex items-center gap-1">
+              <Layers className="w-3 h-3 text-emerald-400" /> Proposed Recipe Ingredients
+            </span>
+            <span className="text-[10px] text-slate-400">{formula.Ingredients.length} Active Components</span>
           </div>
-          <div className="divide-y divide-emerald-50 text-xs">
+          <div className="divide-y divide-slate-800 text-xs">
             {formula.Ingredients.map((ing, i) => (
-              <div key={i} className="px-3 py-1.5 flex justify-between items-center hover:bg-emerald-50/30 transition">
-                <span className="font-medium text-slate-800">{ing.name || ing.Name}</span>
-                <span className="font-mono font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
+              <div key={i} className="px-3 py-2 flex justify-between items-center hover:bg-slate-800/40 transition">
+                <span className="font-medium text-slate-200">{ing.name || ing.Name}</span>
+                <span className="font-mono font-semibold text-emerald-300 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30">
                   {ing.quantity ?? ing.qty ?? 0} {ing.unit || 'ml'}
                 </span>
               </div>
@@ -282,45 +290,45 @@ function CandidateFormulaCard({ formula, config, onSave, isSaved, isViewer, onRe
       )}
 
       {formula.Rationale && (
-        <div className="text-xs text-slate-700 bg-white/70 p-2.5 rounded-xl border border-emerald-100/80 leading-relaxed">
-          <span className="font-bold text-emerald-900">Scientific Rationale: </span>
+        <div className="text-xs text-slate-300 bg-slate-900/60 p-3 rounded-xl border border-slate-700/60 leading-relaxed mb-3 relative z-10">
+          <span className="font-bold text-emerald-400">Scientific Rationale: </span>
           {formula.Rationale}
         </div>
       )}
 
       {/* 1-Click Multi-Turn Refinement Action Pills */}
       {onRefinePrompt && (
-        <div className="mt-3 pt-2.5 border-t border-emerald-200/60 flex flex-wrap items-center gap-1.5">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-900 mr-1">
-            Refine Recipe:
+        <div className="pt-2.5 border-t border-slate-700/60 flex flex-wrap items-center gap-1.5 relative z-10">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mr-1 flex items-center gap-1">
+            <Sparkles className="w-3 h-3 text-emerald-400" /> Refine Recipe:
           </span>
           <button
             type="button"
             onClick={() => onRefinePrompt(`For candidate formula "${formula.Name}", please formulate a lower-cost commercial version reducing ₹/L cost while retaining high efficacy. Provide exact recipe in \`\`\`formula ... \`\`\`.`)}
-            className="text-[11px] px-2.5 py-1 bg-white hover:bg-emerald-100 text-emerald-800 font-semibold rounded-lg border border-emerald-200 shadow-2xs transition"
+            className="text-[11px] px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-emerald-300 font-semibold rounded-lg border border-slate-700 transition cursor-pointer active:scale-95"
           >
-            💸 Lower Cost Version
+            💸 Lower Cost
           </button>
           <button
             type="button"
             onClick={() => onRefinePrompt(`For candidate formula "${formula.Name}", please propose an organic / bio-rational equivalent using natural botanical or biological extracts. Provide exact recipe in \`\`\`formula ... \`\`\`.`)}
-            className="text-[11px] px-2.5 py-1 bg-white hover:bg-emerald-100 text-emerald-800 font-semibold rounded-lg border border-emerald-200 shadow-2xs transition"
+            className="text-[11px] px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-emerald-300 font-semibold rounded-lg border border-slate-700 transition cursor-pointer active:scale-95"
           >
-            🌿 Bio / Organic Alternative
+            🌿 Bio / Organic
           </button>
           <button
             type="button"
             onClick={() => onRefinePrompt(`For candidate formula "${formula.Name}", optimize the ingredients to maximize fast initial knockdown within 24-48 hours. Provide exact recipe in \`\`\`formula ... \`\`\`.`)}
-            className="text-[11px] px-2.5 py-1 bg-white hover:bg-emerald-100 text-emerald-800 font-semibold rounded-lg border border-emerald-200 shadow-2xs transition"
+            className="text-[11px] px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-emerald-300 font-semibold rounded-lg border border-slate-700 transition cursor-pointer active:scale-95"
           >
-            ⚡ Boost Fast Knockdown
+            ⚡ Boost Knockdown
           </button>
           <button
             type="button"
             onClick={() => onRefinePrompt(`For candidate formula "${formula.Name}", adjust the recipe to improve crop safety, reduce phytotoxicity risk, and broaden target selectivity. Provide exact recipe in \`\`\`formula ... \`\`\`.`)}
-            className="text-[11px] px-2.5 py-1 bg-white hover:bg-emerald-100 text-emerald-800 font-semibold rounded-lg border border-emerald-200 shadow-2xs transition"
+            className="text-[11px] px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-emerald-300 font-semibold rounded-lg border border-slate-700 transition cursor-pointer active:scale-95"
           >
-            🛡️ Improve Crop Safety
+            🛡️ Crop Safety
           </button>
         </div>
       )}
@@ -392,6 +400,9 @@ export default function AIAssistant({ onMenuClick }) {
   const [isFieldWalkMode, setIsFieldWalkMode] = useState(false);
   const [savedFormulas, setSavedFormulas] = useState({});
   const [speakingMsgIdx, setSpeakingMsgIdx] = useState(null);
+  const [activeTab, setActiveTab] = useState('chat'); // 'chat' | 'simulator'
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isToolsDrawerOpen, setIsToolsDrawerOpen] = useState(false);
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
   const [simFormId, setSimFormId] = useState('');
   const [simCustomForm, setSimCustomForm] = useState('');
@@ -1467,7 +1478,41 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
     }
   };
 
-  const handleSubmit = (e) => { e.preventDefault(); sendMessage(input); };
+  const handleTextareaInput = (e) => {
+    setInput(e.target.value);
+    e.target.style.height = 'auto';
+    e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
+  };
+
+  const handleSubmit = (e) => { 
+    e.preventDefault(); 
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+    }
+    sendMessage(input); 
+  };
+
+  const handleDeleteSession = async (e, sessionId) => {
+    e.stopPropagation();
+    if (isViewer) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Viewer role cannot delete chat sessions.', type: 'error' } }));
+      return;
+    }
+    const sessionToDelete = allSessions.find(s => s.id === sessionId);
+    if (!sessionToDelete) return;
+    const remaining = allSessions.filter(s => s.id !== sessionId);
+    updateState({
+      aiChatSessions: remaining,
+      currentAiChatSessionId: currentSessionId === sessionId ? null : currentSessionId
+    });
+    try {
+      localStorage.setItem('aiChatSessions', JSON.stringify(remaining.filter(s => (s.category || 'herbicide') === activeCategory)));
+      await deleteAiChatSession({ id: sessionId }, getAppState);
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Chat session deleted', type: 'info' } }));
+    } catch (err) {
+      console.warn('Failed to delete session:', err);
+    }
+  };
 
   const handleCopy = (text, idx) => {
     navigator.clipboard.writeText(text).then(() => {
@@ -1521,13 +1566,17 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
     }
     setSpeakingMsgIdx(null);
     setInput('');
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+    }
     setAttachedImage(null);
     setStreamingMessage('');
     setIsLoading(false);
     setSearchQuery('');
     setIsSearchOpen(false);
     setSimResult(null);
-    setIsSimulatorOpen(false);
+    setIsToolsDrawerOpen(false);
+    setActiveTab('chat');
     updateState({ currentAiChatSessionId: null });
     setTimeout(() => {
       inputRef.current?.focus();
@@ -1540,927 +1589,1351 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50">
+    <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-900/5">
       <TopBar title="AI Assistant" onMenuClick={onMenuClick} />
 
-      <div className="flex-1 flex min-h-0 w-full overflow-hidden">
+      <div className="flex-1 flex min-h-0 w-full overflow-hidden relative">
 
-        {/* Sidebar */}
-        <div className={`${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 absolute md:relative z-20 w-64 h-full bg-slate-900 text-slate-300 flex flex-col transition-transform duration-300 ease-in-out`}>
-          <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+        {/* ─── Modern Agronomic Sidebar (Desktop Collapsible & Mobile Slide-over) ─── */}
+        <div 
+          className={`
+            ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} 
+            md:translate-x-0 
+            fixed md:relative z-40 md:z-20 
+            h-full bg-slate-950 text-slate-300 border-r border-slate-800/80 
+            flex flex-col transition-all duration-300 ease-in-out
+            ${isSidebarCollapsed ? 'md:w-0 md:opacity-0 md:pointer-events-none' : 'w-72 md:w-72 md:opacity-100'}
+          `}
+        >
+          {/* Sidebar Header */}
+          <div className="p-4 border-b border-slate-800/80 flex items-center justify-between gap-2 bg-slate-950/80">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div 
+                className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-md font-bold text-sm text-white" 
+                style={{ backgroundColor: config.color.hex }}
+              >
+                <Sparkles className="w-4 h-4 text-white" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="font-bold text-xs uppercase tracking-wider text-white truncate">
+                  {config.name} AI Studio
+                </h3>
+                <p className="text-[10px] text-emerald-400 font-mono truncate">
+                  Hybrid RAG Active
+                </p>
+              </div>
+            </div>
+
             <button 
               type="button"
-              onClick={() => { handleNewChat(); setIsSidebarOpen(false); }} 
-              className="w-full flex items-center justify-center gap-2 text-white px-3 py-2.5 rounded-xl transition-all font-semibold text-sm shadow-xs active:scale-98 cursor-pointer" 
-              style={{ backgroundColor: config.color.hex }}
-              title="Start a new chat session"
+              onClick={() => setIsSidebarOpen(false)} 
+              className="md:hidden p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"
+              title="Close sidebar"
             >
-              <PlusCircle className="w-4 h-4" />
-              New Chat
-            </button>
-            <button onClick={() => setIsSidebarOpen(false)} className="md:hidden ml-2 p-1 text-slate-400 hover:text-white">
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" />
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar">
-            {sessions.map(session => (
-              <button
-                key={session.id}
-                type="button"
-                onClick={() => { 
-                  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-                    window.speechSynthesis.cancel();
-                  }
-                  setSpeakingMsgIdx(null);
-                  setStreamingMessage('');
-                  setIsLoading(false);
-                  setSearchQuery('');
-                  setIsSearchOpen(false);
-                  updateState({ currentAiChatSessionId: session.id }); 
-                  setIsSidebarOpen(false); 
-                }}
-                className={`w-full flex items-center gap-2 text-left px-3 py-2.5 rounded-lg transition-colors text-sm ${currentSessionId === session.id ? 'bg-slate-800 text-white font-medium' : 'hover:bg-slate-800/50'}`}
-              >
-                <MessageSquare className="w-4 h-4 shrink-0 opacity-70" />
-                <span className="truncate flex-1">{session.title}</span>
-              </button>
-            ))}
+          {/* New Chat Primary Action Button */}
+          <div className="p-3">
+            <button 
+              type="button"
+              onClick={() => { handleNewChat(); setIsSidebarOpen(false); }} 
+              className="w-full flex items-center justify-center gap-2 text-white px-3.5 py-2.5 rounded-xl font-bold text-xs shadow-md transition-all active:scale-95 cursor-pointer hover:brightness-110" 
+              style={{ backgroundColor: config.color.hex }}
+              title="Start a new chat session"
+            >
+              <PlusCircle className="w-4 h-4 shrink-0" />
+              <span>New Conversation</span>
+            </button>
+          </div>
+
+          {/* Sessions List Header */}
+          <div className="px-4 py-1.5 flex items-center justify-between text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+            <span>Recent Sessions</span>
+            <span className="px-1.5 py-0.5 rounded-full bg-slate-800 text-[10px] text-slate-300 font-mono">
+              {sessions.length}
+            </span>
+          </div>
+
+          {/* Sessions List */}
+          <div className="flex-1 overflow-y-auto px-2 py-1 space-y-1 custom-scrollbar">
+            {sessions.map(session => {
+              const isActive = currentSessionId === session.id;
+              const msgCount = session.messages?.length || 0;
+              return (
+                <div
+                  key={session.id}
+                  className={`group relative rounded-xl transition-all duration-150 flex items-center ${
+                    isActive 
+                      ? 'bg-slate-800/90 text-white shadow-xs border-l-3 border-emerald-500' 
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => { 
+                      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+                        window.speechSynthesis.cancel();
+                      }
+                      setSpeakingMsgIdx(null);
+                      setStreamingMessage('');
+                      setIsLoading(false);
+                      setSearchQuery('');
+                      setIsSearchOpen(false);
+                      setActiveTab('chat');
+                      updateState({ currentAiChatSessionId: session.id }); 
+                      setIsSidebarOpen(false); 
+                    }}
+                    className="flex-1 flex items-center gap-2.5 text-left px-3 py-2.5 text-xs min-w-0 cursor-pointer"
+                  >
+                    <MessageSquare className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-emerald-400' : 'text-slate-500'}`} />
+                    <div className="truncate flex-1">
+                      <span className="block truncate font-medium">
+                        {session.title || 'New Conversation'}
+                      </span>
+                      <span className="block text-[10px] text-slate-500 font-mono">
+                        {msgCount} {msgCount === 1 ? 'message' : 'messages'}
+                      </span>
+                    </div>
+                  </button>
+
+                  {/* Individual Session Delete Button */}
+                  <button
+                    type="button"
+                    onClick={(e) => handleDeleteSession(e, session.id)}
+                    title="Delete session"
+                    className="opacity-0 group-hover:opacity-100 p-1.5 mr-2 text-slate-500 hover:text-red-400 hover:bg-slate-700/60 rounded-lg transition-all shrink-0 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              );
+            })}
+
             {sessions.length === 0 && (
-              <div className="text-center p-4 text-xs text-slate-500">
-                No previous chats.
+              <div className="text-center py-8 px-4 text-xs text-slate-500">
+                <MessageSquare className="w-6 h-6 mx-auto mb-2 opacity-30" />
+                <p>No previous conversations recorded in {config.name}.</p>
               </div>
             )}
           </div>
 
-          {sessions.length > 0 && (
-            <div className="p-3 border-t border-slate-800">
-              <button onClick={handleClear} className="w-full flex items-center justify-center gap-2 text-xs text-slate-400 hover:text-red-400 transition-colors py-2 rounded hover:bg-slate-800/50">
+          {/* Sidebar Footer */}
+          <div className="p-3 border-t border-slate-800/80 bg-slate-950/90 flex flex-col gap-2">
+            {sessions.length > 0 && (
+              <button 
+                type="button"
+                onClick={handleClear} 
+                className="w-full flex items-center justify-center gap-1.5 text-xs text-slate-400 hover:text-red-400 transition-colors py-1.5 rounded-lg hover:bg-slate-900 cursor-pointer"
+              >
                 <Trash2 className="w-3.5 h-3.5" />
-                Clear All Sessions
+                <span>Clear All Sessions</span>
               </button>
+            )}
+            <div className="text-[10px] text-slate-500 text-center font-mono">
+              Model: <span className="text-indigo-400">{modelName}</span>
             </div>
-          )}
+          </div>
         </div>
 
-        {/* Mobile Sidebar Overlay */}
+        {/* Mobile Backdrop Overlay */}
         {isSidebarOpen && (
-          <div className="fixed inset-0 bg-black/50 z-10 md:hidden" onClick={() => setIsSidebarOpen(false)} />
+          <div 
+            className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-30 md:hidden" 
+            onClick={() => setIsSidebarOpen(false)} 
+          />
         )}
 
-        <div className="flex-1 flex flex-col min-h-0 pb-20 md:pb-0 md:p-4 max-w-5xl mx-auto w-full relative">
-          <div className="flex-1 bg-white md:rounded-2xl md:shadow-sm md:border md:border-slate-200 flex flex-col min-h-0 overflow-hidden">
+        {/* ─── Main Agronomic Studio Canvas ─── */}
+        <div className="flex-1 flex flex-col min-h-0 h-full overflow-hidden relative bg-slate-50/50">
 
-          {/* Header */}
-          <div className="p-4 border-b bg-slate-50 flex items-center gap-3">
-            <button onClick={() => setIsSidebarOpen(true)} className="md:hidden p-2 -ml-2 text-slate-500 hover:text-slate-800 rounded-lg">
-              <MessageSquare className="w-5 h-5" />
-            </button>
-            <div className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 shadow-inner" style={{ backgroundColor: config.color.hexLight, color: config.color.hex }}>
-              <Sparkles className="w-5 h-5" />
-            </div>
-            <div className="flex-1 min-w-0 flex items-center gap-2">
-              <div>
-                <h3 className="font-bold text-slate-800 flex items-center gap-2 text-sm sm:text-base">
-                  {config.name} AI Assistant
-                  <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200/80">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> 0-Quota Hybrid RAG
-                  </span>
-                </h3>
-                <p className="text-[11px] text-slate-500 truncate flex items-center gap-2">
-                  <span>Model: <strong className="font-medium text-indigo-600">{modelName}</strong></span>
-                  {!hasKey && <span className="text-red-500 font-semibold">⚠ No API key</span>}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* Studio Command Header */}
+          <div className="h-14 border-b border-slate-200/90 bg-white/95 backdrop-blur-md px-3 sm:px-5 flex items-center justify-between shrink-0 gap-2 shadow-2xs z-10">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+              {/* Mobile Sidebar Trigger */}
+              <button 
+                type="button"
+                onClick={() => setIsSidebarOpen(true)} 
+                className="md:hidden p-2 text-slate-600 hover:text-slate-900 rounded-xl hover:bg-slate-100 transition cursor-pointer"
+                title="View conversations"
+              >
+                <MessageSquare className="w-4 h-4" />
+              </button>
+
+              {/* Desktop Sidebar Collapse Toggle */}
               <button
                 type="button"
-                onClick={() => setIsSimulatorOpen(prev => !prev)}
-                className={`hidden md:flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-xl border transition cursor-pointer active:scale-95 ${
-                  isSimulatorOpen ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs' : 'bg-indigo-50/80 hover:bg-indigo-100 border-indigo-200 text-indigo-800'
-                }`}
-                title="Toggle Agronomic Outcome Simulator"
+                onClick={() => setIsSidebarCollapsed(prev => !prev)}
+                className="hidden md:flex p-1.5 text-slate-500 hover:text-slate-800 rounded-lg hover:bg-slate-100 transition cursor-pointer"
+                title={isSidebarCollapsed ? "Expand conversations sidebar" : "Collapse conversations sidebar"}
               >
-                <Sliders className="w-3.5 h-3.5" />
-                <span>{isSimulatorOpen ? 'Close Lab' : 'Outcome Lab'}</span>
+                {isSidebarCollapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
               </button>
+
+              {/* Studio Emblem Badge */}
+              <div className="flex items-center gap-2">
+                <div 
+                  className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 shadow-2xs" 
+                  style={{ backgroundColor: config.color.hexLight, color: config.color.hex }}
+                >
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <div className="hidden sm:block min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-bold text-xs sm:text-sm text-slate-800 truncate">
+                      {config.name} AI Intelligence Studio
+                    </span>
+                    <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200/80 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> 0-Quota RAG
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Segmented View Switcher: AI Consultant vs Outcome Lab */}
+            <div className="flex items-center bg-slate-100/90 p-1 rounded-xl border border-slate-200/80 shadow-2xs">
+              <button
+                type="button"
+                onClick={() => setActiveTab('chat')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  activeTab === 'chat'
+                    ? 'bg-white text-slate-800 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+                <span className="hidden sm:inline">AI Consultant</span>
+                <span className="sm:hidden">Chat</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('simulator')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  activeTab === 'simulator'
+                    ? 'bg-white text-indigo-700 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Sliders className="w-3.5 h-3.5 text-indigo-600" />
+                <span className="hidden sm:inline">Outcome Lab</span>
+                <span className="sm:hidden">Lab</span>
+              </button>
+            </div>
+
+            {/* Right Action Icons */}
+            <div className="flex items-center gap-1 sm:gap-2">
+              {/* Field Walk Scout Voice Mode Toggle */}
               <button
                 type="button"
                 onClick={toggleFieldWalkMode}
-                className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-xl border transition cursor-pointer active:scale-95 ${
-                  isFieldWalkMode ? 'bg-emerald-600 text-white border-emerald-500 shadow-xs' : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700'
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold rounded-xl border transition cursor-pointer active:scale-95 ${
+                  isFieldWalkMode 
+                    ? 'bg-emerald-600 text-white border-emerald-500 shadow-xs animate-pulse' 
+                    : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700 shadow-2xs'
                 }`}
-                title="Hands-free continuous conversational voice field scout"
+                title="Continuous hands-free voice scouting in the field"
               >
-                <Mic className={`w-3.5 h-3.5 ${isFieldWalkMode ? 'text-white animate-pulse' : 'text-emerald-600'}`} />
-                <span>{isFieldWalkMode ? 'Field Walk ON' : 'Field Walk'}</span>
+                <Mic className={`w-3.5 h-3.5 ${isFieldWalkMode ? 'text-white' : 'text-emerald-600'}`} />
+                <span className="hidden lg:inline">{isFieldWalkMode ? 'Field Scout ON' : 'Field Scout'}</span>
               </button>
+
+              {/* In-chat Search Bar Toggle */}
+              {isSearchOpen ? (
+                <div className="flex items-center bg-white border border-slate-300 rounded-xl overflow-hidden h-8 px-2 transition-all shadow-inner">
+                  <Search className="w-3.5 h-3.5 text-slate-400 mr-1.5" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    placeholder="Search messages..."
+                    className="text-xs outline-none bg-transparent w-28 sm:w-36 text-slate-700"
+                    autoFocus
+                  />
+                  <button 
+                    type="button" 
+                    onClick={() => { setIsSearchOpen(false); setSearchQuery(''); }} 
+                    className="text-slate-400 hover:text-slate-600 p-0.5"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                history.length > 0 && (
+                  <button 
+                    type="button" 
+                    onClick={() => setIsSearchOpen(true)} 
+                    title="Search conversation" 
+                    className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition cursor-pointer"
+                  >
+                    <Search className="w-4 h-4" />
+                  </button>
+                )
+              )}
+
+              {/* New Chat Action */}
               <button
                 type="button"
                 onClick={handleNewChat}
-                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 shadow-2xs transition active:scale-95 cursor-pointer"
-                title="Start a new chat session"
+                className="p-2 text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 rounded-xl border border-slate-200 bg-white transition shadow-2xs cursor-pointer active:scale-95"
+                title="Start new conversation"
               >
-                <PlusCircle className="w-3.5 h-3.5 text-emerald-600" />
-                <span className="hidden sm:inline">New Chat</span>
+                <PlusCircle className="w-4 h-4 text-emerald-600" />
               </button>
-              {history.length > 0 && (
-                <>
-                  {isSearchOpen ? (
-                    <div className="flex items-center bg-white border border-slate-300 rounded-lg overflow-hidden h-8 px-2 transition-all shadow-inner">
-                      <Search className="w-3.5 h-3.5 text-slate-400 mr-2" />
-                      <input
-                        type="text"
-                        value={searchQuery}
-                        onChange={e => setSearchQuery(e.target.value)}
-                        placeholder="Search..."
-                        className="text-xs outline-none bg-transparent w-24 sm:w-32"
-                        autoFocus
-                      />
-                      <button onClick={() => { setIsSearchOpen(false); setSearchQuery(''); }} className="text-slate-400 hover:text-slate-600">
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ) : (
-                    <button onClick={() => setIsSearchOpen(true)} title="Search chat" className="p-2 text-slate-400 hover:bg-slate-50 rounded-lg transition" style={{ color: config.color.hex }}>
-                      <Search className="w-4 h-4" />
-                    </button>
-                  )}
-                  <button onClick={handleClear} title="Clear all chat history" className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </>
-              )}
             </div>
           </div>
 
           {/* Active Field Walk Mode Status Banner */}
           {isFieldWalkMode && (
-            <div className="px-4 py-2 bg-emerald-700 text-white flex items-center justify-between text-xs font-semibold animate-pulse shadow-inner">
+            <div className="px-4 py-2 bg-gradient-to-r from-emerald-700 to-teal-800 text-white flex items-center justify-between text-xs font-semibold shadow-md animate-pulse">
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-white animate-ping" />
-                <span>Field Walk Mode Active: Speak plot observations hands-free (e.g. "Plot 3, Glycyl 10ml, 85% control").</span>
+                <span>Field Scout Voice Mode Active: Speak plot observations hands-free (e.g., "Plot 4, Glycyl 10ml, 90% weed kill").</span>
               </div>
               <button
                 type="button"
                 onClick={toggleFieldWalkMode}
-                className="px-2.5 py-1 bg-emerald-900/80 hover:bg-emerald-950 text-emerald-100 rounded text-[11px] font-bold cursor-pointer"
+                className="px-2.5 py-1 bg-emerald-950/80 hover:bg-black text-emerald-100 rounded-lg text-[11px] font-bold cursor-pointer"
               >
-                Pause Field Walk
+                Pause Scout
               </button>
             </div>
           )}
 
-          {/* Collapsible Trial Outcome Simulator Drawer */}
-          {isSimulatorOpen && (
-            <div className="border-b border-indigo-100 bg-gradient-to-b from-indigo-50/70 to-white p-4 transition-all">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-xs">
-                    <Sliders className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-sm text-slate-800 flex items-center gap-2">
-                      Agronomic Trial Outcome Simulator
-                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 uppercase">
-                        {config.name}
-                      </span>
-                    </h4>
-                    <p className="text-[11px] text-slate-500">
-                      Predict field efficacy, control duration, and crop safety using chemistry AI and trial history.
+          {/* ═══════════════════════════════════════════════════════════════════════
+              TAB 1: AI CONSULTANT (CHAT WORKSPACE)
+          ═══════════════════════════════════════════════════════════════════════ */}
+          {activeTab === 'chat' && (
+            <div className="flex-1 flex flex-col min-h-0 h-full overflow-hidden relative">
+
+              {/* Conversation Messages View */}
+              <div 
+                className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-6 min-h-0 custom-scrollbar"
+                onClick={(e) => {
+                  const link = e.target.closest('a');
+                  if (!link) return;
+                  const href = link.getAttribute('href') || '';
+                  const dataFormulaId = link.getAttribute('data-formula-id');
+                  const dataTrialId = link.getAttribute('data-trial-id');
+
+                  // 1. Direct Formulation Link Redirection
+                  const isFormulaLink = !!dataFormulaId || href.includes('/formulations') || href.startsWith('formula:') || link.classList.contains('formula-redirect-link');
+                  if (isFormulaLink) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const rawId = dataFormulaId || href.match(/focus=([^&#\s]+)/i)?.[1] || '';
+                    const cleanId = decodeURIComponent(rawId).trim();
+                    if (cleanId) {
+                      navigate(`/formulations?focus=${encodeURIComponent(cleanId)}`, {
+                        state: { focusFormula: cleanId }
+                      });
+                      window.dispatchEvent(new CustomEvent('app:navigate_to_formulation', {
+                        detail: { formulaId: cleanId }
+                      }));
+                    } else {
+                      navigate('/formulations');
+                    }
+                    return;
+                  }
+
+                  // 2. Direct Trial Link Redirection
+                  const isTrialLink = !!dataTrialId || href.includes('/trials') || href.startsWith('trial:') || link.classList.contains('trial-redirect-link');
+                  if (isTrialLink) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const rawId = dataTrialId || href.match(/focus=([^&#\s]+)/i)?.[1] || '';
+                    const cleanId = decodeURIComponent(rawId).trim();
+                    if (cleanId) {
+                      navigate(`/trials?focus=${encodeURIComponent(cleanId)}`, {
+                        state: { focusTrial: cleanId }
+                      });
+                      window.dispatchEvent(new CustomEvent('app:navigate_to_trial', {
+                        detail: { trialId: cleanId }
+                      }));
+                    } else {
+                      navigate('/trials');
+                    }
+                    return;
+                  }
+
+                  // 3. Fallback: Any other internal link containing focus=
+                  if (href.includes('focus=')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const matched = href.match(/focus=([^&#\s]+)/i)?.[1];
+                    if (matched) {
+                      const clean = decodeURIComponent(matched).trim();
+                      const isTrial = (state.trials || []).some(t => 
+                        String(t.ID || t.id || '').toLowerCase() === clean.toLowerCase() ||
+                        String(t.TrialID || '').toLowerCase() === clean.toLowerCase()
+                      );
+                      if (isTrial) {
+                        navigate(`/trials?focus=${encodeURIComponent(clean)}`, { state: { focusTrial: clean } });
+                        window.dispatchEvent(new CustomEvent('app:navigate_to_trial', { detail: { trialId: clean } }));
+                      } else {
+                        navigate(`/formulations?focus=${encodeURIComponent(clean)}`, { state: { focusFormula: clean } });
+                        window.dispatchEvent(new CustomEvent('app:navigate_to_formulation', { detail: { formulaId: clean } }));
+                      }
+                    }
+                  }
+                }}
+              >
+                {/* ─── Hero / Empty State ─── */}
+                {history.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-6 max-w-3xl mx-auto text-slate-600">
+                    {/* Glowing Center Emblem */}
+                    <div className="relative mb-3">
+                      <div className="w-16 h-16 rounded-2xl flex items-center justify-center shadow-lg relative z-10" style={{ backgroundColor: config.color.hex, color: '#ffffff' }}>
+                        <Sparkles className="w-8 h-8 text-white" />
+                      </div>
+                      <div className="absolute inset-0 rounded-2xl blur-xl opacity-40 animate-pulse" style={{ backgroundColor: config.color.hex }} />
+                    </div>
+
+                    <h2 className="text-lg sm:text-xl font-extrabold text-slate-800 text-center mb-1">
+                      Miklens {config.name} AI Research Studio
+                    </h2>
+                    <p className="text-xs text-slate-500 text-center max-w-lg mb-3">
+                      Autonomous formulation chemistry synthesis, real-time variance diagnostics, and local zero-quota hybrid RAG.
                     </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIsSimulatorOpen(false)}
-                  className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
 
-              {/* Controls Grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-                {/* Formulation Selector */}
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                    Formulation / Recipe
-                  </label>
-                  <select
-                    value={simFormId}
-                    onChange={(e) => {
-                      setSimFormId(e.target.value);
-                      if (e.target.value !== 'custom') setSimCustomForm('');
-                    }}
-                    className="w-full text-xs bg-white border border-slate-300 rounded-lg px-2.5 py-2 font-medium text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500"
-                  >
-                    <option value="">Select Formulation...</option>
-                    {categoryFormulations.map(f => (
-                      <option key={f.ID || f.id} value={f.ID || f.id}>
-                        {f.Code ? `[${f.Code}] ` : ''}{f.Name}
-                      </option>
-                    ))}
-                    <option value="custom">✏️ Custom Recipe / Name...</option>
-                  </select>
-                  {simFormId === 'custom' && (
-                    <input
-                      type="text"
-                      placeholder="e.g. Glyphosate 41% + Surfactant"
-                      value={simCustomForm}
-                      onChange={(e) => setSimCustomForm(e.target.value)}
-                      className="w-full mt-1.5 text-xs bg-white border border-slate-300 rounded-lg px-2 py-1.5"
-                    />
-                  )}
-                </div>
-
-                {/* Target Problem */}
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                    Target ({config.targetLabel || 'Weed / Pest / Disease'})
-                  </label>
-                  <input
-                    type="text"
-                    list="sim-target-list"
-                    placeholder={`e.g. ${uniqueTargets[0] || 'Target problem'}`}
-                    value={simTarget}
-                    onChange={(e) => setSimTarget(e.target.value)}
-                    className="w-full text-xs bg-white border border-slate-300 rounded-lg px-2.5 py-2 font-medium text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                  <datalist id="sim-target-list">
-                    {uniqueTargets.map((t, idx) => (
-                      <option key={idx} value={t} />
-                    ))}
-                  </datalist>
-                </div>
-
-                {/* Dosage & Crop */}
-                <div>
-                  <div className="flex gap-2">
-                    <div className="flex-1">
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                        Dosage Rate
-                      </label>
-                      <input
-                        type="text"
-                        value={simDosage}
-                        onChange={(e) => setSimDosage(e.target.value)}
-                        placeholder="2.5 ml/L"
-                        className="w-full text-xs bg-white border border-slate-300 rounded-lg px-2.5 py-2 font-medium text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500"
-                      />
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200/80 text-emerald-800 text-[11px] font-semibold mb-6 shadow-2xs">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      <span>Sub-30ms Semantic Retrieval • 100% Grounded in Your Trials</span>
                     </div>
-                    <div className="flex-1">
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                        Host Crop
-                      </label>
-                      <input
-                        type="text"
-                        value={simCrop}
-                        onChange={(e) => setSimCrop(e.target.value)}
-                        placeholder="e.g. Cotton"
-                        className="w-full text-xs bg-white border border-slate-300 rounded-lg px-2.5 py-2 font-medium text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500"
-                      />
-                    </div>
-                  </div>
-                </div>
 
-                {/* Weather Conditions */}
-                <div>
-                  <div className="flex gap-2">
-                    <div className="flex-1">
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                        Temp (°C)
-                      </label>
-                      <select
-                        value={simTemp}
-                        onChange={(e) => setSimTemp(e.target.value)}
-                        className="w-full text-xs bg-white border border-slate-300 rounded-lg px-2 py-2 font-medium text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500"
-                      >
-                        <option value="20°C">20°C (Mild)</option>
-                        <option value="28°C">28°C (Optimal)</option>
-                        <option value="35°C">35°C (High Heat)</option>
-                        <option value="40°C">40°C (Extreme)</option>
-                      </select>
+                    {/* ─── 3 Curated Agronomic Capability Pillars ─── */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 w-full mb-6">
+                      {/* Pillar 1: Formulation Architecture */}
+                      <div className="p-4 bg-white border border-slate-200/90 rounded-2xl shadow-xs hover:shadow-md transition-all flex flex-col justify-between">
+                        <div>
+                          <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center mb-2.5 font-bold">
+                            <FlaskConical className="w-4 h-4 text-amber-600" />
+                          </div>
+                          <h4 className="font-bold text-xs text-slate-800 mb-1">
+                            Formulation Architecture
+                          </h4>
+                          <p className="text-[11px] text-slate-500 leading-relaxed mb-3">
+                            Benchmark top formulas, rank win rates, and synthesize novel candidate recipes.
+                          </p>
+                        </div>
+                        <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                          <button
+                            type="button"
+                            onClick={() => sendMessage(`Benchmark our top performing ${config.name.toLowerCase()} formulations across all trials. Which ones deliver the highest efficacy and win rate? Provide a performance leaderboard.`)}
+                            className="w-full text-left text-[11px] font-semibold text-amber-800 hover:text-amber-950 p-2 rounded-lg bg-amber-50/70 hover:bg-amber-100/70 transition flex items-center justify-between"
+                          >
+                            <span>Leaderboard Rank</span>
+                            <ArrowRight className="w-3 h-3 shrink-0" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => sendMessage(`Based on historical ${config.name.toLowerCase()} trial results and ingredient synergy from our inventory, suggest 2 novel high-potential candidate formulations to test with exact recipe quantities.`)}
+                            className="w-full text-left text-[11px] font-semibold text-emerald-800 hover:text-emerald-950 p-2 rounded-lg bg-emerald-50/70 hover:bg-emerald-100/70 transition flex items-center justify-between"
+                          >
+                            <span>Suggest Novel Recipes</span>
+                            <ArrowRight className="w-3 h-3 shrink-0" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Pillar 2: Trial Diagnostics & ANOVA */}
+                      <div className="p-4 bg-white border border-slate-200/90 rounded-2xl shadow-xs hover:shadow-md transition-all flex flex-col justify-between">
+                        <div>
+                          <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center mb-2.5 font-bold">
+                            <Stethoscope className="w-4 h-4 text-blue-600" />
+                          </div>
+                          <h4 className="font-bold text-xs text-slate-800 mb-1">
+                            Trial Doctor & ANOVA
+                          </h4>
+                          <p className="text-[11px] text-slate-500 leading-relaxed mb-3">
+                            Audit trials for data anomalies, abnormal spikes, and compute ANOVA statistical significance.
+                          </p>
+                        </div>
+                        <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                          <button
+                            type="button"
+                            onClick={() => sendMessage(`Run a comprehensive Trial Doctor diagnostic audit across all ${config.name.toLowerCase()} trials. Identify data inconsistencies, abnormal efficacy spikes, and herbicide resistance risks.`)}
+                            className="w-full text-left text-[11px] font-semibold text-blue-800 hover:text-blue-950 p-2 rounded-lg bg-blue-50/70 hover:bg-blue-100/70 transition flex items-center justify-between"
+                          >
+                            <span>Run Trial Doctor Audit</span>
+                            <ArrowRight className="w-3 h-3 shrink-0" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => sendMessage(`Run a one-way ANOVA statistical variance test comparing our top formulations for ${uniqueTargets[0] || 'dominant target'}. Calculate F-statistic, p-value, and treatment means.`)}
+                            className="w-full text-left text-[11px] font-semibold text-indigo-800 hover:text-indigo-950 p-2 rounded-lg bg-indigo-50/70 hover:bg-indigo-100/70 transition flex items-center justify-between"
+                          >
+                            <span>ANOVA Statistical Test</span>
+                            <ArrowRight className="w-3 h-3 shrink-0" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Pillar 3: Field Operations & Microclimate */}
+                      <div className="p-4 bg-white border border-slate-200/90 rounded-2xl shadow-xs hover:shadow-md transition-all flex flex-col justify-between">
+                        <div>
+                          <div className="w-8 h-8 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center mb-2.5 font-bold">
+                            <CloudSun className="w-4 h-4 text-teal-600" />
+                          </div>
+                          <h4 className="font-bold text-xs text-slate-800 mb-1">
+                            Spray Operations & Synergy
+                          </h4>
+                          <p className="text-[11px] text-slate-500 leading-relaxed mb-3">
+                            Evaluate live spray windows, Delta-T drift, and calculate Colby tank-mix synergy.
+                          </p>
+                        </div>
+                        <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                          <button
+                            type="button"
+                            onClick={() => sendMessage(`Check live spray weather window and Delta-T conditions for our field trial location today and tomorrow. What are the optimal application hours?`)}
+                            className="w-full text-left text-[11px] font-semibold text-teal-800 hover:text-teal-950 p-2 rounded-lg bg-teal-50/70 hover:bg-teal-100/70 transition flex items-center justify-between"
+                          >
+                            <span>Check Spray Window</span>
+                            <ArrowRight className="w-3 h-3 shrink-0" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => sendMessage(`Evaluate Colby synergy and ingredient batch cost (₹/L) for combining our top systemic formulation with a bio-penetrant adjuvant.`)}
+                            className="w-full text-left text-[11px] font-semibold text-purple-800 hover:text-purple-950 p-2 rounded-lg bg-purple-50/70 hover:bg-purple-100/70 transition flex items-center justify-between"
+                          >
+                            <span>Colby 2-Way Synergy</span>
+                            <ArrowRight className="w-3 h-3 shrink-0" />
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex-1">
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                        Rain Window
-                      </label>
-                      <select
-                        value={simRain}
-                        onChange={(e) => setSimRain(e.target.value)}
-                        className="w-full text-xs bg-white border border-slate-300 rounded-lg px-2 py-2 font-medium text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500"
-                      >
-                        <option value="No Rain (Dry 24h)">Dry (24h+)</option>
-                        <option value="Rain in 2h (<5mm)">Rain in 2h</option>
-                        <option value="Heavy Rain (>20mm)">Heavy Rain</option>
-                      </select>
+
+                    {/* Common Research Inquiries */}
+                    <div className="w-full">
+                      <p className="font-bold text-[11px] text-slate-400 uppercase tracking-wider mb-2 text-center">
+                        Quick Suggested Inquiries
+                      </p>
+                      <div className="flex flex-wrap justify-center gap-2">
+                        {suggestedPrompts.slice(0, 4).map((p, i) => (
+                          <button 
+                            key={i} 
+                            onClick={() => sendMessage(p)}
+                            className="text-xs px-3 py-2 bg-white border border-slate-200/90 rounded-xl hover:bg-slate-50 transition text-slate-700 font-medium hover:border-slate-300 shadow-2xs cursor-pointer active:scale-95 text-left"
+                          >
+                            {p}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
-                </div>
-              </div>
-
-              {/* Action Button */}
-              <div className="flex items-center justify-between pt-1">
-                <div className="flex flex-wrap items-center gap-1">
-                  <span className="text-[10px] text-slate-400 font-semibold uppercase">Quick Targets:</span>
-                  {uniqueTargets.slice(0, 4).map((t, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => setSimTarget(t)}
-                      className="text-[10px] px-2 py-0.5 rounded bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 text-slate-600 transition"
+                ) : filteredHistory.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-16 text-slate-400">
+                    <Search className="w-10 h-10 text-slate-300 mb-3" />
+                    <p className="font-bold text-slate-600 text-sm">No messages match "{searchQuery}"</p>
+                    <button 
+                      onClick={() => setSearchQuery('')}
+                      className="mt-2 text-xs text-indigo-600 font-semibold underline cursor-pointer"
                     >
-                      {t}
+                      Clear search
                     </button>
-                  ))}
-                </div>
+                  </div>
+                ) : (
+                  /* ─── Render Conversation Turn by Turn ─── */
+                  filteredHistory.map((msg) => {
+                    const originalIndex = history.indexOf(msg);
+                    const parsedParts = msg.role === 'assistant' 
+                      ? parseMessageContent(msg.content) 
+                      : [{ type: 'text', text: msg.content }];
 
-                <button
-                  type="button"
-                  onClick={handleRunSimulation}
-                  disabled={isSimulating}
-                  className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white text-xs font-bold rounded-xl shadow-sm flex items-center gap-2 transition disabled:opacity-50"
-                >
-                  {isSimulating ? (
-                    <>
-                      <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      Simulating Field Outcome...
-                    </>
-                  ) : (
-                    <>
-                      <Sliders className="w-3.5 h-3.5" />
-                      Run AI Simulation
-                    </>
-                  )}
-                </button>
+                    return (
+                      <div key={originalIndex} className="group/msg w-full">
+                        {/* USER MESSAGE */}
+                        {msg.role === 'user' ? (
+                          <div className="flex justify-end mb-4">
+                            <div className="max-w-[85%] sm:max-w-[75%] rounded-2xl rounded-tr-xs px-4 py-3 bg-slate-900 text-white shadow-md text-sm leading-relaxed">
+                              <div className="whitespace-pre-wrap font-medium">{msg.content}</div>
+                            </div>
+                          </div>
+                        ) : (
+                          /* ASSISTANT MESSAGE */
+                          <div className="flex justify-start mb-6">
+                            <div className="max-w-[95%] lg:max-w-[88%] w-full rounded-2xl rounded-tl-xs p-4 sm:p-5 bg-white border border-slate-200/90 shadow-xs text-slate-800 text-sm">
+                              {/* Message Header Bar (Cleanly Docked with Zero Collision!) */}
+                              <div className="flex items-center justify-between pb-2.5 mb-3 border-b border-slate-100">
+                                <div className="flex items-center gap-2">
+                                  <div 
+                                    className="w-6 h-6 rounded-lg flex items-center justify-center font-bold text-xs shadow-2xs" 
+                                    style={{ backgroundColor: config.color.hexLight, color: config.color.hex }}
+                                  >
+                                    <Sparkles className="w-3.5 h-3.5" />
+                                  </div>
+                                  <span className="font-bold text-xs text-slate-800">
+                                    Miklens Agronomic AI
+                                  </span>
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-mono">
+                                    {msg.meta?.model || modelName}
+                                  </span>
+                                </div>
+
+                                {/* Integrated Actions: Speak, Copy, Delete */}
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleSpeak(msg.content, originalIndex)}
+                                    title={speakingMsgIdx === originalIndex ? "Stop speech" : "Read aloud"}
+                                    className={`p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-slate-50 transition cursor-pointer ${
+                                      speakingMsgIdx === originalIndex ? 'text-indigo-600 bg-indigo-50 animate-pulse' : ''
+                                    }`}
+                                  >
+                                    {speakingMsgIdx === originalIndex ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopy(msg.content, originalIndex)}
+                                    title="Copy response"
+                                    className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-slate-50 transition cursor-pointer"
+                                  >
+                                    {copied === originalIndex ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteMessage(originalIndex)}
+                                    title="Delete message"
+                                    className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition cursor-pointer"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Message Parsed Parts (Text, Candidate Formula, Artifacts) */}
+                              <div className="space-y-3 leading-relaxed">
+                                {parsedParts.map((part, pIdx) => {
+                                  if (part.type === 'formula') {
+                                    return (
+                                      <CandidateFormulaCard
+                                        key={pIdx}
+                                        formula={part.data}
+                                        config={config}
+                                        onSave={handleSaveAiFormula}
+                                        onRefinePrompt={(refineText) => sendMessage(refineText)}
+                                        isSaved={!!savedFormulas[part.data.Code || part.data.Name]}
+                                        isViewer={isViewer}
+                                      />
+                                    );
+                                  }
+                                  if (part.type === 'artifact') {
+                                    return (
+                                      <ChatArtifactRenderer
+                                        key={pIdx}
+                                        artifactType={part.artifactType}
+                                        data={part.data}
+                                        onPromptClick={(p) => sendMessage(p)}
+                                        onSaveObservation={handleSaveVoiceObservation}
+                                      />
+                                    );
+                                  }
+                                  return (
+                                    <div 
+                                      key={pIdx} 
+                                      className="prose prose-sm max-w-full text-slate-800 overflow-hidden leading-relaxed"
+                                      dangerouslySetInnerHTML={{ __html: sanitizeAiContent(part.text, {
+                                        linkClass: 'font-semibold underline text-emerald-700 hover:text-emerald-900',
+                                        linkStyle: `color: ${config.color.hex}`
+                                      }) }} 
+                                    />
+                                  );
+                                })}
+                              </div>
+
+                              {/* Follow-up Suggestions Chips */}
+                              {msg.suggestions && msg.suggestions.length > 0 && (
+                                <div className="mt-4 pt-3 border-t border-slate-100 not-prose">
+                                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1">
+                                    <Sparkles className="w-3 h-3 text-emerald-500" /> Suggested Next Inquiries:
+                                  </div>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {msg.suggestions.map((sug, sIdx) => (
+                                      <button
+                                        key={sIdx}
+                                        type="button"
+                                        onClick={() => sendMessage(sug)}
+                                        disabled={isLoading}
+                                        className="text-xs px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-emerald-50 hover:border-emerald-300 text-slate-700 hover:text-emerald-950 border border-slate-200/80 font-medium transition shadow-2xs hover:shadow-xs text-left cursor-pointer active:scale-95 flex items-center gap-1.5 group"
+                                      >
+                                        <ArrowRight className="w-3 h-3 text-emerald-500 group-hover:translate-x-0.5 transition-transform shrink-0" />
+                                        <span>{sug}</span>
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Telemetry Footer */}
+                              {msg.meta && (
+                                <div className="mt-3 pt-2 border-t border-slate-100 flex flex-wrap items-center gap-2 text-[10px] text-slate-400 font-mono not-prose">
+                                  {msg.meta.duration && (
+                                    <span className="flex items-center gap-1 bg-slate-50 px-2 py-0.5 rounded-md border border-slate-200/50">
+                                      <Clock className="w-3 h-3 text-slate-400" /> {msg.meta.duration}
+                                    </span>
+                                  )}
+                                  {msg.meta.rag && (
+                                    <span className="flex items-center gap-1 text-emerald-700 bg-emerald-50 border border-emerald-200/70 px-2 py-0.5 rounded-md font-semibold">
+                                      <Sparkles className="w-2.5 h-2.5 text-emerald-500" /> Hybrid RAG ({msg.meta.rag.chunkCount} docs • {msg.meta.rag.retrievalDuration}ms)
+                                    </span>
+                                  )}
+                                  {msg.meta.compressionRatio > 0 && (
+                                    <span className="flex items-center gap-1 text-blue-700 bg-blue-50 border border-blue-200/60 px-2 py-0.5 rounded-md font-semibold">
+                                      <Zap className="w-2.5 h-2.5 text-blue-500" /> Context -{msg.meta.compressionRatio}%
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+
+                {/* ─── Streaming Live Bubble ─── */}
+                {isLoading && streamingMessage && (
+                  <div className="flex justify-start mb-6">
+                    <div className="max-w-[95%] lg:max-w-[88%] w-full rounded-2xl rounded-tl-xs p-4 sm:p-5 bg-white border border-emerald-300 shadow-md text-slate-800 text-sm">
+                      <div className="flex items-center gap-2 pb-2 mb-3 border-b border-slate-100">
+                        <div 
+                          className="w-6 h-6 rounded-lg flex items-center justify-center font-bold text-xs animate-pulse" 
+                          style={{ backgroundColor: config.color.hexLight, color: config.color.hex }}
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                        </div>
+                        <span className="font-bold text-xs text-slate-800">
+                          Miklens Agronomic AI
+                        </span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-mono font-bold animate-pulse">
+                          Streaming Live ({elapsedSeconds}s)
+                        </span>
+                      </div>
+                      <div 
+                        className="text-sm leading-relaxed max-w-full overflow-hidden"
+                        dangerouslySetInnerHTML={{ __html: sanitizeAiContent(streamingMessage, {
+                          linkClass: 'font-semibold underline',
+                          linkStyle: `color: ${config.color.hex}`
+                        }) }}
+                      />
+                      <span className="inline-block w-2 h-4 bg-emerald-500 animate-pulse ml-1 align-middle rounded-xs" />
+                    </div>
+                  </div>
+                )}
+
+                {/* ─── Intelligent Thinking Card ─── */}
+                {isLoading && !streamingMessage && (
+                  <div className="flex justify-start items-start gap-3 my-4">
+                    <div 
+                      className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-xs" 
+                      style={{ backgroundColor: config.color.hexLight, color: config.color.hex }}
+                    >
+                      <Sparkles className="w-4 h-4 animate-spin text-emerald-600" style={{ animationDuration: '3s' }} />
+                    </div>
+                    <div className="bg-white border border-emerald-200/80 rounded-2xl rounded-tl-xs px-4 py-3.5 shadow-sm max-w-md">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span className="text-base">{THINKING_PHASES[thinkingPhase]?.icon || '🔍'}</span>
+                        <span className="text-xs font-bold text-slate-800 animate-pulse">
+                          {THINKING_PHASES[thinkingPhase]?.label || 'Analyzing...'}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-4 text-[10px] text-slate-400 font-mono">
+                        <span className="flex items-center gap-1 text-emerald-600 font-medium">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+                          0-Quota Local RAG
+                        </span>
+                        <span>{elapsedSeconds}s elapsed</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div ref={messagesEndRef} />
               </div>
 
-              {/* Simulation Results Display */}
-              {simResult && (
-                <div className="mt-4 pt-3 border-t border-indigo-200/70 bg-white p-4 rounded-xl shadow-xs">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping" />
-                      <h5 className="font-bold text-xs text-slate-800 uppercase tracking-wider">
-                        Predicted Trial Performance: {simResult.formulationName} vs {simResult.target}
-                      </h5>
-                    </div>
-                    <span className="text-[10px] text-slate-400 font-medium">
-                      Simulated at {simResult.simulatedAt}
-                    </span>
-                  </div>
-
-                  {/* Metrics KPI Cards */}
-                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 mb-3">
-                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-center">
-                      <span className="text-[10px] uppercase font-bold text-emerald-700 block mb-0.5">Predicted Efficacy</span>
-                      <span className="text-xl font-black text-emerald-800">{simResult.predictedEfficacy}%</span>
-                    </div>
-                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-2.5 text-center">
-                      <span className="text-[10px] uppercase font-bold text-blue-700 block mb-0.5">Residual Control</span>
-                      <span className="text-xl font-black text-blue-800">{simResult.residualDays} Days</span>
-                    </div>
-                    <div className="bg-purple-50 border border-purple-200 rounded-xl p-2.5 text-center">
-                      <span className="text-[10px] uppercase font-bold text-purple-700 block mb-0.5">Crop Safety</span>
-                      <span className="text-xl font-black text-purple-800">{simResult.cropSafetyScore}/10</span>
-                    </div>
-                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-center">
-                      <span className="text-[10px] uppercase font-bold text-amber-700 block mb-0.5">Phytotoxicity Risk</span>
-                      <span className={`text-xs font-bold uppercase px-2 py-0.5 rounded-full inline-block mt-1 ${simResult.phytotoxicityRisk === 'High' ? 'bg-red-100 text-red-700' : simResult.phytotoxicityRisk === 'Moderate' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
-                        {simResult.phytotoxicityRisk}
+              {/* ─── Quick Agronomic Tools Floating Drawer ─── */}
+              {isToolsDrawerOpen && (
+                <div className="px-4 py-3 bg-white/95 backdrop-blur-md border-t border-slate-200 shadow-lg animate-slide-up">
+                  <div className="max-w-4xl mx-auto">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1">
+                        <Sparkles className="w-3.5 h-3.5 text-emerald-600" /> Select Specialized Agronomic Tool
                       </span>
-                    </div>
-                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-center col-span-2 sm:col-span-1">
-                      <span className="text-[10px] uppercase font-bold text-slate-600 block mb-0.5">Knockdown Speed</span>
-                      <span className="text-xs font-bold text-slate-800 block mt-1">{simResult.knockdownSpeed}</span>
-                    </div>
-                  </div>
-
-                  {/* Scientific Summary */}
-                  {simResult.scientificSummary && (
-                    <div className="text-xs text-slate-700 bg-slate-50 p-2.5 rounded-lg border border-slate-200/80 mb-2.5 leading-relaxed">
-                      <span className="font-bold text-slate-900">Mode-of-Action Summary: </span>
-                      {simResult.scientificSummary}
-                    </div>
-                  )}
-
-                  {/* Risks & Recommendations */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs mb-3">
-                    {simResult.keyRiskFactors?.length > 0 && (
-                      <div className="bg-amber-50/60 border border-amber-200/70 p-2 rounded-lg">
-                        <span className="font-bold text-amber-900 flex items-center gap-1 mb-1">
-                          <ShieldAlert className="w-3.5 h-3.5 text-amber-600" /> Agronomic Risks
-                        </span>
-                        <ul className="list-disc list-inside space-y-0.5 text-[11px] text-amber-800">
-                          {simResult.keyRiskFactors.map((r, i) => <li key={i}>{r}</li>)}
-                        </ul>
-                      </div>
-                    )}
-                    {simResult.agronomicRecommendations?.length > 0 && (
-                      <div className="bg-emerald-50/60 border border-emerald-200/70 p-2 rounded-lg">
-                        <span className="font-bold text-emerald-900 flex items-center gap-1 mb-1">
-                          <Sparkles className="w-3.5 h-3.5 text-emerald-600" /> Recommendations
-                        </span>
-                        <ul className="list-disc list-inside space-y-0.5 text-[11px] text-emerald-800">
-                          {simResult.agronomicRecommendations.map((r, i) => <li key={i}>{r}</li>)}
-                        </ul>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Direct Hand-off CTAs */}
-                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => navigate('/trials', {
-                          state: {
-                            newTrialWithFormulation: {
-                              formId: simResult.formulationId,
-                              formName: simResult.formulationName,
-                              target: simResult.target,
-                              crop: simResult.crop,
-                              dosage: simResult.dosage
-                            }
-                          }
-                        })}
-                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow-2xs transition flex items-center gap-1.5"
+                      <button 
+                        type="button" 
+                        onClick={() => setIsToolsDrawerOpen(false)} 
+                        className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
                       >
-                        <span>🌿</span> Launch Microplot Trial
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => navigate('/large-scale-trials', {
-                          state: {
-                            newTrialWithFormulation: {
-                              formId: simResult.formulationId,
-                              formName: simResult.formulationName,
-                              target: simResult.target,
-                              crop: simResult.crop,
-                              dosage: simResult.dosage
-                            }
-                          }
-                        })}
-                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-lg shadow-2xs transition flex items-center gap-1.5"
-                      >
-                        <span>🚜</span> Launch Field Study
+                        <X className="w-4 h-4" />
                       </button>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => sendMessage(`Based on the simulation for "${simResult.formulationName}" on "${simResult.target}" (predicted efficacy: ${simResult.predictedEfficacy}%, residual: ${simResult.residualDays} days), what adjuvants or application timing tweaks can elevate its performance even further?`)}
-                      className="text-xs text-indigo-700 hover:text-indigo-900 font-semibold underline flex items-center gap-1"
-                    >
-                      <MessageSquare className="w-3.5 h-3.5" /> Discuss tweaks with AI
-                    </button>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsToolsDrawerOpen(false);
+                          sendMessage(`Run a comprehensive Trial Doctor diagnostic audit across all ${config.name.toLowerCase()} trials in the database. Identify data inconsistencies, abnormal efficacy spikes, weather failure correlations, and herbicide resistance risks.`);
+                        }}
+                        className="p-2.5 rounded-xl border border-slate-200 hover:border-emerald-300 bg-slate-50 hover:bg-emerald-50/50 text-left transition cursor-pointer active:scale-95 group"
+                      >
+                        <span className="text-base block mb-0.5">🩺</span>
+                        <span className="font-bold text-xs text-slate-800 group-hover:text-emerald-900 block">Trial Doctor</span>
+                        <span className="text-[10px] text-slate-500 block truncate">Audit trial anomalies</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsToolsDrawerOpen(false);
+                          sendMessage(`Check live spray weather window and Delta-T conditions for our field trial location today and tomorrow. What are the optimal application hours with minimal drift and evaporation risk?`);
+                        }}
+                        className="p-2.5 rounded-xl border border-slate-200 hover:border-teal-300 bg-slate-50 hover:bg-teal-50/50 text-left transition cursor-pointer active:scale-95 group"
+                      >
+                        <span className="text-base block mb-0.5">🌦️</span>
+                        <span className="font-bold text-xs text-slate-800 group-hover:text-teal-900 block">Spray Window</span>
+                        <span className="text-[10px] text-slate-500 block truncate">Delta-T & drift safety</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsToolsDrawerOpen(false);
+                          sendMessage(`Run a one-way ANOVA statistical variance test comparing our top formulations for ${uniqueTargets[0] || 'dominant weed'}. Calculate the F-statistic, p-value (p < 0.05 significance), and treatment means table.`);
+                        }}
+                        className="p-2.5 rounded-xl border border-slate-200 hover:border-blue-300 bg-slate-50 hover:bg-blue-50/50 text-left transition cursor-pointer active:scale-95 group"
+                      >
+                        <span className="text-base block mb-0.5">📊</span>
+                        <span className="font-bold text-xs text-slate-800 group-hover:text-blue-900 block">ANOVA Stats</span>
+                        <span className="text-[10px] text-slate-500 block truncate">F-statistic variance</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsToolsDrawerOpen(false);
+                          sendMessage(`Evaluate Colby synergy and ingredient batch cost (₹/L) for combining our top systemic herbicide with a bio-penetrant adjuvant. Provide predicted weed sensitivity spectrum and check for chemical antagonism.`);
+                        }}
+                        className="p-2.5 rounded-xl border border-slate-200 hover:border-purple-300 bg-slate-50 hover:bg-purple-50/50 text-left transition cursor-pointer active:scale-95 group"
+                      >
+                        <span className="text-base block mb-0.5">🧪</span>
+                        <span className="font-bold text-xs text-slate-800 group-hover:text-purple-900 block">Colby Synergy</span>
+                        <span className="text-[10px] text-slate-500 block truncate">2-way mix synergy & cost</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsToolsDrawerOpen(false);
+                          sendMessage(`Benchmark our top performing ${config.name.toLowerCase()} formulations across all trials. Which ones deliver the highest efficacy and win rate? Provide an executive summary and a compact comparison leaderboard.`);
+                        }}
+                        className="p-2.5 rounded-xl border border-slate-200 hover:border-amber-300 bg-slate-50 hover:bg-amber-50/50 text-left transition cursor-pointer active:scale-95 group"
+                      >
+                        <span className="text-base block mb-0.5">🏆</span>
+                        <span className="font-bold text-xs text-slate-800 group-hover:text-amber-900 block">Leaderboard</span>
+                        <span className="text-[10px] text-slate-500 block truncate">Top formula win rates</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsToolsDrawerOpen(false);
+                          sendMessage(`Based on all historical ${config.name.toLowerCase()} trial results and ingredient synergy analysis from our inventory, suggest 2 novel, high-potential candidate formulations to test. Include exact ingredient recipes, predicted efficacy %, target spectrum, and scientific rationale.`);
+                        }}
+                        className="p-2.5 rounded-xl border border-slate-200 hover:border-emerald-300 bg-slate-50 hover:bg-emerald-50/50 text-left transition cursor-pointer active:scale-95 group"
+                      >
+                        <span className="text-base block mb-0.5">🔬</span>
+                        <span className="font-bold text-xs text-slate-800 group-hover:text-emerald-900 block">Novel Formulas</span>
+                        <span className="text-[10px] text-slate-500 block truncate">Generate candidate recipes</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsToolsDrawerOpen(false);
+                          sendMessage(`Analyze category gaps and weaknesses for ${config.name.toLowerCase()}: which targets, crop conditions, or locations have underperforming control? What formulation modifications or ingredient combinations would solve these gaps?`);
+                        }}
+                        className="p-2.5 rounded-xl border border-slate-200 hover:border-red-300 bg-slate-50 hover:bg-red-50/50 text-left transition cursor-pointer active:scale-95 group"
+                      >
+                        <span className="text-base block mb-0.5">🎯</span>
+                        <span className="font-bold text-xs text-slate-800 group-hover:text-red-900 block">Category Gaps</span>
+                        <span className="text-[10px] text-slate-500 block truncate">Weakness & resistance</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsToolsDrawerOpen(false);
+                          sendMessage(`Analyze the dosage response relationship across all ${config.name.toLowerCase()} trials. Which dosage levels achieved optimal efficacy without over-application or phytotoxicity?`);
+                        }}
+                        className="p-2.5 rounded-xl border border-slate-200 hover:border-indigo-300 bg-slate-50 hover:bg-indigo-50/50 text-left transition cursor-pointer active:scale-95 group"
+                      >
+                        <span className="text-base block mb-0.5">📈</span>
+                        <span className="font-bold text-xs text-slate-800 group-hover:text-indigo-900 block">Dose Response</span>
+                        <span className="text-[10px] text-slate-500 block truncate">Optimal rate curve</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
+
+              {/* ─── Floating Command Input Dock ─── */}
+              <div className="p-3 sm:p-4 bg-gradient-to-t from-white via-white/95 to-transparent backdrop-blur-xs pb-20 md:pb-4">
+                <div className="max-w-4xl mx-auto w-full">
+                  {!hasKey && (
+                    <p className="text-xs text-amber-700 bg-amber-50 px-3 py-1.5 rounded-xl mb-2 border border-amber-200 flex items-center gap-1.5">
+                      <ShieldAlert className="w-3.5 h-3.5 text-amber-600" />
+                      <span>No Gemini API key detected — configure in Settings → AI Keys.</span>
+                    </p>
+                  )}
+
+                  {/* Attached Image Preview Tag */}
+                  {attachedImage && (
+                    <div className="flex items-center justify-between gap-2 mb-2 px-3 py-2 bg-slate-900 text-white rounded-xl text-xs shadow-md">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <ImageIcon className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span className="font-semibold truncate max-w-[200px] text-slate-200">{attachedImage.name}</span>
+                        {attachedImage.pixelSensor && (
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-500/40">
+                            🟢 Green: {attachedImage.pixelSensor.greenRatio}% | 🍂 Necrotic: {attachedImage.pixelSensor.deadRatio}% | VARI: {attachedImage.pixelSensor.vari}
+                          </span>
+                        )}
+                      </div>
+                      <button 
+                        type="button"
+                        onClick={() => setAttachedImage(null)} 
+                        className="text-slate-400 hover:text-red-400 p-1 rounded-lg"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Input Card */}
+                  <form 
+                    onSubmit={handleSubmit}
+                    className="bg-white border border-slate-200/90 rounded-2xl shadow-lg hover:shadow-xl transition-shadow p-2 sm:p-2.5 focus-within:ring-2 focus-within:ring-emerald-500/20 focus-within:border-emerald-500"
+                  >
+                    <input 
+                      ref={fileInputRef} 
+                      type="file" 
+                      accept="image/*" 
+                      className="hidden" 
+                      onChange={handleAttachImage} 
+                    />
+
+                    {/* Multiline auto-expanding textarea */}
+                    <textarea
+                      ref={inputRef}
+                      rows={1}
+                      value={input}
+                      onChange={handleTextareaInput}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSubmit(e);
+                        }
+                      }}
+                      placeholder={`Ask about ${config.name.toLowerCase()} trials, recipe formulation, synergy, or weed control...`}
+                      disabled={isLoading}
+                      className="w-full px-3 py-2 bg-transparent text-sm text-slate-800 placeholder-slate-400 outline-none resize-none max-h-36 custom-scrollbar leading-relaxed"
+                    />
+
+                    {/* Input Controls Bar */}
+                    <div className="flex items-center justify-between pt-1.5 border-t border-slate-100/90 mt-1">
+                      <div className="flex items-center gap-1">
+                        {/* Quick Tools Drawer Trigger */}
+                        <button
+                          type="button"
+                          onClick={() => setIsToolsDrawerOpen(prev => !prev)}
+                          className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                            isToolsDrawerOpen
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+                          }`}
+                          title="Open agronomic tools palette"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                          <span className="hidden sm:inline">Tools</span>
+                        </button>
+
+                        {/* Attach Image */}
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          title="Attach leaf/plot image for vegetation analysis"
+                          className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition cursor-pointer"
+                        >
+                          <Paperclip className="w-4 h-4" />
+                        </button>
+
+                        {/* Voice Input */}
+                        <button
+                          type="button"
+                          onClick={handleVoiceInput}
+                          title={isListening ? 'Stop listening' : 'Voice input'}
+                          className={`p-1.5 rounded-xl transition cursor-pointer ${
+                            isListening
+                              ? 'bg-red-50 text-red-600 animate-pulse'
+                              : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+                          }`}
+                        >
+                          {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="hidden md:inline text-[11px] text-slate-400 font-medium">
+                          Enter ↵ to send • Shift+Enter ↵ for new line
+                        </span>
+                        <button
+                          type="submit"
+                          disabled={!input.trim() || isLoading}
+                          className="px-3.5 py-1.5 rounded-xl text-white text-xs font-bold shadow-xs flex items-center gap-1.5 transition active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                          style={{ backgroundColor: config.color.hex }}
+                        >
+                          <span>Send</span>
+                          <SendHorizontal className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </form>
+                </div>
+              </div>
+
             </div>
           )}
 
-          {/* Messages */}
-          <div 
-            className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0"
-            onClick={(e) => {
-              const link = e.target.closest('a');
-              if (!link) return;
-              const href = link.getAttribute('href') || '';
-              const dataFormulaId = link.getAttribute('data-formula-id');
-              const dataTrialId = link.getAttribute('data-trial-id');
+          {/* ═══════════════════════════════════════════════════════════════════════
+              TAB 2: OUTCOME LAB (FULL-SCREEN SIMULATION LABORATORY)
+          ═══════════════════════════════════════════════════════════════════════ */}
+          {activeTab === 'simulator' && (
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 custom-scrollbar pb-24 md:pb-6">
+              <div className="max-w-5xl mx-auto space-y-6">
 
-              // 1. Direct Formulation Link Redirection
-              const isFormulaLink = !!dataFormulaId || href.includes('/formulations') || href.startsWith('formula:') || link.classList.contains('formula-redirect-link');
-              if (isFormulaLink) {
-                e.preventDefault();
-                e.stopPropagation();
-                const rawId = dataFormulaId || href.match(/focus=([^&#\s]+)/i)?.[1] || '';
-                const cleanId = decodeURIComponent(rawId).trim();
-                if (cleanId) {
-                  navigate(`/formulations?focus=${encodeURIComponent(cleanId)}`, {
-                    state: { focusFormula: cleanId }
-                  });
-                  window.dispatchEvent(new CustomEvent('app:navigate_to_formulation', {
-                    detail: { formulaId: cleanId }
-                  }));
-                } else {
-                  navigate('/formulations');
-                }
-                return;
-              }
-
-              // 2. Direct Trial Link Redirection
-              const isTrialLink = !!dataTrialId || href.includes('/trials') || href.startsWith('trial:') || link.classList.contains('trial-redirect-link');
-              if (isTrialLink) {
-                e.preventDefault();
-                e.stopPropagation();
-                const rawId = dataTrialId || href.match(/focus=([^&#\s]+)/i)?.[1] || '';
-                const cleanId = decodeURIComponent(rawId).trim();
-                if (cleanId) {
-                  navigate(`/trials?focus=${encodeURIComponent(cleanId)}`, {
-                    state: { focusTrial: cleanId }
-                  });
-                  window.dispatchEvent(new CustomEvent('app:navigate_to_trial', {
-                    detail: { trialId: cleanId }
-                  }));
-                } else {
-                  navigate('/trials');
-                }
-                return;
-              }
-
-              // 3. Fallback: Any other internal link containing focus=
-              if (href.includes('focus=')) {
-                e.preventDefault();
-                e.stopPropagation();
-                const matched = href.match(/focus=([^&#\s]+)/i)?.[1];
-                if (matched) {
-                  const clean = decodeURIComponent(matched).trim();
-                  const isTrial = (state.trials || []).some(t => 
-                    String(t.ID || t.id || '').toLowerCase() === clean.toLowerCase() ||
-                    String(t.TrialID || '').toLowerCase() === clean.toLowerCase()
-                  );
-                  if (isTrial) {
-                    navigate(`/trials?focus=${encodeURIComponent(clean)}`, { state: { focusTrial: clean } });
-                    window.dispatchEvent(new CustomEvent('app:navigate_to_trial', { detail: { trialId: clean } }));
-                  } else {
-                    navigate(`/formulations?focus=${encodeURIComponent(clean)}`, { state: { focusFormula: clean } });
-                    window.dispatchEvent(new CustomEvent('app:navigate_to_formulation', { detail: { formulaId: clean } }));
-                  }
-                }
-              }
-            }}
-          >
-            {history.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-slate-400 py-6 max-w-2xl mx-auto">
-                <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-3 shadow-inner" style={{ backgroundColor: config.color.hexLight, color: config.color.hex }}>
-                  <Sparkles className="w-7 h-7" />
-                </div>
-                <h3 className="font-bold text-slate-800 text-base text-center">
-                  Senior {config.name} AI Research Assistant
-                </h3>
-                <p className="text-xs text-slate-500 text-center mb-2 max-w-md">
-                  Connected to complete trial databases, field studies, formulation recipes, and ingredient inventory.
-                </p>
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200/80 text-emerald-800 text-[11px] font-semibold mb-4">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  Next-Gen Hybrid RAG Active • 0 Firebase Quota Used • Sub-30ms Retrieval
-                </div>
-
-                {/* R&D Quick Starters */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full mb-4">
-                  <button
-                    onClick={() => sendMessage(`Benchmark our top performing ${config.name.toLowerCase()} formulations across all trials (both standard microplot and large-scale field trials). Which ones deliver the highest efficacy and win rate? Provide a clear performance leaderboard.`)}
-                    className="p-3 bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200/80 rounded-xl hover:shadow-sm text-left transition group hover:border-amber-300"
-                  >
-                    <div className="flex items-center gap-2 font-bold text-xs text-amber-900 mb-1">
-                      <span>🏆</span> Benchmark Top Formulations
+                {/* Lab Banner */}
+                <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-5 sm:p-6 rounded-2xl shadow-md border border-indigo-500/20">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center shrink-0">
+                      <Sliders className="w-5 h-5 text-indigo-300" />
                     </div>
-                    <p className="text-[11px] text-amber-700 leading-tight">Rank high-efficacy formulas and calculate win rates across finalized trials.</p>
-                  </button>
-
-                  <button
-                    onClick={() => sendMessage(`Based on all historical ${config.name.toLowerCase()} trial results and ingredient synergy analysis from our inventory, suggest 2 novel, high-potential candidate formulations to test. Include exact ingredient recipes, predicted efficacy %, target spectrum, and scientific rationale.`)}
-                    className="p-3 bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200/80 rounded-xl hover:shadow-sm text-left transition group hover:border-emerald-300"
-                  >
-                    <div className="flex items-center gap-2 font-bold text-xs text-emerald-900 mb-1">
-                      <FlaskConical className="w-3.5 h-3.5 text-emerald-600" /> Suggest Novel Formulas
+                    <div>
+                      <h3 className="text-base sm:text-lg font-bold">
+                        Agronomic Trial Outcome Simulator
+                      </h3>
+                      <p className="text-xs text-indigo-200 mt-0.5">
+                        Predict field efficacy, control duration, and crop safety using chemical mode-of-action models and historical {config.name} trial benchmarks.
+                      </p>
                     </div>
-                    <p className="text-[11px] text-emerald-700 leading-tight">Synthesize inventory ingredients to propose high-efficacy new candidate recipes.</p>
-                  </button>
-
-                  <button
-                    onClick={() => sendMessage(`Evaluate feasibility and efficacy prediction for a new custom recipe: will it work, what is the expected kill rate percentage, which weed species are susceptible vs. tolerant, and does it duplicate any existing formula?`)}
-                    className="sm:col-span-2 p-3 bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 border border-indigo-200/80 rounded-xl hover:shadow-sm text-left transition group hover:border-indigo-300"
-                  >
-                    <div className="flex items-center gap-2 font-bold text-xs text-indigo-900 mb-1">
-                      <span>🔮</span> Predict Formula Feasibility & Weed Spectrum
-                    </div>
-                    <p className="text-[11px] text-indigo-700 leading-tight">Verify if a proposed formulation will work, its predicted efficacy %, target weed sensitivity, and duplication status.</p>
-                  </button>
+                  </div>
                 </div>
 
-                <p className="font-semibold text-xs text-slate-400 uppercase tracking-wider mb-2">Common Research Questions</p>
-                <div className="w-full space-y-2">
-                  {suggestedPrompts.map((p, i) => (
-                    <button key={i} onClick={() => sendMessage(p)}
-                      className="w-full text-left text-xs px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl hover:bg-slate-100 transition text-slate-600 font-medium hover:border-slate-300">
-                      {p}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : filteredHistory.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-slate-400 py-8">
-                <Search className="w-10 h-10 text-slate-200 mb-3" />
-                <p className="font-semibold text-slate-500 text-sm">No messages match your search.</p>
-              </div>
-            ) : (
-              filteredHistory.map((msg) => {
-                const originalIndex = history.indexOf(msg);
-                const parsedParts = msg.role === 'assistant' ? parseMessageContent(msg.content) : [{ type: 'text', text: msg.content }];
-                return (
-                  <div key={originalIndex} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} group relative mb-8`}>
-                    {msg.role === 'assistant' && (
-                      <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 mr-2 mt-0.5" style={{ backgroundColor: config.color.hexLight, color: config.color.hex }}>
-                        <Sparkles className="w-3.5 h-3.5" />
-                      </div>
-                    )}
-                    <div className={`relative ${msg.role === 'user' ? 'max-w-[85%] rounded-2xl px-4 py-3 text-white rounded-br-sm' : 'max-w-[95%] lg:max-w-[90%] rounded-2xl rounded-bl-sm px-5 py-4 bg-white/95 border border-slate-200/90 shadow-2xs text-slate-800'}`} style={msg.role === 'user' ? { backgroundColor: config.color.hex } : undefined}>
-                      {parsedParts.map((part, pIdx) => {
-                        if (part.type === 'formula') {
-                          return (
-                            <CandidateFormulaCard
-                              key={pIdx}
-                              formula={part.data}
-                              config={config}
-                              onSave={handleSaveAiFormula}
-                              onRefinePrompt={(refineText) => sendMessage(refineText)}
-                              isSaved={!!savedFormulas[part.data.Code || part.data.Name]}
-                              isViewer={isViewer}
-                            />
-                          );
-                        }
-                        if (part.type === 'artifact') {
-                          return (
-                            <ChatArtifactRenderer
-                              key={pIdx}
-                              artifactType={part.artifactType}
-                              data={part.data}
-                              onPromptClick={(p) => sendMessage(p)}
-                              onSaveObservation={handleSaveVoiceObservation}
-                            />
-                          );
-                        }
-                        return (
-                          <div key={pIdx} className={msg.role === 'user' ? "text-sm whitespace-pre-wrap leading-relaxed" : "text-sm leading-relaxed max-w-full overflow-hidden"}
-                            dangerouslySetInnerHTML={{ __html: sanitizeAiContent(part.text, {
-                              linkClass: msg.role === 'user' ? 'text-white/80 hover:text-white' : 'font-semibold underline',
-                              linkStyle: msg.role === 'assistant' ? `color: ${config.color.hex}` : ''
-                            }) }} />
-                        );
-                      })}
+                {/* 2-Column Responsive Lab Grid */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
-                      {/* Follow-up Suggestions */}
-                      {msg.role === 'assistant' && msg.suggestions && msg.suggestions.length > 0 && (
-                        <div className="mt-3 pt-2.5 border-t border-slate-100 flex flex-wrap gap-1.5 items-center not-prose">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1 mr-1">
-                            <Sparkles className="w-3 h-3 text-indigo-500" /> Deep Dive:
-                          </span>
-                          {msg.suggestions.map((sug, sIdx) => (
-                            <button
-                              key={sIdx}
-                              type="button"
-                              onClick={() => sendMessage(sug)}
-                              disabled={isLoading}
-                              className="text-[11px] px-2.5 py-1 rounded-full bg-slate-50 hover:bg-indigo-50 hover:border-indigo-200 text-slate-700 hover:text-indigo-900 border border-slate-200/90 font-medium transition shadow-2xs text-left cursor-pointer active:scale-95 flex items-center gap-1"
-                            >
-                              <ArrowRight className="w-2.5 h-2.5 text-indigo-400 shrink-0" />
-                              <span>{sug}</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
+                  {/* Left Column: Experimental Setup Card (5 cols) */}
+                  <div className="lg:col-span-5 bg-white border border-slate-200 rounded-2xl shadow-xs p-5 space-y-4">
+                    <h4 className="font-bold text-xs uppercase tracking-wider text-slate-700 pb-2 border-b border-slate-100 flex items-center gap-2">
+                      <FlaskConical className="w-4 h-4 text-indigo-600" /> Scenario Parameters
+                    </h4>
 
-                      {/* Response Metadata Bar */}
-                      {msg.role === 'assistant' && msg.meta && (
-                        <div className="mt-2.5 pt-1.5 border-t border-slate-100 flex flex-wrap items-center gap-2.5 text-[10px] text-slate-400 font-mono not-prose">
-                          {msg.meta.duration && (
-                            <span className="flex items-center gap-1" title="Generation latency">
-                              <Clock className="w-3 h-3 text-slate-400" /> {msg.meta.duration}
-                            </span>
-                          )}
-                          {msg.meta.model && (
-                            <span className="flex items-center gap-1" title="AI Model">
-                              <Bot className="w-3 h-3 text-slate-400" /> {msg.meta.model}
-                            </span>
-                          )}
-                          {msg.meta.rag && (
-                            <span className="flex items-center gap-1 text-indigo-700 bg-indigo-50 border border-indigo-200/70 px-1.5 py-0.5 rounded-xs font-semibold text-[9px]" title={`Hybrid RAG: ${msg.meta.rag.chunkCount} verified records retrieved in ${msg.meta.rag.retrievalDuration}ms (0 Firebase reads)`}>
-                              <Sparkles className="w-2.5 h-2.5 text-indigo-500" /> RAG: {msg.meta.rag.chunkCount} docs ({msg.meta.rag.retrievalDuration}ms • 0 reads)
-                            </span>
-                          )}
-                          {msg.meta.compressionRatio > 0 && (
-                            <span className="flex items-center gap-0.5 text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-xs font-semibold text-[9px]" title="Context compressed to conserve tokens">
-                              <Zap className="w-2.5 h-2.5 text-emerald-500" /> -{msg.meta.compressionRatio}% tokens
-                            </span>
-                          )}
-                        </div>
+                    {/* Formulation */}
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Formulation Candidate
+                      </label>
+                      <select
+                        value={simFormId}
+                        onChange={(e) => {
+                          setSimFormId(e.target.value);
+                          if (e.target.value !== 'custom') setSimCustomForm('');
+                        }}
+                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 font-medium text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
+                      >
+                        <option value="">Select Formulation from Database...</option>
+                        {categoryFormulations.map(f => (
+                          <option key={f.ID || f.id} value={f.ID || f.id}>
+                            {f.Code ? `[${f.Code}] ` : ''}{f.Name}
+                          </option>
+                        ))}
+                        <option value="custom">✏️ Enter Custom Formulation Recipe...</option>
+                      </select>
+                      {simFormId === 'custom' && (
+                        <input
+                          type="text"
+                          placeholder="e.g. Glyphosate 41% + Organosilicone 0.1%"
+                          value={simCustomForm}
+                          onChange={(e) => setSimCustomForm(e.target.value)}
+                          className="w-full mt-2 text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-medium"
+                        />
                       )}
                     </div>
 
-                    {/* Actions Menu */}
-                    <div className={`absolute -bottom-8 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 ${msg.role === 'user' ? 'right-0' : 'left-0 ml-10'}`}>
-                      {msg.role === 'assistant' && (
-                        <>
+                    {/* Target Problem */}
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Target {config.targetLabel || 'Weed / Pest / Disease'}
+                      </label>
+                      <input
+                        type="text"
+                        list="sim-target-list-tab"
+                        placeholder={`e.g. ${uniqueTargets[0] || 'Target flora'}`}
+                        value={simTarget}
+                        onChange={(e) => setSimTarget(e.target.value)}
+                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 font-medium text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
+                      />
+                      <datalist id="sim-target-list-tab">
+                        {uniqueTargets.map((t, idx) => (
+                          <option key={idx} value={t} />
+                        ))}
+                      </datalist>
+
+                      {/* Quick target tags */}
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {uniqueTargets.slice(0, 4).map((t, idx) => (
                           <button
+                            key={idx}
                             type="button"
-                            onClick={() => handleToggleSpeak(msg.content, originalIndex)}
-                            title={speakingMsgIdx === originalIndex ? "Stop speaking" : "Read aloud"}
-                            className={`p-1.5 rounded-lg bg-white shadow-sm border border-slate-200 hover:bg-slate-50 transition ${speakingMsgIdx === originalIndex ? 'text-indigo-600 bg-indigo-50 border-indigo-200 animate-pulse' : 'text-slate-400 hover:text-indigo-600'}`}
+                            onClick={() => setSimTarget(t)}
+                            className="text-[10px] px-2 py-0.5 rounded-md bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 text-slate-600 transition cursor-pointer"
                           >
-                            {speakingMsgIdx === originalIndex ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+                            {t}
                           </button>
-                          <button onClick={() => handleCopy(msg.content, originalIndex)} title="Copy message"
-                            className="p-1.5 rounded-lg bg-white shadow-sm border border-slate-200 hover:bg-slate-50 text-slate-400 hover:text-emerald-600 transition">
-                            {copied === originalIndex ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Dosage & Crop */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Dosage Rate
+                        </label>
+                        <input
+                          type="text"
+                          value={simDosage}
+                          onChange={(e) => setSimDosage(e.target.value)}
+                          placeholder="2.5 ml/L"
+                          className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-medium text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Host Crop
+                        </label>
+                        <input
+                          type="text"
+                          value={simCrop}
+                          onChange={(e) => setSimCrop(e.target.value)}
+                          placeholder="e.g. Soybean"
+                          className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-medium text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Microclimate */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Temperature
+                        </label>
+                        <select
+                          value={simTemp}
+                          onChange={(e) => setSimTemp(e.target.value)}
+                          className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 font-medium text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
+                        >
+                          <option value="20°C">20°C (Mild)</option>
+                          <option value="28°C">28°C (Optimal)</option>
+                          <option value="35°C">35°C (High Heat)</option>
+                          <option value="40°C">40°C (Extreme)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Rain Window
+                        </label>
+                        <select
+                          value={simRain}
+                          onChange={(e) => setSimRain(e.target.value)}
+                          className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 font-medium text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
+                        >
+                          <option value="No Rain (Dry 24h)">Dry (24h+)</option>
+                          <option value="Rain in 2h (<5mm)">Rain in 2h</option>
+                          <option value="Heavy Rain (>20mm)">Heavy Rain</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Run Simulation CTA */}
+                    <button
+                      type="button"
+                      onClick={handleRunSimulation}
+                      disabled={isSimulating}
+                      className="w-full py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white font-bold text-xs rounded-xl shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
+                    >
+                      {isSimulating ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          <span>Simulating Agronomic Model...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sliders className="w-4 h-4" />
+                          <span>Run AI Agronomic Simulation</span>
                         </>
                       )}
-                      <button onClick={() => handleDeleteMessage(originalIndex)} title="Delete message"
-                        className="p-1.5 rounded-lg bg-white shadow-sm border border-slate-200 hover:bg-slate-50 text-slate-400 hover:text-red-500 transition">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+                    </button>
                   </div>
-                );
-              })
-            )}
 
-            {/* Live Streaming Response Bubble */}
-            {isLoading && streamingMessage && (
-              <div className="flex justify-start items-start group relative mb-8">
-                <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 mr-2 mt-0.5" style={{ backgroundColor: config.color.hexLight, color: config.color.hex }}>
-                  <Sparkles className="w-3.5 h-3.5 animate-pulse" />
-                </div>
-                <div className="max-w-[95%] lg:max-w-[90%] rounded-2xl rounded-bl-sm px-5 py-4 bg-white/95 border border-indigo-200/80 shadow-xs text-slate-800">
-                  <div 
-                    className="text-sm leading-relaxed max-w-full overflow-hidden"
-                    dangerouslySetInnerHTML={{ __html: sanitizeAiContent(streamingMessage, {
-                      linkClass: 'font-semibold underline',
-                      linkStyle: `color: ${config.color.hex}`
-                    }) }}
-                  />
-                  <span className="inline-block w-2 h-4 bg-indigo-600 animate-pulse ml-1 align-middle rounded-xs" />
-                  <div className="mt-3 pt-2 border-t border-slate-100 flex items-center gap-2.5 text-[10px] text-slate-400 font-mono">
-                    <span className="inline-flex items-center gap-1 text-indigo-600 font-semibold">
-                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-ping" /> Streaming live
-                    </span>
-                    <span>•</span>
-                    <span className="flex items-center gap-1">
-                      <Clock className="w-3 h-3 text-slate-400" /> {elapsedSeconds}s
-                    </span>
+                  {/* Right Column: Telemetry & Results (7 cols) */}
+                  <div className="lg:col-span-7 space-y-4">
+                    {simResult ? (
+                      <div className="bg-white border border-slate-200 rounded-2xl shadow-xs p-5 space-y-4">
+                        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                          <div>
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                              Simulation Verified
+                            </span>
+                            <h4 className="font-bold text-sm text-slate-900 mt-1">
+                              {simResult.formulationName} vs {simResult.target}
+                            </h4>
+                          </div>
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            {simResult.simulatedAt}
+                          </span>
+                        </div>
+
+                        {/* 5 KPI Metric Cards */}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                          <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3 text-center">
+                            <span className="text-[10px] font-bold uppercase text-emerald-800 block">Predicted Efficacy</span>
+                            <span className="text-2xl font-black text-emerald-700">{simResult.predictedEfficacy}%</span>
+                          </div>
+                          <div className="bg-blue-50/70 border border-blue-200 rounded-xl p-3 text-center">
+                            <span className="text-[10px] font-bold uppercase text-blue-800 block">Residual Duration</span>
+                            <span className="text-2xl font-black text-blue-700">{simResult.residualDays}d</span>
+                          </div>
+                          <div className="bg-purple-50/70 border border-purple-200 rounded-xl p-3 text-center">
+                            <span className="text-[10px] font-bold uppercase text-purple-800 block">Crop Safety</span>
+                            <span className="text-2xl font-black text-purple-700">{simResult.cropSafetyScore}/10</span>
+                          </div>
+                          <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3 text-center">
+                            <span className="text-[10px] font-bold uppercase text-amber-800 block">Phytotoxicity Risk</span>
+                            <span className="text-xs font-bold text-amber-900 block mt-1.5 uppercase">{simResult.phytotoxicityRisk}</span>
+                          </div>
+                          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center sm:col-span-2">
+                            <span className="text-[10px] font-bold uppercase text-slate-700 block">Knockdown Speed</span>
+                            <span className="text-xs font-bold text-slate-900 block mt-1.5">{simResult.knockdownSpeed}</span>
+                          </div>
+                        </div>
+
+                        {/* Scientific Mode-of-Action Summary */}
+                        {simResult.scientificSummary && (
+                          <div className="text-xs text-slate-700 bg-slate-50 p-3 rounded-xl border border-slate-200 leading-relaxed">
+                            <span className="font-bold text-slate-900">Mode-of-Action Analysis: </span>
+                            {simResult.scientificSummary}
+                          </div>
+                        )}
+
+                        {/* Agronomic Risks & Recommendations */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                          {simResult.keyRiskFactors?.length > 0 && (
+                            <div className="bg-amber-50/60 border border-amber-200 p-3 rounded-xl">
+                              <span className="font-bold text-amber-900 flex items-center gap-1 mb-1">
+                                <ShieldAlert className="w-3.5 h-3.5 text-amber-600" /> Agronomic Risks
+                              </span>
+                              <ul className="list-disc list-inside space-y-0.5 text-[11px] text-amber-800">
+                                {simResult.keyRiskFactors.map((r, i) => <li key={i}>{r}</li>)}
+                              </ul>
+                            </div>
+                          )}
+
+                          {simResult.agronomicRecommendations?.length > 0 && (
+                            <div className="bg-emerald-50/60 border border-emerald-200 p-3 rounded-xl">
+                              <span className="font-bold text-emerald-900 flex items-center gap-1 mb-1">
+                                <Sparkles className="w-3.5 h-3.5 text-emerald-600" /> Advice
+                              </span>
+                              <ul className="list-disc list-inside space-y-0.5 text-[11px] text-emerald-800">
+                                {simResult.agronomicRecommendations.map((r, i) => <li key={i}>{r}</li>)}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-100">
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => navigate('/trials', {
+                                state: {
+                                  newTrialWithFormulation: {
+                                    formId: simResult.formulationId,
+                                    formName: simResult.formulationName,
+                                    target: simResult.target,
+                                    crop: simResult.crop,
+                                    dosage: simResult.dosage
+                                  }
+                                }
+                              })}
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <span>🌿</span> Launch Microplot
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => navigate('/large-scale-trials', {
+                                state: {
+                                  newTrialWithFormulation: {
+                                    formId: simResult.formulationId,
+                                    formName: simResult.formulationName,
+                                    target: simResult.target,
+                                    crop: simResult.crop,
+                                    dosage: simResult.dosage
+                                  }
+                                }
+                              })}
+                              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <span>🚜</span> Launch Field Study
+                            </button>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveTab('chat');
+                              sendMessage(`Based on the simulation for "${simResult.formulationName}" on "${simResult.target}" (predicted efficacy: ${simResult.predictedEfficacy}%, residual: ${simResult.residualDays} days), what adjuvants or application timing tweaks can elevate its performance even further?`);
+                            }}
+                            className="text-xs text-indigo-700 hover:text-indigo-900 font-bold underline flex items-center gap-1 cursor-pointer"
+                          >
+                            <MessageSquare className="w-3.5 h-3.5" /> Discuss in AI Chat
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-white border border-slate-200 rounded-2xl shadow-xs p-8 text-center flex flex-col items-center justify-center min-h-[360px]">
+                        <div className="w-14 h-14 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-3">
+                          <Sliders className="w-7 h-7" />
+                        </div>
+                        <h4 className="font-bold text-slate-800 text-sm mb-1">
+                          Simulator Ready
+                        </h4>
+                        <p className="text-xs text-slate-500 max-w-sm mb-4">
+                          Configure a candidate recipe and environmental window on the left, then click "Run AI Agronomic Simulation" to generate instant efficacy and safety projections.
+                        </p>
+                      </div>
+                    )}
                   </div>
+
                 </div>
+
               </div>
-            )}
+            </div>
+          )}
 
-            {/* Intelligent Thinking Indicator Card */}
-            {isLoading && !streamingMessage && (
-              <div className="flex justify-start items-start gap-2.5 my-3">
-                <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 shadow-xs border border-indigo-200/50" style={{ backgroundColor: config.color.hexLight, color: config.color.hex }}>
-                  <Sparkles className="w-4 h-4 animate-spin text-indigo-600" style={{ animationDuration: '3s' }} />
-                </div>
-                <div className="bg-gradient-to-r from-slate-50 via-indigo-50/40 to-slate-50 border border-indigo-100 rounded-2xl rounded-bl-sm px-4 py-3 shadow-2xs max-w-md">
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <span className="text-sm">{THINKING_PHASES[thinkingPhase]?.icon || '🔍'}</span>
-                    <span className="text-xs font-semibold text-slate-700 animate-pulse">
-                      {THINKING_PHASES[thinkingPhase]?.label || 'Analyzing...'}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-4 text-[10px] text-slate-400 font-mono">
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-ping" />
-                      <span>Next-Gen Hybrid RAG (0 Quota)</span>
-                    </div>
-                    <span className="flex items-center gap-1">
-                      <Clock className="w-3 h-3 text-slate-400" /> {elapsedSeconds}s elapsed
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Unified Agronomic Quick-Action Strip */}
-          <div className="px-3 py-1.5 bg-slate-50/90 backdrop-blur border-t border-slate-200/80 flex items-center gap-1.5 overflow-x-auto text-xs no-scrollbar">
-            <span className="font-bold text-slate-400 flex items-center gap-1 shrink-0 uppercase tracking-wider text-[10px] mr-1">
-              <Sparkles className="w-3 h-3 text-emerald-600" /> Agronomic Tools:
-            </span>
-            <button
-              type="button"
-              onClick={() => sendMessage(`Run a comprehensive Trial Doctor diagnostic audit across all ${config.name.toLowerCase()} trials in the database. Identify data inconsistencies, abnormal efficacy spikes, weather failure correlations, and herbicide resistance risks.`)}
-              disabled={isLoading}
-              className="shrink-0 px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200/90 rounded-full text-slate-700 hover:text-slate-900 font-medium text-[11px] shadow-2xs hover:shadow-xs transition flex items-center gap-1 cursor-pointer active:scale-95"
-            >
-              <span>🩺</span> Trial Doctor
-            </button>
-            <button
-              type="button"
-              onClick={() => sendMessage(`Check live spray weather window and Delta-T conditions for our field trial location today and tomorrow. What are the optimal application hours with minimal drift and evaporation risk?`)}
-              disabled={isLoading}
-              className="shrink-0 px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200/90 rounded-full text-slate-700 hover:text-slate-900 font-medium text-[11px] shadow-2xs hover:shadow-xs transition flex items-center gap-1 cursor-pointer active:scale-95"
-            >
-              <span>🌦️</span> Spray Window
-            </button>
-            <button
-              type="button"
-              onClick={() => sendMessage(`Run a one-way ANOVA statistical variance test comparing our top formulations for ${uniqueTargets[0] || 'dominant weed'}. Calculate the F-statistic, p-value (p < 0.05 significance), and treatment means table.`)}
-              disabled={isLoading}
-              className="shrink-0 px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200/90 rounded-full text-slate-700 hover:text-slate-900 font-medium text-[11px] shadow-2xs hover:shadow-xs transition flex items-center gap-1 cursor-pointer active:scale-95"
-            >
-              <span>📊</span> ANOVA Stats
-            </button>
-            <button
-              type="button"
-              onClick={() => sendMessage(`Evaluate Colby synergy and ingredient batch cost (₹/L) for combining our top systemic herbicide with a bio-penetrant adjuvant. Provide predicted weed sensitivity spectrum and check for chemical antagonism.`)}
-              disabled={isLoading}
-              className="shrink-0 px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200/90 rounded-full text-slate-700 hover:text-slate-900 font-medium text-[11px] shadow-2xs hover:shadow-xs transition flex items-center gap-1 cursor-pointer active:scale-95"
-            >
-              <span>🧪</span> Colby Synergy
-            </button>
-            <button
-              type="button"
-              onClick={() => sendMessage(`Benchmark our top performing ${config.name.toLowerCase()} formulations across all trials. Which ones deliver the highest efficacy and win rate? Provide an executive summary and a compact comparison leaderboard.`)}
-              disabled={isLoading}
-              className="shrink-0 px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200/90 rounded-full text-slate-700 hover:text-slate-900 font-medium text-[11px] shadow-2xs hover:shadow-xs transition flex items-center gap-1 cursor-pointer active:scale-95"
-            >
-              <span>🏆</span> Benchmark Leaderboard
-            </button>
-            <button
-              type="button"
-              onClick={() => sendMessage(`Based on all historical ${config.name.toLowerCase()} trial results and ingredient synergy analysis from our inventory, suggest 2 novel, high-potential candidate formulations to test. Include exact ingredient recipes, predicted efficacy %, target spectrum, and scientific rationale.`)}
-              disabled={isLoading}
-              className="shrink-0 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-full text-emerald-800 font-semibold text-[11px] shadow-2xs hover:shadow-xs transition flex items-center gap-1 cursor-pointer active:scale-95"
-            >
-              <FlaskConical className="w-3 h-3 text-emerald-600" /> Suggest Novel Formulas
-            </button>
-            <button
-              type="button"
-              onClick={() => sendMessage(`Analyze category gaps and weaknesses for ${config.name.toLowerCase()}: which targets, crop conditions, or locations have underperforming control? What formulation modifications or ingredient combinations would solve these gaps?`)}
-              disabled={isLoading}
-              className="shrink-0 px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200/90 rounded-full text-slate-700 hover:text-slate-900 font-medium text-[11px] shadow-2xs hover:shadow-xs transition flex items-center gap-1 cursor-pointer active:scale-95"
-            >
-              <span>🎯</span> Category Gaps
-            </button>
-            <button
-              type="button"
-              onClick={() => sendMessage(`Analyze the dosage response relationship across all ${config.name.toLowerCase()} trials. Which dosage levels achieved optimal efficacy without over-application or phytotoxicity?`)}
-              disabled={isLoading}
-              className="shrink-0 px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200/90 rounded-full text-slate-700 hover:text-slate-900 font-medium text-[11px] shadow-2xs hover:shadow-xs transition flex items-center gap-1 cursor-pointer active:scale-95"
-            >
-              <span>📈</span> Dosage Response
-            </button>
-          </div>
-
-          {/* Input */}
-          <div className="p-3 border-t bg-white">
-            {!hasKey && (
-              <p className="text-xs text-amber-600 bg-amber-50 px-3 py-1.5 rounded-lg mb-2 border border-amber-100">
-                No Gemini API key — go to Settings → AI Keys to add one.
-              </p>
-            )}
-            {attachedImage && (
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-2 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-xl text-xs shadow-2xs">
-                <div className="flex items-center gap-2 min-w-0">
-                  <ImageIcon className="w-4 h-4 text-blue-600 shrink-0" />
-                  <span className="text-blue-800 font-semibold truncate max-w-[200px]">{attachedImage.name}</span>
-                  {attachedImage.pixelSensor && (
-                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
-                      🟢 Green: {attachedImage.pixelSensor.greenRatio}% | 🍂 Necrotic: {attachedImage.pixelSensor.deadRatio}% | VARI: {attachedImage.pixelSensor.vari}
-                    </span>
-                  )}
-                </div>
-                <button onClick={() => setAttachedImage(null)} className="text-blue-400 hover:text-red-500 p-1">
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )}
-            <form className="flex gap-2" onSubmit={handleSubmit}>
-              <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleAttachImage} />
-              <button type="button" onClick={() => fileInputRef.current?.click()}
-                title="Attach image"
-                className="p-3 rounded-xl text-slate-400 hover:text-blue-500 hover:bg-blue-50 transition shrink-0">
-                <Paperclip className="w-5 h-5" />
-              </button>
-              <button type="button" onClick={handleVoiceInput}
-                title={isListening ? 'Stop listening' : 'Voice input'}
-                className={`p-3 rounded-xl transition shrink-0 ${isListening ? 'text-red-500 bg-red-50 animate-pulse' : 'text-slate-400 hover:bg-slate-50'}`} style={isListening ? undefined : { color: config.color.hex }}>
-                {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-              </button>
-              <input
-                ref={inputRef}
-                type="text"
-                value={input}
-                onChange={e => setInput(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(input); }}}
-                placeholder={`Ask about your ${config.name.toLowerCase()} trials, formulations, or targets…`}
-                disabled={isLoading}
-                className="flex-1 px-4 py-3 bg-slate-100 rounded-xl focus:bg-white focus:ring-2 outline-none transition text-sm"
-                style={{ '--tw-ring-color': config.color.hex }}
-              />
-              <button type="submit" disabled={!input.trim() || isLoading}
-                className="p-3 rounded-xl flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed text-white"
-                style={{ backgroundColor: config.color.hex }}>
-                <SendHorizontal className="w-5 h-5" />
-              </button>
-            </form>
-          </div>
-          </div>
         </div>
       </div>
     </div>
