@@ -170,4 +170,57 @@ describe('Global Mode of Action (MoA) & Chemical Interaction Engine', () => {
       expect(ams.targetSite).toContain('Sequester hard water');
     });
   });
+
+  // ─── 5. Organic Products, Bio-Control & Bio-Stimulants ───
+  describe('Organic Products, Bio-Control & Bio-Stimulants', () => {
+    it('accurately identifies bio-fungicides under official FRAC BM and FRAC P codes', () => {
+      const trichoderma = identifyMoA('Trichoderma viride 1% WP');
+      const bacillus = identifyMoA('Bacillus subtilis Bio-Fungicide');
+      const knotweed = identifyMoA('Reynoutria Giant Knotweed Extract');
+      const chitosan = identifyMoA('Chitosan Liquid');
+
+      expect(trichoderma.code).toBe('FRAC BM02');
+      expect(trichoderma.isOrganic).toBe(true);
+      expect(trichoderma.targetSite).toContain('Mycoparasitism');
+      expect(trichoderma.resistanceRisk).toContain('None / Negligible');
+
+      expect(bacillus.code).toBe('FRAC BM02');
+      expect(knotweed.code).toBe('FRAC P05');
+      expect(chitosan.code).toBe('FRAC P06');
+    });
+
+    it('accurately identifies bio-insecticides under official IRAC UNE, UNF, and UNM codes', () => {
+      const beauveria = identifyMoA('Beauveria bassiana 1.15% WP');
+      const metarhizium = identifyMoA('Metarhizium anisopliae');
+      const de = identifyMoA('Diatomaceous Earth Natural Silica');
+      const karanja = identifyMoA('Karanja Oil Extract');
+
+      expect(beauveria.code).toBe('IRAC UNF');
+      expect(beauveria.isOrganic).toBe(true);
+      expect(beauveria.targetSite).toContain('cuticle breakdown');
+      expect(beauveria.resistanceRisk).toContain('None / Negligible');
+
+      expect(metarhizium.code).toBe('IRAC UNF');
+      expect(de.code).toBe('IRAC UNM');
+      expect(de.targetSite).toContain('absorb epicuticular hydrocarbon waxes');
+      expect(karanja.code).toBe('IRAC UNE');
+    });
+
+    it('accurately identifies bio-stimulants and mycorrhizae with zero resistance risk', () => {
+      const seaweed = identifyMoA('Ascophyllum nodosum Seaweed Extract');
+      const humic = identifyMoA('Humic Acid 12% Liquid');
+      const fulvic = identifyMoA('Fulvic Acid Powder');
+      const vam = identifyMoA('Mycorrhiza VAM Inoculant');
+      const azotobacter = identifyMoA('Azotobacter Bio-Fertilizer');
+
+      expect(seaweed.code).toBe('BIO-STIM');
+      expect(seaweed.isOrganic).toBe(true);
+      expect(seaweed.resistanceRisk).toContain('Not Applicable');
+
+      expect(humic.code).toBe('BIO-STIM');
+      expect(fulvic.code).toBe('BIO-STIM');
+      expect(vam.code).toBe('BIO-INOC');
+      expect(azotobacter.code).toBe('BIO-INOC');
+    });
+  });
 });

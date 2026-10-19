@@ -1038,12 +1038,275 @@ export const IRAC_DATABASE = {
     chemicalFamily: 'Bacillus thuringiensis protein endotoxins', systemicity: 'Stomach Ingestion Only',
     targetSite: 'Cry/Vip toxin binding to cadherin receptors inducing midgut membrane pore formation',
     resistanceRisk: 'Medium (Receptor mutation / down-regulation in target pests)',
-    crossResistanceRisk: 'Specific to Cry/Vip protein subtypes'
+    crossResistanceRisk: 'Specific to Cry/Vip protein subtypes',
+    isOrganic: true
   }
 };
 
 // ============================================================================
-// 4. ADJUVANTS, SURFACTANTS & SYNERGISTS
+// 4. ORGANIC PRODUCTS, BIO-PESTICIDES, BIO-FUNGICIDES & BIO-STIMULANTS
+// ============================================================================
+// Comprehensive registry for products that do not fall under conventional single-site
+// synthetic chemistry. Grounded in official FRAC BM (Biologicals), FRAC P (Host Defence),
+// IRAC UNE (Botanicals), IRAC UNF (Entomopathogenic Fungi), IRAC UNM (Mechanical/Physical),
+// HRAC 0 (Bio-Desiccants), and international organic standards (OMRI, NPOP, USDA-NOP).
+export const ORGANIC_BIO_DATABASE = {
+  // ── A. BIO-FUNGICIDES & MICROBIAL ANTAGONISTS (FRAC BM & P) ──
+  'trichoderma': {
+    code: 'FRAC BM02', group: 'FRAC BM', fracGroup: 'BM', committee: 'FRAC (Bio)',
+    name: 'Microbial Antagonist & Mycoparasite', class: 'Bio-Fungicide (Beneficial Fungi)',
+    chemicalFamily: 'Trichoderma viride / harzianum spores', systemicity: 'Protective Rhizosphere & Phyllosphere Colonizer',
+    targetSite: 'Multi-site: Mycoparasitism (chitinase/glucanase enzymatic lysis) + competitive rhizosphere exclusion + Induced Systemic Resistance (ISR)',
+    resistanceRisk: 'None / Negligible (Complex living biological multi-action)',
+    crossResistanceRisk: 'Zero risk of cross-resistance with synthetic fungicides',
+    isOrganic: true, organicStandard: 'OMRI / NPOP / USDA-NOP Eligible'
+  },
+  'subtilis': {
+    code: 'FRAC BM02', group: 'FRAC BM', fracGroup: 'BM', committee: 'FRAC (Bio)',
+    name: 'Bacterial Lipopeptide Membrane Disruptor', class: 'Bio-Fungicide & Bactericide',
+    chemicalFamily: 'Bacillus subtilis / amyloliquefaciens ferment', systemicity: 'Protective Foliar & Root Colonizer',
+    targetSite: 'Multi-site: Secretion of cyclic lipopeptides (surfactin, iturin, fengycin) disrupting pathogen cell membranes + Systemic Acquired Resistance (SAR)',
+    resistanceRisk: 'None / Negligible', crossResistanceRisk: 'Zero',
+    isOrganic: true, organicStandard: 'OMRI / NPOP / USDA-NOP Eligible'
+  },
+  'pseudomonas': {
+    code: 'FRAC BM02', group: 'FRAC BM', fracGroup: 'BM', committee: 'FRAC (Bio)',
+    name: 'Rhizosphere Siderophore & Antibiotic Producer', class: 'Bio-Fungicide & Bio-Control Agent',
+    chemicalFamily: 'Pseudomonas fluorescens / putida', systemicity: 'Root & Vascular Shield',
+    targetSite: 'Multi-site: Iron chelation via pyoverdine siderophores, 2,4-DAPG antibiotic secretion & plant ISR triggering',
+    resistanceRisk: 'None / Negligible', crossResistanceRisk: 'Zero',
+    isOrganic: true, organicStandard: 'OMRI / NPOP / USDA-NOP Eligible'
+  },
+  'ampelomyces': {
+    code: 'FRAC BM02', group: 'FRAC BM', fracGroup: 'BM', committee: 'FRAC (Bio)',
+    name: 'Hyperparasitic Fungal Antagonist', class: 'Bio-Fungicide (Powdery Mildew Specialist)',
+    chemicalFamily: 'Ampelomyces quisqualis', systemicity: 'Contact Hyperparasite',
+    targetSite: 'Direct intracellular penetration and destruction of powdery mildew conidiophores',
+    resistanceRisk: 'None', crossResistanceRisk: 'Zero',
+    isOrganic: true, organicStandard: 'OMRI / NPOP'
+  },
+  'reynoutria': {
+    code: 'FRAC P05', group: 'FRAC P', fracGroup: 'P', committee: 'FRAC (Bio)',
+    name: 'Host Plant Defense Inducer (Giant Knotweed)', class: 'Bio-Fungicide Plant Extract',
+    chemicalFamily: 'Reynoutria sachalinensis extract (Regalia)', systemicity: 'Systemic Acquired Resistance (SAR)',
+    targetSite: 'Stimulates plant phytoalexin synthesis, PR proteins, and lignin cell wall reinforcement',
+    resistanceRisk: 'None / Negligible (Acts via host defense)', crossResistanceRisk: 'Zero',
+    isOrganic: true, organicStandard: 'OMRI / USDA-NOP'
+  },
+  'tea tree': {
+    code: 'FRAC BM01', group: 'FRAC BM', fracGroup: 'BM', committee: 'FRAC (Bio)',
+    name: 'Botanical Terpene Membrane Disruptor', class: 'Bio-Fungicide (Essential Oil)',
+    chemicalFamily: 'Melaleuca alternifolia extract (Tea Tree Oil)', systemicity: 'Contact Membrane Stripper & Translaminar',
+    targetSite: 'Disruption of fungal cell membrane integrity and mitochondrial organelle leakage',
+    resistanceRisk: 'None / Negligible', crossResistanceRisk: 'Zero',
+    isOrganic: true, organicStandard: 'OMRI Eligible'
+  },
+  'chitosan': {
+    code: 'FRAC P06', group: 'FRAC P', fracGroup: 'P', committee: 'FRAC (Bio)',
+    name: 'Natural Polysaccharide Elicitor', class: 'Bio-Fungicide & Virucide (Crustacean/Fungal Chitin)',
+    chemicalFamily: 'Deacetylated poly-D-glucosamine', systemicity: 'Systemic Plant Defense Elicitor',
+    targetSite: 'Binding to plant plasma membrane receptors inducing callose deposition & phytoalexins + direct fungal membrane charge disruption',
+    resistanceRisk: 'None', crossResistanceRisk: 'Zero',
+    isOrganic: true, organicStandard: 'OMRI / NPOP'
+  },
+  'phosphite': {
+    code: 'FRAC P07', group: 'FRAC P', fracGroup: 'P', committee: 'FRAC (Bio)',
+    name: 'Host Defense Elicitor & Oomycete Inhibitor', class: 'Inorganic Bio-Rational Protectant',
+    chemicalFamily: 'Potassium / Sodium Phosphite (Phosphonates)', systemicity: 'Full 2-Way Ambimobile Systemic (Xylem & Phloem)',
+    targetSite: 'Direct suppression of oomycete oxidative phosphorylation + triggers host hypersensitive response (SAR)',
+    resistanceRisk: 'Low to Medium', crossResistanceRisk: 'Low',
+    isOrganic: true, organicStandard: 'Bio-Rational Input'
+  },
+
+  // ── B. BIO-INSECTICIDES, BOTANICALS & ENTOMOPATHOGENS (IRAC UNE, UNF, UNM) ──
+  'beauveria': {
+    code: 'IRAC UNF', group: 'IRAC UNF', iracGroup: 'UNF', committee: 'IRAC (Bio)',
+    name: 'Entomopathogenic Fungal Parasite', class: 'Bio-Insecticide (White Muscardine)',
+    chemicalFamily: 'Beauveria bassiana fungal blastospores', systemicity: 'Contact Cuticle Penetration (Parasitic Mycosis)',
+    targetSite: 'Spore adhesion, germination, enzymatic cuticle breakdown (Pr1 proteases & chitinases) leading to internal hemolymph proliferation and fatal mycosis',
+    resistanceRisk: 'None / Negligible (Multi-enzymatic mechanical digestion)',
+    crossResistanceRisk: 'Zero cross-resistance with neurotoxic insecticides',
+    isOrganic: true, organicStandard: 'OMRI / NPOP / USDA-NOP Eligible'
+  },
+  'metarhizium': {
+    code: 'IRAC UNF', group: 'IRAC UNF', iracGroup: 'UNF', committee: 'IRAC (Bio)',
+    name: 'Entomopathogenic Green Muscardine Fungi', class: 'Bio-Insecticide (Soil & Foliar Grubs/Locusts)',
+    chemicalFamily: 'Metarhizium anisopliae conidiospores', systemicity: 'Contact Cuticle Infiltration',
+    targetSite: 'Enzymatic cuticle penetration followed by destruxin cyclic peptide secretion inducing insect paralysis and death',
+    resistanceRisk: 'None / Negligible', crossResistanceRisk: 'Zero',
+    isOrganic: true, organicStandard: 'OMRI / NPOP Eligible'
+  },
+  'verticillium': {
+    code: 'IRAC UNF', group: 'IRAC UNF', iracGroup: 'UNF', committee: 'IRAC (Bio)',
+    name: 'Entomopathogenic Sucking Pest Parasite', class: 'Bio-Insecticide (Whitefly, Thrips & Aphid Specialist)',
+    chemicalFamily: 'Lecanicillium (Verticillium) lecanii', systemicity: 'Contact Cuticular Mycosis',
+    targetSite: 'Conidial cuticle penetration and bassianolide/dipicolinic acid toxin release',
+    resistanceRisk: 'None / Negligible', crossResistanceRisk: 'Zero',
+    isOrganic: true, organicStandard: 'OMRI / NPOP Eligible'
+  },
+  'karanja': {
+    code: 'IRAC UNE', group: 'IRAC UNE', iracGroup: 'UNE', committee: 'IRAC (Bio)',
+    name: 'Botanical Furanoflavonoid Antifeedant', class: 'Bio-Pesticide (Pongamia Oil Extract)',
+    chemicalFamily: 'Karanjin / Pongamol Botanical Complex', systemicity: 'Contact, Translaminar & Antifeedant',
+    targetSite: 'Gut disruption, oviposition deterrence, ecdysone inhibition and spray synergy',
+    resistanceRisk: 'Negligible', crossResistanceRisk: 'Zero',
+    isOrganic: true, organicStandard: 'OMRI / NPOP Eligible'
+  },
+  'pyrethrum': {
+    code: 'IRAC 3A (Bio)', group: 'IRAC 3A', iracGroup: '3A', committee: 'IRAC (Bio)',
+    name: 'Natural Botanical Pyrethrins', class: 'Organic Contact Knockdown Insecticide',
+    chemicalFamily: 'Chrysanthemum cinerariifolium botanical extract', systemicity: 'Fast Contact Knockdown (Axonal Excitation)',
+    targetSite: 'Modulates voltage-gated sodium channels causing repetitive discharge; natural esters degrade rapidly in sunlight without environmental residues',
+    resistanceRisk: 'Low to Medium (Rapidly photodegraded in field)',
+    crossResistanceRisk: 'Target-site kdr can affect pyrethrins',
+    isOrganic: true, organicStandard: 'OMRI / NPOP / USDA-NOP Certified Organic'
+  },
+  'diatomaceous': {
+    code: 'IRAC UNM', group: 'IRAC UNM', iracGroup: 'UNM', committee: 'IRAC (Bio)',
+    name: 'Mechanical Cuticle Desiccant', class: 'Physical / Mineral Bio-Insecticide',
+    chemicalFamily: 'Amorphous Silica (Fossilized Freshwater Diatoms)', systemicity: 'Non-chemical Physical Barrier',
+    targetSite: 'Microscopic razor-sharp silica particles absorb epicuticular hydrocarbon waxes, causing rapid, fatal insect desiccation and dehydration',
+    resistanceRisk: 'Zero (Physical Mode of Action cannot trigger biological resistance)',
+    crossResistanceRisk: 'Zero',
+    isOrganic: true, organicStandard: 'OMRI / NPOP Certified 100% Organic'
+  },
+  'kaolin': {
+    code: 'IRAC UNM', group: 'IRAC UNM', iracGroup: 'UNM', committee: 'IRAC (Bio)',
+    name: 'Reflective Mineral Particle Barrier', class: 'Physical Protectant & Sunscreen (Surround)',
+    chemicalFamily: 'Processed Aluminosilicate Mineral Clay', systemicity: 'Foliar Surface Particle Film',
+    targetSite: 'Creates tactile and visual repellent barrier preventing insect landing, tactile feeding, and oviposition while reflecting excess UV/heat',
+    resistanceRisk: 'Zero (Physical / Behavioral Deterrence)', crossResistanceRisk: 'Zero',
+    isOrganic: true, organicStandard: 'OMRI / USDA-NOP Certified'
+  },
+  'soap': {
+    code: 'IRAC UNM', group: 'IRAC UNM', iracGroup: 'UNM', committee: 'IRAC (Bio)',
+    name: 'Potassium Salts of Fatty Acids', class: 'Contact Insecticidal Soap',
+    chemicalFamily: 'Potassium Salt of Coconut / Palm Fatty Acids', systemicity: 'Contact Membrane Disruptor',
+    targetSite: 'Dissolves outer lipophilic insect cuticular waxes and disrupts cellular osmotic membrane integrity',
+    resistanceRisk: 'None / Negligible (Physical membrane lysis)', crossResistanceRisk: 'Zero',
+    isOrganic: true, organicStandard: 'OMRI / USDA-NOP Eligible'
+  },
+  'garlic': {
+    code: 'IRAC UNE', group: 'IRAC UNE', iracGroup: 'UNE', committee: 'IRAC (Bio)',
+    name: 'Botanical Allicin Sensory Repellent', class: 'Bio-Rational Repellent & Nematicide',
+    chemicalFamily: 'Diallyl polysulfides / Allicin (Allium sativum extract)', systemicity: 'Contact Repellent & Systemic Root Uptake',
+    targetSite: 'Sensory olfactory masking, feeding deterrence, and inhibition of sulfhydryl enzymes in nematode gut',
+    resistanceRisk: 'Zero', crossResistanceRisk: 'Zero',
+    isOrganic: true, organicStandard: 'OMRI / NPOP Eligible'
+  },
+  'npv': {
+    code: 'IRAC Bio-Virus', group: 'IRAC Bio', iracGroup: 'Bio', committee: 'IRAC (Bio)',
+    name: 'Nucleopolyhedrovirus Larval Bio-Control', class: 'Viral Bio-Insecticide (HaNPV / SlNPV)',
+    chemicalFamily: 'Baculoviridae (Polyhedral Occlusion Bodies)', systemicity: 'Ingestion Only (Midgut Alkaline Dissolution)',
+    targetSite: 'Alkaline dissolution of occlusion bodies in larval midgut, virion fusion with midgut microvilli, massive tissue lysis and "caterpillar wilt"',
+    resistanceRisk: 'Low (Strictly host-specific virus)', crossResistanceRisk: 'Zero with chemicals',
+    isOrganic: true, organicStandard: 'OMRI / NPOP Eligible'
+  },
+
+  // ── C. BIO-HERBICIDES & BOTANICAL BURNDOWNS (HRAC 0) ──
+  'clove': {
+    code: 'HRAC 0', group: 'HRAC 0', hracGroup: '0', wssa: 'Bio-Burndown', committee: 'HRAC (Bio)',
+    name: 'Essential Oil Membrane Stripper', class: 'Bio-Herbicide Contact Desiccant',
+    chemicalFamily: 'Eugenol (Syzygium aromaticum extract)', systemicity: 'Fast Non-systemic Contact Burn',
+    targetSite: 'Rapid dissolution of plant cuticular lipids and electrolyte leakage within 2-4 hours',
+    resistanceRisk: 'Zero (Physical membrane stripping)', crossResistanceRisk: 'Zero',
+    isOrganic: true, organicStandard: 'OMRI / NPOP Approved'
+  },
+  'corn gluten': {
+    code: 'HRAC 0', group: 'HRAC 0', hracGroup: '0', wssa: 'Bio-Pre-emergence', committee: 'HRAC (Bio)',
+    name: 'Natural Pre-emergence Dipeptide Inhibitor', class: 'Organic Pre-emergence Weed Suppressor',
+    chemicalFamily: 'Zea mays corn protein hydrolysate', systemicity: 'Soil Applied Seedling Barrier',
+    targetSite: 'Active dipeptides (Ala-Gln, Pro-Ala) inhibit root development in newly germinating weed seedlings',
+    resistanceRisk: 'Zero', crossResistanceRisk: 'Zero',
+    isOrganic: true, organicStandard: 'OMRI / NPOP Certified'
+  },
+
+  // ── D. BIO-STIMULANTS, PLANT GROWTH PROMOTERS & INOCULANTS ──
+  'seaweed': {
+    code: 'BIO-STIM', group: 'BIO-STIM', committee: 'Bio-Stimulant',
+    name: 'Marine Algal Bio-Stimulant & Stress Adaptogen', class: 'Organic Plant Growth Promoter & Tonic',
+    chemicalFamily: 'Ascophyllum nodosum / Kappaphycus alvarezii extract', systemicity: 'Systemic Metabolic Enhancer (Foliar & Root)',
+    targetSite: 'Abiotic stress alleviation: delivers natural auxins, cytokinins, betaines and stimulates endogenous SOD/catalase antioxidant enzymes',
+    resistanceRisk: 'Not Applicable (Plant Nutritional & Metabolic Stimulant)',
+    crossResistanceRisk: 'Zero (Universal crop safety & synergistic tank-mix compatibility)',
+    isOrganic: true, organicStandard: 'OMRI / NPOP / USDA-NOP Certified Organic'
+  },
+  'kelp': {
+    code: 'BIO-STIM', group: 'BIO-STIM', committee: 'Bio-Stimulant',
+    name: 'Cold-water Kelp Extract', class: 'Organic Root Stimulator & Bio-Catalyst',
+    chemicalFamily: 'Laminaria / Ascophyllum extract', systemicity: 'Foliar & Root Systemic',
+    targetSite: 'Stimulates root elongation, lateral root initiation, and chlorophyll retention (anti-senescence)',
+    resistanceRisk: 'Not Applicable', crossResistanceRisk: 'Zero',
+    isOrganic: true, organicStandard: 'OMRI Certified'
+  },
+  'humic': {
+    code: 'BIO-STIM', group: 'BIO-STIM', committee: 'Bio-Stimulant',
+    name: 'Soil Conditioner & Cation Exchanger', class: 'Organic Soil Health & Root Activator',
+    chemicalFamily: 'Polymeric Hydroxy-carboxylic Acid (Leonardite humates)', systemicity: 'Soil CEC Enhancer & Root Uptake Aid',
+    targetSite: 'Increases soil Cation Exchange Capacity (CEC), complexes insoluble nutrients (P, Fe, Zn), and stimulates root cell membrane ATPase activity',
+    resistanceRisk: 'Not Applicable', crossResistanceRisk: 'Zero',
+    isOrganic: true, organicStandard: 'OMRI / NPOP Certified'
+  },
+  'fulvic': {
+    code: 'BIO-STIM', group: 'BIO-STIM', committee: 'Bio-Stimulant',
+    name: 'Low Molecular Weight Cellular Carrier', class: 'Organic Foliar Penetrant & Nutrient Translocator',
+    chemicalFamily: 'Fulvic Acid Fraction (Highly oxygenated polyphenol)', systemicity: 'Foliar & Cellular Translocation Facilitator',
+    targetSite: 'Acts as a natural chelator that penetrates cellular membranes, accelerating micronutrient and agrochemical foliar absorption',
+    resistanceRisk: 'Not Applicable', crossResistanceRisk: 'Zero',
+    isOrganic: true, organicStandard: 'OMRI / NPOP Certified'
+  },
+  'amino acid': {
+    code: 'BIO-STIM', group: 'BIO-STIM', committee: 'Bio-Stimulant',
+    name: 'Enzymatic Protein Hydrolysate Complex', class: 'Stress Recovery & Organic Nitrogen Builder',
+    chemicalFamily: 'Free L-Alpha Amino Acids & Short Peptides', systemicity: 'Direct Foliar Cellular Absorption',
+    targetSite: 'Provides pre-formed protein building blocks, saving plant metabolic energy during drought, heat, and herbicide shock',
+    resistanceRisk: 'Not Applicable', crossResistanceRisk: 'Zero',
+    isOrganic: true, organicStandard: 'OMRI / NPOP Certified'
+  },
+  'mycorrhiza': {
+    code: 'BIO-INOC', group: 'BIO-INOC', committee: 'Bio-Inoculant',
+    name: 'Symbiotic Endomycorrhizal Root Fungi', class: 'Bio-Fertilizer / Inoculant (VAM)',
+    chemicalFamily: 'Glomus intraradices / mosseae fungal propagules', systemicity: 'Symbiotic Root Colonization',
+    targetSite: 'Fungal hyphae expand plant root surface area by up to 1000%, mobilizing insoluble phosphorus, zinc and moisture under drought stress',
+    resistanceRisk: 'Not Applicable', crossResistanceRisk: 'Zero',
+    isOrganic: true, organicStandard: 'OMRI / NPOP Certified'
+  },
+  'vam': {
+    code: 'BIO-INOC', group: 'BIO-INOC', committee: 'Bio-Inoculant',
+    name: 'Vesicular Arbuscular Mycorrhizae', class: 'Bio-Inoculant & Soil Health Builder',
+    chemicalFamily: 'Endomycorrhizal fungal spores', systemicity: 'Symbiotic Root Inoculant',
+    targetSite: 'Facilitates phosphorus uptake and enhances root tolerance to soil pathogens',
+    resistanceRisk: 'Not Applicable', crossResistanceRisk: 'Zero',
+    isOrganic: true, organicStandard: 'OMRI / NPOP Certified'
+  },
+  'azotobacter': {
+    code: 'BIO-INOC', group: 'BIO-INOC', committee: 'Bio-Inoculant',
+    name: 'Free-Living Biological Nitrogen Fixer', class: 'Bio-Fertilizer (Bacterial Inoculant)',
+    chemicalFamily: 'Azotobacter chroococcum bacteria', systemicity: 'Rhizosphere Soil Colonizer',
+    targetSite: 'Fixes atmospheric nitrogen (N2) into plant-available ammonium (NH4+) and synthesizes plant growth auxins',
+    resistanceRisk: 'Not Applicable', crossResistanceRisk: 'Zero',
+    isOrganic: true, organicStandard: 'OMRI / NPOP Certified'
+  },
+  'rhizobium': {
+    code: 'BIO-INOC', group: 'BIO-INOC', committee: 'Bio-Inoculant',
+    name: 'Legume Symbiotic Nitrogen Fixer', class: 'Bio-Fertilizer (Root Nodule Symbiont)',
+    chemicalFamily: 'Rhizobium leguminosarum / japonicum', systemicity: 'Root Nodule Symbiosis',
+    targetSite: 'Biological nitrogen fixation within root nodules via bacterial nitrogenase enzyme complex',
+    resistanceRisk: 'Not Applicable', crossResistanceRisk: 'Zero',
+    isOrganic: true, organicStandard: 'OMRI / NPOP Certified'
+  },
+  'phosphobacteria': {
+    code: 'BIO-INOC', group: 'BIO-INOC', committee: 'Bio-Inoculant',
+    name: 'Phosphate Solubilizing Bacteria (PSB)', class: 'Bio-Fertilizer / Soil Inoculant',
+    chemicalFamily: 'Bacillus megaterium / Pseudomonas striata', systemicity: 'Rhizosphere Soil Colonizer',
+    targetSite: 'Produces organic acids (gluconic, citric) that solubilize fixed tricalcium and iron phosphates in soil',
+    resistanceRisk: 'Not Applicable', crossResistanceRisk: 'Zero',
+    isOrganic: true, organicStandard: 'OMRI / NPOP Certified'
+  }
+};
+
+// ============================================================================
+// 5. ADJUVANTS, SURFACTANTS & SYNERGISTS
 // ============================================================================
 export const ADJUVANT_DATABASE = {
   'surfactant': {
@@ -1131,7 +1394,14 @@ export function identifyMoA(activeName, category = 'herbicide') {
     }
   }
 
-  // 2. Select prioritized category database
+  // 2. Check Organic / Bio-Rational Database
+  for (const [key, data] of Object.entries(ORGANIC_BIO_DATABASE)) {
+    if (rawClean.includes(key) || normalized.includes(key) || key.includes(normalized)) {
+      return { active: key, ...data };
+    }
+  }
+
+  // 3. Select prioritized category database
   const targetDb = isFungicide
     ? FRAC_DATABASE
     : isInsecticide
@@ -1145,7 +1415,7 @@ export function identifyMoA(activeName, category = 'herbicide') {
     }
   }
 
-  // 3. Cross-committee fallback: check remaining databases if not found in primary
+  // 4. Cross-committee fallback: check remaining databases if not found in primary
   const otherDbs = [
     { cat: 'HRAC', db: HRAC_DATABASE },
     { cat: 'FRAC', db: FRAC_DATABASE },

@@ -6,7 +6,7 @@ import Modal from '../components/Modal.jsx';
 import { addIngredient, deleteIngredient } from '../services/dataLayer.js';
 import { hasAccess } from '../utils/categoryConfig.js';
 import { identifyMoA } from '../utils/agrochemicalMoaDatabase.js';
-import { Edit, Trash2, Plus, Search, ChevronDown, ChevronUp, FlaskConical, Share2, ShieldCheck, X, Sparkles, AlertCircle } from 'lucide-react';
+import { Edit, Trash2, Plus, Search, ChevronDown, ChevronUp, FlaskConical, Share2, ShieldCheck, X, Sparkles, AlertCircle, Leaf } from 'lucide-react';
 
 export default function Ingredients({ onMenuClick }) {
   const { state, updateState, getAppState } = useAppState();
@@ -425,10 +425,12 @@ export default function Ingredients({ onMenuClick }) {
                             const code = ing.MoACode || detected?.code;
                             const risk = ing.ResistanceRisk || detected?.resistanceRisk;
                             const chemFamily = ing.ChemicalFamily || detected?.chemicalFamily;
+                            const isOrganic = detected?.isOrganic || code?.includes('(Bio)') || code?.startsWith('BIO') || code?.includes('BM') || code?.includes('UNE') || code?.includes('UNF') || code?.includes('UNM');
 
                             if (!code) return null;
 
                             const colorClasses = 
+                              isOrganic ? 'bg-emerald-100 text-emerald-800 border-emerald-300' :
                               code.startsWith('HRAC') ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
                               code.startsWith('FRAC') ? 'bg-purple-50 text-purple-700 border-purple-200' :
                               code.startsWith('IRAC') ? 'bg-amber-50 text-amber-800 border-amber-200' :
@@ -437,9 +439,9 @@ export default function Ingredients({ onMenuClick }) {
                             return (
                               <span 
                                 className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shadow-2xs flex items-center gap-1 ${colorClasses}`}
-                                title={`${chemFamily ? chemFamily + ' • ' : ''}${risk ? 'Resistance Risk: ' + risk : ''}`}
+                                title={`${chemFamily ? chemFamily + ' • ' : ''}${risk ? 'Resistance Risk: ' + risk : ''}${detected?.organicStandard ? ' • ' + detected.organicStandard : ''}`}
                               >
-                                <ShieldCheck className="w-2.5 h-2.5" />
+                                {isOrganic ? <Leaf className="w-2.5 h-2.5 text-emerald-700" /> : <ShieldCheck className="w-2.5 h-2.5" />}
                                 {code}
                               </span>
                             );
@@ -565,20 +567,28 @@ export default function Ingredients({ onMenuClick }) {
 
                         return (
                           <div className="w-full pt-3 border-t border-slate-200/60">
-                            <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
                               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                                Official Resistance Management Profile ({committee})
+                                {detected?.isOrganic ? <Leaf className="w-3.5 h-3.5 text-emerald-600" /> : <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />}
+                                Official Mode of Action & Resistance Profile ({committee})
                               </span>
-                              {risk && (
-                                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                                  risk.toLowerCase().includes('high') ? 'bg-red-50 text-red-700 border border-red-200' :
-                                  risk.toLowerCase().includes('medium') ? 'bg-amber-50 text-amber-700 border border-amber-200' :
-                                  'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                }`}>
-                                  Risk: {risk.split(' ')[0]}
-                                </span>
-                              )}
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {detected?.organicStandard && (
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                                    <Leaf className="w-2.5 h-2.5 text-emerald-600" />
+                                    {detected.organicStandard}
+                                  </span>
+                                )}
+                                {risk && (
+                                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                    risk.toLowerCase().includes('high') ? 'bg-red-50 text-red-700 border border-red-200' :
+                                    risk.toLowerCase().includes('medium') ? 'bg-amber-50 text-amber-700 border border-amber-200' :
+                                    'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  }`}>
+                                    Risk: {risk.split(' ')[0]}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs text-slate-600">
                               <div className="bg-white p-2.5 rounded-xl border border-slate-200/80 shadow-2xs">

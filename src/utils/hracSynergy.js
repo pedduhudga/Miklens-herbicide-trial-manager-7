@@ -7,6 +7,7 @@ import {
   HRAC_DATABASE,
   FRAC_DATABASE,
   IRAC_DATABASE,
+  ORGANIC_BIO_DATABASE,
   ADJUVANT_DATABASE,
   identifyMoA,
   identifyHrac,
@@ -17,6 +18,7 @@ export {
   HRAC_DATABASE,
   FRAC_DATABASE,
   IRAC_DATABASE,
+  ORGANIC_BIO_DATABASE,
   ADJUVANT_DATABASE,
   identifyMoA,
   identifyHrac
