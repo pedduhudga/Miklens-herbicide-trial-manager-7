@@ -292,15 +292,17 @@ export default function Trials({ onMenuClick }) {
     if (!parsed) return;
 
     let target = activeTrial;
-    if (!target && (parsed.trialName || parsed.formulation)) {
-      const q = (parsed.trialName || parsed.formulation).toLowerCase();
+    if (!target && (parsed.trialName || parsed.formulation || parsed.plot)) {
+      const q = (parsed.trialName || parsed.formulation || '').toLowerCase();
+      const plotQ = (parsed.plot || '').toLowerCase();
       target = trials.find(t => 
-        (t.TrialName && t.TrialName.toLowerCase().includes(q)) ||
-        (t.FormulationName && t.FormulationName.toLowerCase().includes(q)) ||
-        (t.ID && String(t.ID).toLowerCase() === q)
+        (q && t.TrialName && t.TrialName.toLowerCase().includes(q)) ||
+        (q && t.FormulationName && t.FormulationName.toLowerCase().includes(q)) ||
+        (q && t.ID && String(t.ID).toLowerCase() === q) ||
+        (plotQ && ((t.PlotNumber && String(t.PlotNumber).toLowerCase() === plotQ) || (t.Plot && String(t.Plot).toLowerCase() === plotQ)))
       );
     }
-    if (!target && trials.length > 0) {
+    if (!target && trials.length === 1) {
       target = trials[0];
     }
 
@@ -346,7 +348,7 @@ export default function Trials({ onMenuClick }) {
     } else {
       window.dispatchEvent(new CustomEvent('app:toast', {
         detail: {
-          msg: 'Voice dictation captured! Please select or create a trial to save the observation.',
+          msg: 'Voice dictation captured, but no matching trial was found. Please select a trial card first.',
           type: 'info'
         }
       }));
@@ -428,11 +430,13 @@ export default function Trials({ onMenuClick }) {
           return;
         }
 
-        const updatedTrials = [...trials];
+        const allTrials = getAppState().trials || state.trials || [];
+        const updatedTrials = [...allTrials];
         for (const payload of importedTrials) {
-          updatedTrials.push(payload);
+          const catPayload = { ...payload, Category: payload.Category || activeCategory };
+          updatedTrials.push(catPayload);
           try {
-            await addTrial(payload, getAppState);
+            await addTrial(catPayload, getAppState);
           } catch (dbErr) {
             console.error('Failed to add trial in DB:', dbErr);
           }
@@ -446,7 +450,7 @@ export default function Trials({ onMenuClick }) {
     };
     reader.readAsText(file);
     e.target.value = '';
-  }, [trials, updateState, getAppState]);
+  }, [state.trials, activeCategory, updateState, getAppState]);
   // --- Navigation & Highlight handler from Toast / Alerts ---
   useEffect(() => {
     const handleNavigateToTrial = (e) => {
@@ -1089,13 +1093,19 @@ export default function Trials({ onMenuClick }) {
     setEditingTrial(isDuplicate ? null : trial);
     if (trial) {
       setFormData({
+        Category: trial.Category || activeCategory,
         ProjectID: trial.ProjectID || '', BlockID: trial.BlockID || '',
         FormulationName: isDuplicate ? `${trial.FormulationName} (Copy)` : (trial.FormulationName || ''),
         InvestigatorName: trial.InvestigatorName || '',
         Date: isDuplicate ? toDatetimeLocal(new Date()) : (trial.Date ? toDatetimeLocal(trial.Date) : ''),
         Location: trial.Location || '', Dosage: trial.Dosage || '',
         Lat: trial.Lat || '', Lon: trial.Lon || '',
-        WeedSpecies: trial.WeedSpecies || '', Result: trial.Result || '',
+        WeedSpecies: trial.WeedSpecies || '',
+        DiseaseTarget: trial.DiseaseTarget || '',
+        PestTarget: trial.PestTarget || '',
+        CropTarget: trial.CropTarget || '',
+        Target: trial.Target || trial.DiseaseTarget || trial.PestTarget || trial.WeedSpecies || '',
+        Result: trial.Result || '',
         Notes: trial.Notes || '', Conclusion: trial.Conclusion || '',
         IsControl: trial.IsControl === true || trial.IsControl === 'true',
         IsStandardCheck: trial.IsStandardCheck === true || trial.IsStandardCheck === 'true',
@@ -1130,10 +1140,10 @@ export default function Trials({ onMenuClick }) {
         SiteType: trial.SiteType || '',
       });
     } else {
-      setFormData({ ...emptyForm(activeCategory), InvestigatorName: state.auth?.user?.Name || state.auth?.user?.Username || '' });
+      setFormData({ ...emptyForm(activeCategory), Category: activeCategory, InvestigatorName: state.auth?.user?.Name || state.auth?.user?.Username || '' });
     }
     setIsModalOpen(true);
-  }, [state.auth?.user?.Name, state.auth?.user?.Username]);
+  }, [activeCategory, state.auth?.user?.Name, state.auth?.user?.Username]);
 
   const fetchGpsWeather = useCallback(async () => {
     if (!navigator.geolocation) return;
@@ -1212,7 +1222,7 @@ export default function Trials({ onMenuClick }) {
     const idx = parseInt(choice) - 1;
     if (idx < 0 || idx >= projects.length) return;
     const updated = { ...trial, ProjectID: projects[idx].ID };
-    updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
+    updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updated.ID ? updated : t) });
     try {
       await updateTrial({ ID: updated.ID, ProjectID: updated.ProjectID }, getAppState);
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Moved to "${projects[idx].Name}"`, type: 'success' } }));
@@ -1367,7 +1377,7 @@ export default function Trials({ onMenuClick }) {
       return;
     }
     if (!window.confirm('Delete this trial?')) return;
-    updateState({ trials: trials.filter(t => t.ID !== id) });
+    updateState({ trials: (getAppState().trials || state.trials || []).filter(t => t.ID !== id) });
     if (activeTrial?.ID === id) setActiveTrial(null);
     try {
       await deleteTrial({ ID: id }, getAppState);
@@ -1388,7 +1398,7 @@ export default function Trials({ onMenuClick }) {
     }
     if (!activeTrial || !window.confirm('Finalize this trial?')) return;
     const updated = { ...activeTrial, IsCompleted: true };
-    updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
+    updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updated.ID ? updated : t) });
     setActiveTrial(updated);
     try {
       await updateTrial({ ID: updated.ID, IsCompleted: true }, getAppState);
@@ -1409,7 +1419,7 @@ export default function Trials({ onMenuClick }) {
     }
     if (!activeTrial || !window.confirm('Reactivate this trial?')) return;
     const updated = { ...activeTrial, IsCompleted: false };
-    updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
+    updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updated.ID ? updated : t) });
     setActiveTrial(updated);
     try {
       await updateTrial({ ID: updated.ID, IsCompleted: false }, getAppState);
@@ -1869,7 +1879,7 @@ export default function Trials({ onMenuClick }) {
           return p;
         });
         const updatedTrial = { ...activeTrial, PhotoURLs: JSON.stringify(updatedPhotos) };
-        updateState({ trials: trials.map(t => t.ID === updatedTrial.ID ? updatedTrial : t) });
+        updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updatedTrial.ID ? updatedTrial : t) });
         setActiveTrial(updatedTrial);
         try {
           await updateTrial({ ID: updatedTrial.ID, PhotoURLs: updatedTrial.PhotoURLs }, getAppState);
@@ -2374,7 +2384,7 @@ export default function Trials({ onMenuClick }) {
       Result: newResult
     };
     
-    updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
+    updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updated.ID ? updated : t) });
     setActiveTrial(updated);
     setQuickEditObs(null);
     
@@ -2578,7 +2588,7 @@ export default function Trials({ onMenuClick }) {
       [targetField]: observedWeeds,
       AISummariesJSON: '{}'
     };
-    updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
+    updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updated.ID ? updated : t) });
     setActiveTrial(updated);
     setAiSummary('');
     try { 
@@ -2613,7 +2623,7 @@ export default function Trials({ onMenuClick }) {
       [targetField]: observedWeeds
     };
 
-    updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
+    updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updated.ID ? updated : t) });
     if (activeTrial && activeTrial.ID === updated.ID) setActiveTrial(updated);
     if (detailTrial && detailTrial.ID === updated.ID) setDetailTrial(updated);
 
@@ -2994,7 +3004,7 @@ export default function Trials({ onMenuClick }) {
       calculatedAt: new Date().toISOString()
     };
     const updated = { ...detailTrial, StatisticsJSON: JSON.stringify(result) };
-    updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
+    updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updated.ID ? updated : t) });
     setActiveTrial(updated);
     try { await updateTrial({ ID: updated.ID, StatisticsJSON: updated.StatisticsJSON }, getAppState); } catch(e) {}
     window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Statistics calculated', type: 'success' } }));
@@ -3432,7 +3442,7 @@ export default function Trials({ onMenuClick }) {
       const photos = safeJsonParse(activeTrial.PhotoURLs, []);
       photos[idx] = { ...photos[idx], fileData: croppedUrl, url: undefined, bounds: undefined, identifications: [] };
       const updated = { ...activeTrial, PhotoURLs: JSON.stringify(photos) };
-      updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
+      updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updated.ID ? updated : t) });
       setActiveTrial(updated);
       try { await updateTrial({ ID: updated.ID, PhotoURLs: updated.PhotoURLs }, getAppState); } catch (e) {}
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Photo cropped & saved', type: 'success' } }));
@@ -3495,7 +3505,7 @@ export default function Trials({ onMenuClick }) {
       [targetField]: observedWeeds,
       AISummariesJSON: '{}'
     };
-    updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
+    updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updated.ID ? updated : t) });
     setActiveTrial(updated);
     setAiSummary('');
 
@@ -4714,7 +4724,7 @@ Rules:
 
     // Update trial with AI-generated conclusion
     const updated = { ...trial, Conclusion: summaryText };
-    updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
+    updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updated.ID ? updated : t) });
     if (activeTrial?.ID === trial.ID) setActiveTrial(updated);
 
     try {
@@ -4755,7 +4765,7 @@ Rules:
     }
     if (!window.confirm(`Delete ${selectedForBulk.size} trial(s)?`)) return;
     const ids = Array.from(selectedForBulk);
-    updateState({ trials: trials.filter(t => !ids.includes(t.ID)) });
+    updateState({ trials: (getAppState().trials || state.trials || []).filter(t => !ids.includes(t.ID)) });
     clearBulk();
     for (const id of ids) { try { await deleteTrial({ ID: id }, getAppState); } catch (e) {} }
     window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `${ids.length} trial(s) deleted`, type: 'success' } }));
@@ -4769,7 +4779,7 @@ Rules:
     if (!window.confirm(`Finalize ${selectedForBulk.size} trial(s)?`)) return;
     const ids = Array.from(selectedForBulk);
     const today = new Date().toISOString();
-    const updated = trials.map(t => ids.includes(t.ID) ? { ...t, IsCompleted: true, FinalizationDate: today } : t);
+    const updated = (getAppState().trials || state.trials || []).map(t => ids.includes(t.ID) ? { ...t, IsCompleted: true, FinalizationDate: today } : t);
     updateState({ trials: updated });
     clearBulk();
     for (const id of ids) {
@@ -5347,20 +5357,20 @@ Rules:
     try {
       const result = await addTrial(payload, getAppState);
       const newTrial = { ...payload, ID: result.ID || result.id || Date.now().toString() };
-      updateState({ trials: [newTrial, ...trials] });
+      updateState({ trials: [newTrial, ...(getAppState().trials || state.trials || [])] });
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Duplicated as "${formMatch.Name}"`, type: 'success' } }));
     } catch(e) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Duplicate failed', type: 'error' } }));
     }
-  }, [duplicateModal, duplicateFormulation, duplicateDate, duplicateDosage, formulations, eligibleFormulations, trials, activeCategory, getAppState, updateState]);
+  }, [duplicateModal, duplicateFormulation, duplicateDate, duplicateDosage, formulations, eligibleFormulations, state.trials, activeCategory, getAppState, updateState]);
 
   const handleQuickRate = useCallback(async (trial, rating) => {
     const newRating = trial.Result === rating ? '' : rating;
     const updated = { ...trial, Result: newRating };
-    updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
+    updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updated.ID ? updated : t) });
     try { await updateTrial({ ID: updated.ID, Result: newRating }, getAppState); } catch(e) {}
     window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: newRating ? `Rated "${newRating}"` : 'Rating cleared', type: 'success' } }));
-  }, [trials, getAppState, updateState]);
+  }, [state.trials, getAppState, updateState]);
 
   const handleMarkComplete = useCallback(async (trial) => {
     if (!window.confirm(`Mark "${trial.FormulationName}" as completed? This will stop control day counting and deactivate the trial.`)) return;
@@ -5369,14 +5379,14 @@ Rules:
     const days = Math.max(0, Math.round((new Date() - start) / 86400000));
     const finalDuration = trial.FinalControlDuration || String(days);
     const updated = { ...trial, IsCompleted: true, IsLive: false, FinalizationDate: finDate, FinalControlDuration: finalDuration };
-    updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
+    updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updated.ID ? updated : t) });
     if (activeTrial?.ID === updated.ID) setActiveTrial(updated);
     try {
       await updateTrial({ ID: updated.ID, IsCompleted: true, IsLive: false, FinalizationDate: finDate, FinalControlDuration: finalDuration }, getAppState);
       await syncTrialToQrScript({ ID: updated.ID, IsCompleted: true, IsLive: false, FinalizationDate: finDate, FinalControlDuration: finalDuration });
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Trial completed — ${finalDuration} control days recorded`, type: 'success' } }));
     } catch(e) {}
-  }, [trials, activeTrial, getAppState, updateState, syncTrialToQrScript]);
+  }, [state.trials, activeTrial, getAppState, updateState, syncTrialToQrScript]);
 
   const handleKanbanStageChange = useCallback(async (trial, newStage) => {
     let patch = {};
@@ -5397,7 +5407,7 @@ Rules:
     }
 
     const updated = { ...trial, ...patch };
-    updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
+    updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updated.ID ? updated : t) });
     if (activeTrial?.ID === updated.ID) setActiveTrial(updated);
     try {
       await updateTrial({ ID: updated.ID, ...patch }, getAppState);
@@ -5405,7 +5415,7 @@ Rules:
     } catch(e) {
       console.error('Failed to update trial stage:', e);
     }
-  }, [trials, activeTrial, getAppState, updateState]);
+  }, [state.trials, activeTrial, getAppState, updateState]);
 
   const handleRecordWeather = useCallback(async (trial) => {
     if (!window.confirm(`Do you want to fetch and record the current real-time weather data for "${trial.FormulationName || 'this trial'}"?`)) {
@@ -5430,7 +5440,7 @@ Rules:
             Sunlight: weather.sunlight !== undefined ? String(weather.sunlight) : (trial.Sunlight || '')
           };
           const updated = { ...trial, ...patch };
-          updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
+          updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updated.ID ? updated : t) });
           await updateTrial(patch, getAppState);
           await syncTrialToQrScript(patch);
           window.dispatchEvent(new CustomEvent('app:toast', {
@@ -5461,7 +5471,7 @@ Rules:
     } else {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Trial coordinates and Geolocation missing.', type: 'error' } }));
     }
-  }, [trials, getAppState, updateState, syncTrialToQrScript]);
+  }, [state.trials, getAppState, updateState, syncTrialToQrScript]);
 
   const handleQuickPhoto = useCallback((trial) => {
     quickActionTrialRef.current = trial;
@@ -5483,14 +5493,14 @@ Rules:
       ? { IsLive: false }
       : { IsLive: true, IsCompleted: false, FinalizationDate: '', FinalControlDuration: '' };
     const updated = { ...trial, ...patch };
-    updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
+    updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updated.ID ? updated : t) });
     if (activeTrial?.ID === updated.ID) setActiveTrial(updated);
     try {
       await updateTrial({ ID: updated.ID, ...patch }, getAppState);
       await syncTrialToQrScript({ ID: updated.ID, ...patch });
     } catch(e) {}
     if (!isCurrentlyLive) window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Trial reactivated — control days reset', type: 'success' } }));
-  }, [trials, activeTrial, updateState, getAppState, syncTrialToQrScript]);
+  }, [state.trials, activeTrial, updateState, getAppState, syncTrialToQrScript]);
 
   const handleEditControlDays = useCallback(async (trial) => {
     const current = trial.FinalControlDuration || String(Math.max(0, Math.round((new Date() - new Date(trial.Date || Date.now())) / 86400000)));
@@ -5499,11 +5509,11 @@ Rules:
     const days = parseInt(val.trim(), 10);
     if (isNaN(days) || days < 0) { window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Invalid number', type: 'error' } })); return; }
     const updated = { ...trial, FinalControlDuration: String(days) };
-    updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
+    updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updated.ID ? updated : t) });
     if (activeTrial?.ID === updated.ID) setActiveTrial(updated);
     try { await updateTrial({ ID: updated.ID, FinalControlDuration: String(days) }, getAppState); } catch(e) {}
     window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Control days set to ${days}`, type: 'success' } }));
-  }, [trials, activeTrial, updateState, getAppState]);
+  }, [state.trials, activeTrial, updateState, getAppState]);
 
 
 
@@ -5920,7 +5930,7 @@ If none are present, write "None".`;
         narrativeGeneratedAt: new Date().toISOString() 
       };
       const updatedTrial = { ...detailTrial, AISummariesJSON: JSON.stringify(updatedSummaries) };
-      updateState({ trials: trials.map(t => t.ID === updatedTrial.ID ? updatedTrial : t) });
+      updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updatedTrial.ID ? updatedTrial : t) });
       setActiveTrial(updatedTrial);
       try { 
         await updateTrial({ ID: updatedTrial.ID, AISummariesJSON: updatedTrial.AISummariesJSON }, getAppState); 
@@ -5933,7 +5943,7 @@ If none are present, write "None".`;
     } finally {
       setAiLoading(false);
     }
-  }, [detailTrial, state.settings, trials, updateState, getAppState]);
+  }, [detailTrial, state.settings, state.trials, updateState, getAppState]);
 
   const handleSaveEditedAiSummary = async () => {
     if (!detailTrial) return;
@@ -5976,11 +5986,11 @@ If none are present, write "None".`;
     const calculated = calculateResultRating(efficacy, detailTrial?.IsControl === true || detailTrial?.IsControl === 'true', detailTrial?.Category || activeCategory, detailTrial);
     if (calculated !== detailTrial.Result) {
       const updated = { ...detailTrial, Result: calculated };
-      updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
+      updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updated.ID ? updated : t) });
       setActiveTrial(updated);
       updateTrial({ ID: updated.ID, Result: calculated }, getAppState).catch(console.error);
     }
-  }, [detailTrial?.ID, detailTrial?.EfficacyDataJSON, trials, updateState, getAppState]);
+  }, [detailTrial?.ID, detailTrial?.EfficacyDataJSON, state.trials, updateState, getAppState]);
 
   // Close export menu on outside click
   useEffect(() => {
@@ -6184,7 +6194,7 @@ If none are present, write "None".`;
       const text = await generateTextWithAI(prompt, 'You are an agricultural researcher writing official trial narrative reports.');
       const summaries = { cover: text, generatedAt: new Date().toISOString() };
       const updated = { ...trial, AISummariesJSON: JSON.stringify(summaries) };
-      updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
+      updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updated.ID ? updated : t) });
       if (activeTrial?.ID === updated.ID) setActiveTrial(updated);
       try { await updateTrial({ ID: updated.ID, AISummariesJSON: updated.AISummariesJSON }, getAppState); } catch(e) {}
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'AI report saved!', type: 'success' } }));
@@ -6192,7 +6202,7 @@ If none are present, write "None".`;
     } catch(err) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'AI generation failed: ' + err.message, type: 'error' } }));
     } finally { setAiGenRunning(false); }
-  }, [state.settings, trials, activeTrial, updateState, getAppState]);
+  }, [state.settings, state.trials, activeTrial, updateState, getAppState]);
 
   const handleSavePhotoEdit = useCallback(async () => {
     if (!activeTrial || !photoEditModal) return;
@@ -6396,7 +6406,7 @@ If none are present, write "None".`;
       ...(efficacyChanged ? { EfficacyDataJSON: JSON.stringify(efficacyData) } : {})
     };
 
-    updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
+    updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updated.ID ? updated : t) });
     setActiveTrial(updated);
     setPhotoEditModal(null);
     try {
@@ -6407,7 +6417,7 @@ If none are present, write "None".`;
       }, getAppState);
     } catch (e) {}
     window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Photo updated', type: 'success' } }));
-  }, [activeTrial, photoEditModal, trials, updateState, getAppState]);
+  }, [activeTrial, photoEditModal, state.trials, updateState, getAppState]);
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden w-full max-w-full min-w-0">
@@ -7096,7 +7106,7 @@ If none are present, write "None".`;
                 if (bulkEditForm.MainFactor.trim()) updates.MainFactor = bulkEditForm.MainFactor.trim();
                 if (bulkEditForm.SubFactor.trim()) updates.SubFactor = bulkEditForm.SubFactor.trim();
                 const ids = Array.from(selectedForBulk);
-                const updated = trials.map(t => {
+                const updated = (getAppState().trials || state.trials || []).map(t => {
                   if (!ids.includes(t.ID)) return t;
                   const n = { ...t, ...updates };
                   if (bulkEditForm.Notes.trim()) n.Notes = n.Notes ? `${n.Notes}\n${bulkEditForm.Notes.trim()}` : bulkEditForm.Notes.trim();
@@ -9061,7 +9071,7 @@ If none are present, write "None".`;
                       const updated = { ...liveSettings, [fieldKey]: !liveSettings[fieldKey] };
                       const updatedTrial = { ...detailTrial, LiveQRSettings: JSON.stringify(updated) };
                       // Optimistic UI update
-                      updateState({ trials: trials.map(t => t.ID === updatedTrial.ID ? updatedTrial : t) });
+                      updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updatedTrial.ID ? updatedTrial : t) });
                       setActiveTrial(updatedTrial);
                       try {
                         await updateTrial({ ID: updatedTrial.ID, LiveQRSettings: updatedTrial.LiveQRSettings }, getAppState);
@@ -9656,7 +9666,7 @@ If none are present, write "None".`;
                           ...detailTrial,
                           HarvestDataJSON: JSON.stringify(updatedForm)
                         };
-                        updateState({ trials: trials.map(t => t.ID === updated.ID ? updated : t) });
+                        updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updated.ID ? updated : t) });
                         setActiveTrial(updated);
                         try {
                           await updateTrial({ ID: updated.ID, HarvestDataJSON: updated.HarvestDataJSON }, getAppState);
@@ -11408,7 +11418,7 @@ If none are present, write "None".`;
                 const updatedTrial = { ...currentTrial, LiveQRSettings: JSON.stringify(updatedSettings) };
                 
                 // Optimistic UI update
-                updateState({ trials: trials.map(t => t.ID === updatedTrial.ID ? updatedTrial : t) });
+                updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updatedTrial.ID ? updatedTrial : t) });
                 if (activeTrial && activeTrial.ID === currentTrial.ID) {
                   setActiveTrial(updatedTrial);
                 }
@@ -11562,7 +11572,7 @@ If none are present, write "None".`;
               return p;
             });
             const updatedTrial = { ...activeTrial, PhotoURLs: JSON.stringify(updatedPhotos) };
-            updateState({ trials: trials.map(t => t.ID === updatedTrial.ID ? updatedTrial : t) });
+            updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updatedTrial.ID ? updatedTrial : t) });
             setActiveTrial(updatedTrial);
             try {
               await updateTrial({ ID: updatedTrial.ID, PhotoURLs: updatedTrial.PhotoURLs }, getAppState);
@@ -11674,6 +11684,8 @@ If none are present, write "None".`;
         onApply={handleApplyVoiceScout}
         currentTrial={activeTrial}
         knownFormulations={formulations}
+        activeCategory={activeCategory}
+        knownTargets={Array.from(new Set(trials.map(t => t.WeedSpecies || t.DiseaseTarget || t.PestTarget || t.Target).filter(Boolean)))}
       />
 
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />

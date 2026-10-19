@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Mic, MicOff, Check, X, Sparkles, Volume2, AlertCircle, RefreshCw, Clock, Thermometer, ShieldAlert } from 'lucide-react';
 import { isSpeechRecognitionSupported, createSpeechRecognizer, parseVoiceObservation } from '../utils/voiceParser.js';
+import { getCategoryConfig } from '../utils/categoryConfig.js';
 
 export default function VoiceFieldScoutModal({
   isOpen,
@@ -8,7 +9,8 @@ export default function VoiceFieldScoutModal({
   onApply,
   currentTrial = null,
   knownFormulations = [],
-  knownTargets = []
+  knownTargets = [],
+  activeCategory = 'herbicide'
 }) {
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
@@ -16,6 +18,10 @@ export default function VoiceFieldScoutModal({
   const [errorMsg, setErrorMsg] = useState('');
   const [manualText, setManualText] = useState('');
   const recognizerRef = useRef(null);
+
+  const catConfig = getCategoryConfig(activeCategory);
+  const targetLabel = catConfig.targetLabel || (activeCategory === 'fungicide' ? 'Disease / Pathogen' : activeCategory === 'pesticide' ? 'Target Pest' : 'Target Weed');
+  const metricLabel = catConfig.primaryMetric?.label || (activeCategory === 'herbicide' ? 'Kill Rate' : 'Efficacy');
 
   const supported = isSpeechRecognitionSupported();
 
@@ -239,7 +245,7 @@ export default function VoiceFieldScoutModal({
               </div>
 
               <div className="p-2 bg-white rounded-xl border border-slate-200/60 shadow-2xs">
-                <div className="text-[10px] uppercase font-bold text-slate-400">Kill Rate</div>
+                <div className="text-[10px] uppercase font-bold text-slate-400">{metricLabel}</div>
                 <div className="text-xs font-black text-emerald-700 truncate">
                   {parsedData?.efficacy !== null && parsedData?.efficacy !== undefined ? `${parsedData.efficacy}%` : '—'}
                 </div>
@@ -253,7 +259,7 @@ export default function VoiceFieldScoutModal({
               </div>
 
               <div className="p-2 bg-white rounded-xl border border-slate-200/60 shadow-2xs">
-                <div className="text-[10px] uppercase font-bold text-slate-400">Target Weed</div>
+                <div className="text-[10px] uppercase font-bold text-slate-400">{targetLabel}</div>
                 <div className="text-xs font-bold text-slate-800 truncate">
                   {parsedData?.target || '—'}
                 </div>

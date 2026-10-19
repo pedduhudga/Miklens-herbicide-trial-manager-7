@@ -2208,7 +2208,7 @@ export default function Projects({ onMenuClick }) {
     setIsSavingNarrative(true);
     try {
       await updateProject({ ID: activeProjectId, Narrative: narrative }, getAppState);
-      const updated = projects.map(p => String(p.ID) === String(activeProjectId) ? { ...p, Narrative: narrative } : p);
+      const updated = (state.projects || []).map(p => String(p.ID) === String(activeProjectId) ? { ...p, Narrative: narrative } : p);
       updateState({ projects: updated });
       toast('Narrative saved');
     } catch { toast('Failed to save narrative', 'error'); }
@@ -4237,7 +4237,7 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       return;
     }
     if (!activeProject) return;
-    const updated = projects.map(p => p.ID === activeProject.ID ? { ...p, ...protocolForm } : p);
+    const updated = (state.projects || []).map(p => p.ID === activeProject.ID ? { ...p, ...protocolForm } : p);
     updateState({ projects: updated });
     try {
       await updateProject({ ID: activeProject.ID, ...protocolForm }, getAppState);
