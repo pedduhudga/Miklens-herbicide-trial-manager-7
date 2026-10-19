@@ -84,17 +84,95 @@ const RISK_LEVELS = {
 };
 
 /**
- * Calculate Delta T (temperature - wet bulb temperature proxy)
- * Simple approximation using temperature and relative humidity
+ * Calculate thermodynamic Wet-Bulb Temperature using Stull's (2011) high-precision psychrometric equation.
+ * Valid for -20°C to 50°C and 5% to 99% RH with mean absolute error < 0.3°C.
+ *
+ * @param {number} temp - Dry-bulb air temperature in °C
+ * @param {number} humidity - Relative humidity % (1-100)
+ * @returns {number} Wet-bulb temperature in °C
  */
-function calculateDeltaT(temp, humidity) {
-  // Simplified delta T approximation
-  // More accurate calculation would use wet bulb temperature
-  const wetBulbApprox = temp * Math.atan(0.151977 * Math.sqrt(humidity + 8.313659)) +
-    Math.atan(temp + humidity) - Math.atan(humidity - 1.676331) +
-    0.00391838 * Math.pow(humidity, 1.5) * Math.atan(0.023101 * humidity) - 4.686035;
-  return temp - wetBulbApprox;
+export function calculateWetBulb(temp, humidity) {
+  const T = parseFloat(temp);
+  const RH = Math.max(1, Math.min(100, parseFloat(humidity)));
+
+  if (isNaN(T) || isNaN(RH)) return 0;
+
+  const Tw = T * Math.atan(0.151977 * Math.sqrt(RH + 8.313659)) +
+    Math.atan(T + RH) - Math.atan(RH - 1.676331) +
+    0.00391838 * Math.pow(RH, 1.5) * Math.atan(0.023101 * RH) - 4.686035;
+
+  return parseFloat(Tw.toFixed(2));
 }
+
+/**
+ * Calculate Delta-T (ΔT = Dry-Bulb Temperature - Wet-Bulb Temperature)
+ * The global standard agronomic indicator for agricultural spray drift and droplet evaporation.
+ *
+ * @param {number} temp - Air temperature in °C
+ * @param {number} humidity - Relative humidity in %
+ * @returns {number} Delta-T value in °C
+ */
+export function calculateDeltaT(temp, humidity) {
+  const T = parseFloat(temp);
+  const RH = Math.max(1, Math.min(100, parseFloat(humidity)));
+  if (isNaN(T) || isNaN(RH)) return 0;
+
+  const Tw = calculateWetBulb(T, RH);
+  const deltaT = T - Tw;
+  return parseFloat(deltaT.toFixed(2));
+}
+
+/**
+ * Evaluates Delta-T agronomic spray suitability according to GRDC and APVMA standards.
+ *
+ * @param {number} deltaT - Delta-T value in °C
+ * @returns {Object} Suitability rating, status label, color token, and recommendation
+ */
+export function getDeltaTCondition(deltaT) {
+  const dt = parseFloat(deltaT);
+  if (isNaN(dt)) {
+    return { status: 'Unknown', label: 'Data Unavailable', color: 'slate', recommendation: 'Weather data pending.' };
+  }
+
+  if (dt < 2) {
+    return {
+      status: 'Marginal Low',
+      label: 'Low Delta-T (< 2°C)',
+      color: 'amber',
+      dropletSurvival: 'High survival / Poor drying',
+      recommendation: 'Caution: Droplets survive extended periods, increasing potential drift distance in still or inversion-prone conditions.'
+    };
+  }
+
+  if (dt <= 8) {
+    return {
+      status: 'Optimal',
+      label: 'Optimal Delta-T (2–8°C)',
+      color: 'emerald',
+      dropletSurvival: 'Optimal',
+      recommendation: 'Excellent conditions: Droplet survival and target foliage absorption are maximized.'
+    };
+  }
+
+  if (dt <= 10) {
+    return {
+      status: 'Marginal High',
+      label: 'High Delta-T (8–10°C)',
+      color: 'orange',
+      dropletSurvival: 'Accelerated evaporation',
+      recommendation: 'Marginal: Fine droplets evaporate rapidly before contacting weeds. Use coarse or very coarse droplet spectrum.'
+    };
+  }
+
+  return {
+    status: 'Unsuitable',
+    label: 'Extreme Delta-T (> 10°C)',
+    color: 'red',
+    dropletSurvival: 'Rapid desiccation',
+    recommendation: 'Do Not Spray: Droplet evaporation occurs in seconds, resulting in spray failures and off-target vapor movement.'
+  };
+}
+
 
 /**
  * Calculate spray window score (0-100)

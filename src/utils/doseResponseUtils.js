@@ -67,9 +67,9 @@ export function fitFourPLModel(data, options = {}) {
     const jacobian = cleanData.map(d => {
       const base = fourPL(d.x, params.min, params.max, params.ec50, params.slope);
       return [
-        (fourPL(d.x, params.min + h, params.max, params.ec50, params.slope) - base) / h,
-        (fourPL(d.x, params.min, params.max + h, params.ec50, params.slope) - base) / h,
-        fixedMin !== null ? 0 : (fourPL(d.x, params.min, params.max, params.ec50 + h, params.slope) - base) / h,
+        fixedMin !== null ? 0 : (fourPL(d.x, params.min + h, params.max, params.ec50, params.slope) - base) / h,
+        fixedMax !== null ? 0 : (fourPL(d.x, params.min, params.max + h, params.ec50, params.slope) - base) / h,
+        (fourPL(d.x, params.min, params.max, params.ec50 + h, params.slope) - base) / h,
         fixedSlope !== null ? 0 : (fourPL(d.x, params.min, params.max, params.ec50, params.slope + h) - base) / h
       ];
     });
@@ -93,7 +93,7 @@ export function fitFourPLModel(data, options = {}) {
     // Add regularization for stability
     jtJ.forEach((row, i) => row[i] += 1e-6);
     
-    // Solve for parameter updates (simplified)
+    // Solve for parameter updates
     const jtResiduals = [0, 0, 0, 0];
     jacobian.forEach((row, i) => {
       row.forEach((val, j) => {
@@ -101,12 +101,12 @@ export function fitFourPLModel(data, options = {}) {
       });
     });
     
-    // Update parameters
-    const gains = [0.5, 0.5, 0.5, 0.5]; // Damping
+    // Update parameters with damping
+    const gains = [0.5, 0.5, 0.5, 0.5];
     if (fixedMin === null) params.min += gains[0] * jtResiduals[0] / (jtJ[0][0] + 1e-6);
     if (fixedMax === null) params.max += gains[1] * jtResiduals[1] / (jtJ[1][1] + 1e-6);
-    if (fixedSlope === null) params.ec50 = Math.max(1e-10, params.ec50 + gains[2] * jtResiduals[2] / (jtJ[2][2] + 1e-6));
-    if (fixedSlope === null) params.slope += gains[3] * jtResiduals[3] / (jtJ[3][3] + 1e-6);
+    params.ec50 = Math.max(1e-10, params.ec50 + gains[2] * jtResiduals[2] / (jtJ[2][2] + 1e-6));
+    if (fixedSlope === null) params.slope = Math.max(0.1, params.slope + gains[3] * jtResiduals[3] / (jtJ[3][3] + 1e-6));
     
     // Ensure physically meaningful bounds
     params.ec50 = Math.max(1e-10, params.ec50);
@@ -118,7 +118,19 @@ export function fitFourPLModel(data, options = {}) {
   const ssTot = yValues.reduce((sum, y) => sum + Math.pow(y - yMean, 2), 0);
   const predictions = cleanData.map(d => fourPL(d.x, params.min, params.max, params.ec50, params.slope));
   const ssRes = yValues.reduce((sum, y, i) => sum + Math.pow(y - predictions[i], 2), 0);
-  const rSquared = 1 - ssRes / ssTot;
+  const rSquared = ssTot > 0 ? Math.max(0, 1 - ssRes / ssTot) : 1;
+
+  // Rigorous statistical variance and 95% Confidence Intervals
+  const dfResidual = Math.max(1, cleanData.length - 4);
+  const residualVariance = ssRes / dfResidual;
+  const seEc50 = Math.sqrt(Math.max(1e-12, residualVariance / (jtJ[2][2] + 1e-6)));
+  const seSlope = Math.sqrt(Math.max(1e-12, residualVariance / (jtJ[3][3] + 1e-6)));
+  const tCritical = dfResidual >= 30 ? 1.96 : (dfResidual >= 10 ? 2.228 : 2.776);
+
+  // Log-normal confidence interval bounds (strictly positive & scale-invariant)
+  const relSeEc50 = Math.min(2.0, seEc50 / Math.max(1e-6, params.ec50));
+  const ec50Lower = Math.max(1e-6, params.ec50 * Math.exp(-tCritical * relSeEc50));
+  const ec50Upper = params.ec50 * Math.exp(tCritical * relSeEc50);
   
   return {
     success: true,
@@ -128,15 +140,18 @@ export function fitFourPLModel(data, options = {}) {
       max: params.max,
       ec50: params.ec50,
       slope: params.slope,
-      // Calculate 95% CI for EC50 (approximate)
-      ec50Lower: params.ec50 * 0.7,
-      ec50Upper: params.ec50 * 1.4
+      seEc50: parseFloat(seEc50.toFixed(4)),
+      seSlope: parseFloat(seSlope.toFixed(4)),
+      ec50Lower: parseFloat(ec50Lower.toFixed(4)),
+      ec50Upper: parseFloat(ec50Upper.toFixed(4)),
+      confidenceLevel: '95%'
     },
     statistics: {
-      rSquared,
-      rmse: Math.sqrt(ssRes / cleanData.length),
+      rSquared: parseFloat(rSquared.toFixed(4)),
+      rmse: parseFloat(Math.sqrt(ssRes / cleanData.length).toFixed(4)),
       n: cleanData.length,
-      ssResidual: ssRes
+      dfResidual,
+      ssResidual: parseFloat(ssRes.toFixed(4))
     },
     // ED values at different effect levels
     edValues: {

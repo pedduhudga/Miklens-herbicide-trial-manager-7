@@ -49,8 +49,19 @@ const T_TABLE_01 = {
 };
 
 export function getStudentTCritical(alpha, df) {
-  const table = (alpha <= 0.01) ? T_TABLE_01 : T_TABLE_05;
   if (df <= 0) return 1.96;
+
+  // Use exact Student's t critical value from jStat when available
+  if (typeof jStat !== 'undefined' && jStat?.studentt?.inv) {
+    try {
+      const val = jStat.studentt.inv(1 - alpha / 2, df);
+      if (!isNaN(val) && isFinite(val) && val > 0) {
+        return val;
+      }
+    } catch (_) {}
+  }
+
+  const table = (alpha <= 0.01) ? T_TABLE_01 : T_TABLE_05;
   
   const dfKeys = Object.keys(table).map(key => key === "inf" ? Infinity : parseInt(key));
   dfKeys.sort((a, b) => a - b);
@@ -857,10 +868,21 @@ function regularizedIncompleteBeta(x, a, b) {
 }
 
 /**
- * Approximate p-value from F-distribution using regularized incomplete beta function
+ * Exact p-value from F-distribution using jStat central F-distribution CDF,
+ * with analytical regularized incomplete beta fallback.
  */
 function approximatePValue(f, df1, df2) {
   if (f <= 0) return 1;
+
+  if (typeof jStat !== 'undefined' && jStat?.centralF?.cdf) {
+    try {
+      const cdf = jStat.centralF.cdf(f, df1, df2);
+      if (!isNaN(cdf) && isFinite(cdf)) {
+        return Math.max(0, Math.min(1, 1 - cdf));
+      }
+    } catch (_) {}
+  }
+
   const x = (df1 * f) / (df1 * f + df2);
   const pVal = 1 - regularizedIncompleteBeta(x, df1 / 2, df2 / 2);
   return isNaN(pVal) ? 1.0 : Math.max(0, Math.min(1, pVal));

@@ -63,6 +63,9 @@ export async function analyzePlantPhenotype(imageSource, options = {}) {
   let greenPixels = 0;
   let necroticPixels = 0;
   let soilBackgroundPixels = 0;
+  let sumVari = 0;
+  let sumGli = 0;
+  let sumExg = 0;
 
   for (let y = 0; y < height; y += sampleStep) {
     for (let x = 0; x < width; x += sampleStep) {
@@ -86,6 +89,12 @@ export async function analyzePlantPhenotype(imageSource, options = {}) {
       const exg = 2 * g - r - b;
       // Normalized Green-Red Difference Index (NGRDI = (G - R) / (G + R + epsilon))
       const ngrdi = (g - r) / (g + r + 0.001);
+      // Visual Atmospherically Resistant Index (VARI = (G - R) / (G + R - B + epsilon))
+      const vari = (g - r) / (g + r - b + 0.001);
+      // Green Leaf Index (GLI = (2G - R - B) / (2G + R + B + epsilon))
+      const gli = (2 * g - r - b) / (2 * g + r + b + 0.001);
+      // Excess Red Index (ExR = 1.4R - G) for desiccation/necrosis
+      const exr = 1.4 * r - g;
 
       // Active Green Photosynthetic Foliage Threshold
       const isGreen = (exg > 15 && ngrdi > 0.05 && g > b);
@@ -95,11 +104,15 @@ export async function analyzePlantPhenotype(imageSource, options = {}) {
       // but Red is significantly elevated relative to Green compared to healthy foliage.
       const isNecrotic = !isGreen && (
         (r > 70 && g > 50 && b < 100 && r >= g - 15 && (r + g) > 2 * b) ||
-        (r > 100 && g > 90 && b < 80) // Chlorotic yellowing
+        (r > 100 && g > 90 && b < 80) || // Chlorotic yellowing
+        (exr > 10 && r > g) // Elevated Excess Red from desiccation
       );
 
       if (isGreen) {
         greenPixels++;
+        sumVari += vari;
+        sumGli += gli;
+        sumExg += exg;
       } else if (isNecrotic) {
         necroticPixels++;
       } else {
@@ -118,6 +131,11 @@ export async function analyzePlantPhenotype(imageSource, options = {}) {
   if (totalFoliage > 0) {
     calculatedDesiccationRate = Math.round((necroticPixels / totalFoliage) * 100);
   }
+
+  // Mean vegetative indices across active photosynthetic foliage
+  const meanVari = greenPixels > 0 ? parseFloat((sumVari / greenPixels).toFixed(3)) : 0;
+  const meanGli = greenPixels > 0 ? parseFloat((sumGli / greenPixels).toFixed(3)) : 0;
+  const meanExg = greenPixels > 0 ? parseFloat((sumExg / greenPixels).toFixed(1)) : 0;
 
   let heatmapDataUrl = null;
   if (options.generateHeatmap) {
@@ -142,6 +160,9 @@ export async function analyzePlantPhenotype(imageSource, options = {}) {
     necrosisPct: roundedNecroticPct,
     calculatedDesiccationRate: roundedDesiccation,
     estimatedWeedControlPct: roundedDesiccation,
+    variMean: meanVari,
+    gliMean: meanGli,
+    exgMean: meanExg,
     heatmapDataUrl,
     confidence: totalFoliage > (totalSampled * 0.1) ? 'High' : 'Moderate (Low canopy coverage)'
   };
@@ -251,4 +272,63 @@ export async function comparePhenotypeProgression(baselineSource, currentSource,
       : `No significant canopy reduction detected between observations.`
   };
 }
+
+/**
+ * Pure mathematical calculation of agronomic vegetative indices from RGB pixel triplets.
+ * Suitable for off-canvas batch processing or multi-spectral sensor feeds.
+ *
+ * @param {Array<{r: number, g: number, b: number}>|Uint8ClampedArray} pixels - RGB pixel array or RGBA buffer
+ * @returns {Object} { exgMean, ngrdiMean, variMean, gliMean, exrMean }
+ */
+export function calculateCanopyIndices(pixels) {
+  if (!pixels || pixels.length === 0) {
+    return { exgMean: 0, ngrdiMean: 0, variMean: 0, gliMean: 0, exrMean: 0, count: 0 };
+  }
+
+  let totalExg = 0;
+  let totalNgrdi = 0;
+  let totalVari = 0;
+  let totalGli = 0;
+  let totalExr = 0;
+  let count = 0;
+
+  const isBuffer = pixels instanceof Uint8ClampedArray || Array.isArray(pixels) && typeof pixels[0] === 'number';
+
+  if (isBuffer) {
+    for (let i = 0; i < pixels.length; i += 4) {
+      const r = pixels[i];
+      const g = pixels[i + 1];
+      const b = pixels[i + 2];
+      const a = pixels[i + 3] ?? 255;
+      if (a < 50) continue;
+
+      totalExg += (2 * g - r - b);
+      totalNgrdi += ((g - r) / (g + r + 0.001));
+      totalVari += ((g - r) / (g + r - b + 0.001));
+      totalGli += ((2 * g - r - b) / (2 * g + r + b + 0.001));
+      totalExr += (1.4 * r - g);
+      count++;
+    }
+  } else {
+    for (const p of pixels) {
+      const { r, g, b } = p;
+      totalExg += (2 * g - r - b);
+      totalNgrdi += ((g - r) / (g + r + 0.001));
+      totalVari += ((g - r) / (g + r - b + 0.001));
+      totalGli += ((2 * g - r - b) / (2 * g + r + b + 0.001));
+      totalExr += (1.4 * r - g);
+      count++;
+    }
+  }
+
+  return {
+    count,
+    exgMean: count > 0 ? parseFloat((totalExg / count).toFixed(2)) : 0,
+    ngrdiMean: count > 0 ? parseFloat((totalNgrdi / count).toFixed(3)) : 0,
+    variMean: count > 0 ? parseFloat((totalVari / count).toFixed(3)) : 0,
+    gliMean: count > 0 ? parseFloat((totalGli / count).toFixed(3)) : 0,
+    exrMean: count > 0 ? parseFloat((totalExr / count).toFixed(2)) : 0
+  };
+}
+
 

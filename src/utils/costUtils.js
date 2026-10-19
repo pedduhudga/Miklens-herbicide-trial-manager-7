@@ -258,3 +258,111 @@ export function calculateFormulationCost(formulationOrIngs, libraryIngredients =
   const details = getFormulationCostDetails(formulationOrIngs, libraryIngredients);
   return details.totalCost;
 }
+
+/**
+ * Converts Target Active Ingredient (a.i.) application rate into formulated commercial product rate.
+ *
+ * @param {Object} params
+ * @param {number} params.targetAiGramsHa - Target a.i. application rate in grams a.i./ha (e.g. 1080 g/ha)
+ * @param {number} params.aiConcentrationPct - Concentration of active ingredient in formulated product % (e.g. 54% or 41%)
+ * @param {number} [params.densityKgL=1.0] - Specific gravity / density of liquid formulation (kg/L, default 1.0)
+ * @returns {Object} Product requirements:
+ *   - productGramsHa: grams product per hectare
+ *   - productKgHa: kilograms product per hectare
+ *   - productLHa: liters product per hectare (for liquids)
+ *   - productMlHa: milliliters product per hectare
+ */
+export function calculateAiToProductRate({ targetAiGramsHa, aiConcentrationPct, densityKgL = 1.0 }) {
+  const targetAi = parseFloat(targetAiGramsHa);
+  const conc = parseFloat(aiConcentrationPct);
+  const density = parseFloat(densityKgL) || 1.0;
+
+  if (isNaN(targetAi) || targetAi <= 0 || isNaN(conc) || conc <= 0) {
+    return { error: 'Target a.i. rate and active concentration % must be positive numbers.' };
+  }
+
+  // Grams product/ha = (targetAiGramsHa * 100) / aiConcentrationPct
+  const productGramsHa = (targetAi * 100) / conc;
+  const productKgHa = productGramsHa / 1000;
+  const productLHa = productKgHa / density;
+  const productMlHa = productLHa * 1000;
+
+  return {
+    targetAiGramsHa: parseFloat(targetAi.toFixed(2)),
+    aiConcentrationPct: parseFloat(conc.toFixed(2)),
+    densityKgL: parseFloat(density.toFixed(3)),
+    productGramsHa: parseFloat(productGramsHa.toFixed(2)),
+    productKgHa: parseFloat(productKgHa.toFixed(3)),
+    productLHa: parseFloat(productLHa.toFixed(3)),
+    productMlHa: parseFloat(productMlHa.toFixed(1))
+  };
+}
+
+/**
+ * Calculates backpack sprayer tank-mix calibration and micro-dosing for small plot research trials.
+ *
+ * @param {Object} params
+ * @param {number} params.plotAreaM2 - Individual plot area in square meters (e.g. 20 m²)
+ * @param {number} params.productRateLHa - Product application rate in L/ha (or kg/ha for solid formulations)
+ * @param {number} params.waterVolumeLHa - Water carrier volume in L/ha (typically 150-500 L/ha)
+ * @param {number} [params.tankCapacityL=16] - Knapsack sprayer tank capacity in Liters (default 16 L)
+ * @param {number} [params.replications=4] - Number of replicated plots to be sprayed
+ * @returns {Object} Micro-plot spray recipe and tank-mix calibration
+ */
+export function calculatePlotSprayMix({
+  plotAreaM2,
+  productRateLHa,
+  waterVolumeLHa,
+  tankCapacityL = 16,
+  replications = 4
+}) {
+  const area = parseFloat(plotAreaM2);
+  const prodRate = parseFloat(productRateLHa);
+  const waterRate = parseFloat(waterVolumeLHa);
+  const tankCap = parseFloat(tankCapacityL) || 16;
+  const reps = parseInt(replications, 10) || 1;
+
+  if (isNaN(area) || area <= 0 || isNaN(prodRate) || prodRate <= 0 || isNaN(waterRate) || waterRate <= 0) {
+    return { error: 'Plot area (m²), product rate (L/ha), and water carrier volume (L/ha) must be positive numbers.' };
+  }
+
+  // 1 hectare = 10,000 m²
+  // Single plot carrier volume in mL
+  const plotSprayVolumeMl = (area * waterRate * 1000) / 10000;
+  // Single plot chemical dose in mL
+  const plotProductDoseMl = (area * prodRate * 1000) / 10000;
+
+  // Total trial requirement across all replications (plus 15% sprayer dead volume / boom priming buffer)
+  const totalSprayedAreaM2 = area * reps;
+  const netSprayVolumeL = (totalSprayedAreaM2 * waterRate) / 10000;
+  const bufferFactor = 1.15; // 15% priming & boom retention safety buffer
+  const recommendedMixVolumeL = parseFloat((netSprayVolumeL * bufferFactor).toFixed(2));
+
+  // Concentration in tank: mL product per Liter of water
+  const concentrationMlPerL = parseFloat(((prodRate * 1000) / waterRate).toFixed(2));
+
+  // Amount of product to add to a full knapsack tank
+  const productPerFullTankMl = parseFloat((concentrationMlPerL * tankCap).toFixed(2));
+  // Exact product to add for recommended trial batch volume
+  const productForTrialBatchMl = parseFloat((concentrationMlPerL * recommendedMixVolumeL).toFixed(2));
+
+  // Number of plots covered per full knapsack tank
+  const plotsPerFullTank = Math.floor((tankCap * 1000) / plotSprayVolumeMl);
+
+  return {
+    plotAreaM2: area,
+    replications: reps,
+    productRateLHa: prodRate,
+    waterVolumeLHa: waterRate,
+    plotSprayVolumeMl: parseFloat(plotSprayVolumeMl.toFixed(2)),
+    plotProductDoseMl: parseFloat(plotProductDoseMl.toFixed(3)),
+    concentrationMlPerL,
+    recommendedMixVolumeL,
+    productForTrialBatchMl,
+    tankCapacityL: tankCap,
+    productPerFullTankMl,
+    plotsPerFullTank,
+    mixingInstructions: `To spray ${reps} plot(s) of ${area} m²: Prepare ${recommendedMixVolumeL} L of water solution with ${productForTrialBatchMl} mL of product (${concentrationMlPerL} mL/L). Each plot receives ${plotSprayVolumeMl.toFixed(1)} mL total spray containing ${plotProductDoseMl.toFixed(2)} mL active product.`
+  };
+}
+
