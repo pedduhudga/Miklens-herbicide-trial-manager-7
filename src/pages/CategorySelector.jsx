@@ -176,9 +176,21 @@ export default function CategorySelector() {
 
                 {/* Name & Description */}
                 <h3 className="text-xl font-bold mb-1.5">{cat.name}</h3>
-                <p className="text-white/70 text-xs leading-relaxed mb-4 line-clamp-2">
+                <p className="text-white/70 text-xs leading-relaxed mb-3 line-clamp-2">
                   {cat.description}
                 </p>
+
+                {/* Organic / Bio-Rational capability pill */}
+                <div className="mb-4 inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/15 text-[11px] font-medium text-white/90 backdrop-blur-xs">
+                  <span>🍃</span>
+                  <span>
+                    {cat.id === 'herbicide' ? 'Bio-Desiccants & Pelargonic' :
+                     cat.id === 'fungicide' ? 'Bio-Fungicides & Trichoderma' :
+                     cat.id === 'pesticide' ? 'Bio-Insecticides & Botanicals' :
+                     cat.id === 'nutrition' ? 'Bio-Fertilizers & Organic Composts' :
+                     'Seaweed Extracts & Mycorrhiza'}
+                  </span>
+                </div>
 
                 {/* Footer */}
                 <div className="flex items-center justify-between">
@@ -200,8 +212,8 @@ export default function CategorySelector() {
         </div>
 
         {/* Footer info */}
-        <p className="text-xs text-slate-400 mt-8 text-center">
-          Each category maintains separate trials, formulations, projects, and analysis data.
+        <p className="text-xs text-slate-500 mt-8 text-center max-w-md">
+          Each category maintains strict data isolation while supporting both synthetic chemistry and 100% Certified Organic / Bio-Rational inputs (OMRI / NPOP / USDA-NOP).
         </p>
       </main>
     </div>

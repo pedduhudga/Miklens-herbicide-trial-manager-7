@@ -145,6 +145,17 @@ function FormulationCard({
                 </span>
               )}
 
+              {/* Organic / Bio-Rational Certification Badge */}
+              {synergy.isOrganicBio && (
+                <span
+                  className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 inline-flex items-center gap-1 shadow-2xs cursor-pointer hover:bg-emerald-100 transition"
+                  onClick={(e) => { e.stopPropagation(); onQuickPeek && onQuickPeek(form); }}
+                  title={`Bio-Rational / Organic input: ${synergy.organicStandard || 'OMRI / NPOP Eligible'}`}
+                >
+                  🍃 {synergy.allOrganic ? '100% Organic' : 'Bio-Rational'}
+                </span>
+              )}
+
               {/* Exact Duplicate Recipe Badge */}
               {form._duplicates && form._duplicates.length > 0 && (
                 <span
@@ -163,13 +174,16 @@ function FormulationCard({
                 </span>
               )}
 
-              {/* Weed Spectrum Badge */}
+              {/* Target Spectrum Badge (Category Adaptive) */}
               {stats?.targetCount > 1 && (
                 <span
                   className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-teal-50 text-teal-700 border border-teal-200/80 inline-flex items-center gap-0.5 shadow-2xs"
-                  title={`Demonstrated control on ${stats.targetCount} weed species`}
+                  title={`Demonstrated control across ${stats.targetCount} targets`}
                 >
-                  🌿 {stats.targetCount} Weeds
+                  {(form.Category || 'herbicide') === 'herbicide' ? `🌿 ${stats.targetCount} Weeds` :
+                   (form.Category || 'herbicide') === 'fungicide' ? `🛡️ ${stats.targetCount} Diseases` :
+                   (form.Category || 'herbicide') === 'pesticide' ? `🐛 ${stats.targetCount} Pests` :
+                   `🌱 ${stats.targetCount} Targets`}
                 </span>
               )}
 
@@ -910,6 +924,7 @@ export default function Formulations({ onMenuClick }) {
     return rawForms.map(form => {
       const stats = getFormulationTrialStats(form, state.trials, state.projects, activeCategory);
       const parsedIngs = safeJsonParse(form.IngredientsJSON, []);
+      const synergy = analyzeFormulationSynergy(parsedIngs, form.Category || activeCategory);
       const costDetails = getFormulationCostDetails(parsedIngs, state.ingredients || []);
       const costVal = costDetails.totalCost > 0 ? costDetails.totalCost : parseFloat(form.EstimatedCost || 0);
       let unitLabel = '';
@@ -923,6 +938,7 @@ export default function Formulations({ onMenuClick }) {
       return {
         ...form,
         _stats: stats,
+        _synergy: synergy,
         _trialsCount: stats.total,
         _stdCount: stats.microplotCount,
         _largeCount: stats.fieldCount,
@@ -950,6 +966,8 @@ export default function Formulations({ onMenuClick }) {
       list = list.filter(f => (f._stats?.targetCount ?? 0) >= 2);
     } else if (performanceFilter === 'duplicates') {
       list = list.filter(f => f._duplicates && f._duplicates.length > 0);
+    } else if (performanceFilter === 'organic') {
+      list = list.filter(f => f._synergy?.isOrganicBio);
     }
 
     list.sort((a, b) => {
@@ -1031,7 +1049,7 @@ export default function Formulations({ onMenuClick }) {
                 <option value="best">Sort: Best (Long Control & High Kill) 🏆</option>
                 <option value="control-days">Sort: Longest Control Days ⏳</option>
                 <option value="efficacy">Sort: Highest Kill Rate ⚡</option>
-                <option value="spectrum">Sort: Broadest Weed Spectrum 🌿</option>
+                <option value="spectrum">Sort: Broadest {activeCategory === 'herbicide' ? 'Weed' : activeCategory === 'fungicide' ? 'Disease' : activeCategory === 'pesticide' ? 'Pest' : 'Target'} Spectrum 🎯</option>
                 <option value="trials">Sort: Most Field Tested 🔬</option>
                 <option value="cost">Sort: Lowest Cost 💰</option>
                 <option value="newest">Sort: Newest First 📅</option>
@@ -1111,7 +1129,21 @@ export default function Formulations({ onMenuClick }) {
                 : 'bg-white border border-slate-200 text-slate-600 hover:bg-teal-50 hover:text-teal-700'
             }`}
           >
-            🌿 Broad Spectrum (2+ Weeds)
+            {activeCategory === 'herbicide' ? '🌿 Broad Spectrum (2+ Weeds)' :
+             activeCategory === 'fungicide' ? '🛡️ Broad Spectrum (2+ Diseases)' :
+             activeCategory === 'pesticide' ? '🐛 Broad Spectrum (2+ Pests)' :
+             '🌱 Broad Spectrum (2+ Targets)'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setPerformanceFilter('organic')}
+            className={`px-3 py-1.5 rounded-xl font-semibold transition shrink-0 flex items-center gap-1 shadow-2xs ${
+              performanceFilter === 'organic'
+                ? 'bg-emerald-700 text-white'
+                : 'bg-white border border-emerald-300 text-emerald-800 hover:bg-emerald-50'
+            }`}
+          >
+            🍃 Organic / Bio ({formulationsWithStats.filter(f => f._synergy?.isOrganicBio).length})
           </button>
           <button
             type="button"

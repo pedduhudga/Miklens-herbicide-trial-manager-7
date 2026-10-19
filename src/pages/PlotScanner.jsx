@@ -924,7 +924,7 @@ Rules:
       } : {})
     };
 
-    updateState({ trials: getAppState().trials.map(t => t.ID === updated.ID ? updated : t) });
+    updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updated.ID ? updated : t) });
 
     const patch = {
       ID: latestTrial.ID,

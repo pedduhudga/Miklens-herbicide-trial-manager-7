@@ -290,18 +290,56 @@ export async function processSyncQueue() {
 }
 
 /**
- * Mock server sync (replace with actual API)
+ * Server sync implementation for queued offline operations
  */
 async function syncToServer(syncItem) {
-  // This is a placeholder - implement actual API call
-  // Return { success: true } or { conflict: true, serverData: {...} } or { error: 'message' }
+  if (!syncItem) return { success: false, error: 'No sync item provided' };
+  const { entityType, entityId, operation, data } = syncItem;
   
-  // Simulate success for now
-  return new Promise(resolve => {
-    setTimeout(() => {
-      resolve({ success: true });
-    }, 100);
-  });
+  try {
+    const fbDB = await import('./firebaseDB.js');
+    const entity = (entityType || '').toLowerCase();
+    const op = (operation || '').toLowerCase();
+
+    if (entity.includes('trial')) {
+      if (op.includes('add') || op.includes('create')) {
+        await fbDB.fbAddTrial(data);
+      } else if (op.includes('delete') || op.includes('remove')) {
+        await fbDB.fbDeleteTrial(entityId);
+      } else {
+        await fbDB.fbUpdateTrial({ ID: entityId, ...(data || {}) });
+      }
+    } else if (entity.includes('project')) {
+      if (op.includes('add') || op.includes('create')) {
+        await fbDB.fbAddProject(data);
+      } else if (op.includes('delete') || op.includes('remove')) {
+        await fbDB.fbDeleteProject(entityId);
+      } else {
+        await fbDB.fbUpdateProject({ ID: entityId, ...(data || {}) });
+      }
+    } else if (entity.includes('formulation')) {
+      if (op.includes('add') || op.includes('create')) {
+        await fbDB.fbAddFormulation(data);
+      } else if (op.includes('delete') || op.includes('remove')) {
+        await fbDB.fbDeleteFormulation(entityId);
+      } else {
+        await fbDB.fbUpdateFormulation({ ID: entityId, ...(data || {}) });
+      }
+    } else if (entity.includes('ingredient')) {
+      if (op.includes('add') || op.includes('create')) {
+        await fbDB.fbAddIngredient(data);
+      } else if (op.includes('delete') || op.includes('remove')) {
+        await fbDB.fbDeleteIngredient(entityId);
+      } else {
+        await fbDB.fbUpdateIngredient({ ID: entityId, ...(data || {}) });
+      }
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.warn('[SyncManager] Sync failed:', err);
+    return { success: false, error: err.message };
+  }
 }
 
 /**

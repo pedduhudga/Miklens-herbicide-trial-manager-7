@@ -220,7 +220,9 @@ export function findDuplicateTrial(candidate, trials = [], category = 'herbicide
   const candFormId = String(candidate.formulationId || candidate.FormulationID || '').trim();
   const candDosage = String(candidate.dosage || candidate.Dosage || '').trim().toLowerCase();
   const candTarget = String(
-    candidate.targetWeed || candidate.WeedTarget || candidate.WeedSpecies || candidate.Target || ''
+    candidate.targetWeed || candidate.WeedTarget || candidate.WeedSpecies || 
+    candidate.DiseaseTarget || candidate.PestTarget || candidate.CropTarget || 
+    candidate.Target || ''
   ).trim().toLowerCase();
 
   if (!candFormName && !candFormId) return null;
@@ -235,7 +237,10 @@ export function findDuplicateTrial(candidate, trials = [], category = 'herbicide
     const tFormName = String(trial.FormulationName || trial.Product || '').trim().toLowerCase();
     const tFormId = String(trial.FormulationID || trial.formulationId || '').trim();
     const tDosage = String(trial.Dosage || '').trim().toLowerCase();
-    const tTarget = String(trial.WeedTarget || trial.WeedSpecies || trial.Target || '').trim().toLowerCase();
+    const tTarget = String(
+      trial.DiseaseTarget || trial.PestTarget || trial.CropTarget || 
+      trial.WeedTarget || trial.WeedSpecies || trial.Target || ''
+    ).trim().toLowerCase();
 
     const formMatches = (candFormId && tFormId && candFormId === tFormId) || (candFormName && tFormName && candFormName === tFormName);
     if (!formMatches) continue;

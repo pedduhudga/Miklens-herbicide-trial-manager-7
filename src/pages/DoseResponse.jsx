@@ -74,7 +74,7 @@ export default function DoseResponse({ onMenuClick }) {
 
   // Unique target species from trials
   const targetSpecies = useMemo(() => {
-    return [...new Set(trials.map(t => t[config.targetField]).filter(Boolean))].sort();
+    return [...new Set(trials.map(t => t[config.targetField] || t.Target || t.DiseaseTarget || t.PestTarget || t.CropTarget || t.WeedSpecies).filter(Boolean))].sort();
   }, [trials, config.targetField]);
 
   const formulationNames = useMemo(() => {

@@ -1596,9 +1596,22 @@ export function analyzeFormulationMoASynergy(ingredients = [], category = 'herbi
     });
   }
 
+  // Organic & Bio-Rational Classification
+  const organicMoas = detectedMoas.filter(m => m.isOrganic || (m.committee && m.committee.includes('(Bio)')));
+  const hasOrganicName = activeNames.some(n => 
+    n.includes('organic') || n.includes('bio-') || n.includes('neem') || 
+    n.includes('trichoderma') || n.includes('subtilis') || n.includes('bacillus') || 
+    n.includes('beauveria') || n.includes('spinosad') || n.includes('pyrethrin') ||
+    n.includes('seaweed') || n.includes('mycorrhiz') || n.includes('pseudomonas')
+  );
+  const isOrganicBio = organicMoas.length > 0 || hasOrganicName;
+  const allOrganic = (detectedMoas.length > 0 && detectedMoas.every(m => m.isOrganic || (m.committee && m.committee.includes('(Bio)')))) ||
+    (activeNames.length > 0 && activeNames.every(n => n.includes('organic') || n.includes('bio-') || n.includes('neem')));
+  const organicStandard = organicMoas[0]?.organicStandard || (isOrganicBio ? 'OMRI / NPOP / USDA-NOP Eligible' : null);
+
   const moaSummary = uniqueGroups.length > 0
     ? `${committee} Mode of Action Diversity: Group(s) ${uniqueGroups.join(', ')} (${multiSiteScore})`
-    : 'No verified active committee group identified.';
+    : (isOrganicBio ? `Bio-Rational Input (${organicStandard || 'OMRI Eligible'})` : 'No verified active committee group identified.');
 
   return {
     committee,
@@ -1616,6 +1629,10 @@ export function analyzeFormulationMoASynergy(ingredients = [], category = 'herbi
     adjuvantTips,
     adjuvantRecommendations: adjuvantTips,
     isMultiMoa,
-    badgeLabel
+    badgeLabel,
+    isOrganicBio,
+    allOrganic,
+    organicStandard,
+    organicMoas
   };
 }

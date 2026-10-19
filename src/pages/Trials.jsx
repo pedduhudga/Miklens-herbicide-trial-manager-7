@@ -5319,13 +5319,15 @@ Rules:
     const proposedDosage = duplicateDosage.trim() !== '' ? duplicateDosage.trim() : (trial.Dosage || '');
     const activeCat = trial.Category || activeCategory || 'herbicide';
 
+    const targetLabelVal = trial.DiseaseTarget || trial.PestTarget || trial.CropTarget || trial.WeedTarget || trial.WeedSpecies || trial.Target || '';
+
     // Duplicate Trial Check: Avoid redundant field plots with identical formulation + dosage + target
     const existingDuplicateTrial = findDuplicateTrial(
       {
         formulationName: formMatch.Name,
         formulationId: formMatch.ID,
         dosage: proposedDosage,
-        targetWeed: trial.WeedTarget || trial.WeedSpecies || trial.Target || ''
+        targetWeed: targetLabelVal
       },
       trials,
       activeCat,
@@ -5334,7 +5336,7 @@ Rules:
 
     if (existingDuplicateTrial) {
       const proceed = window.confirm(
-        `⚠️ DUPLICATE TRIAL PARAMETERS DETECTED!\n\nA field trial with formulation "${formMatch.Name}" @ ${proposedDosage || 'N/A'} on target "${trial.WeedTarget || trial.WeedSpecies || 'Default Target'}" already exists (Trial ID: ${existingDuplicateTrial.ID || 'N/A'}).\n\nDuplicating exact identical treatments leads to redundant plots and resource waste.\n\nDo you want to proceed anyway?`
+        `⚠️ DUPLICATE TRIAL PARAMETERS DETECTED!\n\nA field trial with formulation "${formMatch.Name}" @ ${proposedDosage || 'N/A'} on target "${targetLabelVal || 'Default Target'}" already exists (Trial ID: ${existingDuplicateTrial.ID || 'N/A'}).\n\nDuplicating exact identical treatments leads to redundant plots and resource waste.\n\nDo you want to proceed anyway?`
       );
       if (!proceed) return;
     }

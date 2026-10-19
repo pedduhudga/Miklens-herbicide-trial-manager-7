@@ -53,7 +53,7 @@ export default function ResistanceTracker({ onMenuClick }) {
 
   const targetSpecies = useMemo(() => {
     if (!isSupported) return [];
-    return [...new Set(trials.map(t => t[config.targetField]).filter(Boolean))].sort();
+    return [...new Set(trials.map(t => t[config.targetField] || t.Target || t.DiseaseTarget || t.PestTarget || t.CropTarget || t.WeedSpecies).filter(Boolean))].sort();
   }, [trials, config.targetField, isSupported]);
 
   const formulationNames = useMemo(() => {
@@ -83,7 +83,7 @@ export default function ResistanceTracker({ onMenuClick }) {
     const profiles = {};
 
     trials.forEach(trial => {
-      const targetVal = trial[config.targetField];
+      const targetVal = trial[config.targetField] || trial.Target || trial.DiseaseTarget || trial.PestTarget || trial.CropTarget || trial.WeedSpecies;
       if (!targetVal || !trial.FormulationName) return;
       if (selectedTarget && targetVal !== selectedTarget) return;
       if (selectedFormulation && trial.FormulationName !== selectedFormulation) return;

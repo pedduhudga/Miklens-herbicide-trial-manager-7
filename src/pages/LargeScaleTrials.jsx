@@ -1221,7 +1221,7 @@ export default function LargeScaleTrials({ onMenuClick }) {
     };
     try {
       await addTrial(payload, getAppState);
-      updateState({ trials: [...state.trials, payload] });
+      updateState({ trials: [...(state.trials || []), payload] });
       setDuplicateModal(null);
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Sub-trial duplicated successfully!', type: 'success' } }));
     } catch {
