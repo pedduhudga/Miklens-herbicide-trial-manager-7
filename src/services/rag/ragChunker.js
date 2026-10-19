@@ -176,8 +176,12 @@ ${obsLines}`;
 
     // Extract ingredients recipe
     const ingList = [];
-    if (Array.isArray(f.Ingredients) && f.Ingredients.length > 0) {
-      f.Ingredients.forEach(ing => {
+    const parsedIngredients = Array.isArray(f.Ingredients) && f.Ingredients.length > 0
+      ? f.Ingredients
+      : safeJsonParse(f.IngredientsJSON, []);
+
+    if (Array.isArray(parsedIngredients) && parsedIngredients.length > 0) {
+      parsedIngredients.forEach(ing => {
         const name = ing.name || ing.IngredientName || 'Active Ingredient';
         const qty = ing.quantity || ing.Amount || ing.qty || '';
         const unit = ing.unit || 'ml';
@@ -201,9 +205,9 @@ ${obsLines}`;
     const avgEff = effValues.length > 0 ? `${Math.round(effValues.reduce((a, b) => a + b, 0) / effValues.length)}%` : 'No Trials Yet';
     const targetsTested = Array.from(new Set(linkedTrials.map(t => t.WeedSpecies || t.WeedTarget || t.Target).filter(Boolean))).join(', ') || 'General Field Spectrum';
 
-    // Biochemical synergy & resistance analysis
-    const synergyAnalysis = (Array.isArray(f.Ingredients) && f.Ingredients.length > 0)
-      ? analyzeFormulationSynergy(f.Ingredients)
+    // Biochemical synergy & resistance analysis (category-aware)
+    const synergyAnalysis = (Array.isArray(parsedIngredients) && parsedIngredients.length > 0)
+      ? analyzeFormulationSynergy(parsedIngredients, cat)
       : null;
 
     const synergySection = synergyAnalysis && synergyAnalysis.detectedMoas.length > 0

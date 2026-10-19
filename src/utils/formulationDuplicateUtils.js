@@ -61,11 +61,11 @@ export function canonicalizeIngredients(ingredientsInput) {
   if (!Array.isArray(list)) return [];
 
   const normalized = list
-    .filter(item => item && (item.name || item.Name) && String(item.name || item.Name).trim() !== '')
+    .filter(item => item && (item.name || item.Name || item.IngredientName || item.ingredientName) && String(item.name || item.Name || item.IngredientName || item.ingredientName).trim() !== '')
     .map(item => {
-      const origName = String(item.name || item.Name || '').trim();
+      const origName = String(item.name || item.Name || item.IngredientName || item.ingredientName || '').trim();
       const normName = normalizeIngredientName(origName);
-      const rawQty = item.quantity !== undefined ? item.quantity : (item.Quantity !== undefined ? item.Quantity : '');
+      const rawQty = item.quantity !== undefined ? item.quantity : (item.Quantity !== undefined ? item.Quantity : (item.qty !== undefined ? item.qty : (item.Amount !== undefined ? item.Amount : '')));
       const rawUnit = item.unit || item.Unit || 'ml';
       const { qty, unit } = normalizeQuantityAndUnit(rawQty, rawUnit);
 
@@ -253,7 +253,14 @@ export function findDuplicateTrial(candidate, trials = [], category = 'herbicide
     // Compare target (normalized)
     const normCandTarget = candTarget.replace(/[^a-z0-9]/g, '');
     const normTTarget = tTarget.replace(/[^a-z0-9]/g, '');
-    const targetMatches = !normCandTarget || !normTTarget || normCandTarget === normTTarget;
+    let targetMatches = false;
+    if (normCandTarget && normTTarget) {
+      targetMatches = normCandTarget === normTTarget || normCandTarget.includes(normTTarget) || normTTarget.includes(normCandTarget);
+    } else if (!normCandTarget && !normTTarget) {
+      targetMatches = true;
+    } else {
+      targetMatches = false;
+    }
 
     if (dosageMatches && targetMatches) {
       return trial;

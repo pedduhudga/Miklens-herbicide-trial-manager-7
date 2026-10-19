@@ -300,38 +300,40 @@ async function syncToServer(syncItem) {
     const fbDB = await import('./firebaseDB.js');
     const entity = (entityType || '').toLowerCase();
     const op = (operation || '').toLowerCase();
+    const category = String(data?.Category || 'herbicide').toLowerCase().trim();
+    const userId = data?.CreatedBy || data?.UpdatedBy || null;
 
     if (entity.includes('trial')) {
       if (op.includes('add') || op.includes('create')) {
-        await fbDB.fbAddTrial(data);
+        await fbDB.fbCatAddTrial(category, data, userId);
       } else if (op.includes('delete') || op.includes('remove')) {
-        await fbDB.fbDeleteTrial(entityId);
+        await fbDB.fbCatDeleteTrial(category, entityId);
       } else {
-        await fbDB.fbUpdateTrial({ ID: entityId, ...(data || {}) });
+        await fbDB.fbCatUpdateTrial(category, { ID: entityId, ...(data || {}) });
       }
     } else if (entity.includes('project')) {
       if (op.includes('add') || op.includes('create')) {
-        await fbDB.fbAddProject(data);
+        await fbDB.fbCatAddProject(category, data, userId);
       } else if (op.includes('delete') || op.includes('remove')) {
-        await fbDB.fbDeleteProject(entityId);
+        await fbDB.fbCatDeleteProject(category, entityId);
       } else {
-        await fbDB.fbUpdateProject({ ID: entityId, ...(data || {}) });
+        await fbDB.fbCatUpdateProject(category, { ID: entityId, ...(data || {}) });
       }
     } else if (entity.includes('formulation')) {
       if (op.includes('add') || op.includes('create')) {
-        await fbDB.fbAddFormulation(data);
+        await fbDB.fbCatAddFormulation(category, data, userId);
       } else if (op.includes('delete') || op.includes('remove')) {
-        await fbDB.fbDeleteFormulation(entityId);
+        await fbDB.fbCatDeleteFormulation(category, entityId);
       } else {
-        await fbDB.fbUpdateFormulation({ ID: entityId, ...(data || {}) });
+        await fbDB.fbCatUpdateFormulation(category, { ID: entityId, ...(data || {}) });
       }
     } else if (entity.includes('ingredient')) {
       if (op.includes('add') || op.includes('create')) {
-        await fbDB.fbAddIngredient(data);
+        await fbDB.fbCatAddIngredient(category, data, userId);
       } else if (op.includes('delete') || op.includes('remove')) {
-        await fbDB.fbDeleteIngredient(entityId);
+        await fbDB.fbCatDeleteIngredient(category, entityId);
       } else {
-        await fbDB.fbUpdateIngredient({ ID: entityId, ...(data || {}) });
+        await fbDB.fbCatUpdateIngredient(category, { ID: entityId, ...(data || {}) });
       }
     }
 

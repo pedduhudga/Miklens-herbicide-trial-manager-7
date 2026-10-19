@@ -44,7 +44,7 @@ export default function DoseResponse({ onMenuClick }) {
   }, [state.trials, activeCategory]);
 
   const formulations = useMemo(() => {
-    return (state.formulations || []).filter(f => f.Category === activeCategory);
+    return (state.formulations || []).filter(f => f.Category === activeCategory || (!f.Category && activeCategory === 'herbicide'));
   }, [state.formulations, activeCategory]);
 
   // ── Filter state

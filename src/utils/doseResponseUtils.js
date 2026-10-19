@@ -4,6 +4,7 @@
  */
 
 import { safeJsonParse } from './helpers.js';
+import { getCategoryConfig, getObservationPrimaryValue } from './categoryConfig.js';
 
 /**
  * Fit 4-Parameter Logistic (4PL) Model
@@ -469,8 +470,6 @@ export function performDoseResponseAnalysis(trials, options = {}) {
   };
 }
 
-import { getCategoryConfig } from './categoryConfig.js';
-
 // Extract dose-response data from trials
 export function extractDoseResponseData(trials, formulation, targetSpecies = null, daa = null, activeCategory = 'herbicide') {
   const data = [];
@@ -478,7 +477,8 @@ export function extractDoseResponseData(trials, formulation, targetSpecies = nul
   
   trials.forEach(trial => {
     if (trial.FormulationName !== formulation) return;
-    if (targetSpecies && trial[config.targetField] !== targetSpecies) return;
+    const trialTarget = trial[config.targetField] || trial.Target || trial.WeedSpecies || trial.DiseaseTarget || trial.PestTarget || trial.CropTarget || trial.NutrientType || trial.BiostimulantType;
+    if (targetSpecies && trialTarget && String(trialTarget).trim().toLowerCase() !== String(targetSpecies).trim().toLowerCase()) return;
     
     const dose = parseFloat(trial.Dosage);
     if (isNaN(dose) || dose <= 0) return;
@@ -486,14 +486,15 @@ export function extractDoseResponseData(trials, formulation, targetSpecies = nul
     const efficacy = safeJsonParse(trial.EfficacyDataJSON, []);
     if (!efficacy || efficacy.length === 0) return;
     
-    const obs = daa 
-      ? efficacy.find(e => e.daa === daa) 
+    const obs = daa !== null && daa !== undefined && daa !== ''
+      ? efficacy.find(e => Number(e.daa) === Number(daa)) 
       : efficacy[efficacy.length - 1]; // latest
     
     if (!obs) return;
     
-    const primaryMetricKey = config.primaryMetric.key;
-    const response = parseFloat(obs[primaryMetricKey]);
+    const primaryMetricKey = config.primaryMetric?.key || 'WCE';
+    const rawVal = obs[primaryMetricKey] ?? obs.controlPct ?? obs.wce ?? obs.efficacy ?? obs.value ?? getObservationPrimaryValue(activeCategory, obs);
+    const response = parseFloat(rawVal);
     
     if (isNaN(response)) return;
     

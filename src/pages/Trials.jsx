@@ -5310,9 +5310,15 @@ Rules:
   const handleDuplicateConfirm = useCallback(async () => {
     if (!duplicateModal) return;
     const trial = duplicateModal;
+    const isControlOrCheck = trial.IsControl || 
+                             duplicateFormulation === 'Untreated Check' || 
+                             duplicateFormulation === 'Commercial Standard Check' ||
+                             duplicateFormulation?.toLowerCase().includes('check') ||
+                             duplicateFormulation?.toLowerCase().includes('control');
+
     const formMatch = eligibleFormulations.find(f => f.Name === duplicateFormulation) || formulations.find(f => f.Name === duplicateFormulation);
-    if (!formMatch || !isFormulationEligibleForTrial(formMatch)) {
-      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Please select an approved formulation from the list to start the trial.', type: 'error' } }));
+    if (!isControlOrCheck && (!formMatch || !isFormulationEligibleForTrial(formMatch))) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Please select an approved formulation or standard check to start the trial.', type: 'error' } }));
       return;
     }
 
@@ -5322,7 +5328,7 @@ Rules:
     const targetLabelVal = trial.DiseaseTarget || trial.PestTarget || trial.CropTarget || trial.WeedTarget || trial.WeedSpecies || trial.Target || '';
 
     // Duplicate Trial Check: Avoid redundant field plots with identical formulation + dosage + target
-    const existingDuplicateTrial = findDuplicateTrial(
+    const existingDuplicateTrial = !isControlOrCheck && formMatch ? findDuplicateTrial(
       {
         formulationName: formMatch.Name,
         formulationId: formMatch.ID,
@@ -5332,7 +5338,7 @@ Rules:
       trials,
       activeCat,
       trial.ID
-    );
+    ) : null;
 
     if (existingDuplicateTrial) {
       const proceed = window.confirm(
@@ -5342,11 +5348,12 @@ Rules:
     }
 
     setDuplicateModal(null);
+    const finalFormName = formMatch ? formMatch.Name : duplicateFormulation;
     const payload = {
       ...trial,
       ID: undefined,
-      FormulationName: formMatch.Name,
-      FormulationID: formMatch.ID,
+      FormulationName: finalFormName,
+      FormulationID: formMatch ? formMatch.ID : (trial.FormulationID || ''),
       Date: duplicateDate || toDatetimeLocal(new Date()),
       Dosage: proposedDosage,
       IsCompleted: false, ControlFinalized: false,
@@ -5360,7 +5367,7 @@ Rules:
       const result = await addTrial(payload, getAppState);
       const newTrial = { ...payload, ID: result.ID || result.id || Date.now().toString() };
       updateState({ trials: [newTrial, ...(getAppState().trials || state.trials || [])] });
-      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Duplicated as "${formMatch.Name}"`, type: 'success' } }));
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Duplicated as "${finalFormName}"`, type: 'success' } }));
     } catch(e) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Duplicate failed', type: 'error' } }));
     }

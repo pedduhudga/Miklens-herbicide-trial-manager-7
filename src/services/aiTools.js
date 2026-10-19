@@ -6,7 +6,7 @@
 import { performANOVA } from '../utils/statsUtils.js';
 import { analyzeSprayWindow } from './sprayAdvisor.js';
 import { predictFormulaFeasibility } from '../utils/feasibilityEngine.js';
-import { calculateFormulationCost } from '../utils/costUtils.js';
+import { calculateFormulationCost, getFormulationCostDetails } from '../utils/costUtils.js';
 import { findDuplicateFormulation } from '../utils/formulationDuplicateUtils.js';
 import { parseVoiceObservation } from '../utils/voiceParser.js';
 import { safeJsonParse } from '../utils/helpers.js';
@@ -187,7 +187,13 @@ export async function toolEvaluateColbyAndCost({ ingredients, targetSpecies = ''
   const feasibility = predictFormulaFeasibility(rawIngs, trials, targetSpecies, activeCategory);
 
   // 2. Cost derivation using current inventory rates
-  const costReport = calculateFormulationCost(rawIngs, inventory);
+  const costDetails = getFormulationCostDetails(rawIngs, inventory);
+  const costPerLiter = costDetails.costPerUnit > 0
+    ? `₹${costDetails.costPerUnit.toFixed(2)} ${costDetails.unitLabel}`
+    : 'N/A';
+  const costSummary = costDetails.pricedCount > 0
+    ? `${costDetails.pricedCount}/${costDetails.totalCount} ingredients priced (${costDetails.unitLabel})`
+    : 'Ingredients missing inventory pricing';
 
   // 3. Mode of Action & Antagonism Check via authentic committee database
   const synergy = analyzeFormulationSynergy(rawIngs, activeCategory);
@@ -206,8 +212,8 @@ export async function toolEvaluateColbyAndCost({ ingredients, targetSpecies = ''
     }
   }
 
-  // 4. Duplicate Check
-  const duplicate = findDuplicateFormulation(rawIngs, formulations);
+  // 4. Duplicate Check (category-aware)
+  const duplicate = findDuplicateFormulation(rawIngs, formulations, activeCategory);
   const targetList = feasibility.susceptibleTargets || feasibility.susceptibleWeeds || [];
   const modList = feasibility.moderateTargets || feasibility.moderateWeeds || [];
   const tolList = feasibility.tolerantTargets || feasibility.tolerantWeeds || [];
@@ -227,8 +233,8 @@ export async function toolEvaluateColbyAndCost({ ingredients, targetSpecies = ''
       susceptibleWeeds: targetList,
       moderateWeeds: modList,
       tolerantWeeds: tolList,
-      costPerLiter: costReport.totalCostPerLiter ? `₹${costReport.totalCostPerLiter.toFixed(2)} / L` : 'N/A',
-      costSummary: costReport.summary || '',
+      costPerLiter,
+      costSummary,
       hasAntagonism,
       antagonismReason,
       isDuplicate: !!duplicate,
@@ -249,7 +255,7 @@ export async function toolEvaluateColbyAndCost({ ingredients, targetSpecies = ''
       susceptibleWeeds: targetList,
       moderateWeeds: modList,
       tolerantWeeds: tolList,
-      costPerLiter: costReport.totalCostPerLiter ? `₹${costReport.totalCostPerLiter.toFixed(2)}/L` : null,
+      costPerLiter: costDetails.costPerUnit > 0 ? `₹${costDetails.costPerUnit.toFixed(2)}${costDetails.unitLabel}` : null,
       hasAntagonism,
       antagonismReason,
       isDuplicate: !!duplicate,
@@ -284,6 +290,12 @@ export async function toolAuditTrialDoctor(options = {}, context = {}) {
   let warningCount = 0;
   let insightCount = 0;
 
+  const isYieldMetric = ['nutrition', 'biostimulant'].includes(activeCategory.toLowerCase());
+  const failThreshold = isYieldMetric ? 3 : 60;
+  const ratingMismatchThreshold = isYieldMetric ? 3 : 40;
+  const metricNoun = isYieldMetric ? 'yield/growth response' : 'weed control';
+  const metricLabel = isYieldMetric ? 'Yield Response' : 'Efficacy';
+
   // --- CHECK 1: DATA INCONSISTENCIES ---
   for (const trial of catTrials) {
     const rawEff = safeJsonParse(trial.EfficacyDataJSON, []);
@@ -298,7 +310,7 @@ export async function toolAuditTrialDoctor(options = {}, context = {}) {
         trialName: trial.FormulationName || trial.ID,
         severity: 'warning',
         title: 'Missing DAA 0 Baseline Assessment',
-        description: `Trial has ${sorted.length} observations but lacks an initial DAA 0 baseline. Weed control calculations may be skewed.`,
+        description: `Trial has ${sorted.length} observations but lacks an initial DAA 0 baseline. ${metricLabel} calculations may be skewed.`,
         actionPrompt: `Add DAA 0 baseline for trial ${trial.ID}`
       });
       warningCount++;
@@ -326,17 +338,17 @@ export async function toolAuditTrialDoctor(options = {}, context = {}) {
       }
     }
 
-    // Contradictory result (Rating is Excellent but final efficacy < 40%)
+    // Contradictory result (Rating is Excellent but final efficacy is below threshold)
     const finalEff = sorted.length > 0 ? Number(sorted[sorted.length - 1].controlPct ?? sorted[sorted.length - 1].efficacy ?? 0) : null;
     const rating = String(trial.Result || '').toLowerCase();
-    if (finalEff !== null && finalEff < 40 && rating === 'excellent') {
+    if (finalEff !== null && finalEff < ratingMismatchThreshold && rating === 'excellent') {
       issues.push({
         id: `rating-mismatch-${trial.ID}`,
         trialId: trial.ID,
         trialName: trial.FormulationName || trial.ID,
         severity: 'critical',
-        title: 'Rating & Efficacy Metric Conflict',
-        description: `Trial is labeled "Excellent" but recorded final efficacy is only ${finalEff}%. Rating should be updated to "Poor".`,
+        title: `Rating & ${metricLabel} Metric Conflict`,
+        description: `Trial is labeled "Excellent" but recorded final ${metricNoun} is only ${finalEff}%. Rating should be updated to "Poor".`,
         actionPrompt: `Update rating for trial ${trial.ID} to Poor`
       });
       criticalCount++;
@@ -348,7 +360,7 @@ export async function toolAuditTrialDoctor(options = {}, context = {}) {
     const rawEff = safeJsonParse(t.EfficacyDataJSON, []);
     const last = rawEff[rawEff.length - 1];
     const eff = last ? Number(last.controlPct ?? last.efficacy ?? 0) : null;
-    return eff !== null && eff < 60;
+    return eff !== null && eff < failThreshold;
   });
 
   const highTempFailures = failedTrials.filter(t => parseFloat(t.Temperature) >= 32);
@@ -548,6 +560,16 @@ export async function detectAndExecuteAgronomicTool(userMessage, context = {}) {
       testIngredients = [
         { name: 'Chlorantraniliprole 18.5% SC', quantity: 60, unit: 'ml' },
         { name: 'Thiamethoxam 25% WG', quantity: 100, unit: 'g' }
+      ];
+    } else if (activeCategory === 'nutrition') {
+      testIngredients = [
+        { name: 'Urea (46% N)', quantity: 200, unit: 'g' },
+        { name: 'Zinc Sulphate Heptahydrate', quantity: 50, unit: 'g' }
+      ];
+    } else if (activeCategory === 'biostimulant') {
+      testIngredients = [
+        { name: 'Seaweed Extract (Ascophyllum nodosum)', quantity: 150, unit: 'ml' },
+        { name: 'Humic Acid 12% Liquid', quantity: 100, unit: 'ml' }
       ];
     } else {
       testIngredients = [

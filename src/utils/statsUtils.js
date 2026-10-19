@@ -188,9 +188,10 @@ export function performANOVA(trials, options = {}) {
   
   // Category validation: Ensure all trials belong to the same category when activeCategory is specified
   if (activeCategory) {
+    const targetCategory = String(activeCategory).trim().toLowerCase();
     const categoryViolations = trials.filter(trial => {
-      const trialCategory = trial.Category || 'herbicide';
-      return trialCategory !== activeCategory;
+      const trialCategory = String(trial.Category || 'herbicide').trim().toLowerCase();
+      return trialCategory !== targetCategory;
     });
     
     if (categoryViolations.length > 0) {
@@ -217,8 +218,8 @@ export function performANOVA(trials, options = {}) {
     
     // Extract value from efficacy data
     const efficacy = safeJsonParse(trial.EfficacyDataJSON, []);
-    const observations = daa 
-      ? efficacy.filter(e => e.daa === daa || e.daysAfterApplication === daa)
+    const observations = daa !== null && daa !== undefined && daa !== ''
+      ? efficacy.filter(e => Number(e.daa) === Number(daa) || Number(e.daysAfterApplication) === Number(daa))
       : efficacy;
     
     if (observations.length > 0) {

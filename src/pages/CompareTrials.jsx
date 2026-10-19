@@ -141,14 +141,34 @@ export default function CompareTrials({ onMenuClick }) {
     
     // Find ingredients
     const activeIngs = [];
-    if (form.IngredientsJSON) {
-      const ingMap = safeJsonParse(form.IngredientsJSON, {});
-      Object.entries(ingMap).forEach(([ingId, conc]) => {
-        const found = ingredientsList.find(ing => ing.ID === ingId);
-        if (found) {
-          activeIngs.push(`${found.Name} (${conc}%)`);
-        }
-      });
+    const rawIngs = form.IngredientsJSON || form.Ingredients;
+    if (rawIngs) {
+      const parsed = safeJsonParse(rawIngs, []);
+      if (Array.isArray(parsed)) {
+        parsed.forEach(item => {
+          if (!item) return;
+          if (typeof item === 'string') {
+            activeIngs.push(item);
+          } else if (item.name || item.Name) {
+            const qty = item.quantity !== undefined ? item.quantity : (item.Quantity !== undefined ? item.Quantity : '');
+            const unit = item.unit || item.Unit || '';
+            activeIngs.push(`${item.name || item.Name}${qty ? ` (${qty} ${unit})` : ''}`);
+          } else if (item.ID || item.id) {
+            const found = ingredientsList.find(ing => (ing.ID || ing.id) === (item.ID || item.id));
+            const conc = item.concentration || item.quantity || '';
+            activeIngs.push(`${found ? found.Name : (item.ID || item.id)}${conc ? ` (${conc}%)` : ''}`);
+          }
+        });
+      } else if (typeof parsed === 'object') {
+        Object.entries(parsed).forEach(([ingId, conc]) => {
+          const found = ingredientsList.find(ing => (ing.ID || ing.id) === ingId);
+          if (found) {
+            activeIngs.push(`${found.Name} (${conc}%)`);
+          } else {
+            activeIngs.push(`${ingId} (${conc}%)`);
+          }
+        });
+      }
     }
 
     // Cost calculations
@@ -632,7 +652,7 @@ ${contextData}`;
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div className="bg-slate-50 rounded-lg p-2"><p className="text-slate-400 font-semibold">Dosage</p><p className="font-bold text-slate-700 truncate">{trial.Dosage || '—'}</p></div>
-                    <div className="bg-slate-50 rounded-lg p-2"><p className="text-slate-400 font-semibold">{config.targetLabel}</p><p className="font-bold text-slate-700 truncate">{trial[config.targetField] || '—'}</p></div>
+                    <div className="bg-slate-50 rounded-lg p-2"><p className="text-slate-400 font-semibold">{config.targetLabel}</p><p className="font-bold text-slate-700 truncate">{trial[config.targetField] || trial.Target || trial.DiseaseTarget || trial.PestTarget || trial.CropTarget || trial.WeedSpecies || trial.NutrientType || trial.BiostimulantType || '—'}</p></div>
                     <div className="rounded-lg p-2 col-span-2 flex items-center justify-between" style={{ backgroundColor: config.color.hexLight }}>
                       <p className="font-semibold" style={{ color: config.color.hex }}>Final {config.primaryMetric.key}</p>
                       <p className="text-2xl font-bold" style={{ color: config.color.hex }}>{finalWce !== null ? `${finalWce}${config.primaryMetric.unit || ''}` : '—'}</p>

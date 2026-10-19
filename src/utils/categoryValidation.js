@@ -44,7 +44,8 @@ export function validateCategory(category) {
     );
   }
   
-  if (!VALID_CATEGORIES.includes(category)) {
+  const normCat = String(category).trim().toLowerCase();
+  if (!VALID_CATEGORIES.includes(normCat)) {
     throw new CategoryValidationError(
       `Invalid category: ${category}. Must be one of: ${VALID_CATEGORIES.join(', ')}`,
       VALIDATION_ERROR_TYPES.INVALID_CATEGORY,
@@ -52,7 +53,7 @@ export function validateCategory(category) {
     );
   }
   
-  return category;
+  return normCat;
 }
 
 /**
@@ -63,7 +64,7 @@ export function validateCategory(category) {
  * @throws {CategoryValidationError} If categories don't match
  */
 export function validateRecordCategory(record, expectedCategory, recordType = 'record') {
-  validateCategory(expectedCategory);
+  const normExpected = validateCategory(expectedCategory);
   
   if (!record || typeof record !== 'object') {
     throw new CategoryValidationError(
@@ -75,8 +76,8 @@ export function validateRecordCategory(record, expectedCategory, recordType = 'r
   const recordCategory = record.Category || record.category;
   
   // Allow legacy records without category if expected category is herbicide
-  if (!recordCategory && expectedCategory === 'herbicide') {
-    return expectedCategory;
+  if (!recordCategory && normExpected === 'herbicide') {
+    return normExpected;
   }
   
   if (!recordCategory) {
@@ -87,7 +88,8 @@ export function validateRecordCategory(record, expectedCategory, recordType = 'r
     );
   }
   
-  if (recordCategory !== expectedCategory) {
+  const normRecordCategory = String(recordCategory).trim().toLowerCase();
+  if (normRecordCategory !== normExpected) {
     throw new CategoryValidationError(
       `Category isolation violation: Cannot process ${recordCategory} ${recordType} when active category is ${expectedCategory}`,
       VALIDATION_ERROR_TYPES.CATEGORY_MISMATCH,
@@ -95,7 +97,7 @@ export function validateRecordCategory(record, expectedCategory, recordType = 'r
     );
   }
   
-  return recordCategory;
+  return normRecordCategory;
 }
 
 /**
@@ -109,7 +111,7 @@ export function validateCategoryCrossReferences(record, relatedRecords, relation
   const recordCategory = record.Category || record.category;
   if (!recordCategory) return; // Skip validation for records without category
   
-  validateCategory(recordCategory);
+  const normRecordCat = validateCategory(recordCategory);
   
   const violations = [];
   
@@ -120,15 +122,18 @@ export function validateCategoryCrossReferences(record, relatedRecords, relation
       const relatedCategory = related.Category || related.category;
       
       // Allow legacy records without category if record category is herbicide
-      if (!relatedCategory && recordCategory === 'herbicide') return;
+      if (!relatedCategory && normRecordCat === 'herbicide') return;
       
-      if (relatedCategory && relatedCategory !== recordCategory) {
-        violations.push({
-          index,
-          relatedId: related.ID || related.id,
-          relatedCategory,
-          recordCategory
-        });
+      if (relatedCategory) {
+        const normRelatedCat = String(relatedCategory).trim().toLowerCase();
+        if (normRelatedCat !== normRecordCat) {
+          violations.push({
+            index,
+            relatedId: related.ID || related.id,
+            relatedCategory,
+            recordCategory
+          });
+        }
       }
     });
   }
@@ -161,8 +166,11 @@ export function validateTrialProjectCategory(trial, project) {
   // Handle legacy records - if both are missing category, allow (assume herbicide)
   if (!trialCategory && !projectCategory) return;
   
+  const normTrialCat = trialCategory ? String(trialCategory).trim().toLowerCase() : null;
+  const normProjectCat = projectCategory ? String(projectCategory).trim().toLowerCase() : null;
+  
   // If one has category and other doesn't, check if herbicide is assumed
-  if (!trialCategory && projectCategory !== 'herbicide') {
+  if (!normTrialCat && normProjectCat !== 'herbicide') {
     throw new CategoryValidationError(
       `Trial without category cannot be assigned to ${projectCategory} project`,
       VALIDATION_ERROR_TYPES.CATEGORY_MISMATCH,
@@ -170,7 +178,7 @@ export function validateTrialProjectCategory(trial, project) {
     );
   }
   
-  if (!projectCategory && trialCategory !== 'herbicide') {
+  if (!normProjectCat && normTrialCat !== 'herbicide') {
     throw new CategoryValidationError(
       `${trialCategory} trial cannot be assigned to project without category`,
       VALIDATION_ERROR_TYPES.CATEGORY_MISMATCH,
@@ -179,7 +187,7 @@ export function validateTrialProjectCategory(trial, project) {
   }
   
   // Both have categories - they must match
-  if (trialCategory && projectCategory && trialCategory !== projectCategory) {
+  if (normTrialCat && normProjectCat && normTrialCat !== normProjectCat) {
     throw new CategoryValidationError(
       `Trial category (${trialCategory}) must match project category (${projectCategory})`,
       VALIDATION_ERROR_TYPES.CATEGORY_MISMATCH,
@@ -200,7 +208,7 @@ export function validateFormulationIngredientCategory(formulation, ingredients) 
   const formulationCategory = formulation.Category || formulation.category;
   if (!formulationCategory) return; // Skip validation for formulations without category
   
-  validateCategory(formulationCategory);
+  const normFormCat = validateCategory(formulationCategory);
   
   const violations = [];
   
@@ -212,7 +220,8 @@ export function validateFormulationIngredientCategory(formulation, ingredients) 
     // Allow ingredients without category to be used (shared ingredients)
     if (!ingredientCategory) return;
     
-    if (ingredientCategory !== formulationCategory) {
+    const normIngCat = String(ingredientCategory).trim().toLowerCase();
+    if (normIngCat !== normFormCat) {
       violations.push({
         index,
         ingredientId: ingredient.ID || ingredient.id,
@@ -243,7 +252,7 @@ export function validateFormulationIngredientCategory(formulation, ingredients) 
  * @throws {CategoryValidationError} If export contains cross-category data
  */
 export function validateExportCategoryBoundaries(activeCategory, dataToExport, exportType = 'data') {
-  validateCategory(activeCategory);
+  const normActiveCat = validateCategory(activeCategory);
   
   if (!Array.isArray(dataToExport)) return;
   
@@ -255,15 +264,18 @@ export function validateExportCategoryBoundaries(activeCategory, dataToExport, e
     const recordCategory = record.Category || record.category;
     
     // Allow legacy records without category if active category is herbicide
-    if (!recordCategory && activeCategory === 'herbicide') return;
+    if (!recordCategory && normActiveCat === 'herbicide') return;
     
-    if (recordCategory && recordCategory !== activeCategory) {
-      violations.push({
-        index,
-        recordId: record.ID || record.id,
-        recordCategory,
-        activeCategory
-      });
+    if (recordCategory) {
+      const normRecCat = String(recordCategory).trim().toLowerCase();
+      if (normRecCat !== normActiveCat) {
+        violations.push({
+          index,
+          recordId: record.ID || record.id,
+          recordCategory,
+          activeCategory
+        });
+      }
     }
   });
   
@@ -300,7 +312,7 @@ export function validateComparisonCategoryConsistency(itemsToCompare, comparison
   itemsToCompare.forEach((item, index) => {
     if (!item || typeof item !== 'object') return;
     
-    const category = item.Category || item.category || 'herbicide'; // Default legacy to herbicide
+    const category = String(item.Category || item.category || 'herbicide').trim().toLowerCase(); // Default legacy to herbicide
     categories.add(category);
     categoryMap.set(index, category);
   });
@@ -331,7 +343,7 @@ export function validateComparisonCategoryConsistency(itemsToCompare, comparison
  * @throws {CategoryValidationError} If AI input contains cross-category data
  */
 export function validateAiAnalysisCategoryBoundaries(trialsData, activeCategory) {
-  validateCategory(activeCategory);
+  const normActiveCat = validateCategory(activeCategory);
   
   if (!Array.isArray(trialsData)) return;
   
@@ -343,15 +355,18 @@ export function validateAiAnalysisCategoryBoundaries(trialsData, activeCategory)
     const trialCategory = trial.Category || trial.category;
     
     // Allow legacy trials without category if active category is herbicide
-    if (!trialCategory && activeCategory === 'herbicide') return;
+    if (!trialCategory && normActiveCat === 'herbicide') return;
     
-    if (trialCategory && trialCategory !== activeCategory) {
-      violations.push({
-        index,
-        trialId: trial.ID || trial.id,
-        trialCategory,
-        activeCategory
-      });
+    if (trialCategory) {
+      const normTrialCat = String(trialCategory).trim().toLowerCase();
+      if (normTrialCat !== normActiveCat) {
+        violations.push({
+          index,
+          trialId: trial.ID || trial.id,
+          trialCategory,
+          activeCategory
+        });
+      }
     }
   });
   

@@ -839,17 +839,6 @@ export default function Formulations({ onMenuClick }) {
       ...dynamicFields,
     };
 
-    let newForms = [...(state.formulations || [])];
-    if (editingForm) {
-      // Replace in-place, then re-sort will handle position
-      newForms = newForms.map(f => f.ID === payload.ID ? payload : f);
-    } else {
-      // ✅ Prepend so the new item is immediately at the top
-      newForms = [payload, ...newForms];
-    }
-    updateState({ formulations: newForms });
-    setIsModalOpen(false);
-
     // Category validation before saving
     try {
       const operation = editingForm ? 'updateFormulation' : 'addFormulation';
@@ -862,6 +851,17 @@ export default function Formulations({ onMenuClick }) {
       }
       console.warn('Validation check failed:', validationError);
     }
+
+    let newForms = [...(state.formulations || [])];
+    if (editingForm) {
+      // Replace in-place, then re-sort will handle position
+      newForms = newForms.map(f => f.ID === payload.ID ? payload : f);
+    } else {
+      // ✅ Prepend so the new item is immediately at the top
+      newForms = [payload, ...newForms];
+    }
+    updateState({ formulations: newForms });
+    setIsModalOpen(false);
 
     try {
       if (editingForm) {

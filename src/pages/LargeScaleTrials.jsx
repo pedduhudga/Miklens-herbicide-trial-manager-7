@@ -1198,9 +1198,14 @@ export default function LargeScaleTrials({ onMenuClick }) {
       return;
     }
     if (!duplicateModal) return;
+    const isControlOrCheck = duplicateModal.IsControl || 
+                             duplicateFormulation === 'Untreated Check' || 
+                             duplicateFormulation === 'Commercial Standard Check' ||
+                             duplicateFormulation?.toLowerCase().includes('check') ||
+                             duplicateFormulation?.toLowerCase().includes('control');
     const formMatch = state.formulations?.find(f => f.Name === duplicateFormulation);
-    if (!formMatch || !isFormulationEligibleForTrial(formMatch)) {
-      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Please select an approved formulation from the list.', type: 'error' } }));
+    if (!isControlOrCheck && (!formMatch || !isFormulationEligibleForTrial(formMatch))) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Please select an approved formulation or standard check from the list.', type: 'error' } }));
       return;
     }
     const isCompleted = duplicateModal.IsCompleted === true || duplicateModal.IsCompleted === 'true';

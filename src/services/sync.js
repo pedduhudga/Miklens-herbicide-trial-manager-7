@@ -1,4 +1,5 @@
 import { apiCall } from './db.js';
+import * as dataLayer from './dataLayer.js';
 import { updateTrial } from './dataLayer.js';
 import { safeJsonParse } from '../utils/helpers.js';
 import { buildAiObservationPayload } from '../utils/categoryObservationUtils.js';
@@ -241,7 +242,62 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                             }
 
                             console.log(`[HighTechSync] [INFO] Syncing Action: ${item.action}`);
-                            const result = await apiCall(item.action, item.payload, false, getAppState);
+                            const curSettings = getAppState()?.settings || {};
+                            let result = null;
+
+                            if (curSettings.firebaseEnabled) {
+                                switch (item.action) {
+                                    case 'addTrial':
+                                    case 'createTrialRecord':
+                                        result = await dataLayer.addTrial(item.payload, getAppState);
+                                        break;
+                                    case 'updateTrial':
+                                    case 'updateTrialRecord':
+                                    case 'updateTrialStatus':
+                                    case 'finalizeTrial':
+                                        result = await dataLayer.updateTrial(item.payload, getAppState);
+                                        break;
+                                    case 'deleteTrial':
+                                    case 'deleteTrialRecord':
+                                        result = await dataLayer.deleteTrial(item.payload, getAppState);
+                                        break;
+                                    case 'addFormulation':
+                                        result = await dataLayer.addFormulation(item.payload, getAppState);
+                                        break;
+                                    case 'updateFormulation':
+                                        result = await dataLayer.updateFormulation(item.payload, getAppState);
+                                        break;
+                                    case 'deleteFormulation':
+                                        result = await dataLayer.deleteFormulation(item.payload, getAppState);
+                                        break;
+                                    case 'addProject':
+                                        result = await dataLayer.addProject(item.payload, getAppState);
+                                        break;
+                                    case 'updateProject':
+                                        result = await dataLayer.updateProject(item.payload, getAppState);
+                                        break;
+                                    case 'deleteProject':
+                                        result = await dataLayer.deleteProject(item.payload, getAppState);
+                                        break;
+                                    case 'addIngredient':
+                                        result = await dataLayer.addIngredient(item.payload, getAppState);
+                                        break;
+                                    case 'deleteIngredient':
+                                        result = await dataLayer.deleteIngredient(item.payload, getAppState);
+                                        break;
+                                    case 'addBlock':
+                                        result = await dataLayer.addBlock(item.payload, getAppState);
+                                        break;
+                                    case 'deleteBlock':
+                                        result = await dataLayer.deleteBlock(item.payload, getAppState);
+                                        break;
+                                    default:
+                                        result = await apiCall(item.action, item.payload, false, getAppState);
+                                        break;
+                                }
+                            } else {
+                                result = await apiCall(item.action, item.payload, false, getAppState);
+                            }
 
                             if (item.cancelRequested) {
                                 console.log(`[HighTechSync] ? Cancelled after request: ${item.action}`);

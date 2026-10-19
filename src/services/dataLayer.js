@@ -304,9 +304,10 @@ function checkOwnership(collectionType, recordId, getAppState, action = 'edit') 
   const role = String(user.Role || user.role || '').toLowerCase();
   if (role === 'admin') return true; // admin bypass
 
-  // For ingredients: scientists who have herbicide write permission can edit/delete ingredients
+  // For ingredients: scientists who have activeCategory or herbicide write permission can edit/delete ingredients
   if (collectionType === 'ingredients') {
-    if (hasAccess(user, 'herbicide', 'write')) {
+    const activeCategory = getCategory(getAppState);
+    if (hasAccess(user, activeCategory, 'write') || hasAccess(user, 'herbicide', 'write')) {
       return true;
     }
   }

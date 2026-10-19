@@ -12,14 +12,15 @@ export default function Ingredients({ onMenuClick }) {
   const { state, updateState, getAppState } = useAppState();
   const { isViewer: authIsViewer, user, isAdmin } = useAuth();
 
-  // Any scientist or user with herbicide category write access can add and edit ingredients
-  const hasHerbicideWrite = isAdmin || hasAccess(user, 'herbicide', 'write');
-  const hasHerbicideRead = isAdmin || hasAccess(user, 'herbicide', 'read');
-  const isViewer = !hasHerbicideWrite;
+  const activeCategory = state.activeCategory || 'herbicide';
+  // Any scientist or user with active category or herbicide write access can add and edit ingredients
+  const hasCategoryWrite = isAdmin || hasAccess(user, activeCategory, 'write') || hasAccess(user, 'herbicide', 'write');
+  const hasCategoryRead = isAdmin || hasAccess(user, activeCategory, 'read') || hasAccess(user, 'herbicide', 'read');
+  const isViewer = !hasCategoryWrite;
 
   const canEditIngredient = (record) => {
     if (isAdmin) return true;
-    if (hasHerbicideWrite) return true;
+    if (hasCategoryWrite) return true;
     if (!record) return false;
     const ownUid = user?.uid || user?.ID || user?.id;
     return !record.CreatedBy || record.CreatedBy === ownUid;
@@ -248,8 +249,8 @@ export default function Ingredients({ onMenuClick }) {
 
   const handleSave = async (e) => {
     e.preventDefault();
-    if (!hasHerbicideWrite) {
-      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Permission Denied: Herbicide write permission required to modify ingredients.', type: 'error' } }));
+    if (!hasCategoryWrite) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Permission Denied: Write permission required to modify ${activeCategory} ingredients.`, type: 'error' } }));
       return;
     }
     if (editingIngredient && !canEditIngredient(editingIngredient)) {
@@ -260,7 +261,7 @@ export default function Ingredients({ onMenuClick }) {
     const payload = {
       ...(editingIngredient || {}),
       ...formData,
-      Category: editingIngredient?.Category || 'herbicide',
+      Category: editingIngredient?.Category || activeCategory,
       ID: editingIngredient ? editingIngredient.ID : Date.now().toString(),
       CreatedBy: editingIngredient?.CreatedBy || ownUid,
       UpdatedBy: ownUid,
@@ -287,8 +288,8 @@ export default function Ingredients({ onMenuClick }) {
   };
 
   const handleDelete = async (id) => {
-    if (!hasHerbicideWrite) {
-      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Permission Denied: Herbicide write permission required to delete ingredients.', type: 'error' } }));
+    if (!hasCategoryWrite) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Permission Denied: Write permission required to delete ${activeCategory} ingredients.`, type: 'error' } }));
       return;
     }
     const ingToDelete = state.ingredients?.find(i => i.ID === id);
@@ -337,10 +338,10 @@ export default function Ingredients({ onMenuClick }) {
             <h2 className="text-xl font-bold text-slate-800">Ingredients Library</h2>
             <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1.5">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-              Shared Herbicide Catalog {hasHerbicideWrite ? '• Full Edit Access Granted' : '• Read-Only Mode'}
+              Shared {activeCategory.charAt(0).toUpperCase() + activeCategory.slice(1)} Catalog {hasCategoryWrite ? '• Full Edit Access Granted' : '• Read-Only Mode'}
             </p>
           </div>
-          {hasHerbicideWrite && (
+          {hasCategoryWrite && (
             <div className="flex items-center gap-3">
               <button
                 onClick={handleShareLibrary}
