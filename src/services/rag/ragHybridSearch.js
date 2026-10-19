@@ -144,7 +144,7 @@ export function executeHybridRAGSearch({
   const queryLower = query.toLowerCase();
   const targetCategory = activeCategory.toLowerCase();
 
-  const rankedChunks = Array.from(rrfScores.entries())
+  const candidateList = Array.from(rrfScores.entries())
     .map(([docId, baseRrfScore]) => {
       const chunk = chunkMap.get(docId);
       if (!chunk) return null;
@@ -186,9 +186,83 @@ export function executeHybridRAGSearch({
       const chunkCat = (item.chunk.category || 'herbicide').toLowerCase();
       return chunkCat === targetCategory;
     })
-    .sort((a, b) => b.score - a.score)
-    .slice(0, topK)
-    .map(item => item.chunk);
+    .sort((a, b) => b.score - a.score);
 
-  return rankedChunks;
+  // 7. Apply Maximal Marginal Relevance (MMR) for Information Diversity
+  // Prevents near-duplicate chunks from crowding out recipes, timelines, or benchmarks
+  const vectorMap = new Map();
+  vectorEntries.forEach(ve => vectorMap.set(ve.id, ve.vector));
+
+  const diversifiedChunks = applyMaximalMarginalRelevance(
+    candidateList,
+    vectorMap,
+    queryVector,
+    topK,
+    0.70
+  );
+
+  return diversifiedChunks;
 }
+
+/**
+ * Maximal Marginal Relevance (MMR) Selector
+ * Balances relevance with information novelty/diversity across entity types and documents
+ */
+export function applyMaximalMarginalRelevance(candidates = [], vectorMap = new Map(), queryVector = null, topK = 8, lambda = 0.70) {
+  if (candidates.length <= topK) return candidates.map(c => c.chunk);
+
+  const selected = [];
+  const remaining = [...candidates];
+
+  // Helper cosine function
+  const cosine = (vA, vB) => {
+    if (!vA || !vB || vA.length !== vB.length) return 0;
+    let dot = 0;
+    for (let i = 0; i < vA.length; i++) dot += vA[i] * vB[i];
+    return Math.max(0, dot);
+  };
+
+  while (selected.length < topK && remaining.length > 0) {
+    let bestIdx = -1;
+    let bestScore = -Infinity;
+
+    for (let i = 0; i < remaining.length; i++) {
+      const cand = remaining[i];
+      const candVec = vectorMap.get(cand.id);
+
+      // Max similarity to already selected chunks
+      let maxSimToSelected = 0;
+      if (candVec && selected.length > 0) {
+        for (const sel of selected) {
+          const selVec = vectorMap.get(sel.id);
+          if (selVec) {
+            const sim = cosine(candVec, selVec);
+            if (sim > maxSimToSelected) maxSimToSelected = sim;
+          }
+        }
+      }
+
+      // Penalty if multiple chunks from the exact same entity are already selected
+      const entityId = cand.chunk?.entityId;
+      const sameEntityCount = selected.filter(s => s.chunk?.entityId === entityId).length;
+      const entityPenalty = sameEntityCount * 0.12;
+
+      // MMR formula: lambda * relevance - (1 - lambda) * max_similarity_to_selected
+      const mmr = lambda * cand.score - (1 - lambda) * maxSimToSelected - entityPenalty;
+
+      if (mmr > bestScore) {
+        bestScore = mmr;
+        bestIdx = i;
+      }
+    }
+
+    if (bestIdx !== -1) {
+      selected.push(remaining.splice(bestIdx, 1)[0]);
+    } else {
+      break;
+    }
+  }
+
+  return selected.map(s => s.chunk);
+}
+

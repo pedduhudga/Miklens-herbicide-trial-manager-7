@@ -27,6 +27,7 @@ import {
 import { buildAIMemoryContext } from '../utils/aiMemory.js';
 import { compressAIContext } from '../utils/aiContextCompressor.js';
 import { initRAGIndex, retrieveRAGContext, invalidateRAGCache } from '../services/rag/ragEngine.js';
+import { auditResponseFaithfulness } from '../services/rag/ragFaithfulness.js';
 import { DEFAULT_GEMINI_MODEL } from '../utils/aiConstants.js';
 import { findDuplicateFormulation } from '../utils/formulationDuplicateUtils.js';
 import { detectAndExecuteAgronomicTool, toolAuditTrialDoctor, toolCheckSprayWindow, toolRunAnova, toolEvaluateColbyAndCost, toolParseVoiceScout } from '../services/aiTools.js';
@@ -1180,6 +1181,11 @@ Anchor your weed species diagnosis, burn rate, and living cover estimates strict
       const { cleanContent, suggestions: rawSuggestions } = extractSuggestions(reply);
       const suggestions = getContextualFollowUps(userMsg, cleanContent, activeCategory, rawSuggestions);
 
+      // Self-RAG Ground-Truth Faithfulness Audit: verify claims against retrieved database chunks
+      const faithfulness = ragResult?.retrievedChunks
+        ? auditResponseFaithfulness(cleanContent, ragResult.retrievedChunks)
+        : null;
+
       const sessionIndex = newSessions.findIndex(s => s.id === activeSessionId);
       if (sessionIndex !== -1) {
         newSessions[sessionIndex] = {
@@ -1197,7 +1203,8 @@ Anchor your weed species diagnosis, burn rate, and living cover estimates strict
                 rag: ragResult ? {
                   chunkCount: ragResult.chunkCount,
                   retrievalDuration: ragResult.retrievalDuration,
-                  sources: ragResult.sources || []
+                  sources: ragResult.sources || [],
+                  faithfulness
                 } : null,
                 timestamp: new Date().toLocaleTimeString()
               }
@@ -2276,16 +2283,31 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                                     </span>
                                   )}
                                   {msg.meta.rag && (
-                                    <button
-                                      type="button"
-                                      onClick={() => setExpandedSourcesIdx(expandedSourcesIdx === idx ? null : idx)}
-                                      className="flex items-center gap-1 text-emerald-700 bg-emerald-50 hover:bg-emerald-100/80 border border-emerald-200/70 px-2 py-0.5 rounded-md font-semibold cursor-pointer transition active:scale-95"
-                                      title="Click to inspect verified ground-truth sources retrieved for this answer"
-                                    >
-                                      <Sparkles className="w-2.5 h-2.5 text-emerald-500" />
-                                      <span>Hybrid RAG ({msg.meta.rag.chunkCount} docs • {msg.meta.rag.retrievalDuration}ms)</span>
-                                      <ChevronDown className={`w-3 h-3 text-emerald-600 transition-transform ${expandedSourcesIdx === idx ? 'rotate-180' : ''}`} />
-                                    </button>
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() => setExpandedSourcesIdx(expandedSourcesIdx === idx ? null : idx)}
+                                        className="flex items-center gap-1 text-emerald-700 bg-emerald-50 hover:bg-emerald-100/80 border border-emerald-200/70 px-2 py-0.5 rounded-md font-semibold cursor-pointer transition active:scale-95"
+                                        title="Click to inspect verified ground-truth sources retrieved for this answer"
+                                      >
+                                        <Sparkles className="w-2.5 h-2.5 text-emerald-500" />
+                                        <span>Hybrid RAG ({msg.meta.rag.chunkCount} docs • {msg.meta.rag.retrievalDuration}ms)</span>
+                                        <ChevronDown className={`w-3 h-3 text-emerald-600 transition-transform ${expandedSourcesIdx === idx ? 'rotate-180' : ''}`} />
+                                      </button>
+                                      {msg.meta.rag.faithfulness && (
+                                        <span 
+                                          className={`flex items-center gap-1 px-2 py-0.5 rounded-md font-semibold text-[10px] ${
+                                            msg.meta.rag.faithfulness.isFaithful 
+                                              ? 'text-emerald-700 bg-emerald-50 border border-emerald-200/80' 
+                                              : 'text-amber-700 bg-amber-50 border border-amber-200/80'
+                                          }`}
+                                          title={`Faithfulness score: ${msg.meta.rag.faithfulness.faithfulnessScore}%. Verified ${msg.meta.rag.faithfulness.verifiedClaimsCount} factual claims directly against database records.`}
+                                        >
+                                          <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                                          <span>{msg.meta.rag.faithfulness.auditBadge}</span>
+                                        </span>
+                                      )}
+                                    </>
                                   )}
                                   {msg.meta.compressionRatio > 0 && (
                                     <span className="flex items-center gap-1 text-blue-700 bg-blue-50 border border-blue-200/60 px-2 py-0.5 rounded-md font-semibold">
@@ -2303,7 +2325,14 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                                       <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
                                       <span>Verified Ground-Truth Sources ({msg.meta.rag.sources.length})</span>
                                     </div>
-                                    <span className="text-[10px] text-slate-400 font-mono">0-Quota IndexedDB RAG</span>
+                                    <div className="flex items-center gap-2">
+                                      {msg.meta.rag.faithfulness && (
+                                        <span className="text-[10px] font-bold text-emerald-400 font-mono bg-emerald-950/80 border border-emerald-500/30 px-2 py-0.5 rounded-md">
+                                          Score: {msg.meta.rag.faithfulness.faithfulnessScore}%
+                                        </span>
+                                      )}
+                                      <span className="text-[10px] text-slate-400 font-mono">0-Quota IndexedDB RAG</span>
+                                    </div>
                                   </div>
                                   <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
                                     {msg.meta.rag.sources.map((src, sIdx) => {

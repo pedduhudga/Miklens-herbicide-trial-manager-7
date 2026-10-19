@@ -243,5 +243,64 @@ describe('Next-Generation Agronomic RAG Engine', () => {
       expect(synergyChunk.text).toContain('BIOCHEMICAL SYNERGY & RESISTANCE MANAGEMENT');
     });
   });
+
+  describe('Self-RAG Ground-Truth Faithfulness Auditor', () => {
+    it('audits and verifies factual claims against ground-truth database chunks', async () => {
+      const { auditResponseFaithfulness } = await import('../services/rag/ragFaithfulness.js');
+
+      const retrievedChunks = [
+        {
+          id: 'trial_1783319817942_summary',
+          title: 'Trial Glycyl (1783319817942)',
+          text: 'Trial 1783319817942 demonstrated 100% control with 38 days control duration. Application dosage: 35 ml/L.'
+        }
+      ];
+
+      // Fully faithful response citing true numbers from ground truth
+      const faithfulResponse = 'Trial 1783319817942 achieved 100% control over 38 days control duration at 35 ml/L.';
+      const auditResult = auditResponseFaithfulness(faithfulResponse, retrievedChunks);
+
+      expect(auditResult.faithfulnessScore).toBeGreaterThanOrEqual(80);
+      expect(auditResult.isFaithful).toBe(true);
+      expect(auditResult.verifiedClaimsCount).toBeGreaterThan(0);
+      expect(auditResult.auditBadge).toContain('Verified');
+    });
+  });
+
+  describe('Maximal Marginal Relevance (MMR) Diversification', () => {
+    it('balances relevance and penalizes redundancy to diversify retrieved chunks', async () => {
+      const { applyMaximalMarginalRelevance } = await import('../services/rag/ragHybridSearch.js');
+
+      const candidates = [
+        { id: 'chunk_1', score: 0.95, chunk: { id: 'chunk_1', entityId: 'trial_1', text: 'Trial 1 summary' } },
+        { id: 'chunk_2', score: 0.94, chunk: { id: 'chunk_2', entityId: 'trial_1', text: 'Trial 1 timeline duplicate' } },
+        { id: 'chunk_3', score: 0.88, chunk: { id: 'chunk_3', entityId: 'form_A', text: 'Formulation recipe A' } },
+        { id: 'chunk_4', score: 0.82, chunk: { id: 'chunk_4', entityId: 'ing_B', text: 'Ingredient B profile' } }
+      ];
+
+      const vectorMap = new Map();
+      const v1 = new Float32Array(256).fill(0.1);
+      const v2 = new Float32Array(256).fill(0.1); // identical to v1
+      const v3 = new Float32Array(256).fill(0.0);
+      v3[0] = 1.0;
+      const v4 = new Float32Array(256).fill(0.0);
+      v4[1] = 1.0;
+
+      vectorMap.set('chunk_1', v1);
+      vectorMap.set('chunk_2', v2);
+      vectorMap.set('chunk_3', v3);
+      vectorMap.set('chunk_4', v4);
+
+      const diversified = applyMaximalMarginalRelevance(candidates, vectorMap, null, 3, 0.6);
+
+      expect(diversified.length).toBe(3);
+      // Ensures diverse entity representation
+      const entityIds = diversified.map(d => d.entityId);
+      expect(entityIds).toContain('trial_1');
+      expect(entityIds).toContain('form_A');
+      expect(entityIds).toContain('ing_B');
+    });
+  });
 });
+
 
