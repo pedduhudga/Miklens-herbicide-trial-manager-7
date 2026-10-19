@@ -5,7 +5,8 @@ import TopBar from '../components/TopBar.jsx';
 import Modal from '../components/Modal.jsx';
 import { addIngredient, deleteIngredient } from '../services/dataLayer.js';
 import { hasAccess } from '../utils/categoryConfig.js';
-import { Edit, Trash2, Plus, Search, ChevronDown, ChevronUp, FlaskConical, Share2, ShieldCheck, X } from 'lucide-react';
+import { identifyMoA } from '../utils/agrochemicalMoaDatabase.js';
+import { Edit, Trash2, Plus, Search, ChevronDown, ChevronUp, FlaskConical, Share2, ShieldCheck, X, Sparkles, AlertCircle } from 'lucide-react';
 
 export default function Ingredients({ onMenuClick }) {
   const { state, updateState, getAppState } = useAppState();
@@ -36,7 +37,13 @@ export default function Ingredients({ onMenuClick }) {
     IupacName: '',
     MolecularFormula: '',
     MolecularWeight: '',
-    SMILES: ''
+    SMILES: '',
+    MoACode: '',
+    ChemicalFamily: '',
+    TargetSite: '',
+    Systemicity: '',
+    ResistanceRisk: '',
+    MoACommittee: ''
   });
 
   const handleShareLibrary = async () => {
@@ -131,9 +138,37 @@ export default function Ingredients({ onMenuClick }) {
 
   const CURRENCY_SYMBOL = '₹'; // Could be dynamic from settings
 
+  const handleAutoDetectMoA = (nameOverride = null) => {
+    const activeName = (nameOverride || formData.Name || '').trim();
+    if (!activeName) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Please enter an ingredient name first.', type: 'info' } }));
+      return;
+    }
+    const detected = identifyMoA(activeName, state.activeCategory || 'herbicide');
+    if (detected) {
+      setFormData(prev => ({
+        ...prev,
+        MoACode: detected.code || '',
+        ChemicalFamily: detected.chemicalFamily || prev.ChemicalFamily || '',
+        TargetSite: detected.targetSite || detected.name || prev.TargetSite || '',
+        Systemicity: detected.systemicity || prev.Systemicity || '',
+        ResistanceRisk: detected.resistanceRisk || prev.ResistanceRisk || '',
+        MoACommittee: detected.committee || prev.MoACommittee || ''
+      }));
+      window.dispatchEvent(new CustomEvent('app:toast', {
+        detail: { msg: `Matched ${detected.code}: ${detected.chemicalFamily || detected.name}`, type: 'success' }
+      }));
+    } else {
+      window.dispatchEvent(new CustomEvent('app:toast', {
+        detail: { msg: `No standard committee entry found for "${activeName}". You can enter custom MoA details.`, type: 'info' }
+      }));
+    }
+  };
+
   const handleOpenModal = (ingredient = null) => {
     if (ingredient) {
       setEditingIngredient(ingredient);
+      const detected = identifyMoA(ingredient.Name, ingredient.Category || state.activeCategory || 'herbicide');
       setFormData({
         Name: ingredient.Name || '',
         Cost: ingredient.Cost || '',
@@ -142,7 +177,13 @@ export default function Ingredients({ onMenuClick }) {
         IupacName: ingredient.IupacName || '',
         MolecularFormula: ingredient.MolecularFormula || '',
         MolecularWeight: ingredient.MolecularWeight || '',
-        SMILES: ingredient.SMILES || ''
+        SMILES: ingredient.SMILES || '',
+        MoACode: ingredient.MoACode || detected?.code || '',
+        ChemicalFamily: ingredient.ChemicalFamily || detected?.chemicalFamily || '',
+        TargetSite: ingredient.TargetSite || detected?.targetSite || '',
+        Systemicity: ingredient.Systemicity || detected?.systemicity || '',
+        ResistanceRisk: ingredient.ResistanceRisk || detected?.resistanceRisk || '',
+        MoACommittee: ingredient.MoACommittee || detected?.committee || ''
       });
     } else {
       setEditingIngredient(null);
@@ -154,7 +195,13 @@ export default function Ingredients({ onMenuClick }) {
         IupacName: '',
         MolecularFormula: '',
         MolecularWeight: '',
-        SMILES: ''
+        SMILES: '',
+        MoACode: '',
+        ChemicalFamily: '',
+        TargetSite: '',
+        Systemicity: '',
+        ResistanceRisk: '',
+        MoACommittee: ''
       });
     }
     setIsModalOpen(true);
@@ -171,15 +218,24 @@ export default function Ingredients({ onMenuClick }) {
       const data = await response.json();
       const prop = data.PropertyTable?.Properties?.[0];
       if (prop) {
+        const detected = identifyMoA(formData.Name, state.activeCategory || 'herbicide');
         setFormData(prev => ({
           ...prev,
           PubChemCID: String(prop.CID || ''),
           IupacName: prop.IUPACName || '',
           MolecularFormula: prop.MolecularFormula || '',
           MolecularWeight: prop.MolecularWeight ? String(prop.MolecularWeight) : '',
-          SMILES: prop.CanonicalSMILES || ''
+          SMILES: prop.CanonicalSMILES || '',
+          ...(detected ? {
+            MoACode: prev.MoACode || detected.code || '',
+            ChemicalFamily: prev.ChemicalFamily || detected.chemicalFamily || '',
+            TargetSite: prev.TargetSite || detected.targetSite || '',
+            Systemicity: prev.Systemicity || detected.systemicity || '',
+            ResistanceRisk: prev.ResistanceRisk || detected.resistanceRisk || '',
+            MoACommittee: prev.MoACommittee || detected.committee || ''
+          } : {})
         }));
-        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Scientific details retrieved from PubChem!', type: 'success' } }));
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Scientific details retrieved from PubChem & MoA database!', type: 'success' } }));
       } else {
         throw new Error('No properties found for this compound.');
       }
@@ -364,6 +420,30 @@ export default function Ingredients({ onMenuClick }) {
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
                           <p className="font-bold text-slate-800">{ing.Name}</p>
+                          {(() => {
+                            const detected = identifyMoA(ing.Name, ing.Category || state.activeCategory || 'herbicide');
+                            const code = ing.MoACode || detected?.code;
+                            const risk = ing.ResistanceRisk || detected?.resistanceRisk;
+                            const chemFamily = ing.ChemicalFamily || detected?.chemicalFamily;
+
+                            if (!code) return null;
+
+                            const colorClasses = 
+                              code.startsWith('HRAC') ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                              code.startsWith('FRAC') ? 'bg-purple-50 text-purple-700 border-purple-200' :
+                              code.startsWith('IRAC') ? 'bg-amber-50 text-amber-800 border-amber-200' :
+                              'bg-teal-50 text-teal-700 border-teal-200';
+
+                            return (
+                              <span 
+                                className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shadow-2xs flex items-center gap-1 ${colorClasses}`}
+                                title={`${chemFamily ? chemFamily + ' • ' : ''}${risk ? 'Resistance Risk: ' + risk : ''}`}
+                              >
+                                <ShieldCheck className="w-2.5 h-2.5" />
+                                {code}
+                              </span>
+                            );
+                          })()}
                           {ing.PubChemCID && (
                             <span className="text-[10px] bg-indigo-50 text-indigo-600 font-bold px-1.5 py-0.5 rounded-full border border-indigo-100">
                               PubChem Verified
@@ -414,60 +494,119 @@ export default function Ingredients({ onMenuClick }) {
                   </div>
 
                   {expandedIngId === ing.ID && (
-                    <div className="px-6 pb-5 pt-3 border-t border-slate-50 bg-slate-50/50 flex flex-col md:flex-row gap-5 transition-all">
-                      {ing.PubChemCID ? (
-                        <>
-                          <div className="flex-shrink-0 flex items-center justify-center p-3 rounded-xl bg-white border border-slate-200 self-start">
-                            <img 
-                              src={`https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/${ing.PubChemCID}/PNG`} 
-                              alt={`${ing.Name} chemical structure`} 
-                              className="w-28 h-28 object-contain"
-                              onError={(e) => { e.target.style.display = 'none'; }}
-                            />
-                          </div>
-                          <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-slate-600">
-                            <div>
-                              <p className="font-semibold text-slate-400 uppercase tracking-wider text-[10px]">PubChem CID</p>
-                              <p className="font-bold text-slate-800 text-sm mt-0.5">{ing.PubChemCID}</p>
+                    <div className="px-6 pb-5 pt-3 border-t border-slate-50 bg-slate-50/50 flex flex-col gap-4 transition-all">
+                      <div className="flex flex-col md:flex-row gap-5">
+                        {ing.PubChemCID ? (
+                          <>
+                            <div className="flex-shrink-0 flex items-center justify-center p-3 rounded-xl bg-white border border-slate-200 self-start">
+                              <img 
+                                src={`https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/${ing.PubChemCID}/PNG`} 
+                                alt={`${ing.Name} chemical structure`} 
+                                className="w-28 h-28 object-contain"
+                                onError={(e) => { e.target.style.display = 'none'; }}
+                              />
                             </div>
-                            {ing.MolecularFormula && (
+                            <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-slate-600">
                               <div>
-                                <p className="font-semibold text-slate-400 uppercase tracking-wider text-[10px]">Molecular Formula</p>
-                                <p className="font-bold text-slate-800 text-sm mt-0.5">{ing.MolecularFormula}</p>
+                                <p className="font-semibold text-slate-400 uppercase tracking-wider text-[10px]">PubChem CID</p>
+                                <p className="font-bold text-slate-800 text-sm mt-0.5">{ing.PubChemCID}</p>
                               </div>
-                            )}
-                            {ing.MolecularWeight && (
-                              <div>
-                                <p className="font-semibold text-slate-400 uppercase tracking-wider text-[10px]">Molecular Weight</p>
-                                <p className="font-bold text-slate-800 text-sm mt-0.5">{ing.MolecularWeight} g/mol</p>
+                              {ing.MolecularFormula && (
+                                <div>
+                                  <p className="font-semibold text-slate-400 uppercase tracking-wider text-[10px]">Molecular Formula</p>
+                                  <p className="font-bold text-slate-800 text-sm mt-0.5">{ing.MolecularFormula}</p>
+                                </div>
+                              )}
+                              {ing.MolecularWeight && (
+                                <div>
+                                  <p className="font-semibold text-slate-400 uppercase tracking-wider text-[10px]">Molecular Weight</p>
+                                  <p className="font-bold text-slate-800 text-sm mt-0.5">{ing.MolecularWeight} g/mol</p>
+                                </div>
+                              )}
+                              {ing.IupacName && (
+                                <div className="col-span-1 sm:col-span-2">
+                                  <p className="font-semibold text-slate-400 uppercase tracking-wider text-[10px]">IUPAC Chemical Name</p>
+                                  <p className="font-bold text-slate-800 mt-0.5 break-all text-xs leading-relaxed">{ing.IupacName}</p>
+                                </div>
+                              )}
+                              {ing.SMILES && (
+                                <div className="col-span-1 sm:col-span-2">
+                                  <p className="font-semibold text-slate-400 uppercase tracking-wider text-[10px]">Canonical SMILES</p>
+                                  <p className="font-mono text-slate-800 mt-0.5 break-all bg-white p-2 rounded-lg border border-slate-200 text-[10px] select-all leading-tight">{ing.SMILES}</p>
+                                </div>
+                              )}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="py-2 text-center text-xs text-slate-400 w-full flex flex-col items-center justify-center gap-1">
+                            <p>No PubChem scientific 2D structure query stored.</p>
+                            <button 
+                              onClick={() => handleOpenModal(ing)}
+                              className="text-indigo-600 font-bold hover:underline"
+                            >
+                              Query PubChem
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Official Mode of Action & Resistance Management Panel */}
+                      {(() => {
+                        const detected = identifyMoA(ing.Name, ing.Category || state.activeCategory || 'herbicide');
+                        const code = ing.MoACode || detected?.code;
+                        const chemFamily = ing.ChemicalFamily || detected?.chemicalFamily;
+                        const targetSite = ing.TargetSite || detected?.targetSite || detected?.name;
+                        const systemicity = ing.Systemicity || detected?.systemicity;
+                        const risk = ing.ResistanceRisk || detected?.resistanceRisk;
+                        const crossRisk = detected?.crossResistanceRisk;
+                        const committee = ing.MoACommittee || detected?.committee || 'MoA';
+
+                        if (!code && !chemFamily && !targetSite) return null;
+
+                        return (
+                          <div className="w-full pt-3 border-t border-slate-200/60">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                                Official Resistance Management Profile ({committee})
+                              </span>
+                              {risk && (
+                                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                  risk.toLowerCase().includes('high') ? 'bg-red-50 text-red-700 border border-red-200' :
+                                  risk.toLowerCase().includes('medium') ? 'bg-amber-50 text-amber-700 border border-amber-200' :
+                                  'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                }`}>
+                                  Risk: {risk.split(' ')[0]}
+                                </span>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs text-slate-600">
+                              <div className="bg-white p-2.5 rounded-xl border border-slate-200/80 shadow-2xs">
+                                <p className="font-semibold text-slate-400 uppercase text-[9px] tracking-wide">Classification Code</p>
+                                <p className="font-bold text-slate-800 text-xs mt-0.5">{code || 'Standard'}</p>
                               </div>
-                            )}
-                            {ing.IupacName && (
-                              <div className="col-span-1 sm:col-span-2">
-                                <p className="font-semibold text-slate-400 uppercase tracking-wider text-[10px]">IUPAC Chemical Name</p>
-                                <p className="font-bold text-slate-800 mt-0.5 break-all text-xs leading-relaxed">{ing.IupacName}</p>
+                              <div className="bg-white p-2.5 rounded-xl border border-slate-200/80 shadow-2xs">
+                                <p className="font-semibold text-slate-400 uppercase text-[9px] tracking-wide">Chemical Family</p>
+                                <p className="font-bold text-slate-800 text-xs mt-0.5 truncate" title={chemFamily}>{chemFamily || 'Organic Active'}</p>
                               </div>
-                            )}
-                            {ing.SMILES && (
-                              <div className="col-span-1 sm:col-span-2">
-                                <p className="font-semibold text-slate-400 uppercase tracking-wider text-[10px]">Canonical SMILES</p>
-                                <p className="font-mono text-slate-800 mt-0.5 break-all bg-white p-2 rounded-lg border border-slate-200 text-[10px] select-all leading-tight">{ing.SMILES}</p>
+                              <div className="bg-white p-2.5 rounded-xl border border-slate-200/80 shadow-2xs">
+                                <p className="font-semibold text-slate-400 uppercase text-[9px] tracking-wide">Systemicity / Uptake</p>
+                                <p className="font-medium text-slate-800 text-xs mt-0.5 truncate" title={systemicity}>{systemicity || 'Contact / Systemic'}</p>
                               </div>
+                              <div className="bg-white p-2.5 rounded-xl border border-slate-200/80 shadow-2xs sm:col-span-2 lg:col-span-1">
+                                <p className="font-semibold text-slate-400 uppercase text-[9px] tracking-wide">Biochemical Target Site</p>
+                                <p className="font-medium text-slate-800 text-xs mt-0.5 truncate" title={targetSite}>{targetSite || 'Biochemical Target'}</p>
+                              </div>
+                            </div>
+                            {crossRisk && (
+                              <p className="text-[11px] text-slate-500 mt-2 bg-amber-50/60 p-2 rounded-lg border border-amber-200/50 flex items-center gap-1.5">
+                                <AlertCircle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+                                <span><strong>Resistance Guidance:</strong> {crossRisk}</span>
+                              </p>
                             )}
                           </div>
-                        </>
-                      ) : (
-                        <div className="py-4 text-center text-xs text-slate-400 w-full flex flex-col items-center justify-center gap-1.5">
-                          <FlaskConical className="w-8 h-8 text-slate-300 animate-pulse" />
-                          <p>No scientific profile information found.</p>
-                          <button 
-                            onClick={() => handleOpenModal(ing)}
-                            className="mt-1 text-indigo-600 font-bold hover:underline"
-                          >
-                            Edit to query PubChem
-                          </button>
-                        </div>
-                      )}
+                        );
+                      })()}
                     </div>
                   )}
                 </li>
@@ -580,6 +719,76 @@ export default function Ingredients({ onMenuClick }) {
                 className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
                 placeholder="e.g., Litre, Kg"
               />
+            </div>
+          </div>
+
+          {/* Mode of Action (HRAC / FRAC / IRAC) Classification Box */}
+          <div className="border border-slate-200 bg-slate-50/80 rounded-xl p-3.5 space-y-3">
+            <div className="flex justify-between items-center">
+              <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                Mode of Action & Committee Classification
+              </span>
+              <button
+                type="button"
+                onClick={() => handleAutoDetectMoA()}
+                className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 hover:underline cursor-pointer"
+                title="Auto-detect MoA from global HRAC / FRAC / IRAC registry"
+              >
+                <Sparkles className="w-3 h-3 text-indigo-500" />
+                Auto-Detect MoA
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Committee Code / Group</label>
+                <input
+                  type="text"
+                  value={formData.MoACode}
+                  onChange={e => setFormData({ ...formData, MoACode: e.target.value })}
+                  placeholder="e.g., HRAC 9, FRAC 11, IRAC 28"
+                  className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Chemical Family</label>
+                <input
+                  type="text"
+                  value={formData.ChemicalFamily}
+                  onChange={e => setFormData({ ...formData, ChemicalFamily: e.target.value })}
+                  placeholder="e.g., Triketone, Triazole, Diamide"
+                  className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Target Site</label>
+                <input
+                  type="text"
+                  value={formData.TargetSite}
+                  onChange={e => setFormData({ ...formData, TargetSite: e.target.value })}
+                  placeholder="e.g., EPSP synthase, RyR calcium channels"
+                  className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Resistance Risk</label>
+                <select
+                  value={formData.ResistanceRisk}
+                  onChange={e => setFormData({ ...formData, ResistanceRisk: e.target.value })}
+                  className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-emerald-500 outline-none"
+                >
+                  <option value="">Select Risk...</option>
+                  <option value="Low">Low Risk</option>
+                  <option value="Medium">Medium Risk</option>
+                  <option value="High">High Risk</option>
+                  <option value="Low / None (Multi-site)">Low / None (Multi-site)</option>
+                  <option value="Not Applicable">Not Applicable (Adjuvant)</option>
+                </select>
+              </div>
             </div>
           </div>
 

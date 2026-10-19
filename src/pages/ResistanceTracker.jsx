@@ -7,6 +7,7 @@ import React, { useState, useMemo } from 'react';
 import { useAppState } from '../hooks/useAppState.jsx';
 import TopBar from '../components/TopBar.jsx';
 import { getCategoryConfig, getPrimaryObservationField, calculateEfficacy } from '../utils/categoryConfig.js';
+import { identifyMoA, analyzeFormulationSynergy } from '../utils/hracSynergy.js';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle, ShieldAlert, CheckCircle, TrendingDown,
@@ -136,8 +137,32 @@ export default function ResistanceTracker({ onMenuClick }) {
       const level = classifyResistance(effiDrop, years.length);
 
       const formulation = (state.formulations || []).find(f => f.Name === profile.formulation);
-      const moa = formulation?.Notes?.match(/MoA[:\s]+([A-Z0-9/]+)/i)?.[1] || 
-                  formulation?.ModeOfAction || null;
+      let moa = formulation?.Notes?.match(/MoA[:\s]+([A-Z0-9/+-]+)/i)?.[1] || 
+                formulation?.ModeOfAction || null;
+
+      // If no explicit MoA tag, automatically classify via authentic ingredients or formulation name
+      if (!moa && formulation) {
+        let ings = [];
+        try {
+          ings = typeof formulation.Ingredients === 'string'
+            ? JSON.parse(formulation.Ingredients)
+            : (Array.isArray(formulation.Ingredients) ? formulation.Ingredients : []);
+        } catch { ings = []; }
+
+        if (ings.length > 0) {
+          const syn = analyzeFormulationSynergy(ings, activeCategory);
+          if (syn.uniqueGroups && syn.uniqueGroups.length > 0) {
+            moa = syn.uniqueGroups.join('+');
+          }
+        }
+      }
+
+      if (!moa) {
+        const detectedFromForm = identifyMoA(profile.formulation, activeCategory);
+        if (detectedFromForm) {
+          moa = (detectedFromForm.code || '').replace(/^(HRAC|FRAC|IRAC)\s*/, '');
+        }
+      }
 
       return {
         ...profile,
@@ -303,7 +328,15 @@ export default function ResistanceTracker({ onMenuClick }) {
                         <MapPin className="w-3 h-3" />{profile.location}
                         <span className="text-slate-300">|</span>
                         <Calendar className="w-3 h-3" />{profile.yearlyAvg.length} yr{profile.yearlyAvg.length !== 1 ? 's' : ''} data
-                        {profile.moa && <><span className="text-slate-300">|</span> MoA ({moaLabel}): {profile.moa}</>}
+                        {profile.moa && (
+                          <>
+                            <span className="text-slate-300">|</span>
+                            <span className="inline-flex items-center gap-1 font-bold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded text-[11px] border border-slate-200">
+                              <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                              {moaLabel} {profile.moa}
+                            </span>
+                          </>
+                        )}
                       </p>
                     </div>
 

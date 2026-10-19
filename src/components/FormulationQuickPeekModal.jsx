@@ -63,8 +63,8 @@ export default function FormulationQuickPeekModal({
   }, [formulation, allTrials, ingredientsList]);
 
   const synergy = useMemo(() => {
-    return analyzeFormulationSynergy(stats.ings);
-  }, [stats.ings]);
+    return analyzeFormulationSynergy(stats.ings, formulation?.Category || 'herbicide');
+  }, [stats.ings, formulation?.Category]);
 
   if (!isOpen || !formulation) return null;
 
@@ -152,7 +152,7 @@ export default function FormulationQuickPeekModal({
                           <span className="font-medium text-slate-700">{ing.name}</span>
                           {act && act.hracGroup !== 'Unknown' && (
                             <span className="text-[10px] font-mono px-1.5 py-0.2 bg-purple-100 text-purple-700 font-bold rounded" title={act.targetSite}>
-                              HRAC {act.hracGroup}
+                              {act.committee || 'HRAC'} {act.hracGroup}
                             </span>
                           )}
                           {libCost > 0 && (
@@ -182,16 +182,16 @@ export default function FormulationQuickPeekModal({
             </div>
           </div>
 
-          {/* HRAC MOA & Synergy Engine Summary */}
-          {synergy.uniqueHracGroups?.length > 0 && (
+          {/* Committee MOA & Synergy Engine Summary */}
+          {synergy.uniqueGroups?.length > 0 && (
             <div className="p-3 bg-purple-50/50 border border-purple-100 rounded-xl space-y-1">
               <div className="flex items-center justify-between text-[11px] font-bold text-purple-900">
                 <span className="flex items-center gap-1">
                   <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-                  HRAC Mode of Action Profile
+                  {synergy.committee || 'MoA'} Resistance & Synergy Profile
                 </span>
                 <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full font-mono">
-                  {synergy.uniqueHracGroups.length > 1 ? `${synergy.uniqueHracGroups.length}-Site Dual MOA` : 'Single Site'}
+                  {synergy.uniqueGroups.length > 1 ? `${synergy.uniqueGroups.length}-Site Multi MOA` : 'Single Site'}
                 </span>
               </div>
               <p className="text-[11px] text-purple-800 leading-snug">{synergy.moaSummary}</p>

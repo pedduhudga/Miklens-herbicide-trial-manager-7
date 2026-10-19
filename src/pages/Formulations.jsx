@@ -68,8 +68,8 @@ function FormulationCard({
   const visibleIngs = isExpanded ? ings : ings.slice(0, 3);
   const ratingBadge = getEfficacyRatingBadge(stats?.avgEfficacy);
   const synergy = useMemo(() => {
-    return analyzeFormulationSynergy(ings);
-  }, [ings]);
+    return analyzeFormulationSynergy(ings, form?.Category || 'herbicide');
+  }, [ings, form?.Category]);
 
   return (
     <div
@@ -120,15 +120,17 @@ function FormulationCard({
                 </span>
               )}
 
-              {/* HRAC Mode of Action Badge */}
-              {synergy.uniqueHracGroups.length > 0 && (
+              {/* Committee Mode of Action Badge */}
+              {(synergy.uniqueGroups?.length > 0 || synergy.uniqueHracGroups?.length > 0) && (
                 <span
                   className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-purple-50 text-purple-700 border border-purple-200/80 inline-flex items-center gap-1 shadow-2xs cursor-pointer hover:bg-purple-100 transition"
                   onClick={(e) => { e.stopPropagation(); onQuickPeek && onQuickPeek(form); }}
                   title={synergy.moaSummary}
                 >
                   <Sparkles className="w-2.5 h-2.5 text-purple-600" />
-                  {synergy.uniqueHracGroups.length > 1 ? `Dual MOA: HRAC ${synergy.uniqueHracGroups.join('+')}` : `HRAC ${synergy.uniqueHracGroups[0]}`}
+                  {synergy.badgeLabel || ((synergy.uniqueGroups || synergy.uniqueHracGroups).length > 1
+                    ? `Multi-MOA: ${synergy.committee || 'MoA'} ${(synergy.uniqueGroups || synergy.uniqueHracGroups).join('+')}`
+                    : `${synergy.committee || 'HRAC'} ${(synergy.uniqueGroups || synergy.uniqueHracGroups)[0]}`)}
                 </span>
               )}
 
