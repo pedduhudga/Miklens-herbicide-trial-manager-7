@@ -10,11 +10,11 @@ import { calculateFormulationCost } from '../utils/costUtils.js';
 import { findDuplicateFormulation } from '../utils/formulationDuplicateUtils.js';
 import { parseVoiceObservation } from '../utils/voiceParser.js';
 import { safeJsonParse } from '../utils/helpers.js';
-import { identifyHrac } from '../utils/hracSynergy.js';
+import { identifyMoA, identifyHrac, analyzeFormulationSynergy } from '../utils/hracSynergy.js';
 
 /**
  * 1. RUN ANOVA STATISTICAL ANALYSIS TOOL
- * Performs one-way ANOVA across formulations for a specific weed target or metric.
+ * Performs one-way ANOVA across formulations for a specific target or metric.
  */
 export async function toolRunAnova({ target, metric = 'controlPct', design = 'RCBD' }, context) {
   const { trials = [], activeCategory = 'herbicide' } = context;
@@ -172,45 +172,45 @@ export async function toolCheckSprayWindow({ location, lat, lon, targetDate = nu
 
 /**
  * 3. COLBY SYNERGY & INVENTORY RECIPE COST TOOL
- * Calculates Colby expected synergy for tank mixes, checks HRAC antagonism,
+ * Calculates Colby expected synergy for tank mixes, checks HRAC/FRAC/IRAC antagonism,
  * and derives commercial production cost per liter from ingredient stock.
  */
-export async function toolEvaluateColbyAndCost({ ingredients, targetSpecies = '' }, context) {
-  const { trials = [], ingredients: inventory = [], formulations = [] } = context;
+export async function toolEvaluateColbyAndCost({ ingredients, targetSpecies = '' }, context = {}) {
+  const { trials = [], ingredients: inventory = [], formulations = [], activeCategory = 'herbicide' } = context;
 
   const rawIngs = Array.isArray(ingredients) ? ingredients : [];
   if (rawIngs.length === 0) {
     return { success: false, error: 'No ingredients provided for synergy evaluation.' };
   }
 
-  // 1. Feasibility & Colby synergy analysis
-  const feasibility = predictFormulaFeasibility(rawIngs, trials, targetSpecies);
+  // 1. Feasibility & Colby synergy analysis (category-aware)
+  const feasibility = predictFormulaFeasibility(rawIngs, trials, targetSpecies, activeCategory);
 
   // 2. Cost derivation using current inventory rates
   const costReport = calculateFormulationCost(rawIngs, inventory);
 
-  // 3. HRAC Mode of Action & Antagonism Check
-  const hracTags = [];
-  let hasAntagonism = false;
+  // 3. Mode of Action & Antagonism Check via authentic committee database
+  const synergy = analyzeFormulationSynergy(rawIngs, activeCategory);
+  const hasAntagonism = synergy.hasAntagonism || (feasibility.antagonismAlerts && feasibility.antagonismAlerts.length > 0);
   let antagonismReason = '';
 
-  for (const ing of rawIngs) {
-    const info = identifyHrac(ing.name || ing.Name);
-    if (info && info.code && info.code !== 'Adjuvant') {
-      hracTags.push({ name: ing.name, group: info.code, moa: info.moa });
+  if (hasAntagonism) {
+    if (synergy.antagonismAlerts && synergy.antagonismAlerts.length > 0) {
+      antagonismReason = synergy.antagonismAlerts
+        .map(a => `${a.title ? a.title + ': ' : ''}${a.desc || a.description || a}`)
+        .join(' | ');
+    } else if (feasibility.riskFactors && feasibility.riskFactors.some(r => r.toLowerCase().includes('antagonism'))) {
+      antagonismReason = feasibility.riskFactors.filter(r => r.toLowerCase().includes('antagonism')).join(' | ');
+    } else {
+      antagonismReason = 'Known biochemical or physical antagonism detected between active ingredients.';
     }
-  }
-
-  // Check classic Herbicide Antagonism: ACCase Graminicide (Group 1) + Synthetic Auxin (Group 4)
-  const hasGroup1 = hracTags.some(t => t.group === '1' || t.group === 'A');
-  const hasGroup4 = hracTags.some(t => t.group === '4' || t.group === 'O');
-  if (hasGroup1 && hasGroup4) {
-    hasAntagonism = true;
-    antagonismReason = 'Known biochemical antagonism between ACCase Graminicides and Synthetic Auxins (2,4-D/Dicamba) can reduce grass control by up to 25%.';
   }
 
   // 4. Duplicate Check
   const duplicate = findDuplicateFormulation(rawIngs, formulations);
+  const targetList = feasibility.susceptibleTargets || feasibility.susceptibleWeeds || [];
+  const modList = feasibility.moderateTargets || feasibility.moderateWeeds || [];
+  const tolList = feasibility.tolerantTargets || feasibility.tolerantWeeds || [];
 
   return {
     success: true,
@@ -220,9 +220,13 @@ export async function toolEvaluateColbyAndCost({ ingredients, targetSpecies = ''
       predictedEfficacyAvg: feasibility.predictedEfficacyAvg,
       overallRating: feasibility.overallRating,
       confidence: feasibility.confidence,
-      susceptibleWeeds: feasibility.susceptibleWeeds,
-      moderateWeeds: feasibility.moderateWeeds,
-      tolerantWeeds: feasibility.tolerantWeeds,
+      susceptibleTargets: targetList,
+      moderateTargets: modList,
+      tolerantTargets: tolList,
+      // Backward compatibility aliases
+      susceptibleWeeds: targetList,
+      moderateWeeds: modList,
+      tolerantWeeds: tolList,
       costPerLiter: costReport.totalCostPerLiter ? `₹${costReport.totalCostPerLiter.toFixed(2)} / L` : 'N/A',
       costSummary: costReport.summary || '',
       hasAntagonism,
@@ -239,9 +243,12 @@ export async function toolEvaluateColbyAndCost({ ingredients, targetSpecies = ''
       predictedEfficacyMax: feasibility.predictedEfficacyMax,
       confidence: feasibility.confidence,
       overallRating: feasibility.overallRating,
-      susceptibleWeeds: feasibility.susceptibleWeeds,
-      moderateWeeds: feasibility.moderateWeeds,
-      tolerantWeeds: feasibility.tolerantWeeds,
+      susceptibleTargets: targetList,
+      moderateTargets: modList,
+      tolerantTargets: tolList,
+      susceptibleWeeds: targetList,
+      moderateWeeds: modList,
+      tolerantWeeds: tolList,
       costPerLiter: costReport.totalCostPerLiter ? `₹${costReport.totalCostPerLiter.toFixed(2)}/L` : null,
       hasAntagonism,
       antagonismReason,
@@ -382,7 +389,7 @@ export async function toolAuditTrialDoctor(options = {}, context = {}) {
     warningCount++;
   }
 
-  // --- CHECK 3: HERBICIDE RESISTANCE WATCHDOG ---
+  // --- CHECK 3: RESISTANCE ROTATION WATCHDOG ---
   // Group by Location/Block
   const blockMap = {};
   for (const trial of catTrials) {
@@ -391,22 +398,31 @@ export async function toolAuditTrialDoctor(options = {}, context = {}) {
     blockMap[blockKey].push(trial);
   }
 
+  const isFungicide = activeCategory.toLowerCase() === 'fungicide';
+  const isPesticide = activeCategory.toLowerCase() === 'pesticide' || activeCategory.toLowerCase() === 'insecticide';
+  const committeeName = isFungicide ? 'FRAC' : isPesticide ? 'IRAC' : 'HRAC';
+  const targetNoun = isFungicide
+    ? 'resistant fungal pathogen strains (e.g., QoI/SDHI single-site loss of control)'
+    : isPesticide
+    ? 'resistant insect pest populations (e.g., Diamide/Pyrethroid metabolic resistance)'
+    : 'resistant weed biotypes';
+
   for (const [block, blockTrials] of Object.entries(blockMap)) {
     if (blockTrials.length >= 2) {
-      const hracUsage = blockTrials.map(t => {
-        const h = identifyHrac(t.FormulationName);
-        return h ? h.code : null;
+      const moaUsage = blockTrials.map(t => {
+        const h = identifyMoA(t.FormulationName, activeCategory);
+        return h && h.code && h.code !== 'Adjuvant' ? h.code : null;
       }).filter(Boolean);
 
-      // Check if same HRAC group used 2+ consecutive times
-      for (let i = 1; i < hracUsage.length; i++) {
-        if (hracUsage[i] === hracUsage[i - 1] && hracUsage[i] !== 'Adjuvant') {
+      // Check if same MoA group used 2+ consecutive times
+      for (let i = 1; i < moaUsage.length; i++) {
+        if (moaUsage[i] === moaUsage[i - 1]) {
           issues.push({
-            id: `resistance-${block}-${hracUsage[i]}`,
+            id: `resistance-${block}-${moaUsage[i]}`,
             severity: 'critical',
-            title: `Repeated HRAC Group ${hracUsage[i]} at ${block}`,
-            description: `Consecutive treatments of the same Mode of Action (HRAC Group ${hracUsage[i]}) applied at ${block}. High risk of selecting resistant weed biotypes!`,
-            actionPrompt: `Suggest rotational MoA partners for ${block}`
+            title: `Repeated ${moaUsage[i]} at ${block}`,
+            description: `Consecutive treatments of the same Mode of Action (${moaUsage[i]}) applied at ${block}. High risk of selecting ${targetNoun}!`,
+            actionPrompt: `Suggest rotational ${committeeName} MoA partners for ${block}`
           });
           criticalCount++;
           break;
@@ -481,14 +497,22 @@ export function toolParseVoiceScout({ transcript, trialId = null }, context) {
  * Tool Intent Detector & Direct Executor
  * Automatically determines if a user message should trigger an agronomic tool.
  */
-export async function detectAndExecuteAgronomicTool(userMessage, context) {
+export async function detectAndExecuteAgronomicTool(userMessage, context = {}) {
   const q = String(userMessage || '').toLowerCase();
+  const activeCategory = String(context.activeCategory || 'herbicide').toLowerCase();
 
   // 1. ANOVA / Statistics request
   if (q.includes('anova') || q.includes('f-statistic') || q.includes('tukey') || q.includes('variance analysis') || q.includes('statistical significance')) {
-    // Extract target weed if mentioned
+    // Extract target species (weeds, pathogens, or insect pests)
     let target = '';
-    const targets = ['bermuda', 'cynodon', 'cyperus', 'nutsedge', 'parthenium', 'echinochloa', 'goosegrass', 'crabgrass', 'broadleaf'];
+    const targets = [
+      // Weeds
+      'bermuda', 'cynodon', 'cyperus', 'nutsedge', 'parthenium', 'echinochloa', 'goosegrass', 'crabgrass', 'broadleaf',
+      // Fungal Pathogens
+      'blight', 'mildew', 'rust', 'blast', 'anthracnose', 'fusarium', 'damping off', 'leaf spot', 'alternaria', 'phytophthora',
+      // Insect Pests
+      'bollworm', 'caterpillar', 'armyworm', 'thrips', 'aphid', 'whitefly', 'borer', 'jassid', 'mite', 'planthopper'
+    ];
     for (const t of targets) {
       if (q.includes(t)) {
         target = t;
@@ -513,11 +537,24 @@ export async function detectAndExecuteAgronomicTool(userMessage, context) {
 
   // 4. Tank-mix Colby Synergy / Cost request
   if (q.includes('colby') || q.includes('synergy') || q.includes('tank mix') || (q.includes('cost') && q.includes('recipe')) || q.includes('antagonism')) {
-    // Try building test ingredients from known context
-    const testIngredients = [
-      { name: 'Glyphosate 41% IPA', quantity: 300, unit: 'ml' },
-      { name: 'Microweed Bio-Penetrant', quantity: 50, unit: 'ml' }
-    ];
+    // Build representative ingredients matching the active category
+    let testIngredients = [];
+    if (activeCategory === 'fungicide') {
+      testIngredients = [
+        { name: 'Azoxystrobin 23% SC', quantity: 200, unit: 'ml' },
+        { name: 'Difenoconazole 25% EC', quantity: 150, unit: 'ml' }
+      ];
+    } else if (activeCategory === 'pesticide' || activeCategory === 'insecticide') {
+      testIngredients = [
+        { name: 'Chlorantraniliprole 18.5% SC', quantity: 60, unit: 'ml' },
+        { name: 'Thiamethoxam 25% WG', quantity: 100, unit: 'g' }
+      ];
+    } else {
+      testIngredients = [
+        { name: 'Glyphosate 41% IPA', quantity: 300, unit: 'ml' },
+        { name: '2,4-D Ethyl Ester 38% EC', quantity: 100, unit: 'ml' }
+      ];
+    }
     const result = await toolEvaluateColbyAndCost({ ingredients: testIngredients }, context);
     return { toolName: 'evaluate_colby_synergy', result };
   }

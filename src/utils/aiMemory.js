@@ -18,7 +18,7 @@ import {
   isTrialLinkedToFormulation,
   getFormulationTrialStats
 } from './formulationTrialUtils.js';
-import { identifyHrac } from './hracSynergy.js';
+import { identifyMoA, identifyHrac } from './agrochemicalMoaDatabase.js';
 
 function avg(arr) {
   if (!arr || arr.length === 0) return null;
@@ -394,7 +394,7 @@ function buildTrialIndex(parsedTrials, projectMap) {
   }).join('\n');
 }
 
-function buildIngredientSynergySummary(parsedTrials, catFormulations, catIngredients) {
+function buildIngredientSynergySummary(parsedTrials, catFormulations, catIngredients, categoryId = 'herbicide') {
   const formMap = new Map();
   const allKnownIngMap = new Map();
 
@@ -436,7 +436,7 @@ function buildIngredientSynergySummary(parsedTrials, catFormulations, catIngredi
 
   const ingStats = Array.from(allKnownIngMap.values()).map(ing => {
     const cleanName = ing.name.toLowerCase();
-    const hracInfo = identifyHrac(ing.name);
+    const moaInfo = identifyMoA(ing.name, categoryId);
 
     const matchedFormNames = [];
     formMap.forEach((ingList, fName) => {
@@ -455,7 +455,7 @@ function buildIngredientSynergySummary(parsedTrials, catFormulations, catIngredi
       cost: ing.cost,
       unit: ing.unit,
       isInventory: ing.isInventory,
-      hrac: hracInfo,
+      moa: moaInfo,
       formulaCount: matchedFormNames.length,
       trialCount: trials.length,
       winRate: trials.length > 0 ? Math.round((winCount / trials.length) * 100) : null,
@@ -470,14 +470,16 @@ function buildIngredientSynergySummary(parsedTrials, catFormulations, catIngredi
   ingStats.sort((a, b) => (b.avgEff || 0) - (a.avgEff || 0) || (b.trialCount || 0) - (a.trialCount || 0));
 
   return ingStats.map(s => {
-    const hracBadge = s.hrac 
-      ? ` [${s.hrac.group}: ${s.hrac.name} (${s.hrac.class || 'Active'}, ${s.hrac.systemicity || 'Systemic'})]` 
-      : ' [Bio/Chemical Co-Active or Adjuvant]';
+    let moaBadge = ' [Adjuvant / Carrier / Unclassified Co-Active]';
+    if (s.moa) {
+      const comm = s.moa.committee || (s.moa.isOrganicBio ? 'BIO' : 'MoA');
+      moaBadge = ` [${comm} ${s.moa.group || s.moa.code}: ${s.moa.name || ''} (${s.moa.class || s.moa.chemicalFamily || 'Active'}, ${s.moa.systemicity || 'Target Specific'})]`;
+    }
     const costStr = s.cost !== 'N/A' ? ` | Cost: Rs.${s.cost}/${s.unit}` : '';
     const perf = s.trialCount > 0 
       ? ` | Tested in ${s.trialCount} trial(s) across ${s.formulaCount} formula(s) -> avgEff: ${s.avgEff ?? '?'}% (peak: ${s.maxEff ?? '?'}%, winRate: ${s.winRate}%)${s.avgCtrlDays ? `, avgCtrl: ${s.avgCtrlDays}d` : ''} | targets: [${s.targets.slice(0, 5).join(', ')}]`
       : ' | Available in catalog/inventory (untested as single active)';
-    return `* ${s.name}${hracBadge}${costStr}${perf}`;
+    return `* ${s.name}${moaBadge}${costStr}${perf}`;
   }).join('\n');
 }
 
@@ -580,7 +582,7 @@ export function buildAIMemoryContext(trials, formulations, projects, ingredients
   const investigatorSums = buildInvestigatorSummary(parsedTrials);
   const formulaSums = buildFormulaSummary(parsedTrials);
   const trialIndex = buildTrialIndex(parsedTrials, projectMap);
-  const ingredientSynergy = buildIngredientSynergySummary(parsedTrials, catFormulations, catIngredients);
+  const ingredientSynergy = buildIngredientSynergySummary(parsedTrials, catFormulations, catIngredients, categoryId);
   const excellentTrialsList = buildExcellentTrialsList(parsedTrials, catFormulations);
   const multiIngredientSynergyBenchmarks = buildMultiIngredientSynergyBenchmarks(catFormulations, parsedTrials);
   const targetCoverageMatrix = buildWeedTargetCoverageMatrix(parsedTrials);
