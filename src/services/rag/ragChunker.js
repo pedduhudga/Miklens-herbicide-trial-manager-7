@@ -8,6 +8,7 @@ import { getPrimaryObservationField } from '../../utils/categoryConfig.js';
 import { getTrialCalculatedEfficacy } from '../../utils/formulationTrialUtils.js';
 import { calculateEffectiveControlDays } from '../../utils/trialLifecycle.js';
 import { calculateFormulationCost } from '../../utils/costUtils.js';
+import { analyzeFormulationSynergy } from '../../utils/hracSynergy.js';
 
 /**
  * Fast deterministic hash string for incremental change detection
@@ -200,6 +201,18 @@ ${obsLines}`;
     const avgEff = effValues.length > 0 ? `${Math.round(effValues.reduce((a, b) => a + b, 0) / effValues.length)}%` : 'No Trials Yet';
     const targetsTested = Array.from(new Set(linkedTrials.map(t => t.WeedSpecies || t.WeedTarget || t.Target).filter(Boolean))).join(', ') || 'General Field Spectrum';
 
+    // Biochemical synergy & resistance analysis
+    const synergyAnalysis = (Array.isArray(f.Ingredients) && f.Ingredients.length > 0)
+      ? analyzeFormulationSynergy(f.Ingredients)
+      : null;
+
+    const synergySection = synergyAnalysis && synergyAnalysis.detectedMoas.length > 0
+      ? `\nMode of Action Diversity: ${synergyAnalysis.multiSiteScore} (${synergyAnalysis.hracGroups.join(' + ')})
+Synergy Mechanism: ${synergyAnalysis.synergies.map(s => s.title + ' - ' + s.description).join('; ') || 'Standard complimentary active pathways'}
+Antagonism Alerts: ${synergyAnalysis.antagonismAlerts.map(a => a.title + ': ' + a.description).join('; ') || 'None detected (Safe tank mix)'}
+Adjuvant Recommendation: ${synergyAnalysis.adjuvantRecommendations.join('; ') || 'Standard NIS / MSO'}`
+      : '';
+
     const formText = `FORMULATION PROFILE & RECIPE: ${formLink}
 Code: ${formCode} | Category: ${cat.toUpperCase()}
 Commercial / Batch Cost: ${costText}
@@ -207,7 +220,7 @@ Recommended Field Dosage: ${f.Dosage || f.RecommendedDosage || '20-35 ml/L'}
 Target Spectrum: ${targetsTested}
 Historical Field Testing: ${trialCount} Field Plot Trials Conducted (Average Demonstrated Efficacy: ${avgEff})
 Biochemical Ingredients & Recipe:
-${recipeText}
+${recipeText}${synergySection}
 Chemical Rationale / Mode of Action: ${f.Description || f.Notes || 'Engineered systemic penetrant with bio-surfactant carrier matrix.'}`;
 
     const formHash = simpleHash(formId + formText);
@@ -226,13 +239,48 @@ Chemical Rationale / Mode of Action: ${f.Description || f.Notes || 'Engineered s
         costPerL,
         trialCount,
         avgEfficacy: avgEff,
+        moaScore: synergyAnalysis?.multiSiteScore || 'Single',
         chunkType: 'formulation_recipe'
       }
     });
+
+    // Dedicated Biochemical Synergy & Antagonism Chunk for multi-active formulations
+    if (synergyAnalysis && synergyAnalysis.detectedMoas.length >= 2) {
+      const synTitle = `Biochemical Synergy & Resistance Defense: ${formName}`;
+      const synText = `BIOCHEMICAL SYNERGY & RESISTANCE MANAGEMENT: ${formLink}
+Formulation: ${formName} (${formCode}) | Category: ${cat.toUpperCase()}
+Resistance Defense Rating: ${synergyAnalysis.multiSiteScore}
+Active Modes of Action: ${synergyAnalysis.hracGroups.join(' + ')}
+Active Ingredients Profile:
+${synergyAnalysis.activeIngredients.map(a => `• ${a.name} (${a.quantity} ${a.unit}) - HRAC ${a.hracGroup}: ${a.chemicalFamily} [${a.systemicity}]`).join('\n')}
+Synergy Mechanisms:
+${synergyAnalysis.synergies.map(s => `• ${s.title}: ${s.description}`).join('\n') || '• Multi-site enzymatic inhibition'}
+Antagonism & Tank-Mix Cautions:
+${synergyAnalysis.antagonismAlerts.map(a => `⚠️ ${a.title}: ${a.description} -> ${a.recommendation}`).join('\n') || '• No chemical or biological antagonisms identified in formulation matrix'}
+Recommended Adjuvant Pairing:
+${synergyAnalysis.adjuvantTips.map(t => `• ${t.name}: ${t.purpose}`).join('\n') || '• Standard penetrant pairing'}`;
+
+      chunks.push({
+        id: `form_${formId}_synergy`,
+        entityId: formId,
+        entityType: 'formulation',
+        category: cat,
+        title: synTitle,
+        text: synText,
+        hash: simpleHash(formId + synText),
+        metadata: {
+          formId,
+          formulationName: formName,
+          hasAntagonism: synergyAnalysis.hasAntagonism,
+          moaGroups: synergyAnalysis.hracGroups,
+          chunkType: 'formulation_synergy'
+        }
+      });
+    }
   });
 
   // ───────────────────────────────────────────────────────────────────────────
-  // 3. INGREDIENTS CHUNKS
+  // 3. INGREDIENTS CHUNKS (MASTER INVENTORY + INDIVIDUAL INGREDIENT PROFILES)
   // ───────────────────────────────────────────────────────────────────────────
   if (catIngredients.length > 0) {
     const ingLines = catIngredients.map(ing => {
@@ -260,6 +308,56 @@ ${ingLines}`;
         ingredientCount: catIngredients.length,
         chunkType: 'ingredient_inventory'
       }
+    });
+
+    // Granular Individual Ingredient Chunks for high-precision retrieval
+    catIngredients.forEach(ing => {
+      const name = (ing.Name || ing.IngredientName || '').trim();
+      if (!name) return;
+
+      const cleanKey = name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+      const cost = ing.CostPerUnit ? `₹${ing.CostPerUnit} per ${ing.Unit || 'kg'}` : 'Cost rate pending';
+      const hrac = ing.HRAC || ing.ModeOfAction || 'Standard Technical Active';
+      const type = ing.Type || 'Active Ingredient';
+      const purity = ing.Purity || ing.Concentration ? `Concentration/Purity: ${ing.Purity || ing.Concentration}` : null;
+      const supplier = ing.Supplier || ing.Vendor ? `Vendor: ${ing.Supplier || ing.Vendor}` : null;
+
+      // Find formulations using this ingredient
+      const usingForms = catFormulations.filter(f => {
+        if (!Array.isArray(f.Ingredients)) return false;
+        return f.Ingredients.some(i => (i.name || i.IngredientName || '').toLowerCase().includes(name.toLowerCase()));
+      }).map(f => f.Name || f.FormulationName).filter(Boolean);
+
+      const usageText = usingForms.length > 0
+        ? `Registered in ${usingForms.length} formulation(s): ${usingForms.join(', ')}`
+        : 'Available in raw inventory pool for novel formulation recipes';
+
+      const ingProfileText = `INGREDIENT SPECIFICATION: [🌿 Ingredient: ${name}](#/ingredients)
+Chemical Name: ${name}
+Classification: ${type} | Category: ${cat.toUpperCase()}
+Mode of Action / Resistance Group: ${hrac}
+Commercial Acquisition Rate: ${cost}
+${[purity, supplier].filter(Boolean).join(' | ')}
+Formulation Deployment: ${usageText}
+Technical Properties / Role: ${ing.Description || ing.Notes || 'Certified technical-grade agrochemical raw material.'}`;
+
+      chunks.push({
+        id: `ing_${cleanKey}_profile`,
+        entityId: String(ing.ID || ing.id || cleanKey),
+        entityType: 'ingredient',
+        category: cat,
+        title: `Ingredient ${name} (${type})`,
+        text: ingProfileText,
+        hash: simpleHash(cleanKey + ingProfileText),
+        metadata: {
+          ingredientName: name,
+          cost: ing.CostPerUnit,
+          type,
+          hrac,
+          usedInCount: usingForms.length,
+          chunkType: 'ingredient_profile'
+        }
+      });
     });
   }
 

@@ -1,9 +1,34 @@
 // src/services/rag/ragHybridSearch.js
-// Next-Generation Hybrid RAG Retrieval Engine with Reciprocal Rank Fusion (RRF)
-// and Multi-Turn Conversational Coreference Resolution.
+// Next-Generation Hybrid RAG Retrieval Engine with Reciprocal Rank Fusion (RRF),
+// Query Intent Classification, and Multi-Turn Conversational Coreference Resolution.
 
 import { BM25Index } from './ragBM25.js';
 import { generateLocalSemanticVector, searchVectorIndex } from './ragVector.js';
+
+/**
+ * Classifies semantic intent of the agronomist's inquiry to dynamically adjust retrieval weights
+ */
+export function classifyQueryIntent(query = '') {
+  const q = query.toLowerCase();
+
+  if (/\b(recipe|ingredient|ingredients|composition|make|formulate|cost per l|batch|dilution|how much|formula)\b/i.test(q)) {
+    return 'FORMULATION_RECIPE';
+  }
+  if (/\b(synergy|colby|wadley|antagonism|hrac|frac|irac|mode of action|moa|tank mix|mix|compatible|compatibility)\b/i.test(q)) {
+    return 'SYNERGY_RESISTANCE';
+  }
+  if (/\b(timeline|daa|day|days after|symptom|progression|weather impact|over time|microclimate|rainfast)\b/i.test(q)) {
+    return 'TIMELINE_OBSERVATION';
+  }
+  if (/\b(best|winner|compare|top|highest|leaderboard|ranking|most effective|longevity|longest|sustained|duration)\b/i.test(q)) {
+    return 'BENCHMARK_COMPARISON';
+  }
+  if (/\b(inventory|stock|raw material|cost of|price of|adjuvant|surfactant|penetrant|technical active)\b/i.test(q)) {
+    return 'INGREDIENT_POOL';
+  }
+
+  return 'GENERAL_TRIAL_QUERY';
+}
 
 /**
  * Resolves conversational pronouns and coreferences from past dialogue turns
@@ -15,8 +40,8 @@ export function expandConversationalQuery(currentQuery = '', conversationHistory
   const lowerQ = q.toLowerCase();
 
   // Pronouns or demonstratives indicating follow-up dependency
-  const hasPronoun = /\b(it|this|that|these|those|its|the first one|the second one|the winner|between them|among these|which one|the formulation|the candidate)\b/i.test(lowerQ);
-  const isBriefEllipsis = lowerQ.split(/\s+/).length <= 4 && (lowerQ.includes('?') || lowerQ.startsWith('and ') || lowerQ.startsWith('what about '));
+  const hasPronoun = /\b(it|this|that|these|those|its|the first one|the second one|the winner|between them|among these|which one|the formulation|the candidate|tell me more|how about it)\b/i.test(lowerQ);
+  const isBriefEllipsis = lowerQ.split(/\s+/).length <= 4 && (lowerQ.includes('?') || lowerQ.startsWith('and ') || lowerQ.startsWith('what about ') || lowerQ.startsWith('why '));
 
   if (!hasPronoun && !isBriefEllipsis && conversationHistory.length === 0) {
     return q;
@@ -35,7 +60,8 @@ export function expandConversationalQuery(currentQuery = '', conversationHistory
     // Match formulas and weed targets
     const keywords = [
       'glycyl', 'bpd', 'cl-5', 'goweed', 'g-5', 'microweed', 'pelargonic', 'glyphosate',
-      'cynodon', 'bermuda', 'cyperus', 'nutsedge', 'parthenium', 'echinochloa', 'broadleaf'
+      'cynodon', 'bermuda', 'cyperus', 'nutsedge', 'parthenium', 'echinochloa', 'broadleaf',
+      'atrazine', 'pendimethalin', 'clethodim', 'haloxyfop', '2,4-d', 'paraquat', 'glufosinate'
     ];
     keywords.forEach(kw => {
       if (text.toLowerCase().includes(kw)) {
@@ -56,7 +82,7 @@ export function expandConversationalQuery(currentQuery = '', conversationHistory
 
 /**
  * Performs Hybrid Search across BM25 sparse index and Dense Semantic vector index
- * Merges rankings using Reciprocal Rank Fusion (RRF)
+ * Merges rankings using Reciprocal Rank Fusion (RRF) with Dynamic Query Intent Boosts
  */
 export function executeHybridRAGSearch({
   query,
@@ -69,23 +95,31 @@ export function executeHybridRAGSearch({
 }) {
   if (!chunks || chunks.length === 0) return [];
 
-  // 1. Expand query with multi-turn conversation memory
+  // 1. Detect query intent
+  const intent = classifyQueryIntent(query);
+
+  // 2. Expand query with multi-turn conversation memory
   const expandedQuery = expandConversationalQuery(query, conversationHistory);
 
-  // 2. Run BM25 Sparse Keyword Search
+  // Dynamic weights based on query specificity
+  const hasSpecificIdOrCode = /\d{4,}/.test(expandedQuery) || /^[a-z]{1,4}-\d+/i.test(expandedQuery);
+  const bm25Weight = hasSpecificIdOrCode ? 0.75 : 0.60;
+  const vectorWeight = 1.0 - bm25Weight;
+
+  // 3. Run BM25 Sparse Keyword Search
   let bm25Results = [];
   if (bm25Index) {
-    bm25Results = bm25Index.search(expandedQuery, topK * 2);
+    bm25Results = bm25Index.search(expandedQuery, topK * 3);
   } else {
     const tempBM25 = new BM25Index().buildIndex(chunks);
-    bm25Results = tempBM25.search(expandedQuery, topK * 2);
+    bm25Results = tempBM25.search(expandedQuery, topK * 3);
   }
 
-  // 3. Run Dense Semantic Vector Search
+  // 4. Run Dense Semantic Vector Search
   const queryVector = generateLocalSemanticVector(expandedQuery);
-  const vectorResults = searchVectorIndex(queryVector, vectorEntries, topK * 2);
+  const vectorResults = searchVectorIndex(queryVector, vectorEntries, topK * 3);
 
-  // 4. Reciprocal Rank Fusion (RRF)
+  // 5. Reciprocal Rank Fusion (RRF) with Intent Re-ranking
   // RRF(d) = w_bm25 / (60 + rank_bm25) + w_vec / (60 + rank_vec)
   const rrfScores = new Map();
   const chunkMap = new Map();
@@ -95,31 +129,60 @@ export function executeHybridRAGSearch({
   // Score BM25 ranks
   bm25Results.forEach((res, rank) => {
     const docId = res.docId;
-    const score = 0.6 / (60 + rank + 1);
+    const score = bm25Weight / (60 + rank + 1);
     rrfScores.set(docId, (rrfScores.get(docId) || 0) + score);
   });
 
   // Score Vector ranks
   vectorResults.forEach((res, rank) => {
     const docId = res.docId;
-    const score = 0.4 / (60 + rank + 1);
+    const score = vectorWeight / (60 + rank + 1);
     rrfScores.set(docId, (rrfScores.get(docId) || 0) + score);
   });
 
-  // 5. Build final ranked list filtered by active category
+  // 6. Cross-Encoder Intent Multipliers and Title Matching
+  const queryLower = query.toLowerCase();
   const targetCategory = activeCategory.toLowerCase();
 
   const rankedChunks = Array.from(rrfScores.entries())
-    .map(([docId, rrfScore]) => {
+    .map(([docId, baseRrfScore]) => {
       const chunk = chunkMap.get(docId);
+      if (!chunk) return null;
+
+      let scoreMultiplier = 1.0;
+      const type = chunk.metadata?.chunkType;
+      const titleLower = (chunk.title || '').toLowerCase();
+
+      // Intent-based type boosting
+      if (intent === 'FORMULATION_RECIPE') {
+        if (type === 'formulation_recipe') scoreMultiplier *= 1.6;
+        else if (type === 'ingredient_profile') scoreMultiplier *= 1.4;
+      } else if (intent === 'SYNERGY_RESISTANCE') {
+        if (type === 'formulation_synergy') scoreMultiplier *= 1.9;
+        else if (type === 'formulation_recipe') scoreMultiplier *= 1.4;
+      } else if (intent === 'TIMELINE_OBSERVATION') {
+        if (type === 'trial_observations') scoreMultiplier *= 1.8;
+      } else if (intent === 'BENCHMARK_COMPARISON') {
+        if (type === 'benchmark_leaderboard') scoreMultiplier *= 1.7;
+        else if (type === 'trial_summary') scoreMultiplier *= 1.35;
+      } else if (intent === 'INGREDIENT_POOL') {
+        if (type === 'ingredient_profile') scoreMultiplier *= 1.8;
+        else if (type === 'ingredient_inventory') scoreMultiplier *= 1.5;
+      }
+
+      // Title exact phrase match bonus
+      if (titleLower && queryLower.includes(titleLower)) {
+        scoreMultiplier *= 1.4;
+      }
+
       return {
         id: docId,
-        score: rrfScore,
+        score: baseRrfScore * scoreMultiplier,
         chunk
       };
     })
     .filter(item => {
-      if (!item.chunk) return false;
+      if (!item || !item.chunk) return false;
       const chunkCat = (item.chunk.category || 'herbicide').toLowerCase();
       return chunkCat === targetCategory;
     })

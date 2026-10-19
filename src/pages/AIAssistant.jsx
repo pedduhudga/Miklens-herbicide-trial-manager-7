@@ -7,7 +7,7 @@ import {
   Image as ImageIcon, Search, PlusCircle, MessageSquare, FlaskConical, Target, 
   TrendingUp, Cpu, Volume2, VolumeX, Sliders, ShieldAlert, Clock, Bot, Zap,
   Activity, Stethoscope, CloudSun, CheckCircle2, ArrowRight, PanelLeftClose,
-  PanelLeftOpen, ChevronRight, Layers, Wrench, RefreshCw, BarChart2, ShieldCheck,
+  PanelLeftOpen, ChevronRight, ChevronDown, Layers, Wrench, RefreshCw, BarChart2, ShieldCheck,
   Compass, Info, Flame, Leaf, Award
 } from 'lucide-react';
 import { safeJsonParse } from '../utils/helpers.js';
@@ -404,6 +404,7 @@ export default function AIAssistant({ onMenuClick }) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isToolsDrawerOpen, setIsToolsDrawerOpen] = useState(false);
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
+  const [expandedSourcesIdx, setExpandedSourcesIdx] = useState(null);
   const [simFormId, setSimFormId] = useState('');
   const [simCustomForm, setSimCustomForm] = useState('');
   const [simTarget, setSimTarget] = useState('');
@@ -1195,7 +1196,8 @@ Anchor your weed species diagnosis, burn rate, and living cover estimates strict
                 compressionRatio: ragResult?.chunkCount ? undefined : compressionRatio,
                 rag: ragResult ? {
                   chunkCount: ragResult.chunkCount,
-                  retrievalDuration: ragResult.retrievalDuration
+                  retrievalDuration: ragResult.retrievalDuration,
+                  sources: ragResult.sources || []
                 } : null,
                 timestamp: new Date().toLocaleTimeString()
               }
@@ -2274,15 +2276,60 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                                     </span>
                                   )}
                                   {msg.meta.rag && (
-                                    <span className="flex items-center gap-1 text-emerald-700 bg-emerald-50 border border-emerald-200/70 px-2 py-0.5 rounded-md font-semibold">
-                                      <Sparkles className="w-2.5 h-2.5 text-emerald-500" /> Hybrid RAG ({msg.meta.rag.chunkCount} docs • {msg.meta.rag.retrievalDuration}ms)
-                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setExpandedSourcesIdx(expandedSourcesIdx === idx ? null : idx)}
+                                      className="flex items-center gap-1 text-emerald-700 bg-emerald-50 hover:bg-emerald-100/80 border border-emerald-200/70 px-2 py-0.5 rounded-md font-semibold cursor-pointer transition active:scale-95"
+                                      title="Click to inspect verified ground-truth sources retrieved for this answer"
+                                    >
+                                      <Sparkles className="w-2.5 h-2.5 text-emerald-500" />
+                                      <span>Hybrid RAG ({msg.meta.rag.chunkCount} docs • {msg.meta.rag.retrievalDuration}ms)</span>
+                                      <ChevronDown className={`w-3 h-3 text-emerald-600 transition-transform ${expandedSourcesIdx === idx ? 'rotate-180' : ''}`} />
+                                    </button>
                                   )}
                                   {msg.meta.compressionRatio > 0 && (
                                     <span className="flex items-center gap-1 text-blue-700 bg-blue-50 border border-blue-200/60 px-2 py-0.5 rounded-md font-semibold">
                                       <Zap className="w-2.5 h-2.5 text-blue-500" /> Context -{msg.meta.compressionRatio}%
                                     </span>
                                   )}
+                                </div>
+                              )}
+
+                              {/* Interactive Ground-Truth Sources Drawer */}
+                              {expandedSourcesIdx === idx && msg.meta?.rag?.sources?.length > 0 && (
+                                <div className="mt-3 p-3.5 rounded-xl bg-slate-950 text-slate-200 border border-emerald-500/30 shadow-lg text-xs not-prose space-y-2.5">
+                                  <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                                    <div className="flex items-center gap-1.5 font-bold text-emerald-400 text-[11px] uppercase tracking-wider">
+                                      <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                                      <span>Verified Ground-Truth Sources ({msg.meta.rag.sources.length})</span>
+                                    </div>
+                                    <span className="text-[10px] text-slate-400 font-mono">0-Quota IndexedDB RAG</span>
+                                  </div>
+                                  <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                                    {msg.meta.rag.sources.map((src, sIdx) => {
+                                      const typeBadge = src.chunkType === 'trial_summary' ? '🔬 Trial'
+                                        : src.chunkType === 'trial_observations' ? '📅 Timeline'
+                                        : src.chunkType === 'formulation_recipe' ? '🧪 Recipe'
+                                        : src.chunkType === 'formulation_synergy' ? '⚡ Synergy'
+                                        : src.chunkType === 'ingredient_profile' ? '🌿 Ingredient'
+                                        : src.chunkType === 'benchmark_leaderboard' ? '🏆 Leaderboard'
+                                        : '📄 Record';
+
+                                      return (
+                                        <div key={sIdx} className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-emerald-500/50 transition">
+                                          <div className="flex items-center justify-between gap-2 mb-1">
+                                            <span className="font-semibold text-white truncate text-[11px]">{src.title}</span>
+                                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-slate-800 text-emerald-300 border border-emerald-500/20 shrink-0">
+                                              {typeBadge}
+                                            </span>
+                                          </div>
+                                          <p className="text-[10px] text-slate-300 leading-relaxed font-sans line-clamp-2">
+                                            {src.preview}
+                                          </p>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
                                 </div>
                               )}
                             </div>

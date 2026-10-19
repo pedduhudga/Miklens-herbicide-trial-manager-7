@@ -217,6 +217,31 @@ describe('Next-Generation Agronomic RAG Engine', () => {
       expect(ragResult.contextText).toContain('Glycyl');
       expect(ragResult.contextText).toContain('1783319817942');
       expect(ragResult.retrievalDuration).toBeLessThan(100); // Super fast <100ms
+      expect(ragResult.sources).toBeDefined();
+      expect(ragResult.sources.length).toBe(ragResult.chunkCount);
+      expect(ragResult.sources[0].title).toBeDefined();
+      expect(ragResult.sources[0].chunkType).toBeDefined();
+    });
+
+    it('generates granular individual ingredient profile chunks and synergy chunks', () => {
+      const chunks = generateCategoryChunks({
+        trials: mockTrials,
+        formulations: mockFormulations,
+        ingredients: mockIngredients,
+        activeCategory: 'herbicide'
+      });
+
+      // Individual ingredient chunk
+      const ingChunk = chunks.find(c => c.id.startsWith('ing_') && c.id.includes('glyphosate'));
+      expect(ingChunk).toBeDefined();
+      expect(ingChunk.text).toContain('Chemical Name: Glyphosate 41% IPA');
+      expect(ingChunk.text).toContain('₹420 per L');
+
+      // Synergy chunk for multi-active formulation
+      const synergyChunk = chunks.find(c => c.id === 'form_1783319817942_synergy');
+      expect(synergyChunk).toBeDefined();
+      expect(synergyChunk.text).toContain('BIOCHEMICAL SYNERGY & RESISTANCE MANAGEMENT');
     });
   });
 });
+

@@ -159,9 +159,20 @@ No specific plot trial or formulation records matching "${query}" were found in 
 === END RETRIEVED GROUND TRUTH ===`;
   }
 
+  const sources = retrievedChunks.map((chunk, idx) => ({
+    id: chunk.id,
+    entityId: chunk.entityId,
+    entityType: chunk.entityType,
+    title: chunk.title,
+    category: chunk.category,
+    chunkType: chunk.metadata?.chunkType || 'record',
+    preview: (chunk.text || '').slice(0, 160).replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') + '...'
+  }));
+
   const result = {
     contextText: formattedContext,
     retrievedChunks,
+    sources,
     retrievalDuration,
     chunkCount: retrievedChunks.length,
     category: cat

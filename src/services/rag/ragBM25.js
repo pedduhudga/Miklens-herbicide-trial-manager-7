@@ -1,6 +1,6 @@
 // src/services/rag/ragBM25.js
 // High-Performance Client-Side BM25 Probabilistic Search Engine
-// Optimized for agronomic technical terms, formulation names, chemical codes, and trial IDs.
+// Optimized for agronomic technical terms, formulation names, chemical codes, bigram phrases, and trial IDs.
 
 const STOP_WORDS = new Set([
   'a', 'about', 'above', 'after', 'again', 'against', 'all', 'am', 'an', 'and', 'any', 'are', 'aren',
@@ -17,19 +17,63 @@ const STOP_WORDS = new Set([
 ]);
 
 /**
- * Tokenizes text preserving agronomic codes, trial IDs, and hyphenated chemical names
+ * Light agronomic suffix stemmer
+ * Strips inflectional suffixes while protecting chemical symbols & short IDs
  */
-export function tokenizeAgronomicText(text = '') {
+export function stemAgronomicWord(word = '') {
+  if (word.length <= 3) return word;
+  // Do not stem IDs or chemical codes
+  if (/\d/.test(word) || word.includes('-') || word.includes('/')) return word;
+
+  let w = word.toLowerCase();
+
+  if (w.endsWith('ies') && w.length > 4) return w.slice(0, -3) + 'y';
+  if (w.endsWith('ing') && w.length > 5) return w.slice(0, -3);
+  if (w.endsWith('tion') && w.length > 5) return w.slice(0, -4);
+  if (w.endsWith('ated') && w.length > 5) return w.slice(0, -2);
+  if (w.endsWith('ed') && w.length > 4) return w.slice(0, -2);
+  if (w.endsWith('ment') && w.length > 5) return w.slice(0, -4);
+  if (w.endsWith('ness') && w.length > 5) return w.slice(0, -4);
+  if (w.endsWith('es') && w.length > 4) return w.slice(0, -2);
+  if (w.endsWith('s') && !w.endsWith('ss') && w.length > 3) return w.slice(0, -1);
+
+  return w;
+}
+
+/**
+ * Tokenizes text preserving agronomic codes, trial IDs, and hyphenated chemical names
+ * Generates both unigrams and contiguous bigram phrases
+ */
+export function tokenizeAgronomicText(text = '', includeBigrams = true) {
   if (!text || typeof text !== 'string') return [];
 
-  // Match words, numbers, hyphenated codes (e.g. CL-5, TR-2024, 1783319817942, 35ml/L)
   const rawTokens = text
     .toLowerCase()
     .replace(/[^\w\s\-\.\/%]/g, ' ')
     .split(/\s+/)
     .filter(t => t.length > 1 && !STOP_WORDS.has(t));
 
-  return rawTokens;
+  const tokens = [];
+
+  for (let i = 0; i < rawTokens.length; i++) {
+    const raw = rawTokens[i];
+    tokens.push(raw);
+
+    const stemmed = stemAgronomicWord(raw);
+    if (stemmed !== raw) {
+      tokens.push(stemmed);
+    }
+
+    // Contiguous bigram phrase generation (e.g. "cynodon_dactylon", "crop_injury")
+    if (includeBigrams && i < rawTokens.length - 1) {
+      const nextRaw = rawTokens[i + 1];
+      if (!STOP_WORDS.has(nextRaw)) {
+        tokens.push(`${raw}_${nextRaw}`);
+      }
+    }
+  }
+
+  return tokens;
 }
 
 export class BM25Index {
@@ -41,7 +85,7 @@ export class BM25Index {
     this.avgDocLength = 0;
     this.docCount = 0;
     this.termDocFreq = {}; // term -> count of docs containing term
-    this.invertedIndex = {}; // term -> [{ docId, tf }]
+    this.invertedIndex = {}; // term -> [{ docId, tf, isTitle }]
   }
 
   /**
@@ -57,18 +101,27 @@ export class BM25Index {
     let totalLength = 0;
 
     chunks.forEach(chunk => {
-      const textToTokenize = `${chunk.title || ''} ${chunk.text || ''}`;
-      const tokens = tokenizeAgronomicText(textToTokenize);
-      const docLength = tokens.length;
+      const titleTokens = tokenizeAgronomicText(chunk.title || '', true);
+      const bodyTokens = tokenizeAgronomicText(chunk.text || '', true);
+      const allTokens = [...titleTokens, ...bodyTokens];
+
+      const docLength = allTokens.length;
       totalLength += docLength;
 
       const docId = chunk.id;
       this.docLengths[docId] = docLength;
 
-      // Calculate term frequencies in this document
+      // Calculate term frequencies with title boost
       const tfMap = new Map();
-      tokens.forEach(term => {
-        tfMap.set(term, (tfMap.get(term) || 0) + 1);
+      const titleSet = new Set(titleTokens);
+
+      bodyTokens.forEach(term => {
+        tfMap.set(term, (tfMap.get(term) || 0) + 1.0);
+      });
+
+      // Title tokens receive higher frequency weighting
+      titleTokens.forEach(term => {
+        tfMap.set(term, (tfMap.get(term) || 0) + 2.0);
       });
 
       // Update inverted index and document frequencies
@@ -77,7 +130,11 @@ export class BM25Index {
         if (!this.invertedIndex[term]) {
           this.invertedIndex[term] = [];
         }
-        this.invertedIndex[term].push({ docId, tf });
+        this.invertedIndex[term].push({
+          docId,
+          tf,
+          isTitle: titleSet.has(term)
+        });
       });
 
       this.docs.push({ id: docId, chunk, length: docLength });
@@ -103,7 +160,7 @@ export class BM25Index {
   search(query, topK = 10) {
     if (!query || this.docCount === 0) return [];
 
-    const queryTokens = tokenizeAgronomicText(query);
+    const queryTokens = tokenizeAgronomicText(query, true);
     if (queryTokens.length === 0) return [];
 
     const scores = new Map();
@@ -114,14 +171,19 @@ export class BM25Index {
 
       const idfWeight = this.idf(term);
 
-      // Boost specific IDs or high-value chemical terms
+      // Boost specific IDs, chemical codes, or bigrams
       const isIdOrCode = /\d{4,}/.test(term) || /^[a-z]{1,4}-\d+/.test(term);
-      const termBoost = isIdOrCode ? 2.5 : 1.0;
+      const isBigram = term.includes('_');
+      let termBoost = 1.0;
+      if (isIdOrCode) termBoost = 2.5;
+      else if (isBigram) termBoost = 1.8;
 
-      postings.forEach(({ docId, tf }) => {
+      postings.forEach(({ docId, tf, isTitle }) => {
         const docLength = this.docLengths[docId] || this.avgDocLength;
         const normFactor = 1 - this.b + this.b * (docLength / this.avgDocLength);
-        const termScore = idfWeight * ((tf * (this.k1 + 1)) / (tf + this.k1 * normFactor)) * termBoost;
+        const titleMultiplier = isTitle ? 1.5 : 1.0;
+
+        const termScore = idfWeight * ((tf * (this.k1 + 1)) / (tf + this.k1 * normFactor)) * termBoost * titleMultiplier;
 
         scores.set(docId, (scores.get(docId) || 0) + termScore);
       });
@@ -132,7 +194,9 @@ export class BM25Index {
     const results = Array.from(scores.entries())
       .map(([docId, rawScore]) => {
         const chunk = docMap.get(docId);
-        const typeBoost = (chunk?.metadata?.chunkType === 'trial_summary' || chunk?.metadata?.chunkType === 'formulation_recipe') ? 1.25 : 1.0;
+        const type = chunk?.metadata?.chunkType;
+        const typeBoost = (type === 'trial_summary' || type === 'formulation_recipe' || type === 'ingredient_profile') ? 1.25 : 1.0;
+
         return {
           docId,
           score: rawScore * typeBoost,
