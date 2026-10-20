@@ -1,9 +1,10 @@
 import React, { memo, useMemo, useCallback, useState, useEffect, useRef } from 'react';
-import { Calendar, MapPin, FlaskConical, Activity, Image as ImageIcon, ChevronLeft, ChevronRight, Edit, MoreVertical, Eye, Copy, FolderOpen, FileDown, ScanLine, MonitorPlay, Archive, FileCode, FileSpreadsheet, Share2, BrainCircuit, Trash2, Camera, CheckCircle, Clock, Pencil, CloudSun, Sparkles, Maximize2, Minimize2, X, ShieldCheck, FileText } from 'lucide-react';
+import { Calendar, MapPin, FlaskConical, Activity, Image as ImageIcon, ChevronLeft, ChevronRight, Edit, MoreVertical, Eye, Copy, FolderOpen, FileDown, ScanLine, MonitorPlay, Archive, FileCode, FileSpreadsheet, Share2, BrainCircuit, Trash2, Camera, CheckCircle, Clock, Pencil, CloudSun, Sparkles, Maximize2, Minimize2, X, ShieldCheck, FileText, AlertTriangle } from 'lucide-react';
 import { safeJsonParse } from '../utils/helpers.js';
 import { formatDateTime } from '../utils/dateUtils.js';
-import { calculateEffectiveControlDays } from '../utils/trialLifecycle.js';
-import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryValue } from '../utils/categoryConfig.js';
+import { calculateEffectiveControlDays, getDetailedControlDaysInfo } from '../utils/trialLifecycle.js';
+import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryValue, getEWRSScale, getRatingFromEfficacy } from '../utils/categoryConfig.js';
+import { canonicalizeWeedSpecies, getWeedBiology, getWeedEPPOCode } from '../utils/weedUtils.js';
 import { useAuth } from '../hooks/useAuth.js';
 import { resolvePhotoSrc, getPhotoThumbnailSrc, getDriveFileId } from '../utils/photoUtils.js';
 import PhotoComparisonModal from './PhotoComparisonModal.jsx';
@@ -33,12 +34,32 @@ const RESULT_BORDER_COLORS = {
   '': 'border-l-4 border-slate-200',
 };
 
-function ResultBadge({ result }) {
-  const style = RESULT_COLORS[result] || 'bg-slate-100 text-slate-600';
+function ResultBadge({ result, ewrs, autoRating, onApplySuggested, isEditable }) {
+  const style = RESULT_COLORS[result] || 'bg-slate-100 text-slate-600 border-slate-200';
   return (
-    <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${style}`}>
-      {result || 'Unrated'}
-    </span>
+    <div className="inline-flex items-center gap-1.5 flex-wrap">
+      <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${style}`}>
+        {result || 'Unrated'}
+      </span>
+      {ewrs && (
+        <span 
+          className={`text-[9px] font-bold px-1.5 py-0.5 rounded shadow-xs ${ewrs.badgeColor}`}
+          title={`EWRS Rating Scale (1-9): ${ewrs.label}`}
+        >
+          {ewrs.shortLabel}
+        </span>
+      )}
+      {!result && autoRating && (
+        <span 
+          className="text-[9px] bg-indigo-50 text-indigo-700 border border-indigo-200 px-1.5 py-0.5 rounded font-semibold flex items-center gap-1 cursor-pointer hover:bg-indigo-100 transition"
+          title={`Scientific auto-recommendation: ${autoRating}. ${isEditable ? 'Click to apply.' : ''}`}
+          onClick={isEditable && onApplySuggested ? (e) => { e.stopPropagation(); onApplySuggested(autoRating); } : undefined}
+        >
+          <Sparkles className="w-2.5 h-2.5 text-indigo-500" />
+          Auto: {autoRating}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -303,13 +324,16 @@ const TrialCard = memo(function TrialCard({
     return '';
   }, [trial.PotRow, trial.PotCol, trial.TrialDesign, trial.Replication, project]);
 
-  // Control days calculation (Scientific WCE >= 70% Effective Duration)
-  const controlDays = useMemo(() => {
-    const calc = calculateEffectiveControlDays(trial);
-    if (calc > 0) return calc;
-    if (trial.FinalControlDuration) return parseInt(trial.FinalControlDuration, 10);
-    return calc;
+  // Control days calculation (Scientific EPPO/EWRS Linear Interpolation & Sustained Threshold)
+  const controlDaysInfo = useMemo(() => {
+    return getDetailedControlDaysInfo(trial);
   }, [trial, efficacyData]);
+
+  const controlDays = useMemo(() => {
+    if (controlDaysInfo?.effectiveDays > 0) return controlDaysInfo.effectiveDays;
+    if (trial.FinalControlDuration) return parseInt(trial.FinalControlDuration, 10);
+    return controlDaysInfo?.effectiveDays ?? 0;
+  }, [controlDaysInfo, trial.FinalControlDuration]);
 
   const categoryId = project?.Category || trial?.Category || 'herbicide';
 
@@ -317,6 +341,41 @@ const TrialCard = memo(function TrialCard({
     if (!efficacyData || efficacyData.length === 0) return null;
     return efficacyData.slice().sort((a, b) => (parseFloat(b.daa) || 0) - (parseFloat(a.daa) || 0))[0];
   }, [efficacyData]);
+
+  // EWRS Rating and suggested grade based on scientific efficacy
+  const efficacyMetrics = useMemo(() => {
+    if (!latestObs) return { primaryVal: null, ewrs: null, autoRating: null };
+    const primaryVal = getObservationPrimaryValue(categoryId, latestObs);
+    const ewrs = (primaryVal !== undefined && primaryVal !== null && !isNaN(primaryVal))
+      ? getEWRSScale(primaryVal)
+      : null;
+    const autoRating = (primaryVal !== undefined && primaryVal !== null && !isNaN(primaryVal))
+      ? getRatingFromEfficacy(categoryId, primaryVal)
+      : null;
+    return { primaryVal, ewrs, autoRating };
+  }, [latestObs, categoryId]);
+
+  // Advanced botanical weed taxonomy parsing
+  const weedSpeciesList = useMemo(() => {
+    if (!trial.WeedSpecies) return [];
+    return String(trial.WeedSpecies)
+      .split(/[,;\n]+/)
+      .map(s => s.trim())
+      .filter(Boolean)
+      .map(raw => {
+        const canonical = canonicalizeWeedSpecies(raw);
+        const bio = getWeedBiology(canonical);
+        return {
+          raw,
+          canonical,
+          type: bio.type,
+          lifecycle: bio.lifecycle,
+          isPerennial: bio.isPerennial,
+          regrowthRisk: bio.regrowthRisk,
+          eppoCode: bio.eppoCode || getWeedEPPOCode(canonical)
+        };
+      });
+  }, [trial.WeedSpecies]);
 
   const latestObsDetails = useMemo(() => {
     if (!latestObs) return null;
@@ -708,7 +767,36 @@ const TrialCard = memo(function TrialCard({
             <span>{formatDateTime(trial.Date) || '—'}</span>
           </div>
           <div className="flex items-center gap-1.5"><FlaskConical className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{trial.Dosage || '—'}</span></div>
-          {trial.WeedSpecies && <div className="flex items-center gap-1.5"><Activity className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{trial.WeedSpecies}</span></div>}
+          {/* Advanced Botanical Weed Identification */}
+          {weedSpeciesList.length > 0 ? (
+            <div className="space-y-1 pt-0.5">
+              {weedSpeciesList.map((w, idx) => (
+                <div key={idx} className="flex items-center gap-1.5 text-xs flex-wrap">
+                  <Activity className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
+                  <span className="font-semibold text-slate-700 truncate">{w.canonical}</span>
+                  {w.eppoCode && (
+                    <span className="text-[9px] font-mono font-bold bg-slate-100 text-slate-700 px-1 py-0.2 rounded border border-slate-200" title={`EPPO Code: ${w.eppoCode}`}>
+                      {w.eppoCode}
+                    </span>
+                  )}
+                  <span className={`text-[9px] font-semibold px-1 py-0.2 rounded ${
+                    w.type === 'Sedge' ? 'bg-amber-100 text-amber-800' :
+                    w.type === 'Grass' ? 'bg-lime-100 text-lime-800' :
+                    'bg-teal-100 text-teal-800'
+                  }`}>
+                    {w.type}
+                  </span>
+                  {w.regrowthRisk && (
+                    <span className="text-[9px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 px-1 py-0.2 rounded flex items-center gap-0.5" title="Perennial weed or sedge with tuber/rhizome regrowth risk">
+                      ⚠️ Perennial
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : trial.WeedSpecies ? (
+            <div className="flex items-center gap-1.5"><Activity className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{trial.WeedSpecies}</span></div>
+          ) : null}
           {trial.TrialDesign === 'Split-Plot' && (trial.MainFactor || trial.SubFactor) && (
             <div className="text-[10px] text-slate-500 bg-slate-50 border border-slate-200 rounded p-1 pl-1.5 font-medium space-y-0.5">
               <div>Main Factor: <span className="font-bold text-slate-700">{trial.MainFactor || 'N/A'}</span></div>
@@ -726,14 +814,34 @@ const TrialCard = memo(function TrialCard({
               <div>Sub-Block: <span className="font-bold text-slate-700">{trial.SubBlockID}</span></div>
             </div>
           )}
+          {/* Scientific Control Days with Breakdown & Linear Interpolation Indicator */}
           {controlDays !== null && controlDays >= 0 && (
-            <div className="flex items-center gap-1.5" onClick={stopPropagation}>
-              <Clock className="w-3.5 h-3.5 shrink-0" />
-              <span className={isCompleted ? 'text-emerald-600 font-semibold' : 'text-blue-600 font-semibold'}>
-                {controlDays}d control{isCompleted ? ' (finalized)' : ''}
+            <div 
+              className="flex items-center gap-1.5 flex-wrap pt-0.5" 
+              onClick={stopPropagation}
+              title={controlDaysInfo?.reason || `Scientific EPPO Control Duration: ${controlDays} days`}
+            >
+              <Clock className="w-3.5 h-3.5 shrink-0 text-slate-400" />
+              <span className={`font-semibold ${
+                controlDaysInfo?.status === 'breakdown_regrowth'
+                  ? 'text-amber-700 font-bold'
+                  : (isCompleted ? 'text-emerald-600' : 'text-blue-600')
+              }`}>
+                {controlDays}d control
+                {controlDaysInfo?.status === 'breakdown_regrowth' && (
+                  <span className="text-[10px] font-medium text-amber-800 bg-amber-50 border border-amber-200 px-1 py-0.2 rounded ml-1">
+                    Regrowth @ {controlDaysInfo.breakdownDaa}d
+                  </span>
+                )}
+                {controlDaysInfo?.status === 'active_sustained' && !isCompleted && (
+                  <span className="text-[10px] font-medium text-emerald-800 bg-emerald-50 border border-emerald-200 px-1 py-0.2 rounded ml-1">
+                    Sustained ≥70%
+                  </span>
+                )}
+                {isCompleted ? ' (finalized)' : ''}
               </span>
               {isEditable && (
-                <button onClick={handleEditControlDays} title="Edit control days" className="text-slate-300 hover:text-slate-600 transition">
+                <button onClick={handleEditControlDays} title="Edit / override control days" className="text-slate-300 hover:text-slate-600 transition">
                   <Pencil className="w-3 h-3" />
                 </button>
               )}
@@ -741,16 +849,21 @@ const TrialCard = memo(function TrialCard({
           )}
         </div>
 
-        {/* Quick Rating */}
+        {/* Quick Rating with Scientific EPPO & EWRS Scales */}
         {isEditable && (
-          <div className="mt-2 flex items-center gap-1" onClick={stopPropagation}>
-            <span className="text-[10px] text-slate-400 mr-0.5">Rate:</span>
-            {[['Excellent','bg-emerald-500'],['Good','bg-blue-500'],['Fair','bg-amber-500'],['Poor','bg-red-500']].map(([r, col]) => (
+          <div className="mt-2 flex items-center gap-1 flex-wrap" onClick={stopPropagation}>
+            <span className="text-[10px] text-slate-400 mr-0.5 font-medium">Rate:</span>
+            {[
+              ['Excellent', 'bg-emerald-500', '≥90% WCE • EWRS 1–2'],
+              ['Good', 'bg-blue-500', '80–89% WCE • EWRS 3–4'],
+              ['Fair', 'bg-amber-500', '60–79% WCE • EWRS 5–6'],
+              ['Poor', 'bg-red-500', '<60% WCE • EWRS 7–9']
+            ].map(([r, col, eppoHint]) => (
               <button key={r} onClick={e => handleQuickRate(e, r)}
-                title={trial.Result === r ? `${r} — tap to clear` : r}
+                title={trial.Result === r ? `${r} (active) — tap to clear` : `${r} (${eppoHint})`}
                 className={`text-[9px] font-bold px-1.5 py-0.5 rounded transition ${
                   trial.Result === r
-                    ? `${col} text-white ring-2 ring-offset-1 ring-current`
+                    ? `${col} text-white ring-2 ring-offset-1 ring-current shadow-xs`
                     : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                 }`}>
                 {r[0]}
@@ -758,7 +871,7 @@ const TrialCard = memo(function TrialCard({
             ))}
             {trial.Result && (
               <button onClick={e => handleQuickRate(e, trial.Result)} title="Clear rating"
-                className="text-[9px] text-slate-400 hover:text-red-500 ml-0.5 transition">
+                className="text-[9px] text-slate-400 hover:text-red-500 ml-0.5 transition px-1">
                 ×
               </button>
             )}
@@ -766,7 +879,13 @@ const TrialCard = memo(function TrialCard({
         )}
 
         <div className="mt-2.5 flex items-center gap-2 flex-wrap">
-          <ResultBadge result={trial.Result} />
+          <ResultBadge 
+            result={trial.Result} 
+            ewrs={efficacyMetrics.ewrs}
+            autoRating={efficacyMetrics.autoRating}
+            onApplySuggested={(suggested) => handleQuickRate(null, suggested)}
+            isEditable={isEditable}
+          />
           {photos.length > 0 && <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full flex items-center gap-1"><ImageIcon className="w-3 h-3" />{photos.length}</span>}
           {efficacyData.length > 0 && <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{efficacyData.length} obs</span>}
           {trial.YieldValue && <span className="text-xs bg-teal-50 text-teal-700 px-2 py-0.5 rounded-full font-semibold">{trial.YieldValue} t/ha</span>}

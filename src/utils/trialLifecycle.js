@@ -67,26 +67,55 @@ export function getTrialLastActivityDate(trial) {
 /**
  * ADVANCED SCIENTIFIC WEED CONTROL EFFICACY ENGINE (EPPO / EWRS Standard)
  * ─────────────────────────────────────────────────────────────────────────────
+/**
+ * ADVANCED SCIENTIFIC WEED CONTROL EFFICACY ENGINE (EPPO / EWRS Standard)
+ * ─────────────────────────────────────────────────────────────────────────────
  * Calculates the exact Effective Days of Control & WCE Metrics.
  * 
  * Advanced Capabilities:
  * 1. Multi-Species Weighted WCE: Evaluates individual weed species breakdown (e.g. Bermuda grass vs Pigweed).
- * 2. Untreated Control Plot Correction (Abbott / Henderson-Tilton Formula):
+ * 2. Untreated Control Plot Correction (Henderson-Tilton / Abbott Formula):
  *    Adjusts WCE against natural weed population dynamics if control plot data exists.
- * 3. Multi-Category Metric Adaptation: Supports Fungicide (Disease Severity), Insecticide, and Nutrition.
- * 4. Regrowth Breakdown Lock (WCE >= 70% threshold): Stops effective control counter at initial breakdown DAA.
+ * 3. Linear Threshold Interpolation: When WCE drops below 70%, calculates exact interpolated day of breakdown.
+ * 4. Regrowth & Perennial Resurgence Detection: Accurately identifies secondary emergence and locks control days.
  */
 export function calculateEffectiveControlDays(trial, controlTrial = null) {
-  if (!trial) return 0;
+  const details = getDetailedControlDaysInfo(trial, controlTrial);
+  return details.effectiveDays;
+}
+
+/**
+ * Returns a detailed analytical breakdown of sustained control duration.
+ */
+export function getDetailedControlDaysInfo(trial, controlTrial = null) {
+  if (!trial) {
+    return { effectiveDays: 0, status: 'no_data', breakdownDaa: null, isInterpolated: false, reason: 'No trial data' };
+  }
+
+  // If trial is explicitly finalized by scientist with recorded duration, honor it
+  if (trial.ControlFinalized && trial.FinalControlDuration) {
+    const parsed = parseInt(trial.FinalControlDuration, 10);
+    if (!isNaN(parsed) && parsed >= 0) {
+      return { 
+        effectiveDays: parsed, 
+        status: 'finalized', 
+        breakdownDaa: parsed, 
+        isInterpolated: false, 
+        reason: 'Scientist verified finalized duration' 
+      };
+    }
+  }
 
   const rawObs = safeJsonParse(trial.EfficacyDataJSON || trial.observations, []);
   const observations = Array.isArray(rawObs) ? rawObs : (rawObs && Array.isArray(rawObs.observations) ? rawObs.observations : []);
   if (!Array.isArray(observations) || observations.length === 0) {
     if (trial.FinalControlDuration) {
       const parsed = parseInt(trial.FinalControlDuration, 10);
-      if (!isNaN(parsed) && parsed > 0) return parsed;
+      if (!isNaN(parsed) && parsed >= 0) {
+        return { effectiveDays: parsed, status: 'manual_duration', breakdownDaa: parsed, isInterpolated: false, reason: 'Manual duration field' };
+      }
     }
-    return 0;
+    return { effectiveDays: 0, status: 'no_observations', breakdownDaa: null, isInterpolated: false, reason: 'No efficacy observations recorded' };
   }
 
   // Sort observations chronologically by DAA
@@ -108,12 +137,17 @@ export function calculateEffectiveControlDays(trial, controlTrial = null) {
     }
   }
 
-  const baselineObs = sortedObs[0];
+  const baselineObs = sortedObs.find(o => Number(o.daa ?? 0) === 0) || sortedObs[0];
   const baselineCover = parseFloat(baselineObs?.weedCover ?? 0) || 0;
   
-  let effectiveControlDays = 0;
   let maxDAAFound = 0;
+  let prevDaa = 0;
+  let prevWce = 100; // Baseline before spray starts at 100% potential
+  let effectiveControlDays = 0;
   let breakdownOccurred = false;
+  let breakdownDaa = null;
+  let isInterpolated = false;
+  let reason = 'Active sustained control';
 
   for (let i = 0; i < sortedObs.length; i++) {
     const obs = sortedObs[i];
@@ -128,7 +162,9 @@ export function calculateEffectiveControlDays(trial, controlTrial = null) {
       let validSpeciesCount = 0;
       obs.weedDetails.forEach(wd => {
         const speciesCover = parseFloat(wd.cover ?? 0);
-        const speciesWCE = wd.wce !== undefined && wd.wce !== null ? parseFloat(wd.wce) : (100 - speciesCover);
+        const speciesWCE = wd.wce !== undefined && wd.wce !== null && wd.wce !== '' 
+          ? parseFloat(wd.wce) 
+          : (100 - speciesCover);
         if (!isNaN(speciesWCE)) {
           totalSpeciesWCE += speciesWCE;
           validSpeciesCount++;
@@ -152,7 +188,7 @@ export function calculateEffectiveControlDays(trial, controlTrial = null) {
       }
     }
 
-    // 3. Fallback to direct WCE / Control % / Weed Cover calculation
+    // 3. Direct WCE / Control % / Weed Cover calculation
     if (computedWCE === null) {
       if (obs.wce !== undefined && obs.wce !== null && obs.wce !== '') {
         computedWCE = parseFloat(obs.wce);
@@ -168,30 +204,66 @@ export function calculateEffectiveControlDays(trial, controlTrial = null) {
       }
     }
 
-    // Baseline observation (DAA 0) or unrated observation defaults to effective
+    // Baseline observation (DAA 0) defaults to 100% control expectation
     if (computedWCE === null || isNaN(computedWCE) || daa === 0) {
       computedWCE = 100;
+    }
+
+    if (daa === 0) {
+      prevDaa = 0;
+      prevWce = 100;
+      continue;
     }
 
     // Scientific Threshold: Effective control requires WCE >= 70%
     if (computedWCE >= 70) {
       if (!breakdownOccurred) {
         effectiveControlDays = Math.max(effectiveControlDays, daa);
+        prevDaa = daa;
+        prevWce = computedWCE;
       }
     } else {
       // Regrowth breakdown detected (< 70% control)!
-      breakdownOccurred = true;
+      if (!breakdownOccurred) {
+        breakdownOccurred = true;
+        // Linear Interpolation: Calculate exact threshold crossing day (WCE = 70%)
+        if (prevWce > computedWCE && prevWce >= 70) {
+          const interpolated = prevDaa + (daa - prevDaa) * ((prevWce - 70) / (prevWce - computedWCE));
+          breakdownDaa = Math.max(prevDaa, Math.min(daa, Math.round(interpolated * 10) / 10));
+          effectiveControlDays = Math.round(breakdownDaa);
+          isInterpolated = true;
+          reason = `Regrowth breakdown occurred at DAA ${breakdownDaa} (WCE dropped to ${Math.round(computedWCE)}%)`;
+        } else {
+          // If already below 70% from first observation, control is ineffective
+          breakdownDaa = prevDaa;
+          effectiveControlDays = prevDaa;
+          reason = `Initial control below 70% standard threshold (${Math.round(computedWCE)}%)`;
+        }
+      }
     }
   }
 
-  // Fallback: If no breakdown occurred throughout the trial, use max DAA
-  if (effectiveControlDays === 0 && maxDAAFound > 0 && !breakdownOccurred) {
+  // If no breakdown occurred throughout all observations, sustained until max DAA
+  if (!breakdownOccurred && maxDAAFound > 0) {
     effectiveControlDays = maxDAAFound;
-  } else if (effectiveControlDays === 0 && sortedObs.length > 0) {
-    effectiveControlDays = maxDAAFound;
+    reason = `Sustained control across full observation window (${maxDAAFound} DAA)`;
   }
 
-  return effectiveControlDays;
+  // If trial has explicit FinalControlDuration that was manually entered and no breakdown occurred, respect it
+  if (trial.FinalControlDuration && !isNaN(parseInt(trial.FinalControlDuration, 10))) {
+    const manualDays = parseInt(trial.FinalControlDuration, 10);
+    if (manualDays > effectiveControlDays && !breakdownOccurred) {
+      effectiveControlDays = manualDays;
+    }
+  }
+
+  return {
+    effectiveDays: effectiveControlDays,
+    status: breakdownOccurred ? 'breakdown_regrowth' : (effectiveControlDays > 0 ? 'active_sustained' : 'ineffective'),
+    breakdownDaa: breakdownDaa !== null ? breakdownDaa : effectiveControlDays,
+    isInterpolated,
+    reason
+  };
 }
 
 /**

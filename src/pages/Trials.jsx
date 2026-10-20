@@ -20,11 +20,12 @@ import {
 } from 'lucide-react';
 import { safeJsonParse } from '../utils/helpers.js';
 import { resolvePhotoSrc, getPhotoThumbnailSrc, isPhotoBroken, getDriveFileId, compressImage, deduplicatePhotoList } from '../utils/photoUtils.js';
-import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryValue, calculateEfficacy, getRatingFromEfficacy } from '../utils/categoryConfig.js';
+import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryValue, calculateEfficacy, getRatingFromEfficacy, getEWRSScale } from '../utils/categoryConfig.js';
 import { calculateDAA, toDateKey, formatPhotoDate, toDatetimeLocal, formatDate, formatDateTime, parseDateFromFilename, parsePhotoInfoFromFilename, parseCustomDate } from '../utils/dateUtils.js';
 import { normalizeObservation } from '../utils/categoryObservationUtils.js';
 import { validateEfficacyData } from '../utils/analysisUtils.js';
-import { canonicalizeWeedSpecies } from '../utils/weedUtils.js';
+import { canonicalizeWeedSpecies, getWeedBiology, getWeedEPPOCode } from '../utils/weedUtils.js';
+import { EPPO_CODES } from '../utils/eppoBBCHData.js';
 import CameraCapture from '../components/CameraCapture.jsx';
 import CropperModal from '../components/CropperModal.jsx';
 import CategoryValidationAlert, { showCategoryValidationToast } from '../components/CategoryValidationAlert.jsx';
@@ -36,7 +37,7 @@ import FormulationQuickPeekModal from '../components/FormulationQuickPeekModal.j
 import VoiceFieldScoutModal from '../components/VoiceFieldScoutModal.jsx';
 import { isFormulationEligibleForTrial, getTrialCalculatedEfficacy } from '../utils/formulationTrialUtils.js';
 import { findDuplicateTrial } from '../utils/formulationDuplicateUtils.js';
-import { calculateEffectiveControlDays } from '../utils/trialLifecycle.js';
+import { calculateEffectiveControlDays, getDetailedControlDaysInfo } from '../utils/trialLifecycle.js';
 import TrialFiltersBar from '../components/trials/TrialFiltersBar.jsx';
 import TrialTimelineView from '../components/trials/TrialTimelineView.jsx';
 import TrialKanbanBoard from '../components/trials/TrialKanbanBoard.jsx';
@@ -8158,16 +8159,27 @@ If none are present, write "None".`;
               {detailTab === 'observations' && (
                 (() => {
                   const { sorted, baseCover } = obsData;
+                  const controlDaysDetails = getDetailedControlDaysInfo(detailTrial);
                   let controlDays = null;
+                  let controlDaysBadgeStyle = 'bg-blue-100 text-blue-800 border border-blue-200';
+
                   if (detailTrial.ControlFinalized === true || detailTrial.ControlFinalized === 'true') {
-                    if (detailTrial.FinalControlDuration) controlDays = `${detailTrial.FinalControlDuration} days (final)`;
-                    else if (detailTrial.FinalizationDate && detailTrial.Date) {
-                      const d = Math.floor((new Date(detailTrial.FinalizationDate) - new Date(detailTrial.Date)) / 86400000);
-                      controlDays = `${Math.max(0, d)} days (final)`;
-                    } else controlDays = 'Finalized';
+                    if (detailTrial.FinalControlDuration) {
+                      controlDays = `${detailTrial.FinalControlDuration} days (finalized)`;
+                    } else {
+                      controlDays = `${controlDaysDetails.effectiveDays} days (finalized)`;
+                    }
+                    controlDaysBadgeStyle = 'bg-emerald-100 text-emerald-800 border border-emerald-300';
+                  } else if (controlDaysDetails.status === 'breakdown_regrowth') {
+                    controlDays = `${controlDaysDetails.effectiveDays}d control (regrowth @ DAA ${controlDaysDetails.breakdownDaa})`;
+                    controlDaysBadgeStyle = 'bg-amber-100 text-amber-800 border border-amber-300';
+                  } else if (controlDaysDetails.effectiveDays > 0) {
+                    controlDays = `${controlDaysDetails.effectiveDays}d control (sustained ≥70%)`;
+                    controlDaysBadgeStyle = 'bg-blue-100 text-blue-800 border border-blue-300';
                   } else if (detailTrial.Date) {
                     const d = Math.floor((new Date() - new Date(detailTrial.Date)) / 86400000);
-                    controlDays = `${Math.max(0, d)} days active`;
+                    controlDays = `${Math.max(0, d)} days active (<70% initial)`;
+                    controlDaysBadgeStyle = 'bg-slate-100 text-slate-700 border border-slate-300';
                   }
                   return (
                   <div>
@@ -8190,7 +8202,10 @@ If none are present, write "None".`;
                       <div>
                         <h3 className="font-semibold text-slate-700">Observation Timeline</h3>
                         {controlDays && (
-                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 mt-1 inline-block">
+                          <span 
+                            className={`text-xs font-semibold px-2 py-0.5 rounded-full mt-1 inline-block ${controlDaysBadgeStyle}`}
+                            title={controlDaysDetails.reason || 'Scientific EPPO/EWRS Standard Effective Control Days'}
+                          >
                             ⏱ {controlDays}
                           </span>
                         )}
@@ -8404,20 +8419,46 @@ If none are present, write "None".`;
                                      activeCategory === 'biostimulant' ? 'Biostimulant Parameter Breakdown' : `${catConfig.targetLabel} Breakdown`}
                                   </p>
                                   <div className="space-y-1.5">
-                                    {obs.weedDetails.map((wd, wIdx) => (
-                                      <div key={wIdx} className="flex items-center justify-between text-xs gap-2">
-                                        <span className="text-slate-600 truncate flex-1">{wd.species || 'Unknown'}</span>
-                                        <div className="flex gap-1 shrink-0">
-                                          {wd.growthStage && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-600">{wd.growthStage}</span>}
-                                          {wd.status && (
-                                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${STATUS_CLS[wd.status === 'Unaffected' && activeCategory !== 'herbicide' ? 'Healthy' : wd.status] || 'bg-slate-100 text-slate-600'}`}>
-                                              {wd.status === 'Unaffected' && activeCategory !== 'herbicide' ? 'Healthy' : wd.status}
-                                            </span>
-                                          )}
-                                        </div>
-                                        <span className="font-bold text-slate-800 shrink-0">{wd.cover}%{wd.confidence ? ` (${wd.confidence}% Conf)` : ''}</span>
-                                      </div>
-                                    ))}
+                                     {obs.weedDetails.map((wd, wIdx) => {
+                                       const canonical = canonicalizeWeedSpecies(wd.species);
+                                       const bio = getWeedBiology(canonical);
+                                       const eppo = bio.eppoCode || getWeedEPPOCode(canonical);
+                                       return (
+                                         <div key={wIdx} className="flex items-center justify-between text-xs gap-2 flex-wrap bg-slate-50/60 rounded px-2 py-1 border border-slate-100">
+                                           <div className="flex items-center gap-1.5 flex-1 min-w-[140px]">
+                                             <span className="text-slate-700 font-semibold truncate">{canonical || 'Unknown'}</span>
+                                             {eppo && (
+                                               <span className="text-[9px] font-mono font-bold bg-slate-100 text-slate-700 px-1 py-0.2 rounded border border-slate-200" title={`EPPO Code: ${eppo}`}>
+                                                 {eppo}
+                                               </span>
+                                             )}
+                                             {bio.type && (
+                                               <span className={`text-[9px] font-semibold px-1 py-0.2 rounded ${
+                                                 bio.type === 'Sedge' ? 'bg-amber-100 text-amber-800' :
+                                                 bio.type === 'Grass' ? 'bg-lime-100 text-lime-800' :
+                                                 'bg-teal-100 text-teal-800'
+                                               }`}>
+                                                 {bio.type}
+                                               </span>
+                                             )}
+                                             {bio.regrowthRisk && (
+                                               <span className="text-[9px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 px-1 py-0.2 rounded" title="Perennial or tuberous regrowth risk">
+                                                 âš ï¸ Perennial
+                                               </span>
+                                             )}
+                                           </div>
+                                           <div className="flex gap-1 shrink-0 items-center">
+                                             {wd.growthStage && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-600">{wd.growthStage}</span>}
+                                             {wd.status && (
+                                               <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${STATUS_CLS[wd.status === 'Unaffected' && activeCategory !== 'herbicide' ? 'Healthy' : wd.status] || 'bg-slate-100 text-slate-600'}`}>
+                                                 {wd.status === 'Unaffected' && activeCategory !== 'herbicide' ? 'Healthy' : wd.status}
+                                               </span>
+                                             )}
+                                             <span className="font-bold text-slate-800 shrink-0 ml-1">{wd.cover}%{wd.confidence ? ` (${wd.confidence}% Conf)` : ''}</span>
+                                           </div>
+                                         </div>
+                                       );
+                                     })}
                                   </div>
                                 </div>
                               )}
@@ -10924,26 +10965,62 @@ If none are present, write "None".`;
               <p className="text-xs text-slate-400 italic">No {activeCategory === 'herbicide' ? 'species' : catConfig.targetLabel.toLowerCase()} added — total {activeCategory === 'herbicide' ? 'cover' : catConfig.primaryMetric.label.toLowerCase()} only will be saved.</p>
             ) : (
               <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
-                {obsForm.weedDetails.map((wd, wi) => (
-                  <div key={wi} className="grid grid-cols-12 gap-1.5 items-center bg-slate-50 rounded-lg p-2">
-                    <input value={wd.species} onChange={e => { const d=[...obsForm.weedDetails]; d[wi]={...d[wi],species:e.target.value}; setObsForm(p=>({...p,weedDetails:d})); }}
-                      placeholder={activeCategory === 'herbicide' ? 'Species name' : `${catConfig.targetLabel} name`} className="col-span-5 px-2 py-1.5 text-xs border rounded focus:outline-none focus:ring-1 focus:ring-emerald-400" />
-                    <input type="number" min="0" max="100" value={wd.cover} onChange={e => { const d=[...obsForm.weedDetails]; d[wi]={...d[wi],cover:e.target.value}; setObsForm(p=>({...p,weedDetails:d})); }}
-                      placeholder="%" className="col-span-2 px-2 py-1.5 text-xs border rounded focus:outline-none focus:ring-1 focus:ring-emerald-400" />
-                    <select value={wd.status} onChange={e => { const d=[...obsForm.weedDetails]; d[wi]={...d[wi],status:e.target.value}; setObsForm(p=>({...p,weedDetails:d})); }}
-                      className="col-span-3 px-1 py-1.5 text-xs border rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400">
-                      <option value="">Status</option>
-                      {(activeCategory === 'herbicide' 
-                        ? ['Controlled','Burndown','Re-emerged','Resistant','Unaffected','Emerged','Not detected','Suppressed','Top-kill','Regrowth','Eliminated']
-                        : ['Healthy','Symptomatic','Deficient','Stressed','Vigorous','Recovered','Not detected']
-                      ).map(s=><option key={s} value={s}>{s}</option>)}
-                    </select>
-                    <button type="button" onClick={() => { const d=[...obsForm.weedDetails]; d.splice(wi,1); setObsForm(p=>({...p,weedDetails:d})); }}
-                      className="col-span-2 flex justify-center text-slate-400 hover:text-red-500 p-1">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ))}
+                <datalist id="eppo-weed-datalist">
+                  {EPPO_CODES.filter(item => item.type === 'weed').map(item => (
+                    <option key={item.code} value={`${item.commonName} (${item.scientificName})`}>
+                      {item.code} â€” {item.scientificName}
+                    </option>
+                  ))}
+                </datalist>
+                {obsForm.weedDetails.map((wd, wi) => {
+                  const bio = wd.species ? getWeedBiology(canonicalizeWeedSpecies(wd.species)) : null;
+                  return (
+                    <div key={wi} className="bg-slate-50 rounded-lg p-2 space-y-1">
+                      <div className="grid grid-cols-12 gap-1.5 items-center">
+                        <input 
+                          list="eppo-weed-datalist"
+                          value={wd.species} 
+                          onChange={e => { const d=[...obsForm.weedDetails]; d[wi]={...d[wi],species:e.target.value}; setObsForm(p=>({...p,weedDetails:d})); }}
+                          onBlur={e => {
+                            if (activeCategory === 'herbicide' && e.target.value) {
+                              const canon = canonicalizeWeedSpecies(e.target.value);
+                              if (canon !== e.target.value) {
+                                const d = [...obsForm.weedDetails];
+                                d[wi] = { ...d[wi], species: canon };
+                                setObsForm(p => ({ ...p, weedDetails: d }));
+                              }
+                            }
+                          }}
+                          placeholder={activeCategory === 'herbicide' ? 'Species (e.g. Cyperus rotundus, Motha)' : `${catConfig.targetLabel} name`} 
+                          className="col-span-5 px-2 py-1.5 text-xs border rounded focus:outline-none focus:ring-1 focus:ring-emerald-400" 
+                        />
+                        <input type="number" min="0" max="100" value={wd.cover} onChange={e => { const d=[...obsForm.weedDetails]; d[wi]={...d[wi],cover:e.target.value}; setObsForm(p=>({...p,weedDetails:d})); }}
+                          placeholder="%" className="col-span-2 px-2 py-1.5 text-xs border rounded focus:outline-none focus:ring-1 focus:ring-emerald-400" />
+                        <select value={wd.status} onChange={e => { const d=[...obsForm.weedDetails]; d[wi]={...d[wi],status:e.target.value}; setObsForm(p=>({...p,weedDetails:d})); }}
+                          className="col-span-3 px-1 py-1.5 text-xs border rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400">
+                          <option value="">Status</option>
+                          {(activeCategory === 'herbicide' 
+                            ? ['Controlled','Burndown','Re-emerged','Resistant','Unaffected','Emerged','Not detected','Suppressed','Top-kill','Regrowth','Eliminated']
+                            : ['Healthy','Symptomatic','Deficient','Stressed','Vigorous','Recovered','Not detected']
+                          ).map(s=><option key={s} value={s}>{s}</option>)}
+                        </select>
+                        <button type="button" onClick={() => { const d=[...obsForm.weedDetails]; d.splice(wi,1); setObsForm(p=>({...p,weedDetails:d})); }}
+                          className="col-span-2 flex justify-center text-slate-400 hover:text-red-500 p-1">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      {bio && bio.type && activeCategory === 'herbicide' && (
+                        <div className="flex items-center gap-1.5 text-[10px] pl-1 text-slate-500">
+                          {bio.eppoCode && <span className="font-mono font-bold bg-slate-200 text-slate-700 px-1 rounded">EPPO: {bio.eppoCode}</span>}
+                          <span className={`px-1 rounded font-semibold ${bio.type === 'Sedge' ? 'bg-amber-100 text-amber-800' : bio.type === 'Grass' ? 'bg-lime-100 text-lime-800' : 'bg-teal-100 text-teal-800'}`}>
+                            {bio.type} ({bio.lifecycle})
+                          </span>
+                          {bio.regrowthRisk && <span className="text-rose-600 font-semibold">âš ï¸ Regrowth risk</span>}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

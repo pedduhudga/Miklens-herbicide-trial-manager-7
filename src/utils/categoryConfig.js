@@ -433,19 +433,42 @@ export function calculateEfficacy(categoryId, treatedValue, controlValue) {
 
 // Helper: determine descriptive rating based on calculated efficacy percentage
 export function getRatingFromEfficacy(categoryId, efficacyVal) {
-  if (efficacyVal === null || efficacyVal === undefined) return 'Unrated';
+  if (efficacyVal === null || efficacyVal === undefined || isNaN(efficacyVal)) return 'Unrated';
+  const val = Number(efficacyVal);
   if (categoryId === 'nutrition' || categoryId === 'biostimulant') {
-    if (efficacyVal >= 15) return 'Excellent';
-    if (efficacyVal >= 8) return 'Good';
-    if (efficacyVal >= 3) return 'Fair';
+    if (val >= 20) return 'Excellent';
+    if (val >= 10) return 'Good';
+    if (val >= 5)  return 'Fair';
     return 'Poor';
   } else {
-    if (efficacyVal >= 85) return 'Excellent';
-    if (efficacyVal >= 70) return 'Good';
-    if (efficacyVal >= 50) return 'Fair';
+    // International Agricultural Research (EPPO / EWRS 4-tier mapping)
+    if (val >= 85) return 'Excellent';
+    if (val >= 70) return 'Good';
+    if (val >= 50) return 'Fair';
     return 'Poor';
   }
 }
+
+/**
+ * Standard European Weed Research Society (EWRS) 1–9 Efficacy & Phytotoxicity Scale
+ * Reference: EPPO Standard PP 1/152 & EWRS Evaluation Scale
+ */
+export function getEWRSScale(efficacyVal) {
+  if (efficacyVal === null || efficacyVal === undefined || isNaN(efficacyVal)) {
+    return { score: null, grade: 'Unrated', description: 'No efficacy data' };
+  }
+  const eff = Math.max(0, Math.min(100, Number(efficacyVal)));
+  if (eff >= 99.9) return { score: 1, grade: 'Complete Kill', description: 'EWRS 1: 100% control, no weeds surviving' };
+  if (eff >= 96.5) return { score: 2, grade: 'Very Good Control', description: 'EWRS 2: 96.5–99% control, negligible survival' };
+  if (eff >= 90.0) return { score: 3, grade: 'Good Commercial Control', description: 'EWRS 3: 90–96.4% control, commercially acceptable' };
+  if (eff >= 80.0) return { score: 4, grade: 'Moderate Control', description: 'EWRS 4: 80–89.9% control, acceptable suppression' };
+  if (eff >= 70.0) return { score: 5, grade: 'Marginal Control', description: 'EWRS 5: 70–79.9% control, minimum commercial efficacy' };
+  if (eff >= 55.0) return { score: 6, grade: 'Substandard Control', description: 'EWRS 6: 55–69.9% control, heavy competition remaining' };
+  if (eff >= 40.0) return { score: 7, grade: 'Poor Control', description: 'EWRS 7: 40–54.9% control, partial suppression only' };
+  if (eff >= 20.0) return { score: 8, grade: 'Very Poor Control', description: 'EWRS 8: 20–39.9% control, ineffective treatment' };
+  return { score: 9, grade: 'Complete Failure', description: 'EWRS 9: 0–19.9% control, no significant weed reduction' };
+}
+
 
 // Helper: get the primary observation field key for a category
 export function getPrimaryObservationField(categoryId) {
