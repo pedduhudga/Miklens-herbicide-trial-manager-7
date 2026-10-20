@@ -63,7 +63,145 @@
     0%, 100% { transform: scale(1); opacity: 1; }
     50% { transform: scale(1.03); opacity: 0.88; }
   }
+
+  /* ═══════════════════════════════════════════════════════════════
+     ATMOSPHERIC WEATHER FX ANIMATIONS
+     GPU-accelerated microclimate visual effects engine
+     ═══════════════════════════════════════════════════════════════ */
+
+  /* Rain: Diagonal raindrop streaks falling */
+  --animate-rain: rainFall 1s linear infinite;
+  @keyframes rainFall {
+    0%   { transform: translate3d(0, -20%, 0) rotate(8deg); opacity: 0; }
+    15%  { opacity: 1; }
+    85%  { opacity: 1; }
+    100% { transform: translate3d(-8px, 120%, 0) rotate(8deg); opacity: 0; }
+  }
+
+  /* Rain: Ground splash ripples */
+  --animate-splash: splashRipple 2s ease-out infinite;
+  @keyframes splashRipple {
+    0%   { transform: scale(0.5); opacity: 0.7; }
+    50%  { transform: scale(1.4); opacity: 0.3; }
+    100% { transform: scale(2); opacity: 0; }
+  }
+
+  /* Thunderstorm: Ambient lightning flash */
+  --animate-lightning: lightningFlash 4s ease-in-out infinite;
+  @keyframes lightningFlash {
+    0%, 88%, 100%  { background: transparent; }
+    89%            { background: rgba(199, 210, 254, 0.25); }
+    90%            { background: transparent; }
+    92%            { background: rgba(199, 210, 254, 0.35); }
+    93%            { background: transparent; }
+  }
+
+  /* Thunderstorm: Lightning bolt visibility pulse */
+  --animate-lightning-bolt: lightningBoltPulse 4s ease-in-out infinite;
+  @keyframes lightningBoltPulse {
+    0%, 88%, 94%, 100% { opacity: 0; }
+    89%, 93%           { opacity: 0.9; }
+    90%, 92%           { opacity: 0; }
+  }
+
+  /* Wind: Flowing horizontal ribbon */
+  --animate-wind-ribbon: windRibbon 4s linear infinite;
+  @keyframes windRibbon {
+    0%   { transform: translate3d(-100%, 0, 0) scaleY(0.8); }
+    100% { transform: translate3d(200%, 0, 0) scaleY(1.2); }
+  }
+
+  /* Wind: SVG dashed streamline flow */
+  --animate-streamline: streamlineFlow 6s linear infinite;
+  @keyframes streamlineFlow {
+    0%   { stroke-dashoffset: 0; }
+    100% { stroke-dashoffset: -200; }
+  }
+
+  /* Wind: Tumbling leaf / spore particle drift */
+  --animate-leaf-drift: leafDrift 4s ease-in-out infinite;
+  @keyframes leafDrift {
+    0%   { transform: translate3d(-120%, 0, 0) rotate(0deg) scale(0.8); opacity: 0; }
+    20%  { opacity: 1; }
+    80%  { opacity: 1; }
+    100% { transform: translate3d(600%, -30%, 0) rotate(540deg) scale(0.6); opacity: 0; }
+  }
+
+  /* Sun: Pulsating solar corona orb */
+  --animate-solar-pulse: solarPulse 3s ease-in-out infinite;
+  @keyframes solarPulse {
+    0%, 100% { transform: scale(1); box-shadow: 0 0 35px rgba(245,158,11,0.65); }
+    50%      { transform: scale(1.08); box-shadow: 0 0 55px rgba(245,158,11,0.85); }
+  }
+
+  /* Sun: Slow rotating solar rays */
+  --animate-spin-slow: spinSlow 20s linear infinite;
+  @keyframes spinSlow {
+    0%   { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+
+  /* Sun: Bottom thermal heat haze shimmer */
+  --animate-heat-haze: heatHaze 3s ease-in-out infinite;
+  @keyframes heatHaze {
+    0%, 100% { transform: scaleY(1) translate3d(0, 0, 0); opacity: 0.5; }
+    50%      { transform: scaleY(1.15) translate3d(0, -3px, 0); opacity: 0.8; }
+  }
+
+  /* Sun: SVG wavy heat distortion */
+  --animate-heat-wave: heatWave 4s ease-in-out infinite;
+  @keyframes heatWave {
+    0%, 100% { transform: translate3d(0, 0, 0); }
+    50%      { transform: translate3d(-20px, -2px, 0); }
+  }
+
+  /* Night: Twinkling constellation stars */
+  --animate-star-twinkle: starTwinkle 3s ease-in-out infinite;
+  @keyframes starTwinkle {
+    0%, 100% { opacity: 0.4; transform: scale(0.8); }
+    50%      { opacity: 1; transform: scale(1.3); }
+  }
+
+  /* Night: Low-drifting nocturnal inversion mist */
+  --animate-mist-drift: mistDrift 8s ease-in-out infinite;
+  @keyframes mistDrift {
+    0%, 100% { transform: translate3d(-5%, 0, 0) scaleX(1); opacity: 0.6; }
+    50%      { transform: translate3d(5%, -4px, 0) scaleX(1.1); opacity: 0.9; }
+  }
+
+  /* Optimal: Emerald vitality aura pulse */
+  --animate-emerald-pulse: emeraldPulse 4s ease-in-out infinite;
+  @keyframes emeraldPulse {
+    0%, 100% { opacity: 0.5; transform: scale(1); }
+    50%      { opacity: 0.8; transform: scale(1.06); }
+  }
+
+  /* Frost: Floating ice crystals / freezing warning */
+  --animate-frost-float: frostFloat 5s ease-in-out infinite;
+  @keyframes frostFloat {
+    0%   { transform: translate3d(0, -10%, 0) rotate(0deg); opacity: 0; }
+    20%  { opacity: 0.85; }
+    80%  { opacity: 0.85; }
+    100% { transform: translate3d(12px, 120%, 0) rotate(160deg); opacity: 0; }
+  }
 }
+
+/* Atmospheric Weather FX explicit animation classes (cross-engine fallback) */
+.animate-rain { animation: rainFall 0.9s linear infinite; }
+.animate-splash { animation: splashRipple 2s ease-out infinite; }
+.animate-lightning { animation: lightningFlash 4.5s ease-in-out infinite; }
+.animate-lightning-bolt { animation: lightningBoltPulse 4.5s ease-in-out infinite; }
+.animate-wind-ribbon { animation: windRibbon 3.5s linear infinite; }
+.animate-streamline { animation: streamlineFlow 5s linear infinite; }
+.animate-leaf-drift { animation: leafDrift 4s ease-in-out infinite; }
+.animate-solar-pulse { animation: solarPulse 3s ease-in-out infinite; }
+.animate-spin-slow { animation: spinSlow 20s linear infinite; }
+.animate-heat-haze { animation: heatHaze 3s ease-in-out infinite; }
+.animate-heat-wave { animation: heatWave 4s ease-in-out infinite; }
+.animate-star-twinkle { animation: starTwinkle 3s ease-in-out infinite; }
+.animate-mist-drift { animation: mistDrift 8s ease-in-out infinite; }
+.animate-emerald-pulse { animation: emeraldPulse 4s ease-in-out infinite; }
+.animate-frost-float { animation: frostFloat 5s ease-in-out infinite; }
 
 :root {
     --primary-color: #059669;

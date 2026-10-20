@@ -14,6 +14,7 @@ import {
   ShieldCheck, ShieldAlert, Sparkles, Sun, ArrowRight,
   Info, Check, Compass, Gauge, AlertCircle, Ban, Moon
 } from 'lucide-react';
+import AtmosphericWeatherFX from './AtmosphericWeatherFX.jsx';
 
 /**
  * High-precision Delta-T Psychrometric Arc Gauge
@@ -133,6 +134,7 @@ export default function SprayAdvisor({ lat, lon, locationName = 'Current Locatio
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('decision'); // 'decision' | 'timeline' | 'forecast'
   const [selectedHourIdx, setSelectedHourIdx] = useState(null);
+  const [fxSimulation, setFxSimulation] = useState('auto'); // 'auto' | 'thunderstorm' | 'rain' | 'wind' | 'sun' | 'night' | 'frost' | 'optimal'
 
   const loadAnalysis = useCallback(async () => {
     clearWeatherCache();
@@ -170,6 +172,38 @@ export default function SprayAdvisor({ lat, lon, locationName = 'Current Locatio
   const currentVerdict = analysis?.current?.verdict || 'SAFE_TO_SPRAY';
   const currentScore = analysis?.current?.score ?? 80;
 
+  // Derive immersive weather visual effect from live atmospheric conditions or manual simulation
+  const activeWeatherEffect = useMemo(() => {
+    if (fxSimulation && fxSimulation !== 'auto') {
+      return fxSimulation;
+    }
+
+    if (!analysis?.current?.conditions) return 'none';
+    const c = analysis.current.conditions;
+    const isNight = analysis.current.isNight;
+    const precip = c.precipitation ?? 0;
+    const wind = c.windSpeed ?? 0;
+    const temp = c.temperature ?? 20;
+
+    // Cold / Frost hazard (< 4°C)
+    if (temp < 4) return 'frost';
+    // Thunderstorm: heavy precip + wind
+    if (precip > 2 && wind > 15) return 'thunderstorm';
+    // Rain: any meaningful precipitation or wash-off hazard
+    if (precip > 0.3 || analysis.current.rainfastHazard) return 'rain';
+    // Wind: strong drift risk
+    if (wind > 18) return 'wind';
+    // Night / nocturnal temperature inversion
+    if (isNight) return 'night';
+    // Hot sun: high temperature or high Delta-T evaporation risk
+    if (temp > 30 || (analysis.current.deltaT ?? 0) > 8) return 'sun';
+    // Optimal: safe spray window
+    if (currentVerdict === 'SAFE_TO_SPRAY') return 'optimal';
+    // Moderate sun for caution
+    if (temp > 25) return 'sun';
+    return 'none';
+  }, [analysis, currentVerdict, fxSimulation]);
+
   // Selected hour in timeline or fallback to current conditions
   const inspectedHour = useMemo(() => {
     if (!analysis?.hourlyTimeline || analysis.hourlyTimeline.length === 0) return null;
@@ -179,6 +213,25 @@ export default function SprayAdvisor({ lat, lon, locationName = 'Current Locatio
     const currentH = new Date().getHours();
     return analysis.hourlyTimeline.find(h => h.hour === currentH) || analysis.hourlyTimeline[0];
   }, [analysis, selectedHourIdx]);
+
+  // Derive atmospheric weather effect for inspected hour in timeline
+  const inspectedHourWeatherEffect = useMemo(() => {
+    if (!inspectedHour || !inspectedHour.conditions) return 'none';
+    const c = inspectedHour.conditions;
+    const precip = c.precipitation ?? 0;
+    const wind = c.windSpeed ?? 0;
+    const temp = c.temperature ?? 20;
+    const isNight = inspectedHour.hour < 6 || inspectedHour.hour >= 19;
+
+    if (temp < 4) return 'frost';
+    if (precip > 2 && wind > 15) return 'thunderstorm';
+    if (precip > 0.3 || inspectedHour.rainSoon) return 'rain';
+    if (wind > 18) return 'wind';
+    if (isNight) return 'night';
+    if (temp > 30 || (inspectedHour.deltaT ?? 0) > 8) return 'sun';
+    if (inspectedHour.verdict === 'optimal') return 'optimal';
+    return 'none';
+  }, [inspectedHour]);
 
   if (!lat || !lon) {
     return (
@@ -300,8 +353,60 @@ export default function SprayAdvisor({ lat, lon, locationName = 'Current Locatio
                 HERO DECISION VERDICT: CAN I SPRAY RIGHT NOW? (INSTANT CLARITY)
                 ══════════════════════════════════════════════════════════════════ */}
             {activeTab === 'decision' && (
-              <div className="space-y-5">
-                {/* Visual Verdict Hero Banner */}
+              <div className="space-y-4">
+                {/* Microclimate Atmosphere Simulator / Telemetry Mode Switcher */}
+                <div className="flex items-center justify-between gap-2 p-2.5 bg-slate-50/90 rounded-2xl border border-slate-200/80 flex-wrap shadow-2xs">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span className="text-[11px] font-black text-slate-800 uppercase tracking-wider">
+                      Atmosphere FX:
+                    </span>
+                    {fxSimulation === 'auto' ? (
+                      <span className="text-[10px] font-black text-emerald-800 bg-emerald-100/90 border border-emerald-300/80 px-2 py-0.5 rounded-full flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        Live Sync ({activeWeatherEffect.toUpperCase()})
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-black text-indigo-800 bg-indigo-100/90 border border-indigo-300/80 px-2 py-0.5 rounded-full flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+                        Simulation ({fxSimulation.toUpperCase()})
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-1 overflow-x-auto max-w-full py-0.5">
+                    {[
+                      { id: 'auto', label: 'Live Auto', icon: '📡' },
+                      { id: 'thunderstorm', label: 'Thunderstorm', icon: '⛈️' },
+                      { id: 'rain', label: 'Rain Wash-off', icon: '🌧️' },
+                      { id: 'wind', label: 'Wind Drift', icon: '💨' },
+                      { id: 'sun', label: 'Scorching Sun', icon: '☀️' },
+                      { id: 'night', label: 'Inversion/Night', icon: '🌙' },
+                      { id: 'frost', label: 'Frost Alert', icon: '❄️' },
+                      { id: 'optimal', label: 'Optimal Window', icon: '✨' }
+                    ].map(item => {
+                      const isSelected = fxSimulation === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setFxSimulation(item.id)}
+                          className={`px-2.5 py-1 rounded-xl text-[11px] font-black flex items-center gap-1 transition-all whitespace-nowrap cursor-pointer ${
+                            isSelected
+                              ? 'bg-slate-900 text-white shadow-xs scale-102 ring-1 ring-slate-800'
+                              : 'bg-white text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200/80'
+                          }`}
+                          title={`Preview ${item.label} atmosphere`}
+                        >
+                          <span>{item.icon}</span>
+                          <span>{item.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Visual Verdict Hero Banner with Atmospheric Weather FX */}
                 <div 
                   className={`relative rounded-3xl p-5 border-2 shadow-sm transition-all overflow-hidden ${
                     currentVerdict === 'SAFE_TO_SPRAY'
@@ -311,6 +416,11 @@ export default function SprayAdvisor({ lat, lon, locationName = 'Current Locatio
                       : 'bg-gradient-to-br from-rose-500/10 via-white to-red-500/5 border-rose-300/90'
                   }`}
                 >
+                  {/* Immersive Weather Visual FX Layer */}
+                  <AtmosphericWeatherFX 
+                    effect={activeWeatherEffect} 
+                    badge={fxSimulation !== 'auto' ? `Simulated: ${fxSimulation}` : null}
+                  />
                   <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div className="flex items-start gap-3.5">
                       {/* Pulse Status Beacon */}
@@ -405,9 +515,10 @@ export default function SprayAdvisor({ lat, lon, locationName = 'Current Locatio
                     WHEN TO SPRAY VS WHEN TO AVOID (THE TWO EXPLICIT DIRECTIVES)
                     ══════════════════════════════════════════════════════════════════ */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* GREEN CARD: WHEN YOU CAN SPRAY */}
-                  <div className="rounded-3xl p-5 bg-gradient-to-br from-emerald-50/70 via-white to-teal-50/40 border border-emerald-200/80 shadow-xs flex flex-col justify-between">
-                    <div>
+                  {/* GREEN CARD: WHEN YOU CAN SPRAY (with Optimal FX) */}
+                  <div className="relative rounded-3xl p-5 bg-gradient-to-br from-emerald-50/70 via-white to-teal-50/40 border border-emerald-200/80 shadow-xs flex flex-col justify-between overflow-hidden">
+                    <AtmosphericWeatherFX effect="optimal" className="opacity-40" />
+                    <div className="relative z-10">
                       <div className="flex items-center justify-between mb-3.5 pb-2.5 border-b border-emerald-100">
                         <div className="flex items-center gap-2">
                           <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold">
@@ -467,7 +578,7 @@ export default function SprayAdvisor({ lat, lon, locationName = 'Current Locatio
                       )}
                     </div>
 
-                    <div className="mt-3.5 pt-2.5 border-t border-emerald-100/80 text-[11px] text-emerald-800 font-semibold flex items-center justify-between">
+                    <div className="relative z-10 mt-3.5 pt-2.5 border-t border-emerald-100/80 text-[11px] text-emerald-800 font-semibold flex items-center justify-between">
                       <span>✓ High absorption & minimal off-target drift</span>
                       <button 
                         onClick={() => setActiveTab('timeline')}
@@ -479,8 +590,9 @@ export default function SprayAdvisor({ lat, lon, locationName = 'Current Locatio
                   </div>
 
                   {/* RED CARD: WHEN TO AVOID SPRAYING */}
-                  <div className="rounded-3xl p-5 bg-gradient-to-br from-rose-50/70 via-white to-red-50/40 border border-rose-200/80 shadow-xs flex flex-col justify-between">
-                    <div>
+                  <div className="relative rounded-3xl p-5 bg-gradient-to-br from-rose-50/70 via-white to-red-50/40 border border-rose-200/80 shadow-xs flex flex-col justify-between overflow-hidden">
+                    <AtmosphericWeatherFX effect={activeWeatherEffect === 'optimal' ? 'rain' : activeWeatherEffect} className="opacity-30" />
+                    <div className="relative z-10">
                       <div className="flex items-center justify-between mb-3.5 pb-2.5 border-b border-rose-100">
                         <div className="flex items-center gap-2">
                           <div className="w-8 h-8 rounded-xl bg-rose-100 text-rose-800 flex items-center justify-center font-bold">
@@ -550,7 +662,7 @@ export default function SprayAdvisor({ lat, lon, locationName = 'Current Locatio
                       )}
                     </div>
 
-                    <div className="mt-3.5 pt-2.5 border-t border-rose-100/80 text-[11px] text-rose-800 font-semibold flex items-center justify-between">
+                    <div className="relative z-10 mt-3.5 pt-2.5 border-t border-rose-100/80 text-[11px] text-rose-800 font-semibold flex items-center justify-between">
                       <span>✗ High washoff or rapid droplet evaporation risk</span>
                       <span className="text-rose-600 font-bold">Postpone Application</span>
                     </div>
@@ -724,61 +836,64 @@ export default function SprayAdvisor({ lat, lon, locationName = 'Current Locatio
                   })}
                 </div>
 
-                {/* Inspected Hour Card */}
+                {/* Inspected Hour Card with Atmospheric Weather FX */}
                 {inspectedHour && (
-                  <div className="rounded-2xl p-4 bg-slate-50/90 border border-slate-200/90 shadow-2xs">
-                    <div className="flex items-center justify-between flex-wrap gap-2 mb-2 pb-2 border-b border-slate-200">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-black text-slate-900">
-                          {formatHour(inspectedHour.hour)} Snapshot
+                  <div className="relative rounded-2xl p-4 bg-slate-50/90 border border-slate-200/90 shadow-2xs overflow-hidden">
+                    <AtmosphericWeatherFX effect={inspectedHourWeatherEffect} className="opacity-30" />
+                    <div className="relative z-10">
+                      <div className="flex items-center justify-between flex-wrap gap-2 mb-2 pb-2 border-b border-slate-200">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-black text-slate-900">
+                            {formatHour(inspectedHour.hour)} Snapshot
+                          </span>
+                          <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                            inspectedHour.verdict === 'optimal' 
+                              ? 'bg-emerald-100 text-emerald-800' 
+                              : inspectedHour.verdict === 'caution' 
+                              ? 'bg-amber-100 text-amber-800' 
+                              : 'bg-rose-100 text-rose-800'
+                          }`}>
+                            {inspectedHour.verdict === 'optimal' ? 'Optimal Application Time' : inspectedHour.verdict === 'caution' ? 'Caution Advised' : 'Unsuitable Hour — Avoid'}
+                          </span>
+                        </div>
+                        <span className="text-xs font-black text-slate-700">
+                          Spray Window Score: <strong>{inspectedHour.score}/100</strong>
                         </span>
-                        <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
-                          inspectedHour.verdict === 'optimal' 
-                            ? 'bg-emerald-100 text-emerald-800' 
-                            : inspectedHour.verdict === 'caution' 
-                            ? 'bg-amber-100 text-amber-800' 
-                            : 'bg-rose-100 text-rose-800'
-                        }`}>
-                          {inspectedHour.verdict === 'optimal' ? 'Optimal Application Time' : inspectedHour.verdict === 'caution' ? 'Caution Advised' : 'Unsuitable Hour — Avoid'}
-                        </span>
                       </div>
-                      <span className="text-xs font-black text-slate-700">
-                        Spray Window Score: <strong>{inspectedHour.score}/100</strong>
-                      </span>
-                    </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                      <div>
-                        <span className="text-slate-400 text-[10px] block">Temperature</span>
-                        <strong className="text-slate-800 font-black">{inspectedHour.conditions.temperature}°C</strong>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 text-[10px] block">Humidity</span>
-                        <strong className="text-slate-800 font-black">{inspectedHour.conditions.humidity}%</strong>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 text-[10px] block">Wind Speed</span>
-                        <strong className="text-slate-800 font-black">{inspectedHour.conditions.windSpeed} km/h</strong>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 text-[10px] block">Psychrometric Delta-T</span>
-                        <strong className="text-slate-800 font-black">ΔT {inspectedHour.deltaT?.toFixed(1)}°C</strong>
-                      </div>
-                    </div>
-
-                    {inspectedHour.issues && inspectedHour.issues.length > 0 && (
-                      <div className="mt-2.5 pt-2 border-t border-slate-200/60">
-                        <span className="text-[10px] font-bold text-slate-400 block mb-1">Advisory Factors:</span>
-                        <div className="flex gap-2 flex-wrap">
-                          {inspectedHour.issues.map((iss, idx) => (
-                            <span key={idx} className="text-[11px] font-semibold text-rose-800 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-md flex items-center gap-1">
-                              <AlertTriangle className="w-3 h-3 text-rose-500" />
-                              {iss}
-                            </span>
-                          ))}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                        <div>
+                          <span className="text-slate-400 text-[10px] block">Temperature</span>
+                          <strong className="text-slate-800 font-black">{inspectedHour.conditions.temperature}°C</strong>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 text-[10px] block">Humidity</span>
+                          <strong className="text-slate-800 font-black">{inspectedHour.conditions.humidity}%</strong>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 text-[10px] block">Wind Speed</span>
+                          <strong className="text-slate-800 font-black">{inspectedHour.conditions.windSpeed} km/h</strong>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 text-[10px] block">Psychrometric Delta-T</span>
+                          <strong className="text-slate-800 font-black">ΔT {inspectedHour.deltaT?.toFixed(1)}°C</strong>
                         </div>
                       </div>
-                    )}
+
+                      {inspectedHour.issues && inspectedHour.issues.length > 0 && (
+                        <div className="mt-2.5 pt-2 border-t border-slate-200/60">
+                          <span className="text-[10px] font-bold text-slate-400 block mb-1">Advisory Factors:</span>
+                          <div className="flex gap-2 flex-wrap">
+                            {inspectedHour.issues.map((iss, idx) => (
+                              <span key={idx} className="text-[11px] font-semibold text-rose-800 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-md flex items-center gap-1">
+                                <AlertTriangle className="w-3 h-3 text-rose-500" />
+                                {iss}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
