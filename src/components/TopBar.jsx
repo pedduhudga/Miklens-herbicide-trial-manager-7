@@ -65,18 +65,18 @@ export default function TopBar({ title, onMenuClick }) {
         <Menu className="w-6 h-6" />
       </button>
 
-      <h1 className="text-lg md:text-2xl font-bold text-slate-800 tracking-tight truncate flex-1 text-center mx-2">
+      <h1 className="text-base sm:text-xl font-bold text-slate-800 tracking-tight truncate flex-1 text-left mx-1 sm:mx-2 min-w-0">
         {title}
       </h1>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
         {canInstall && (
           <button
             onClick={handleInstallClick}
-            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200/80 font-bold text-xs shadow-2xs transition active:scale-95"
+            className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-xl bg-[#154734]/10 text-[#154734] hover:bg-[#154734]/15 border border-[#154734]/20 font-bold text-xs shadow-2xs transition active:scale-95 touch-manipulation"
             title="Install Miklens Trial Manager PWA to home screen"
           >
-            <Download className="w-3.5 h-3.5 text-emerald-600" />
+            <Download className="w-3.5 h-3.5 text-[#154734]" />
             <span className="hidden sm:inline">Install</span>
           </button>
         )}

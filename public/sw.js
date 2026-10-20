@@ -1,10 +1,10 @@
 // Service Worker for Miklens Trial Manager PWA
-// Version: 3.0.0 - Advanced PWA Engine with Navigation Preload, Immutable Chunk Cache & Instant Offline SPA
+// Version: 3.1.0 - Advanced PWA Engine with Navigation Preload, Immutable Chunk Cache & Instant Offline SPA
 
-const CACHE_NAME = 'trial-manager-v3.0.0';
-const STATIC_CACHE = 'static-v3.0.0';
-const DYNAMIC_CACHE = 'dynamic-v3.0.0';
-const IMAGE_CACHE = 'images-v3.0.0';
+const CACHE_NAME = 'trial-manager-v3.1.0';
+const STATIC_CACHE = 'static-v3.1.0';
+const DYNAMIC_CACHE = 'dynamic-v3.1.0';
+const IMAGE_CACHE = 'images-v3.1.0';
 
 // IndexedDB setup via Dexie for offline data
 importScripts('https://unpkg.com/dexie@4.4.4/dist/dexie.js');

@@ -1336,8 +1336,40 @@ export default function Formulations({ onMenuClick }) {
       <TopBar title="Formulations" onMenuClick={onMenuClick} />
 
       <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
-        {/* Modern Agricultural Formulation Hub Hero Header */}
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 p-6 text-white shadow-lg border border-slate-700/60">
+        {/* Compact Mobile Formulations Header */}
+        <div className="sm:hidden -mx-4 -mt-4 mb-3 px-3.5 pt-3 pb-2 flex items-center justify-between border-b border-slate-200/80 bg-white/80 backdrop-blur-xs">
+          <div>
+            <div className="flex items-center gap-1.5">
+              <h1 className="text-base font-bold text-slate-800 tracking-tight">
+                Formulations
+              </h1>
+              <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                {formulationsWithStats.length}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
+              <span className="text-[#154734] font-semibold">
+                {formulationsWithStats.filter(f => (f._stats?.avgEfficacy || 0) >= 90).length} High Kill
+              </span>
+              <span>•</span>
+              <span>
+                {formulationsWithStats.filter(f => (f._stats?.avgControlDays || 0) >= 10).length} Residual
+              </span>
+            </div>
+          </div>
+          {!isViewer && (
+            <button
+              onClick={() => handleOpenModal()}
+              className="px-3 py-1.5 bg-[#154734] hover:bg-[#0e3525] text-white rounded-xl text-xs font-semibold shadow-xs flex items-center gap-1 active:scale-95 transition touch-manipulation"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>New</span>
+            </button>
+          )}
+        </div>
+
+        {/* Desktop / Tablet Formulation Hub Hero Header */}
+        <div className="hidden sm:block relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-800 to-[#0e3525] p-6 text-white shadow-md border border-slate-700/60">
           <div className="absolute -right-12 -top-12 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
           <div className="absolute right-1/4 -bottom-12 w-48 h-48 bg-teal-500/10 rounded-full blur-2xl pointer-events-none" />
 

@@ -238,7 +238,7 @@ export default function TrialFiltersBar({
 
         {/* Utility action buttons */}
         {!isViewer && (
-          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 ml-auto">
+          <div className="hidden sm:flex items-center gap-1 sm:gap-1.5 shrink-0 ml-auto">
             {/* Folder icon: ARM CSV Import */}
             <input
               type="file"
@@ -269,7 +269,7 @@ export default function TrialFiltersBar({
 
             {/* Heal only checkbox */}
             <div
-              className="hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-lg border border-slate-200 text-slate-500 bg-white shrink-0"
+              className="hidden md:flex items-center gap-1.5 px-2 py-1 rounded-lg border border-slate-200 text-slate-500 bg-white shrink-0"
               title="Heal existing only: Only restore broken/unavailable photos already in the list"
             >
               <input
@@ -297,11 +297,11 @@ export default function TrialFiltersBar({
 
       {/* Filter Drawer */}
       {showFilters && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pb-1">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-1 pb-1 border-t border-slate-100 animate-slide-down">
           <select
             value={filterFormulation}
             onChange={e => setFilterFormulation(e.target.value)}
-            className="text-sm border rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
+            className="text-xs sm:text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-[#154734]/30"
           >
             <option value="">All Formulations</option>
             {formulations.map(f => (
@@ -312,7 +312,7 @@ export default function TrialFiltersBar({
           <select
             value={filterProject}
             onChange={e => setFilterProject(e.target.value)}
-            className="text-sm border rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
+            className="text-xs sm:text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-[#154734]/30"
           >
             <option value="">All Projects</option>
             {projects.map(p => (
@@ -323,7 +323,7 @@ export default function TrialFiltersBar({
           <select
             value={filterResult}
             onChange={e => setFilterResult(e.target.value)}
-            className="text-sm border rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
+            className="text-xs sm:text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-[#154734]/30"
           >
             <option value="">All Results</option>
             {['Excellent', 'Good', 'Fair', 'Poor', 'Control'].map(r => (
@@ -334,9 +334,9 @@ export default function TrialFiltersBar({
           <select
             value={sortBy}
             onChange={e => setSortBy(e.target.value)}
-            className="text-sm border rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400 font-medium"
+            className="text-xs sm:text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-[#154734]/30 font-medium"
           >
-            <option value="best">🏆 Best (High Kill & Long Control)</option>
+            <option value="best">🏆 Best (High Kill & Long Residual)</option>
             <option value="kill-rate">⚡ Highest Kill Rate / Efficacy</option>
             <option value="control-days">⏳ Longest Control Days</option>
             <option value="date-desc">Newest First</option>
@@ -346,27 +346,62 @@ export default function TrialFiltersBar({
             <option value="shared">Shared Status</option>
           </select>
 
-          <div className="col-span-2 flex gap-2 items-center">
-            <span className="text-xs font-semibold text-slate-500 shrink-0">From</span>
+          <div className="col-span-2 flex gap-1.5 items-center">
+            <span className="text-[11px] font-semibold text-slate-500 shrink-0">From</span>
             <input
               type="date"
               value={filterDateStart}
               onChange={e => setFilterDateStart(e.target.value)}
-              className="flex-1 text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+              className="flex-1 text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#154734]/30"
             />
-            <span className="text-xs font-semibold text-slate-500 shrink-0">To</span>
+            <span className="text-[11px] font-semibold text-slate-500 shrink-0">To</span>
             <input
               type="date"
               value={filterDateEnd}
               onChange={e => setFilterDateEnd(e.target.value)}
-              className="flex-1 text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+              className="flex-1 text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#154734]/30"
             />
+          </div>
+
+          {/* Mobile utility buttons in drawer */}
+          <div className="col-span-2 sm:hidden flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={handleARMImportClick}
+                className="px-2 py-1 rounded-md text-[11px] font-medium border border-slate-200 text-slate-700 bg-slate-50 flex items-center gap-1"
+              >
+                <FolderPlus className="w-3 h-3 text-slate-500" /> ARM CSV
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSyncAllPhotosFromDrive()}
+                disabled={syncingAllPhotos}
+                className="px-2 py-1 rounded-md text-[11px] font-medium border border-slate-200 text-slate-700 bg-slate-50 flex items-center gap-1"
+              >
+                <RefreshCw className={`w-3 h-3 text-slate-500 ${syncingAllPhotos ? 'animate-spin' : ''}`} /> Sync Drive
+              </button>
+              <button
+                type="button"
+                onClick={exportAllCsv}
+                className="px-2 py-1 rounded-md text-[11px] font-medium border border-slate-200 text-slate-700 bg-slate-50 flex items-center gap-1"
+              >
+                <FileDown className="w-3 h-3 text-slate-500" /> Export
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={onResetFilters}
+              className="text-[11px] text-red-600 font-semibold bg-red-50 rounded-lg px-2.5 py-1 hover:bg-red-100 transition"
+            >
+              Reset
+            </button>
           </div>
 
           <button
             type="button"
             onClick={onResetFilters}
-            className="text-xs text-red-600 font-semibold bg-red-50 rounded-lg px-3 py-1.5 hover:bg-red-100 transition"
+            className="hidden sm:block text-xs text-red-600 font-semibold bg-red-50 rounded-lg px-3 py-1.5 hover:bg-red-100 transition"
           >
             Reset Filters
           </button>
@@ -374,8 +409,8 @@ export default function TrialFiltersBar({
       )}
 
       {/* Tabs */}
-      <div className="flex items-center justify-between gap-2 overflow-x-auto pb-0.5">
-        <div className="flex gap-1 items-center shrink-0">
+      <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar scroll-smooth py-0.5 -mx-1 px-1 touch-pan-x">
+        <div className="flex gap-1.5 items-center shrink-0">
           {[
             ['all', 'All Plots'],
             ['active', 'Active / Live'],
@@ -388,9 +423,9 @@ export default function TrialFiltersBar({
               key={k}
               type="button"
               onClick={() => setActiveTab(k)}
-              className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition flex items-center gap-1.5 ${
+              className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-all duration-150 flex items-center gap-1.5 active:scale-95 touch-manipulation ${
                 activeTab === k
-                  ? 'bg-emerald-600 text-white shadow-2xs'
+                  ? 'bg-[#154734] text-white shadow-xs'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
@@ -407,16 +442,16 @@ export default function TrialFiltersBar({
 
       {/* Quick Agronomic Performance Filter Chips */}
       {setPerformanceFilter && (
-        <div className="flex items-center gap-1.5 overflow-x-auto pt-0.5 pb-0.5 text-xs">
+        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar scroll-smooth py-0.5 -mx-1 px-1 text-xs touch-pan-x">
           <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider shrink-0 mr-1 flex items-center gap-1">
-            <Sparkles className="w-3 h-3 text-emerald-500" /> Focus:
+            <Sparkles className="w-3 h-3 text-[#154734]" /> Focus:
           </span>
           <button
             type="button"
             onClick={() => setPerformanceFilter('all')}
-            className={`px-2.5 py-1 rounded-lg font-semibold transition shrink-0 flex items-center gap-1.5 text-xs ${
+            className={`px-2.5 py-1 rounded-lg font-semibold transition shrink-0 flex items-center gap-1.5 text-xs active:scale-95 touch-manipulation ${
               performanceFilter === 'all'
-                ? 'bg-slate-900 text-white shadow-2xs'
+                ? 'bg-slate-900 text-white shadow-xs'
                 : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
             }`}
           >
@@ -425,16 +460,16 @@ export default function TrialFiltersBar({
           <button
             type="button"
             onClick={() => setPerformanceFilter('high-kill')}
-            className={`px-2.5 py-1 rounded-lg font-semibold transition shrink-0 flex items-center gap-1.5 text-xs ${
+            className={`px-2.5 py-1 rounded-lg font-semibold transition shrink-0 flex items-center gap-1.5 text-xs active:scale-95 touch-manipulation ${
               performanceFilter === 'high-kill'
-                ? 'bg-emerald-600 text-white shadow-2xs'
-                : 'bg-white border border-slate-200 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700'
+                ? 'bg-[#154734] text-white shadow-xs'
+                : 'bg-white border border-slate-200 text-slate-600 hover:bg-emerald-50 hover:text-[#154734]'
             }`}
           >
             <span>⚡ High Kill (≥70%)</span>
             {performanceCounts?.highKill !== undefined && (
               <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
-                performanceFilter === 'high-kill' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-700'
+                performanceFilter === 'high-kill' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-[#154734]'
               }`}>
                 {performanceCounts.highKill}
               </span>
@@ -443,9 +478,9 @@ export default function TrialFiltersBar({
           <button
             type="button"
             onClick={() => setPerformanceFilter('long-control')}
-            className={`px-2.5 py-1 rounded-lg font-semibold transition shrink-0 flex items-center gap-1.5 text-xs ${
+            className={`px-2.5 py-1 rounded-lg font-semibold transition shrink-0 flex items-center gap-1.5 text-xs active:scale-95 touch-manipulation ${
               performanceFilter === 'long-control'
-                ? 'bg-amber-600 text-white shadow-2xs'
+                ? 'bg-amber-600 text-white shadow-xs'
                 : 'bg-white border border-slate-200 text-slate-600 hover:bg-amber-50 hover:text-amber-700'
             }`}
           >
@@ -461,13 +496,13 @@ export default function TrialFiltersBar({
           <button
             type="button"
             onClick={() => setPerformanceFilter('needs-obs')}
-            className={`px-2.5 py-1 rounded-lg font-semibold transition shrink-0 flex items-center gap-1.5 text-xs ${
+            className={`px-2.5 py-1 rounded-lg font-semibold transition shrink-0 flex items-center gap-1.5 text-xs active:scale-95 touch-manipulation ${
               performanceFilter === 'needs-obs'
-                ? 'bg-rose-600 text-white shadow-2xs'
+                ? 'bg-rose-600 text-white shadow-xs'
                 : 'bg-white border border-slate-200 text-slate-600 hover:bg-rose-50 hover:text-rose-700'
             }`}
           >
-            <span>⚠️ Needs Observation (&gt;7d)</span>
+            <span>⚠️ Needs Obs (&gt;7d)</span>
             {performanceCounts?.needsObs !== undefined && (
               <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
                 performanceFilter === 'needs-obs' ? 'bg-white/20 text-white' : 'bg-rose-100 text-rose-700'
@@ -479,9 +514,9 @@ export default function TrialFiltersBar({
           <button
             type="button"
             onClick={() => setPerformanceFilter('has-photos')}
-            className={`px-2.5 py-1 rounded-lg font-semibold transition shrink-0 flex items-center gap-1.5 text-xs ${
+            className={`px-2.5 py-1 rounded-lg font-semibold transition shrink-0 flex items-center gap-1.5 text-xs active:scale-95 touch-manipulation ${
               performanceFilter === 'has-photos'
-                ? 'bg-blue-600 text-white shadow-2xs'
+                ? 'bg-blue-600 text-white shadow-xs'
                 : 'bg-white border border-slate-200 text-slate-600 hover:bg-blue-50 hover:text-blue-700'
             }`}
           >

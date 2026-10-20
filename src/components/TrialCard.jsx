@@ -538,577 +538,409 @@ const TrialCard = memo(function TrialCard({
 
   const stopPropagation = useCallback((e) => e.stopPropagation(), []);
 
-  const resultBorderClass = RESULT_BORDER_COLORS[trial.Result || ''] || RESULT_BORDER_COLORS[''];
+  const topAccent = trial.Result === 'Excellent' ? 'from-[#154734] to-emerald-500' :
+    trial.Result === 'Good' ? 'from-blue-600 to-teal-500' :
+    trial.Result === 'Fair' ? 'from-amber-500 to-amber-400' :
+    trial.Result === 'Poor' ? 'from-rose-500 to-red-400' :
+    trial.IsControl ? 'from-purple-600 to-indigo-500' : 'from-slate-300 to-slate-200';
 
   return (
     <div
       id={`trial-card-${trial.ID}`}
       onClick={handleCardClick}
-      className={`cv-auto bg-white rounded-xl shadow-sm relative transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md active:scale-[0.99] touch-manipulation cursor-pointer flex flex-col
-        ${resultBorderClass}
-        ${isHighlighted ? 'ring-4 ring-amber-400 border-amber-500 shadow-xl animate-pulse scale-[1.01] z-10' : isSelected ? 'border-2 border-emerald-500 ring-2 ring-emerald-100' : 'border border-slate-100 hover:border-emerald-300'}`}
+      className={`cv-auto bg-white rounded-2xl shadow-xs relative transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md active:scale-[0.99] touch-manipulation cursor-pointer flex flex-col justify-between overflow-hidden border ${
+        isHighlighted
+          ? 'ring-4 ring-amber-400 border-amber-500 shadow-xl scale-[1.01] z-10'
+          : isSelected
+          ? 'border-[#154734] ring-2 ring-[#154734]/20 shadow-md'
+          : 'border-slate-200/90 hover:border-slate-300'
+      }`}
     >
-      {/* Checkbox */}
-      {!isViewer && !isShared && (
-        <div className={`absolute top-3 left-3 w-5 h-5 rounded border-2 flex items-center justify-center transition ${isSelected ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300 bg-white'}`}>
-          {isSelected && (
-            <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
-          )}
-        </div>
-      )}
+      {/* Top Accent Gradient Line */}
+      <div className={`h-1 w-full bg-gradient-to-r ${topAccent}`} />
 
-      {/* Shared Badge */}
-      {isShared && (
-        <div className="absolute top-3 left-3 bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shadow-sm">
-          <Share2 className="w-3 h-3" /> Shared by {trial.InvestigatorName || 'Scientist'}{isSharedEdit ? ' (Edit Access)' : ''}
-        </div>
-      )}
-
-      {/* Block Badge for RCBD Pot Trial */}
-      {blockInfo && (
-        <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-t-xl ${blockInfo.colors.bg} border-b ${blockInfo.colors.border}`}>
-          <span className="text-sm leading-none">{blockInfo.colors.emoji}</span>
-          <span className={`text-[11px] font-extrabold uppercase tracking-wide ${blockInfo.colors.text}`}>
-            Block {blockInfo.blockNum}
-          </span>
-          {trial.PotLabel && (
-            <span className={`ml-auto text-[10px] font-semibold ${blockInfo.colors.text} opacity-70`}>
-              Pot: {trial.PotLabel} {posVal && posVal !== trial.PotLabel ? ` | Pos: ${posVal}` : ''}
-            </span>
-          )}
-        </div>
-      )}
-
-
-
-      <div className={`p-4 ${blockInfo ? 'pt-3' : 'pt-10'} flex-1 flex flex-col`}>
-        <div className="flex items-start justify-between gap-3 mb-2">
-          <div className="min-w-0">
-            <h3 className="font-bold text-slate-800 truncate" title={blockInfo ? `Block ${blockInfo.blockNum} - ${trial.FormulationName}` : trial.FormulationName}>
-              {subTrialLabel && (
-                <span className="bg-emerald-600 text-white text-[10px] font-extrabold px-1.5 py-0.5 rounded-md mr-1.5 align-middle shadow-sm">
-                  {subTrialLabel}
-                </span>
-              )}
-              {blockInfo && (
-                <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded-md mr-1.5 align-middle shadow-sm ${blockInfo.colors.bg} ${blockInfo.colors.text} border ${blockInfo.colors.border}`}>
-                  B{blockInfo.blockNum}
-                </span>
-              )}
-              <span className="align-middle">{trial.TrialName || trial.FormulationName || 'Untitled'}</span>
-            </h3>
-            {trial.FormulationName && (
-              <p className="text-[11px] font-semibold text-slate-500 truncate flex items-center gap-1 mt-0.5">
-                Product:
-                <button
-                  type="button"
+      {/* Main Content Area */}
+      <div className="p-3.5 sm:p-4 flex-1 flex flex-col justify-between space-y-2.5">
+        <div>
+          {/* Header Row: Checkbox / Block Pill, Status Dot, Title, and Action Icons */}
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-start gap-2 min-w-0 flex-1">
+              {/* Checkbox (Bulk Select Mode) */}
+              {!isViewer && !isShared && (
+                <div 
+                  className={`w-4 h-4 mt-0.5 rounded border flex items-center justify-center shrink-0 transition ${
+                    isSelected ? 'bg-[#154734] border-[#154734]' : 'border-slate-300 bg-white hover:border-slate-400'
+                  }`}
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (onQuickPeekFormulation) {
-                      onQuickPeekFormulation(trial.FormulationID, trial.FormulationName);
-                    }
+                    onToggleBulk(trial.ID);
                   }}
-                  className="text-emerald-700 dark:text-emerald-400 font-bold hover:underline inline-flex items-center gap-0.5 group cursor-pointer"
-                  title="Quick peek formulation recipe and performance"
                 >
-                  <span>{trial.FormulationName}</span>
-                  <Eye className="w-3 h-3 text-emerald-500 opacity-60 group-hover:opacity-100 transition" />
-                </button>
-              </p>
-            )}
-            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-              {isPendingSync && (
-                <span className="text-[10px] bg-amber-50 text-amber-600 border border-amber-200 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5 animate-pulse" title="Offline changes queued, pending sync">
-                  <Clock className="w-2.5 h-2.5 text-amber-500" /> Pending Sync
-                </span>
-              )}
-              {trial.IsControl && <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">Control</span>}
-              {trial.IsStandardCheck && <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">Standard</span>}
-              {trial.IsCompleted && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded">Finalized</span>}
-              {/* Task 57: Baseline indicator */}
-              {efficacyData.length > 0 && hasBaseline && (
-                <span className="text-[10px] bg-emerald-50 text-emerald-600 border border-emerald-200 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5" title="Pre-spray baseline recorded"><CheckCircle className="w-2.5 h-2.5" /> Baseline</span>
-              )}
-              {hasBeenShared && (
-                <span className="text-[10px] bg-teal-50 text-teal-700 border border-teal-200 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5" title={`Shared with ${trial.SharedWith.length} user(s)`}>
-                  <Share2 className="w-2.5 h-2.5" /> Shared ({trial.SharedWith.length})
-                </span>
-              )}
-              {trial.TrialDesign && trial.TrialDesign !== 'RCBD' && <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-semibold">{trial.TrialDesign}</span>}
-              {project && <span className="text-xs text-emerald-600 font-medium truncate block">{project.Name}</span>}
-            </div>
-          </div>
-          <div className="flex gap-1 shrink-0" onClick={stopPropagation}>
-            {isEditable && (
-              <>
-                <button onClick={handleRecordWeather} className="p-1.5 text-slate-400 hover:text-amber-500 hover:bg-amber-50 rounded" title="Record Real-time Weather Info">
-                  <CloudSun className="w-3.5 h-3.5" />
-                </button>
-                <button onClick={handleEdit} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="Edit">
-                  <Edit className="w-3.5 h-3.5" />
-                </button>
-              </>
-            )}
-            {/* 3-dot menu */}
-            <div className="relative">
-              <button
-                onClick={handleMenuClick}
-                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded" title="More actions">
-                <MoreVertical className="w-3.5 h-3.5" />
-              </button>
-              {isMenuOpen && (
-                <div className="absolute right-0 top-8 z-50 bg-white rounded-xl shadow-2xl border border-slate-200 min-w-48 py-1 max-h-72 overflow-y-auto" onClick={stopPropagation}>
-                  <button onClick={handleViewDetails} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
-                    <Eye className="w-3.5 h-3.5 text-slate-500" /> View Details
-                  </button>
-                  {isEditable && (
-                    <button onClick={handleDuplicate} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
-                      <Copy className="w-3.5 h-3.5 text-emerald-500" /> Duplicate
-                    </button>
-                  )}
-                  {isEditable && (
-                    <button onClick={handleMove} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
-                      <FolderOpen className="w-3.5 h-3.5 text-blue-500" /> Move to Project
-                    </button>
-                  )}
-                  {canDownloadTrial && (
-                    <>
-                      <hr className="my-1 border-slate-100" />
-                      {onExportInstitutionalDossier && (
-                        <>
-                          <button
-                            onClick={handleExportInstitutionalPdf}
-                            className="w-full flex items-center justify-between px-3 py-2 text-xs text-emerald-800 bg-emerald-50/70 hover:bg-emerald-100 font-semibold transition"
-                            title="15-Page Miklens Bio Institutional Regulatory Dossier (PDF)"
-                          >
-                            <span className="flex items-center gap-2">
-                              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                              <span className="truncate">Institutional Dossier (PDF)</span>
-                            </span>
-                            <span className="text-[9px] bg-emerald-200/80 text-emerald-800 px-1.5 py-0.5 rounded font-extrabold uppercase shrink-0">15p</span>
-                          </button>
-                          <button
-                            onClick={handleExportInstitutionalDocx}
-                            className="w-full flex items-center justify-between px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 transition"
-                            title="15-Page Miklens Bio Institutional Regulatory Dossier (Word DOCX)"
-                          >
-                            <span className="flex items-center gap-2">
-                              <FileText className="w-3.5 h-3.5 text-teal-600 shrink-0" />
-                              <span className="truncate">Institutional Dossier (DOCX)</span>
-                            </span>
-                            <span className="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-semibold uppercase shrink-0">DOCX</span>
-                          </button>
-                        </>
-                      )}
-                      <button onClick={handleExportPdf} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
-                        <FileDown className="w-3.5 h-3.5 text-red-500" /> Comprehensive PDF
-                      </button>
-                      <button onClick={handleExportSciPdf} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
-                        <ScanLine className="w-3.5 h-3.5 text-indigo-500" /> Scientific PDF
-                      </button>
-                      <button onClick={handleExportPpt} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
-                        <MonitorPlay className="w-3.5 h-3.5 text-orange-500" /> PowerPoint (.pptx)
-                      </button>
-                      <button onClick={handleExportHtml} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
-                        <Archive className="w-3.5 h-3.5 text-blue-500" /> HTML Report
-                      </button>
-                      <button onClick={handleExportTxt} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
-                        <FileCode className="w-3.5 h-3.5 text-slate-500" /> Field Report (.txt)
-                      </button>
-                      <button onClick={handleExportCsv} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
-                        <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" /> Export CSV
-                      </button>
-                      <button onClick={handleExportJson} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
-                        <FileDown className="w-3.5 h-3.5 text-violet-500" /> Export JSON
-                      </button>
-                    </>
-                  )}
-                  <button onClick={handleShare} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
-                    <Share2 className="w-3.5 h-3.5 text-sky-500" /> Share / Copy
-                  </button>
-                  {isAdmin && (
-                    <button onClick={handleAppSharing} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
-                      <Share2 className="w-3.5 h-3.5 text-indigo-500" /> App Sharing (In-App)
-                    </button>
-                  )}
-                  <hr className="my-1 border-slate-100" />
-                  <button onClick={handleAiGenerate} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-violet-50">
-                    <BrainCircuit className="w-3.5 h-3.5 text-violet-500" /> Generate AI Report
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      stopPropagation(e);
-                      setShowPhotoComparison(true);
-                      onToggleMenu && onToggleMenu(null);
-                    }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-indigo-700 hover:bg-indigo-50 font-medium"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-indigo-500" /> AI Photo Comparison
-                  </button>
-                  {!isViewer && isOwnData && (
-                    <>
-                      <hr className="my-1 border-slate-100" />
-                      <button onClick={handleDelete} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-600 hover:bg-red-50">
-                        <Trash2 className="w-3.5 h-3.5" /> Delete
-                      </button>
-                    </>
+                  {isSelected && (
+                    <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
                   )}
                 </div>
               )}
-            </div>
-          </div>
-        </div>
 
-        <div className="space-y-1.5 text-xs text-slate-500">
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50/90 text-emerald-950 border border-emerald-200 font-bold text-[11px] shadow-xs">
-            <Calendar className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
-            <span>{formatDateTime(trial.Date) || '—'}</span>
-          </div>
-          <div className="flex items-center gap-1.5"><FlaskConical className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{trial.Dosage || '—'}</span></div>
-          {/* Advanced Botanical Weed Identification */}
-          {weedSpeciesList.length > 0 ? (
-            <div className="space-y-1 pt-0.5">
-              {weedSpeciesList.map((w, idx) => (
-                <div key={idx} className="flex items-center gap-1.5 text-xs flex-wrap">
-                  <Activity className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
-                  <span className="font-semibold text-slate-700 truncate">{w.canonical}</span>
-                  {w.eppoCode && (
-                    <span className="text-[9px] font-mono font-bold bg-slate-100 text-slate-700 px-1 py-0.2 rounded border border-slate-200" title={`EPPO Code: ${w.eppoCode}`}>
-                      {w.eppoCode}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {/* Status Indicator Dot */}
+                  <span 
+                    className={`w-2 h-2 rounded-full shrink-0 ${
+                      isCompleted ? 'bg-slate-400' : isLive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'
+                    }`} 
+                    title={isCompleted ? 'Finalized' : isLive ? 'Live Field Trial' : 'Inactive'} 
+                  />
+
+                  {/* Subtrial or Block Tag */}
+                  {subTrialLabel && (
+                    <span className="bg-[#154734] text-white text-[9px] font-bold px-1.5 py-0.2 rounded shrink-0">
+                      {subTrialLabel}
                     </span>
                   )}
-                  <span className={`text-[9px] font-semibold px-1 py-0.2 rounded ${
-                    w.type === 'Sedge' ? 'bg-amber-100 text-amber-800' :
-                    w.type === 'Grass' ? 'bg-lime-100 text-lime-800' :
-                    'bg-teal-100 text-teal-800'
-                  }`}>
-                    {w.type}
-                  </span>
-                  {w.regrowthRisk && (
-                    <span className="text-[9px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 px-1 py-0.2 rounded flex items-center gap-0.5" title="Perennial weed or sedge with tuber/rhizome regrowth risk">
-                      ⚠️ Perennial
+                  {blockInfo && (
+                    <span className={`text-[9px] font-extrabold px-1.5 py-0.2 rounded shrink-0 ${blockInfo.colors.bg} ${blockInfo.colors.text} border ${blockInfo.colors.border}`}>
+                      B{blockInfo.blockNum}
                     </span>
+                  )}
+
+                  {/* Trial Name */}
+                  <h3 className="font-bold text-sm sm:text-base text-slate-800 tracking-tight truncate">
+                    {trial.TrialName || trial.FormulationName || 'Field Plot'}
+                  </h3>
+                </div>
+
+                {/* Subtitle: Product Peek & Project */}
+                <div className="flex items-center gap-1.5 text-xs text-slate-500 mt-0.5 truncate">
+                  {trial.FormulationName && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (onQuickPeekFormulation) {
+                          onQuickPeekFormulation(trial.FormulationID, trial.FormulationName);
+                        }
+                      }}
+                      className="text-[#154734] font-semibold hover:underline inline-flex items-center gap-0.5 truncate"
+                      title="Quick peek formulation recipe"
+                    >
+                      <span className="truncate">{trial.FormulationName}</span>
+                      <Eye className="w-3 h-3 text-[#154734] opacity-70 shrink-0" />
+                    </button>
+                  )}
+                  {project && (
+                    <>
+                      <span className="text-slate-300">•</span>
+                      <span className="text-slate-500 text-[11px] truncate">{project.Name}</span>
+                    </>
                   )}
                 </div>
-              ))}
+              </div>
             </div>
-          ) : trial.WeedSpecies ? (
-            <div className="flex items-center gap-1.5"><Activity className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{trial.WeedSpecies}</span></div>
-          ) : null}
-          {trial.TrialDesign === 'Split-Plot' && (trial.MainFactor || trial.SubFactor) && (
-            <div className="text-[10px] text-slate-500 bg-slate-50 border border-slate-200 rounded p-1 pl-1.5 font-medium space-y-0.5">
-              <div>Main Factor: <span className="font-bold text-slate-700">{trial.MainFactor || 'N/A'}</span></div>
-              <div>Sub Factor: <span className="font-bold text-slate-700">{trial.SubFactor || 'N/A'}</span></div>
-            </div>
-          )}
-          {trial.TrialDesign === 'Factorial' && (trial.MainFactor || trial.SubFactor) && (
-            <div className="text-[10px] text-slate-500 bg-slate-50 border border-slate-200 rounded p-1 pl-1.5 font-medium space-y-0.5">
-              <div>Factor A: <span className="font-bold text-slate-700">{trial.MainFactor || 'N/A'}</span></div>
-              <div>Factor B: <span className="font-bold text-slate-700">{trial.SubFactor || 'N/A'}</span></div>
-            </div>
-          )}
-          {trial.TrialDesign === 'Lattice' && trial.SubBlockID && (
-            <div className="text-[10px] text-slate-500 bg-slate-50 border border-slate-200 rounded p-1 pl-1.5 font-medium">
-              <div>Sub-Block: <span className="font-bold text-slate-700">{trial.SubBlockID}</span></div>
-            </div>
-          )}
-          {/* Scientific Control Days with Breakdown & Linear Interpolation Indicator */}
-          {controlDays !== null && controlDays >= 0 && (
-            <div 
-              className="flex items-center gap-1.5 flex-wrap pt-0.5" 
-              onClick={stopPropagation}
-              title={controlDaysInfo?.reason || `Scientific EPPO Control Duration: ${controlDays} days`}
-            >
-              <Clock className="w-3.5 h-3.5 shrink-0 text-slate-400" />
-              <span className={`font-semibold ${
-                controlDaysInfo?.status === 'breakdown_regrowth'
-                  ? 'text-amber-700 font-bold'
-                  : (isCompleted ? 'text-emerald-600' : 'text-blue-600')
-              }`}>
-                {controlDays}d control
-                {controlDaysInfo?.status === 'breakdown_regrowth' && (
-                  <span className="text-[10px] font-medium text-amber-800 bg-amber-50 border border-amber-200 px-1 py-0.2 rounded ml-1">
-                    Regrowth @ {controlDaysInfo.breakdownDaa}d
-                  </span>
-                )}
-                {controlDaysInfo?.status === 'active_sustained' && !isCompleted && (
-                  <span className="text-[10px] font-medium text-emerald-800 bg-emerald-50 border border-emerald-200 px-1 py-0.2 rounded ml-1">
-                    Sustained ≥70%
-                  </span>
-                )}
-                {isCompleted ? ' (finalized)' : ''}
-              </span>
+
+            {/* Top Right Quick Actions */}
+            <div className="flex items-center gap-0.5 shrink-0" onClick={stopPropagation}>
               {isEditable && (
-                <button onClick={handleEditControlDays} title="Edit / override control days" className="text-slate-300 hover:text-slate-600 transition">
-                  <Pencil className="w-3 h-3" />
-                </button>
+                <>
+                  <button 
+                    onClick={handleRecordWeather} 
+                    className="p-1 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition" 
+                    title="Record Weather Info"
+                  >
+                    <CloudSun className="w-4 h-4" />
+                  </button>
+                  <button 
+                    onClick={handleEdit} 
+                    className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition" 
+                    title="Edit Trial"
+                  >
+                    <Edit className="w-4 h-4" />
+                  </button>
+                </>
               )}
-            </div>
-          )}
-        </div>
 
-        {/* Quick Rating with Scientific EPPO & EWRS Scales */}
-        {isEditable && (
-          <div className="mt-2 flex items-center gap-1 flex-wrap" onClick={stopPropagation}>
-            <span className="text-[10px] text-slate-400 mr-0.5 font-medium">Rate:</span>
-            {[
-              ['Excellent', 'bg-emerald-500', '≥90% WCE • EWRS 1–2'],
-              ['Good', 'bg-blue-500', '80–89% WCE • EWRS 3–4'],
-              ['Fair', 'bg-amber-500', '60–79% WCE • EWRS 5–6'],
-              ['Poor', 'bg-red-500', '<60% WCE • EWRS 7–9']
-            ].map(([r, col, eppoHint]) => (
-              <button key={r} onClick={e => handleQuickRate(e, r)}
-                title={trial.Result === r ? `${r} (active) — tap to clear` : `${r} (${eppoHint})`}
-                className={`text-[9px] font-bold px-1.5 py-0.5 rounded transition ${
-                  trial.Result === r
-                    ? `${col} text-white ring-2 ring-offset-1 ring-current shadow-xs`
-                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-                }`}>
-                {r[0]}
-              </button>
-            ))}
-            {trial.Result && (
-              <button onClick={e => handleQuickRate(e, trial.Result)} title="Clear rating"
-                className="text-[9px] text-slate-400 hover:text-red-500 ml-0.5 transition px-1">
-                ×
-              </button>
-            )}
-          </div>
-        )}
-
-        <div className="mt-2.5 flex items-center gap-2 flex-wrap">
-          <ResultBadge 
-            result={trial.Result} 
-            ewrs={efficacyMetrics.ewrs}
-            autoRating={efficacyMetrics.autoRating}
-            onApplySuggested={(suggested) => handleQuickRate(null, suggested)}
-            isEditable={isEditable}
-          />
-          {photos.length > 0 && <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full flex items-center gap-1"><ImageIcon className="w-3 h-3" />{photos.length}</span>}
-          {efficacyData.length > 0 && <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{efficacyData.length} obs</span>}
-          {trial.YieldValue && <span className="text-xs bg-teal-50 text-teal-700 px-2 py-0.5 rounded-full font-semibold">{trial.YieldValue} t/ha</span>}
-        </div>
-
-        {/* ══ JIO-MART STYLE IN-CARD PHOTO CAROUSEL ═══════════════════════ */}
-        {allCardPhotos.length > 0 && (
-          <div
-            className="mt-2.5 relative rounded-xl overflow-hidden bg-slate-950/20 border border-slate-200/80 shadow-xs group select-none cursor-pointer h-36 sm:h-40 w-full"
-            style={{ touchAction: 'pan-y' }}
-            onClick={(e) => {
-              stopPropagation(e);
-              if (touchCoordsRef.current.isSwipe) {
-                touchCoordsRef.current.isSwipe = false;
-                return;
-              }
-              setLightboxPhoto(allCardPhotos[activePhotoIdx % allCardPhotos.length]);
-            }}
-            onMouseEnter={() => setIsCarouselHovered(true)}
-            onMouseLeave={() => setIsCarouselHovered(false)}
-            onTouchStart={handleTouchStart}
-            onTouchMove={handleTouchMove}
-            onTouchEnd={handleTouchEnd}
-          >
-            {/* Smooth Hardware-Accelerated Sliding Track */}
-            <div
-              className="flex h-full w-full transition-transform duration-350 ease-[cubic-bezier(0.25,1,0.5,1)] will-change-transform"
-              style={{
-                transform: `translateX(-${(activePhotoIdx % allCardPhotos.length) * 100}%)`,
-              }}
-            >
-              {allCardPhotos.map((p, pIdx) => {
-                const resolvedSrc = p.src || getPhotoThumbnailSrc(p.rawItem, 400) || resolvePhotoSrc(p.rawItem, 400);
-                return (
-                  <div key={p.id || pIdx} className="w-full h-full shrink-0 relative overflow-hidden bg-slate-900/10">
-                    {resolvedSrc ? (
+              {/* 3-Dot Overflow Menu */}
+              <div className="relative">
+                <button
+                  onClick={handleMenuClick}
+                  className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition"
+                  title="More actions"
+                >
+                  <MoreVertical className="w-4 h-4" />
+                </button>
+                {isMenuOpen && (
+                  <div 
+                    className="absolute right-0 top-8 z-50 bg-white rounded-xl shadow-xl border border-slate-200 min-w-48 py-1 max-h-72 overflow-y-auto" 
+                    onClick={stopPropagation}
+                  >
+                    <button onClick={handleViewDetails} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
+                      <Eye className="w-3.5 h-3.5 text-slate-500" /> View Details
+                    </button>
+                    {isEditable && (
+                      <button onClick={handleDuplicate} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
+                        <Copy className="w-3.5 h-3.5 text-emerald-500" /> Duplicate
+                      </button>
+                    )}
+                    {isEditable && (
+                      <button onClick={handleMove} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
+                        <FolderOpen className="w-3.5 h-3.5 text-blue-500" /> Move to Project
+                      </button>
+                    )}
+                    {canDownloadTrial && (
                       <>
-                        {/* Blurred Backdrop Ambience for Uncropped 'contain' mode */}
-                        {photoFitMode === 'contain' && (
-                          <img
-                            src={resolvedSrc}
-                            alt=""
-                            aria-hidden="true"
-                            className="absolute inset-0 w-full h-full object-cover blur-sm opacity-35 scale-110 pointer-events-none"
-                          />
+                        <hr className="my-1 border-slate-100" />
+                        {onExportInstitutionalDossier && (
+                          <>
+                            <button
+                              onClick={handleExportInstitutionalPdf}
+                              className="w-full flex items-center justify-between px-3 py-2 text-xs text-emerald-800 bg-emerald-50/70 hover:bg-emerald-100 font-semibold transition"
+                              title="15-Page Miklens Bio Institutional Regulatory Dossier (PDF)"
+                            >
+                              <span className="flex items-center gap-2">
+                                <ShieldCheck className="w-3.5 h-3.5 text-[#154734] shrink-0" />
+                                <span className="truncate">Institutional Dossier (PDF)</span>
+                              </span>
+                              <span className="text-[9px] bg-emerald-200/80 text-[#154734] px-1.5 py-0.5 rounded font-extrabold uppercase shrink-0">15p</span>
+                            </button>
+                            <button
+                              onClick={handleExportInstitutionalDocx}
+                              className="w-full flex items-center justify-between px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 transition"
+                              title="15-Page Miklens Bio Institutional Regulatory Dossier (Word DOCX)"
+                            >
+                              <span className="flex items-center gap-2">
+                                <FileText className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+                                <span className="truncate">Institutional Dossier (DOCX)</span>
+                              </span>
+                              <span className="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-semibold uppercase shrink-0">DOCX</span>
+                            </button>
+                          </>
                         )}
-                        <img
-                          src={resolvedSrc}
-                          alt={p.label || 'Trial photo'}
-                          className={`relative z-1 w-full h-full ${photoFitMode === 'contain' ? 'object-contain' : 'object-cover'} transition-transform duration-300`}
-                          loading={pIdx === 0 ? 'eager' : 'lazy'}
-                          draggable={false}
-                          onError={(e) => {
-                            const driveId = getDriveFileId(resolvedSrc) || getDriveFileId(p.rawItem);
-                            if (driveId && !e.currentTarget.dataset.fallbackTried) {
-                              e.currentTarget.dataset.fallbackTried = '1';
-                              e.currentTarget.src = `https://drive.google.com/uc?export=view&id=${driveId}`;
-                            } else if (driveId && e.currentTarget.dataset.fallbackTried === '1') {
-                              e.currentTarget.dataset.fallbackTried = '2';
-                              e.currentTarget.src = `https://drive.google.com/uc?export=download&id=${driveId}`;
-                            }
-                          }}
-                        />
+                        <button onClick={handleExportPdf} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
+                          <FileDown className="w-3.5 h-3.5 text-red-500" /> Comprehensive PDF
+                        </button>
+                        <button onClick={handleExportSciPdf} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
+                          <ScanLine className="w-3.5 h-3.5 text-indigo-500" /> Scientific PDF
+                        </button>
+                        <button onClick={handleExportPpt} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
+                          <MonitorPlay className="w-3.5 h-3.5 text-orange-500" /> PowerPoint (.pptx)
+                        </button>
+                        <button onClick={handleExportHtml} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
+                          <Archive className="w-3.5 h-3.5 text-blue-500" /> HTML Report
+                        </button>
+                        <button onClick={handleExportTxt} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
+                          <FileCode className="w-3.5 h-3.5 text-slate-500" /> Field Report (.txt)
+                        </button>
+                        <button onClick={handleExportCsv} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
+                          <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" /> Export CSV
+                        </button>
+                        <button onClick={handleExportJson} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
+                          <FileDown className="w-3.5 h-3.5 text-violet-500" /> Export JSON
+                        </button>
                       </>
-                    ) : (
-                      <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 bg-slate-100">
-                        <ImageIcon className="w-5 h-5 mb-1 opacity-50" />
-                        <span className="text-[10px]">Photo available</span>
-                      </div>
+                    )}
+                    <button onClick={handleShare} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
+                      <Share2 className="w-3.5 h-3.5 text-sky-500" /> Share / Copy
+                    </button>
+                    {isAdmin && (
+                      <button onClick={handleAppSharing} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
+                        <Share2 className="w-3.5 h-3.5 text-indigo-500" /> App Sharing (In-App)
+                      </button>
+                    )}
+                    <hr className="my-1 border-slate-100" />
+                    <button onClick={handleAiGenerate} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-violet-50">
+                      <BrainCircuit className="w-3.5 h-3.5 text-violet-500" /> Generate AI Report
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        stopPropagation(e);
+                        setShowPhotoComparison(true);
+                        onToggleMenu && onToggleMenu(null);
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs text-indigo-700 hover:bg-indigo-50 font-medium"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-indigo-500" /> AI Photo Comparison
+                    </button>
+                    {!isViewer && isOwnData && (
+                      <>
+                        <hr className="my-1 border-slate-100" />
+                        <button onClick={handleDelete} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-600 hover:bg-red-50">
+                          <Trash2 className="w-3.5 h-3.5" /> Delete Plot
+                        </button>
+                      </>
                     )}
                   </div>
-                );
-              })}
-            </div>
-
-            {/* Top Overlay Bar: DAA Tag, Fit/Fill Toggle, Expand Fullscreen, Photo Counter */}
-            <div className="absolute top-1.5 left-1.5 right-1.5 flex items-center justify-between z-10 pointer-events-none">
-              <div>
-                {allCardPhotos[activePhotoIdx % allCardPhotos.length]?.daa !== null &&
-                allCardPhotos[activePhotoIdx % allCardPhotos.length]?.daa !== undefined ? (
-                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-md bg-emerald-600/90 text-white backdrop-blur-md shadow-xs border border-white/20">
-                    DAA {allCardPhotos[activePhotoIdx % allCardPhotos.length].daa}
-                  </span>
-                ) : <span />}
+                )}
               </div>
+            </div>
+          </div>
 
-              <div className="flex items-center gap-1.5">
-                {/* Fit / Fill Toggle */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setPhotoFitMode(m => m === 'contain' ? 'cover' : 'contain');
-                  }}
-                  className="pointer-events-auto px-2 py-0.5 rounded-md bg-black/55 hover:bg-black/80 text-white text-[9px] font-semibold backdrop-blur-md transition shadow-xs border border-white/15 flex items-center gap-0.5 active:scale-95"
-                  title={photoFitMode === 'contain' ? 'Currently: Full Uncropped photo. Click to Fill frame.' : 'Currently: Fill frame. Click to view Full Uncropped photo.'}
+          {/* Target Weeds & Botanical Species (Streamlined) */}
+          {weedSpeciesList.length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap mt-2 text-xs">
+              <span className="text-[11px] font-semibold text-slate-500">Target:</span>
+              {weedSpeciesList.slice(0, 2).map((w, idx) => (
+                <span 
+                  key={idx} 
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[11px] font-medium"
                 >
-                  {photoFitMode === 'contain' ? 'Fit' : 'Fill'}
-                </button>
+                  <span className="italic">{w.canonical}</span>
+                  <span className="text-[9px] text-slate-400">({w.type})</span>
+                </span>
+              ))}
+              {weedSpeciesList.length > 2 && (
+                <span className="text-[10px] text-slate-400 font-semibold">+{weedSpeciesList.length - 2} more</span>
+              )}
+            </div>
+          )}
 
-                {/* Lightbox / Zoom full photo button */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setLightboxPhoto(allCardPhotos[activePhotoIdx % allCardPhotos.length]);
-                  }}
-                  className="pointer-events-auto w-6 h-6 rounded-md bg-black/55 hover:bg-black/80 text-white flex items-center justify-center backdrop-blur-md transition shadow-xs border border-white/15 active:scale-95"
-                  title="Expand to Fullscreen Photo Lightbox"
-                >
-                  <Maximize2 className="w-3 h-3" />
-                </button>
+          {/* Unified Key Metric Capsule Row */}
+          <div className="flex items-center gap-1.5 flex-wrap mt-2.5">
+            {/* Efficacy & Rating */}
+            <ResultBadge 
+              result={trial.Result} 
+              ewrs={efficacyMetrics.ewrs}
+              autoRating={efficacyMetrics.autoRating}
+              onApplySuggested={(suggested) => handleQuickRate(null, suggested)}
+              isEditable={isEditable}
+            />
 
-                {/* Photo Counter Badge */}
+            {/* Scientific Control Days */}
+            {controlDays !== null && controlDays >= 0 && (
+              <span 
+                className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200/80 inline-flex items-center gap-1"
+                title={controlDaysInfo?.reason || `${controlDays} days sustained control`}
+              >
+                <span>⏳ {controlDays}d Residual</span>
+                {controlDaysInfo?.status === 'breakdown_regrowth' && (
+                  <span className="text-[9px] font-bold text-rose-600">Breakdown @ {controlDaysInfo.breakdownDaa}d</span>
+                )}
+              </span>
+            )}
+
+            {/* Observations count */}
+            {efficacyData.length > 0 && (
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200/80">
+                {efficacyData.length} Obs
+              </span>
+            )}
+
+            {/* Photos count */}
+            {photos.length > 0 && (
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200/80 inline-flex items-center gap-1">
+                <ImageIcon className="w-2.5 h-2.5" /> {photos.length}
+              </span>
+            )}
+
+            {/* Offline sync indicator */}
+            {isPendingSync && (
+              <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded-md font-bold flex items-center gap-1 animate-pulse">
+                <Clock className="w-2.5 h-2.5 text-amber-500" /> Queued
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Compact Photo Preview Banner (Tap opens Lightbox) */}
+        {allCardPhotos.length > 0 && (
+          <div
+            className="relative rounded-xl overflow-hidden bg-slate-900 border border-slate-200/80 group select-none cursor-pointer h-28 sm:h-32 w-full mt-1"
+            onClick={(e) => {
+              stopPropagation(e);
+              setLightboxPhoto(allCardPhotos[activePhotoIdx % allCardPhotos.length]);
+            }}
+          >
+            <img
+              src={allCardPhotos[activePhotoIdx % allCardPhotos.length]?.src}
+              alt="Plot photo"
+              className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+              loading="lazy"
+            />
+            {/* Top DAA tag & Photo count overlay */}
+            <div className="absolute top-1.5 left-1.5 right-1.5 flex items-center justify-between pointer-events-none">
+              {allCardPhotos[activePhotoIdx % allCardPhotos.length]?.daa !== null ? (
+                <span className="text-[9px] font-bold px-2 py-0.5 rounded-md bg-[#154734]/90 text-white backdrop-blur-xs shadow-xs">
+                  DAA {allCardPhotos[activePhotoIdx % allCardPhotos.length].daa}
+                </span>
+              ) : <span />}
+
+              <div className="flex items-center gap-1">
                 {allCardPhotos.length > 1 && (
-                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-md bg-black/55 text-white backdrop-blur-md shadow-xs border border-white/15">
+                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-black/60 text-white backdrop-blur-xs">
                     {(activePhotoIdx % allCardPhotos.length) + 1}/{allCardPhotos.length}
                   </span>
                 )}
+                <span className="p-1 rounded-md bg-black/60 text-white backdrop-blur-xs">
+                  <Maximize2 className="w-2.5 h-2.5" />
+                </span>
               </div>
             </div>
 
-            {/* Left / Right Carousel Arrow Buttons */}
+            {/* Quick Carousel Prev / Next Controls if multiple photos */}
             {allCardPhotos.length > 1 && (
               <>
                 <button
                   type="button"
                   onClick={handlePrevPhoto}
-                  className="absolute left-1.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-black/45 hover:bg-black/75 text-white shadow-md backdrop-blur-md border border-white/20 flex items-center justify-center opacity-90 sm:opacity-0 sm:group-hover:opacity-100 transition-all duration-200 z-10 active:scale-95"
-                  title="Previous photo"
+                  className="absolute left-1 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-black/50 text-white flex items-center justify-center opacity-80 hover:opacity-100 transition"
                 >
-                  <ChevronLeft className="w-4 h-4" />
+                  <ChevronLeft className="w-3.5 h-3.5" />
                 </button>
                 <button
                   type="button"
                   onClick={handleNextPhoto}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-black/45 hover:bg-black/75 text-white shadow-md backdrop-blur-md border border-white/20 flex items-center justify-center opacity-90 sm:opacity-0 sm:group-hover:opacity-100 transition-all duration-200 z-10 active:scale-95"
-                  title="Next photo"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-black/50 text-white flex items-center justify-center opacity-80 hover:opacity-100 transition"
                 >
-                  <ChevronRight className="w-4 h-4" />
+                  <ChevronRight className="w-3.5 h-3.5" />
                 </button>
-
-                {/* Clickable Interactive Dot Indicators */}
-                <div className="absolute bottom-1.5 left-0 right-0 flex items-center justify-center z-10 pointer-events-none">
-                  <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/40 backdrop-blur-md border border-white/15 pointer-events-auto shadow-xs">
-                    {allCardPhotos.slice(0, 7).map((_, dotIdx) => (
-                      <button
-                        key={dotIdx}
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setActivePhotoIdx(dotIdx);
-                        }}
-                        aria-label={`Go to photo ${dotIdx + 1}`}
-                        className={`h-1.5 rounded-full transition-all duration-300 cursor-pointer ${
-                          dotIdx === (activePhotoIdx % allCardPhotos.length)
-                            ? 'w-4 bg-white shadow-xs'
-                            : 'w-1.5 bg-white/50 hover:bg-white/85'
-                        }`}
-                      />
-                    ))}
-                    {allCardPhotos.length > 7 && (
-                      <span className="text-[8px] text-white/90 font-bold ml-0.5">+</span>
-                    )}
-                  </div>
-                </div>
               </>
             )}
           </div>
         )}
-
-        <div className="mt-2 flex items-center justify-between" onClick={stopPropagation}>
-          <div className="flex items-center gap-1.5">
-            {isCompleted ? (
-              <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">FINALIZED</span>
-            ) : (
-              <>
-                <span className={`w-2 h-2 rounded-full ${isLive ? 'bg-green-500' : 'bg-slate-400'}`} />
-                <span className={`text-[10px] font-bold ${isLive ? 'text-green-700' : 'text-slate-500'}`}>
-                  {isLive ? 'LIVE' : 'INACTIVE'}
-                </span>
-              </>
-            )}
-          </div>
-          {isEditable && !isCompleted && (
-            <div className="flex items-center gap-1">
-              <button onClick={handleMarkComplete}
-                title="Mark as Completed"
-                className="text-[10px] font-bold px-2 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 flex items-center gap-0.5 transition">
-                <CheckCircle className="w-3 h-3" /> Done
-              </button>
-              <button
-                onClick={handleActivateToggle}
-                className={`text-[10px] font-bold px-2 py-0.5 rounded border transition ${
-                  isLive
-                    ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
-                    : 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100'
-                }`}>
-                {isLive ? 'Deactivate' : 'Activate'}
-              </button>
-            </div>
-          )}
-        </div>
       </div>
 
-      <div className="border-t px-3 py-2 flex items-center justify-between" onClick={stopPropagation}>
-        {isEditable && (
-          <div className="flex gap-1">
-            <button onClick={handleQuickPhoto}
-              title="Add Photo"
-              className="flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:bg-blue-50 px-2 py-1 rounded-lg transition">
-              <Camera className="w-3.5 h-3.5" /> Photo
-            </button>
-            <button onClick={handleQuickGalleryUpload}
-              title="Upload from Gallery"
-              className="flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:bg-blue-50 px-2 py-1 rounded-lg transition">
-              <ImageIcon className="w-3.5 h-3.5" /> Gallery
-            </button>
-          </div>
-        )}
-        <button onClick={() => onViewDetails(trial)}
-          className={`text-xs text-emerald-600 font-semibold flex items-center gap-1 hover:underline ${isViewer || isShared ? 'w-full justify-center' : ''}`}>
-          View Details <ChevronRight className="w-3.5 h-3.5" />
+      {/* Sleek Mobile-Friendly 3-Action Bottom Bar */}
+      <div 
+        className="px-3 py-2 bg-slate-50/70 border-t border-slate-100 flex items-center justify-between gap-1.5 text-xs" 
+        onClick={stopPropagation}
+      >
+        <div className="flex items-center gap-1">
+          {isEditable && (
+            <>
+              {/* Quick Rate Trigger */}
+              <button
+                type="button"
+                onClick={(e) => handleQuickRate(e, trial.Result === 'Excellent' ? 'Good' : 'Excellent')}
+                className="px-2 py-1 rounded-lg font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-emerald-50 hover:text-[#154734] hover:border-emerald-200 transition active:scale-95 touch-manipulation flex items-center gap-1 text-[11px]"
+                title="Log / cycle efficacy score"
+              >
+                <Sparkles className="w-3 h-3 text-[#154734]" />
+                <span>Rate</span>
+              </button>
+
+              {/* Quick Photo Upload Trigger */}
+              <button
+                type="button"
+                onClick={handleQuickPhoto}
+                className="px-2 py-1 rounded-lg font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 transition active:scale-95 touch-manipulation flex items-center gap-1 text-[11px]"
+                title="Take or attach field photo"
+              >
+                <Camera className="w-3 h-3 text-blue-600" />
+                <span>Photo</span>
+              </button>
+            </>
+          )}
+        </div>
+
+        {/* View Details Link */}
+        <button
+          type="button"
+          onClick={() => onViewDetails(trial)}
+          className="text-xs font-bold text-[#154734] hover:text-[#0e3525] flex items-center gap-0.5 active:scale-95 transition touch-manipulation"
+        >
+          <span>View Details</span>
+          <ChevronRight className="w-3.5 h-3.5 stroke-[2.5]" />
         </button>
       </div>
 

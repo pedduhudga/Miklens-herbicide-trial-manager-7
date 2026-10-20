@@ -1,10 +1,10 @@
 {
-  "name": "Miklens Trial Manager",
-  "short_name": "TrialManager",
-  "description": "Professional agricultural research platform for tracking, evaluating, and reporting on bio-efficacy trials",
-  "version": "3.0.0",
+  "name": "Miklens Agronomic Trial Manager",
+  "short_name": "Miklens",
+  "description": "Professional agronomic research platform for tracking, evaluating, and reporting on bio-efficacy trials",
+  "version": "3.1.0",
   "id": "com.miklens.trialmanager",
-  "start_url": "./index.html",
+  "start_url": "./index.html#/",
   "scope": "./",
   "display": "standalone",
   "display_override": [
@@ -13,8 +13,8 @@
     "minimal-ui"
   ],
   "orientation": "portrait-primary",
-  "background_color": "#ecfdf5",
-  "theme_color": "#059669",
+  "background_color": "#f8faf9",
+  "theme_color": "#154734",
   "categories": [
     "productivity",
     "business",
