@@ -224,10 +224,23 @@ export default function FormulationQuickPeekModal({
                 <Droplets className="w-3.5 h-3.5 text-sky-600" />
                 <span>Adjuvant & Surfactant Optimizer</span>
               </div>
-              <ul className="list-disc list-inside text-[11px] text-sky-800 space-y-0.5">
-                {synergy.adjuvantRecommendations.map((rec, rIdx) => (
-                  <li key={rIdx}>{rec}</li>
-                ))}
+              <ul className="list-disc list-inside text-[11px] text-sky-800 space-y-1">
+                {synergy.adjuvantRecommendations.map((rec, rIdx) => {
+                  if (typeof rec === 'string') {
+                    return <li key={rIdx}>{rec}</li>;
+                  }
+                  if (rec && typeof rec === 'object') {
+                    const title = rec.title || rec.name || rec.type || 'Adjuvant Recommendation';
+                    const text = rec.tip || rec.purpose || rec.benefit || rec.description || '';
+                    return (
+                      <li key={rIdx} className="leading-snug">
+                        <strong className="font-semibold text-sky-950">{title}: </strong>
+                        <span>{text}</span>
+                      </li>
+                    );
+                  }
+                  return null;
+                })}
               </ul>
             </div>
           )}

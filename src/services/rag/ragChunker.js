@@ -214,7 +214,7 @@ ${obsLines}`;
       ? `\nMode of Action Diversity: ${synergyAnalysis.multiSiteScore} (${synergyAnalysis.hracGroups.join(' + ')})
 Synergy Mechanism: ${synergyAnalysis.synergies.map(s => s.title + ' - ' + s.description).join('; ') || 'Standard complimentary active pathways'}
 Antagonism Alerts: ${synergyAnalysis.antagonismAlerts.map(a => a.title + ': ' + a.description).join('; ') || 'None detected (Safe tank mix)'}
-Adjuvant Recommendation: ${synergyAnalysis.adjuvantRecommendations.join('; ') || 'Standard NIS / MSO'}`
+Adjuvant Recommendation: ${synergyAnalysis.adjuvantRecommendations.map(r => typeof r === 'string' ? r : (r.title ? `${r.title}: ${r.tip || r.purpose || ''}` : String(r))).join('; ') || 'Standard NIS / MSO'}`
       : '';
 
     const formText = `FORMULATION PROFILE & RECIPE: ${formLink}

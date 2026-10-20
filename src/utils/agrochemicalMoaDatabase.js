@@ -1639,8 +1639,13 @@ export function analyzeFormulationMoASynergy(ingredients = [], category = 'herbi
   if (!hasAdjuvant) {
     adjuvantTips.push({
       type: 'Adjuvant Recommendation',
+      name: 'Organosilicone or NIS Penetrant',
       title: 'Add Organosilicone or NIS Penetrant',
-      tip: 'Adding a non-ionic surfactant or organosilicone super-spreader reduces surface tension and improves foliar canopy penetration.'
+      tip: 'Adding a non-ionic surfactant or organosilicone super-spreader reduces surface tension and improves foliar canopy penetration.',
+      purpose: 'Reduces surface tension and enhances cuticular and foliar canopy penetration.',
+      toString() {
+        return `${this.title}: ${this.tip}`;
+      }
     });
   }
 
