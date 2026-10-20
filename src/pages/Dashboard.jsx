@@ -12,36 +12,96 @@ import {
   TrendingUp, TrendingDown, AlertCircle, Leaf, BarChart3, Search, ChevronRight,
   Thermometer, Droplets, Wind, CloudRain, Sprout, Filter, Grid3x3,
   Clock, Camera, CalendarDays, CloudOff, Eye, MapPin, Zap, ShieldAlert,
-  Sparkles, ArrowRight
+  Sparkles, ArrowRight, RefreshCw, Sun, Compass, Sliders, ChevronDown,
+  Award, Target, AlertTriangle, Layers, ArrowUpRight, Check, PlayCircle,
+  Bot, ShieldCheck, Microscope
 } from 'lucide-react';
 import { getCategoryConfig } from '../utils/categoryConfig.js';
 import { getTrialCalculatedEfficacy } from '../utils/formulationTrialUtils.js';
 
-function StatCard({ icon: Icon, label, value, sub, color = 'emerald', onClick }) {
-  const colors = {
-    emerald: 'bg-emerald-50 text-emerald-600',
-    blue: 'bg-blue-50 text-blue-600',
-    amber: 'bg-amber-50 text-amber-600',
-    purple: 'bg-purple-50 text-purple-600',
-    red: 'bg-red-50 text-red-600',
+/**
+ * Premium Executive Metric Card
+ */
+function ExecutiveMetricCard({
+  icon: Icon,
+  label,
+  value,
+  subLabel,
+  badgeText,
+  badgeColor = 'emerald',
+  gradient = 'from-emerald-500/10 to-teal-500/5',
+  iconColor = 'text-emerald-600',
+  iconBg = 'bg-emerald-500/15',
+  borderColor = 'border-emerald-500/20',
+  progressPct = null,
+  onClick
+}) {
+  const badgeStyles = {
+    emerald: 'bg-emerald-50 text-emerald-700 border-emerald-200/60',
+    blue: 'bg-sky-50 text-sky-700 border-sky-200/60',
+    amber: 'bg-amber-50 text-amber-700 border-amber-200/60',
+    purple: 'bg-purple-50 text-purple-700 border-purple-200/60',
+    rose: 'bg-rose-50 text-rose-700 border-rose-200/60',
   };
+
   return (
-    <button onClick={onClick} className="bg-white rounded-xl p-4 shadow-sm border border-slate-100 flex items-center gap-4 card-interactive text-left w-full touch-manipulation">
-      <div className={`p-3 rounded-xl ${colors[color]}`}><Icon className="w-5 h-5" /></div>
-      <div>
-        <p className="text-2xl font-bold text-slate-800">{value}</p>
-        <p className="text-xs font-semibold text-slate-500">{label}</p>
-        {sub && <p className="text-xs text-slate-400 mt-0.5">{sub}</p>}
+    <button
+      onClick={onClick}
+      className={`group relative text-left w-full p-4.5 rounded-2xl bg-white border ${borderColor} shadow-xs hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 overflow-hidden touch-manipulation focus:outline-none focus:ring-2 focus:ring-emerald-500/30`}
+    >
+      {/* Background ambient gradient glow on hover */}
+      <div className={`absolute inset-0 bg-gradient-to-br ${gradient} opacity-40 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none`} />
+
+      <div className="relative z-10 flex flex-col justify-between h-full">
+        <div className="flex items-start justify-between gap-2 mb-3">
+          <div className={`w-11 h-11 rounded-xl ${iconBg} ${iconColor} flex items-center justify-center shrink-0 shadow-xs ring-1 ring-black/5 group-hover:scale-105 transition-transform duration-300`}>
+            <Icon className="w-5 h-5" />
+          </div>
+          {badgeText && (
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${badgeStyles[badgeColor] || badgeStyles.emerald} shrink-0`}>
+              {badgeText}
+            </span>
+          )}
+        </div>
+
+        <div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl md:text-3xl font-extrabold text-slate-800 tracking-tight">{value}</span>
+          </div>
+          <p className="text-xs font-bold text-slate-600 mt-0.5">{label}</p>
+          {subLabel && <p className="text-[11px] text-slate-400 font-medium mt-1 truncate">{subLabel}</p>}
+        </div>
+
+        {progressPct !== null && (
+          <div className="mt-3 pt-2.5 border-t border-slate-100/80">
+            <div className="flex justify-between text-[10px] text-slate-400 font-medium mb-1">
+              <span>Completion Progress</span>
+              <span className="font-bold text-slate-600">{progressPct}%</span>
+            </div>
+            <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full transition-all duration-500"
+                style={{ width: `${Math.min(100, Math.max(0, progressPct))}%` }}
+              />
+            </div>
+          </div>
+        )}
       </div>
     </button>
   );
 }
 
-function MiniBar({ value, max, color = 'bg-emerald-500' }) {
+/**
+ * Modern Progress Bar
+ */
+function ModernBar({ value, max, color = 'from-emerald-500 to-teal-400' }) {
   const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
   return (
-    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-      <div className={`h-full rounded-full ${color} transition-all`} style={{ width: `${pct}%` }} />
+    <div className="h-2 bg-slate-100/90 rounded-full overflow-hidden p-0.5 border border-slate-200/50">
+      <div
+        className={`h-full rounded-full bg-gradient-to-r ${color} transition-all duration-500 shadow-xs`}
+        style={{ width: `${pct}%` }}
+      />
     </div>
   );
 }
@@ -63,20 +123,44 @@ export default function Dashboard({ onMenuClick }) {
   const [minEfficacy, setMinEfficacy] = useState(70);
   const [targetResults, setTargetResults] = useState(null);
 
-  // ── Location for Spray Advisor (from most recent trial with coordinates)
-  const trialLocation = useMemo(() => {
-    const trialsWithCoords = trials.filter(t => t.Lat && t.Lon && !isNaN(parseFloat(t.Lat)) && !isNaN(parseFloat(t.Lon)));
-    if (trialsWithCoords.length === 0) return null;
-    // Get most recent trial with coordinates
-    const sorted = [...trialsWithCoords].sort((a, b) => new Date(b.Date || 0) - new Date(a.Date || 0));
-    return {
-      lat: parseFloat(sorted[0].Lat),
-      lon: parseFloat(sorted[0].Lon),
-      name: sorted[0].Location || 'Trial Location'
-    };
+  // ── Health monitor filters
+  const [healthFilter, setHealthFilter] = useState('all');
+  const [healthSearch, setHealthSearch] = useState('');
+
+  // ── Unique locations with coordinates for Spray Advisor
+  const availableLocations = useMemo(() => {
+    const locs = [];
+    const seen = new Set();
+    trials.forEach(t => {
+      if (t.Lat && t.Lon && !isNaN(parseFloat(t.Lat)) && !isNaN(parseFloat(t.Lon))) {
+        const lat = parseFloat(t.Lat);
+        const lon = parseFloat(t.Lon);
+        const name = t.Location || 'Trial Site';
+        const key = `${lat.toFixed(3)},${lon.toFixed(3)}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          const count = trials.filter(tr => tr.Lat && tr.Lon && Math.abs(parseFloat(tr.Lat) - lat) < 0.05 && Math.abs(parseFloat(tr.Lon) - lon) < 0.05).length;
+          locs.push({
+            lat,
+            lon,
+            name,
+            displayName: `${name} (${count} plot${count > 1 ? 's' : ''})`,
+            trialCount: count
+          });
+        }
+      }
+    });
+    return locs;
   }, [trials]);
 
-  // ── Top-Formulations season filter state
+  const [selectedLocationIdx, setSelectedLocationIdx] = useState(0);
+
+  const activeTrialLocation = useMemo(() => {
+    if (availableLocations.length === 0) return null;
+    return availableLocations[selectedLocationIdx] || availableLocations[0];
+  }, [availableLocations, selectedLocationIdx]);
+
+  // ── Top-Formulations filter state
   const [fYear, setFYear] = useState('');
   const [fTarget, setFTarget] = useState('');
   const [fLocation, setFLocation] = useState('');
@@ -92,7 +176,6 @@ export default function Dashboard({ onMenuClick }) {
     const ratedTrials = Object.values(resultCounts).reduce((a, b) => a + b, 0);
     const successRate = ratedTrials > 0 ? Math.round((positiveResults / ratedTrials) * 100) : null;
 
-    // Lifecycle breakdown
     let reminderCount = 0;
     let autoFinalizedCount = 0;
     const now = Date.now();
@@ -141,32 +224,6 @@ export default function Dashboard({ onMenuClick }) {
   }, [trials]);
 
   const maxMonthCount = useMemo(() => Math.max(...trialsOverTime.map(x => x.count), 1), [trialsOverTime]);
-
-  // ── Average Weather Conditions from trial data
-  const weatherStats = useMemo(() => {
-    const temps = [], hums = [], winds = [], rains = [];
-    trials.forEach(t => {
-      if (t.Temperature && isFinite(parseFloat(t.Temperature))) temps.push(parseFloat(t.Temperature));
-      if (t.Humidity && isFinite(parseFloat(t.Humidity))) hums.push(parseFloat(t.Humidity));
-      if (t.Windspeed && isFinite(parseFloat(t.Windspeed))) winds.push(parseFloat(t.Windspeed));
-      if (t.Rain && isFinite(parseFloat(t.Rain))) rains.push(parseFloat(t.Rain));
-    });
-    const avg = arr => arr.length ? (arr.reduce((a, b) => a + b, 0) / arr.length) : null;
-    return {
-      temp: avg(temps), hum: avg(hums), wind: avg(winds), rain: avg(rains),
-      hasData: temps.length > 0 || hums.length > 0
-    };
-  }, [trials]);
-
-  // ── Weather Alerts
-  const weatherAlerts = useMemo(() => {
-    const alerts = [];
-    if (weatherStats.temp !== null && weatherStats.temp > 35) alerts.push({ type: 'warning', msg: `High avg temperature (${weatherStats.temp.toFixed(1)}°C) — may reduce ${catConfig.name.toLowerCase()} efficacy` });
-    if (weatherStats.hum !== null && weatherStats.hum < 30) alerts.push({ type: 'warning', msg: `Low avg humidity (${weatherStats.hum.toFixed(1)}%) — increased evaporation risk` });
-    if (weatherStats.wind !== null && weatherStats.wind > 20) alerts.push({ type: 'warning', msg: `High avg wind speed (${weatherStats.wind.toFixed(1)} km/h) — drift risk` });
-    if (weatherStats.rain !== null && weatherStats.rain === 0) alerts.push({ type: 'info', msg: 'No rainfall recorded — consider irrigation impact on results' });
-    return alerts;
-  }, [weatherStats]);
 
   // ── Available years for filter
   const availableYears = useMemo(() => {
@@ -239,19 +296,7 @@ export default function Dashboard({ onMenuClick }) {
       .slice(0, 8);
   }, [trials, fYear, fTarget, fLocation, catConfig.targetField, activeCategory]);
 
-  // ── Recent Trials
-  const recentTrials = useMemo(() =>
-    [...trials].sort((a, b) => new Date(b.CreatedAt || b.Date || 0) - new Date(a.CreatedAt || a.Date || 0)).slice(0, 6)
-  , [trials]);
-
-  // ── Recent Projects
-  const recentProjects = useMemo(() =>
-    [...projects].sort((a, b) => new Date(b.CreatedAt || 0) - new Date(a.CreatedAt || 0)).slice(0, 3)
-  , [projects]);
-
-  // ══════════════════════════════════════════════════════════════════
-  // 1.1 — ACTIVITY FEED: Reconstruct last 15 actions from data timestamps
-  // ══════════════════════════════════════════════════════════════════
+  // ── Activity feed
   const activityFeed = useMemo(() => {
     const events = [];
     const allTrials = state.trials || [];
@@ -260,15 +305,12 @@ export default function Dashboard({ onMenuClick }) {
 
     allTrials.forEach(t => {
       const cat = t.Category || 'herbicide';
-      // Trial created
       if (t.CreatedAt) {
         events.push({ type: 'trial_created', icon: 'plus', color: 'emerald', label: `Trial created: ${t.FormulationName || 'Untitled'}`, detail: t.Location ? `at ${t.Location}` : (t.WeedSpecies ? `on ${t.WeedSpecies}` : ''), time: new Date(t.CreatedAt), trialId: t.ID, category: cat });
       }
-      // Trial finalized
       if ((t.IsCompleted === true || t.IsCompleted === 'true') && t.FinalizationDate) {
         events.push({ type: 'trial_finalized', icon: 'check', color: 'blue', label: `Trial finalized: ${t.FormulationName || 'Untitled'}`, detail: t.Result ? `Result: ${t.Result}` : '', time: new Date(t.FinalizationDate), trialId: t.ID, category: cat });
       }
-      // Observations added
       const obs = safeJsonParse(t.EfficacyDataJSON, []);
       if (Array.isArray(obs)) {
         obs.forEach(o => {
@@ -276,43 +318,39 @@ export default function Dashboard({ onMenuClick }) {
           if (rawD) {
             const d = new Date(rawD);
             if (!isNaN(d.getTime())) {
-              events.push({ type: 'observation', icon: 'eye', color: 'purple', label: `Observation recorded (DAA ${o.daa || '?'})`, detail: t.FormulationName || '', time: d, trialId: t.ID, category: cat });
+              events.push({ type: 'observation', icon: 'eye', color: 'purple', label: `Observation scored (DAA ${o.daa || '?'})`, detail: t.FormulationName || '', time: d, trialId: t.ID, category: cat });
             }
           }
         });
       }
-      // Photos added
       const photos = safeJsonParse(t.PhotoURLs, []);
       if (Array.isArray(photos) && photos.length > 0) {
-        // Use the trial's last modified or creation date for photos
         const photoTime = t.LastModified ? new Date(t.LastModified) : (t.CreatedAt ? new Date(t.CreatedAt) : null);
         if (photoTime && !isNaN(photoTime.getTime())) {
-          events.push({ type: 'photo', icon: 'camera', color: 'amber', label: `${photos.length} photo${photos.length > 1 ? 's' : ''} added`, detail: t.FormulationName || '', time: photoTime, trialId: t.ID, category: cat });
+          events.push({ type: 'photo', icon: 'camera', color: 'amber', label: `${photos.length} field photo${photos.length > 1 ? 's' : ''} uploaded`, detail: t.FormulationName || '', time: photoTime, trialId: t.ID, category: cat });
         }
       }
     });
 
     allProjects.forEach(p => {
       if (p.CreatedAt) {
-        events.push({ type: 'project_created', icon: 'folder', color: 'indigo', label: `Project created: ${p.Name || 'Untitled'}`, detail: p.Description ? p.Description.slice(0, 40) : '', time: new Date(p.CreatedAt), category: p.Category || 'herbicide' });
+        events.push({ type: 'project_created', icon: 'folder', color: 'indigo', label: `Project registered: ${p.Name || 'Untitled'}`, detail: p.Description ? p.Description.slice(0, 40) : '', time: new Date(p.CreatedAt), category: p.Category || 'herbicide' });
       }
     });
 
     allFormulations.forEach(f => {
       if (f.CreatedAt) {
-        events.push({ type: 'formulation_created', icon: 'flask', color: 'teal', label: `Formulation added: ${f.Name || 'Untitled'}`, detail: f.Code || '', time: new Date(f.CreatedAt), category: f.Category || 'herbicide' });
+        events.push({ type: 'formulation_created', icon: 'flask', color: 'teal', label: `Formulation logged: ${f.Name || 'Untitled'}`, detail: f.Code || '', time: new Date(f.CreatedAt), category: f.Category || 'herbicide' });
       }
     });
 
     return events
       .filter(e => !isNaN(e.time.getTime()))
       .sort((a, b) => b.time - a.time)
-      .slice(0, 15);
+      .slice(0, 10);
   }, [state.trials, state.projects, state.formulations]);
 
-  // ══════════════════════════════════════════════════════════════════
-  // 1.3 — TRIAL HEALTH HEATMAP: Compute health status per active trial
-  // ══════════════════════════════════════════════════════════════════
+  // ── Trial Health Heatmap Data
   const trialHealthData = useMemo(() => {
     const now = Date.now();
     const activeTrials = trials.filter(t => t.IsCompleted !== true && t.IsCompleted !== 'true');
@@ -333,7 +371,6 @@ export default function Dashboard({ onMenuClick }) {
       const daysSinceObs = lastObsDate ? Math.max(0, Math.floor((now - lastObsDate.getTime()) / 86400000)) : 999;
       const obsCount = obs.length;
 
-      // Efficacy trend: compare last two observations
       let efficacyTrend = 'stable';
       if (obs.length >= 2) {
         const sorted = [...obs].sort((a, b) => (a.daa || 0) - (b.daa || 0));
@@ -347,7 +384,6 @@ export default function Dashboard({ onMenuClick }) {
         }
       }
 
-      // Calculate health score 0-100
       let healthScore = 100;
       if (daysSinceObs > 14) healthScore -= 40;
       else if (daysSinceObs > 7) healthScore -= 20;
@@ -356,7 +392,6 @@ export default function Dashboard({ onMenuClick }) {
       if (obsCount === 0) healthScore -= 30;
       if (efficacyTrend === 'declining') healthScore -= 20;
 
-      // Weather risk
       const hasWeatherRisk = (t.Temperature && parseFloat(t.Temperature) > 35) || (t.Windspeed && parseFloat(t.Windspeed) > 20);
       if (hasWeatherRisk) healthScore -= 10;
 
@@ -380,9 +415,21 @@ export default function Dashboard({ onMenuClick }) {
     }).sort((a, b) => a.healthScore - b.healthScore);
   }, [trials]);
 
-  // ══════════════════════════════════════════════════════════════════
-  // 1.4 — DUE OBSERVATIONS CALENDAR: Calculate upcoming observation dates
-  // ══════════════════════════════════════════════════════════════════
+  // Filtered health data for search & category filter
+  const filteredHealthData = useMemo(() => {
+    return trialHealthData.filter(t => {
+      if (healthFilter === 'green' && t.status !== 'green') return false;
+      if (healthFilter === 'amber' && t.status !== 'amber') return false;
+      if (healthFilter === 'red' && t.status !== 'red') return false;
+      if (healthSearch) {
+        const q = healthSearch.toLowerCase();
+        return t.name.toLowerCase().includes(q) || t.location.toLowerCase().includes(q);
+      }
+      return true;
+    });
+  }, [trialHealthData, healthFilter, healthSearch]);
+
+  // ── Due Observations
   const dueObservations = useMemo(() => {
     const now = new Date();
     now.setHours(0, 0, 0, 0);
@@ -405,12 +452,10 @@ export default function Dashboard({ onMenuClick }) {
         });
       }
 
-      // Find next unrecorded DAA
       for (const daa of STANDARD_DAA_INTERVALS) {
         if (recordedDAAs.has(daa)) continue;
         const dueDate = new Date(trialDate.getTime() + daa * 86400000);
         dueDate.setHours(0, 0, 0, 0);
-        // Show observations due from today to 14 days in the future
         const diffDays = Math.round((dueDate - now) / 86400000);
         if (diffDays >= -1 && diffDays <= 14) {
           results.push({
@@ -424,16 +469,14 @@ export default function Dashboard({ onMenuClick }) {
             isToday: diffDays === 0,
           });
         }
-        break; // only next due per trial
+        break;
       }
     });
 
     return results.sort((a, b) => a.dueDate - b.dueDate);
   }, [trials]);
 
-  // ══════════════════════════════════════════════════════════════════
-  // 1.6 — WEATHER ALERT BANNER: Check 48h forecast for trial locations
-  // ══════════════════════════════════════════════════════════════════
+  // ── 48h Weather Forecast Alerts
   const [forecastAlerts, setForecastAlerts] = useState([]);
   const [forecastLoading, setForecastLoading] = useState(false);
   const forecastCheckedRef = useRef(false);
@@ -451,14 +494,13 @@ export default function Dashboard({ onMenuClick }) {
       const key = `${lat.toFixed(2)},${lon.toFixed(2)}`;
       if (seen.has(key)) return;
       seen.add(key);
-      locationsToCheck.push({ lat, lon, name: t.Location || 'Trial Site', trialName: t.FormulationName || 'Untitled' });
+      locationsToCheck.push({ lat, lon, name: t.Location || 'Field Site', trialName: t.FormulationName || 'Untitled' });
     });
 
     if (locationsToCheck.length === 0) return;
     forecastCheckedRef.current = true;
     setForecastLoading(true);
 
-    // Check up to 3 unique locations to avoid excessive API calls
     const toCheck = locationsToCheck.slice(0, 3);
     Promise.all(toCheck.map(async (loc) => {
       try {
@@ -474,7 +516,6 @@ export default function Dashboard({ onMenuClick }) {
         const wind = data.hourly.wind_speed_10m || [];
         const temp = data.hourly.temperature_2m || [];
 
-        // Check for heavy rain (>60% probability in any 6h window)
         let highRainHours = 0;
         let maxWind = 0;
         let extremeTemp = false;
@@ -492,7 +533,7 @@ export default function Dashboard({ onMenuClick }) {
           alerts.push({ type: 'wind', severity: 'high', location: loc.name, msg: `High wind forecast (up to ${Math.round(maxWind)} km/h) — spray drift risk` });
         }
         if (extremeTemp) {
-          alerts.push({ type: 'temp', severity: 'medium', location: loc.name, msg: `Extreme temperatures forecast at ${loc.name} — may affect product efficacy` });
+          alerts.push({ type: 'temp', severity: 'medium', location: loc.name, msg: `Extreme temperatures forecast at ${loc.name} — potential evaporation hazard` });
         }
         return alerts;
       } catch {
@@ -533,9 +574,7 @@ export default function Dashboard({ onMenuClick }) {
     setTargetResults({ query: q, results: ranked, total: matched.length });
   };
 
-  // ══════════════════════════════════════════════════════════════════
-  // 7.1 — PROACTIVE AI INSIGHTS ENGINE
-  // ══════════════════════════════════════════════════════════════════
+  // ── Proactive AI Insights
   const proactiveInsights = useMemo(() => {
     const insights = [];
     const active = trials.filter(t => t.IsCompleted !== true && t.IsCompleted !== 'true');
@@ -561,16 +600,16 @@ export default function Dashboard({ onMenuClick }) {
         id: 'declining_eff',
         type: 'danger',
         icon: TrendingDown,
-        title: `${decliningTrials.length} active trial${decliningTrials.length > 1 ? 's show' : ' shows'} declining efficacy`,
+        title: `${decliningTrials.length} active plot${decliningTrials.length > 1 ? 's show' : ' shows'} declining efficacy`,
         description: `Loss of control detected between latest observations (up to -${Math.max(...decliningTrials.map(d => d.drop))}% drop). Review application dosage or weed regrowth.`,
-        actionLabel: 'Inspect Trials',
+        actionLabel: 'Inspect Plots',
         actionRoute: '/trials',
-        badge: 'ACTION NEEDED',
-        badgeBg: 'bg-red-100 text-red-700'
+        badge: 'ACTION REQUIRED',
+        badgeBg: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
       });
     }
 
-    // 2. Outperforming star formulation benchmark
+    // 2. Star performer
     const formulaMap = {};
     trials.forEach(t => {
       if (!t.FormulationName) return;
@@ -591,15 +630,15 @@ export default function Dashboard({ onMenuClick }) {
         type: 'success',
         icon: Sparkles,
         title: `"${top.name}" achieves standout ${top.avg}% control across ${top.count} trials`,
-        description: `This formulation consistently leads ${catConfig.name.toLowerCase()} trials this season. Consider promoting to large-scale registration trials.`,
+        description: `Consistently outperforming benchmark treatments this season. Candidate for multi-location registration trials.`,
         actionLabel: 'View in Analytics',
         actionRoute: '/analytics',
         badge: 'TOP PERFORMER',
-        badgeBg: 'bg-emerald-100 text-emerald-700'
+        badgeBg: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
       });
     }
 
-    // 3. Overdue observation alert
+    // 3. Stale observations
     const staleTrials = active.filter(t => {
       const eff = safeJsonParse(t.EfficacyDataJSON, []);
       let lastD = t.Date ? new Date(t.Date) : null;
@@ -616,16 +655,16 @@ export default function Dashboard({ onMenuClick }) {
         id: 'stale_obs',
         type: 'info',
         icon: Clock,
-        title: `${staleTrials.length} trial${staleTrials.length > 1 ? 's have' : ' has'} no recorded observations in >10 days`,
-        description: `Timely intervals are crucial for accurate regression curves. Plots at ${staleTrials.slice(0, 2).map(t => t.Location || t.FormulationName).join(', ')} require field scoring.`,
+        title: `${staleTrials.length} active plot${staleTrials.length > 1 ? 's have' : ' has'} no recorded observations in >10 days`,
+        description: `Timely intervals are crucial for continuous progression modeling. Plots at ${staleTrials.slice(0, 2).map(t => t.Location || t.FormulationName).join(', ')} require scoring.`,
         actionLabel: 'Log Observations',
         actionRoute: '/trials',
-        badge: 'SCHEDULE',
-        badgeBg: 'bg-blue-100 text-blue-700'
+        badge: 'TIMING ALERT',
+        badgeBg: 'bg-sky-500/20 text-sky-300 border-sky-500/30'
       });
     }
 
-    // 4. Resistance / dosage anomaly warning
+    // 4. Resistance signal
     const failureTrials = trials.filter(t => {
       const eff = getTrialCalculatedEfficacy(t, activeCategory);
       return eff !== null && eff < 45 && t.Dosage && !t.IsControl;
@@ -636,12 +675,12 @@ export default function Dashboard({ onMenuClick }) {
         id: 'resistance_signal',
         type: 'warning',
         icon: ShieldAlert,
-        title: `Possible resistance or sub-lethal dose flagged on ${failureTrials.length} plot${failureTrials.length > 1 ? 's' : ''}`,
-        description: `Treated plots demonstrated <45% efficacy despite full product application. Check Resistance Tracker for target biotypes.`,
+        title: `Possible resistance or sub-lethal dose on ${failureTrials.length} plot${failureTrials.length > 1 ? 's' : ''}`,
+        description: `Treated plots demonstrated <45% bio-suppression despite standard dose. Check Resistance Tracker for target biotypes.`,
         actionLabel: 'Open Resistance Tracker',
         actionRoute: '/resistance',
-        badge: 'BIOTYPE ALERT',
-        badgeBg: 'bg-purple-100 text-purple-700'
+        badge: 'BIOTYPE SUSPECT',
+        badgeBg: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
       });
     }
 
@@ -654,496 +693,729 @@ export default function Dashboard({ onMenuClick }) {
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
-  const RESULT_COLORS = {
-    Excellent: 'text-emerald-600 bg-emerald-50',
-    Good: 'text-blue-600 bg-blue-50',
-    Fair: 'text-amber-600 bg-amber-50',
-    Poor: 'text-red-600 bg-red-50',
-  };
-
-  const maxFormulationCount = topFormulationsFiltered[0]?.count || 1;
+  const todayFormatted = new Date().toLocaleDateString('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
+  });
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50">
-      <TopBar title="Dashboard" onMenuClick={onMenuClick} />
+    <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50/80">
+      <TopBar title="Agronomic Command Center" onMenuClick={onMenuClick} />
 
-      <div className="flex-1 overflow-y-auto">
-        {/* Hero */}
-        <div className={`bg-gradient-to-r ${catConfig.color.gradient.replace('from-', 'from-').replace('to-', 'to-')} px-6 py-5 text-white`}>
-          <div className="flex items-center justify-between">
+      <div className="flex-1 overflow-y-auto pb-12">
+        {/* ══════════════════════════════════════════════════════════════════
+            HERO COMMAND HEADER
+            ══════════════════════════════════════════════════════════════════ */}
+        <div className="relative bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950 px-6 py-6 text-white border-b border-emerald-500/20 shadow-md overflow-hidden">
+          {/* Subtle Ambient Radial Lighting */}
+          <div className="absolute top-0 right-1/4 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute -bottom-10 left-10 w-72 h-72 bg-teal-500/10 rounded-full blur-2xl pointer-events-none" />
+
+          <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
             <div>
-              <p className="text-white/70 text-sm font-medium">{greeting},</p>
-              <h1 className="text-2xl font-bold mt-0.5">{displayName}</h1>
-              <p className="text-white/70 text-sm mt-1">
-                {stats.active} active trial{stats.active !== 1 ? 's' : ''} · {stats.totalObs} total observations
-                {stats.successRate !== null && ` · ${stats.successRate}% success rate`}
-              </p>
-            </div>
-            <button
-              onClick={() => navigate('/categories')}
-              className="flex items-center gap-2 bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-xl text-xs font-bold text-white transition"
-            >
-              <Grid3x3 className="w-4 h-4" />
-              {catConfig.name}
-            </button>
-          </div>
-        </div>
+              <div className="flex items-center gap-2.5 mb-1.5 flex-wrap">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  Live Field Telemetry
+                </span>
+                <span className="text-xs text-slate-400 font-medium">· {todayFormatted}</span>
+                <span className="text-xs text-slate-400 font-medium">· {catConfig.name} Discipline</span>
+              </div>
 
-        <div className="p-4 space-y-5">
+              <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-white flex items-center gap-3">
+                {greeting}, {displayName}
+              </h1>
 
-          {/* ── Stat cards ─────────────────────────────────────────── */}
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
-            <StatCard icon={Activity}    label="Total Trials"   value={trials.length}        sub={`${stats.active} active`}   color="emerald" onClick={() => navigate('/trials')} />
-            <StatCard icon={CheckCircle} label="Finalized"      value={stats.finalized}      sub={`${stats.autoFinalizedCount} auto-closed`} color="blue" onClick={() => navigate('/trials')} />
-            <StatCard icon={AlertCircle} label="Photo Reminders" value={stats.reminderCount}  sub="Due today" color="amber" onClick={() => navigate('/alerts')} />
-            <StatCard icon={FolderOpen}  label="Projects"       value={projects.length}                                        color="purple"  onClick={() => navigate('/projects')} />
-            <StatCard icon={FlaskConical}label="Formulations"   value={formulations.length}                                    color="amber"   onClick={() => navigate('/formulations')} />
-            <StatCard icon={Leaf}        label="Ingredients"    value={ingredients.length}                                     color="emerald" onClick={() => navigate('/ingredients')} />
-            <StatCard icon={BarChart3}   label="Observations"   value={stats.totalObs}                                         color="blue"    onClick={() => navigate('/analytics')} />
-            <StatCard icon={Sprout}      label="Auto-Closed"    value={stats.autoFinalizedCount} sub="Due to inactivity" color="emerald" onClick={() => navigate('/alerts')} />
-          </div>
-
-          {/* ══ 1.6 — WEATHER ALERT BANNER ════════════════════════════ */}
-          {(forecastAlerts.length > 0 || forecastLoading) && (
-            <div className="space-y-2">
-              {forecastLoading ? (
-                <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-center gap-3 animate-pulse">
-                  <CloudRain className="w-5 h-5 text-blue-500" />
-                  <span className="text-sm text-blue-700">Checking 48h weather forecast for your trial locations...</span>
+              <div className="flex items-center gap-4 text-xs text-slate-300 mt-2 flex-wrap">
+                <div className="flex items-center gap-1.5">
+                  <Activity className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="font-semibold text-white">{stats.active}</span> Active Trials Running
                 </div>
-              ) : (
-                forecastAlerts.map((alert, i) => (
-                  <div key={i} className={`rounded-xl px-4 py-3 flex items-center gap-3 border ${
-                    alert.severity === 'high' 
-                      ? 'bg-red-50 border-red-200' 
-                      : 'bg-amber-50 border-amber-200'
-                  }`}>
-                    {alert.type === 'rain' && <CloudRain className={`w-5 h-5 shrink-0 ${alert.severity === 'high' ? 'text-red-500' : 'text-amber-500'}`} />}
-                    {alert.type === 'wind' && <Wind className={`w-5 h-5 shrink-0 ${alert.severity === 'high' ? 'text-red-500' : 'text-amber-500'}`} />}
-                    {alert.type === 'temp' && <Thermometer className={`w-5 h-5 shrink-0 ${alert.severity === 'high' ? 'text-red-500' : 'text-amber-500'}`} />}
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-sm font-semibold ${alert.severity === 'high' ? 'text-red-800' : 'text-amber-800'}`}>
-                        ⚠️ {alert.msg}
-                      </p>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        <MapPin className="w-3 h-3 inline mr-1" />{alert.location} · Next 48 hours
-                      </p>
+                <span className="text-slate-600">|</span>
+                <div className="flex items-center gap-1.5">
+                  <BarChart3 className="w-3.5 h-3.5 text-sky-400" />
+                  <span className="font-semibold text-white">{stats.totalObs}</span> Observations Scored
+                </div>
+                {stats.successRate !== null && (
+                  <>
+                    <span className="text-slate-600">|</span>
+                    <div className="flex items-center gap-1.5">
+                      <Award className="w-3.5 h-3.5 text-amber-400" />
+                      <span className="font-semibold text-emerald-400">{stats.successRate}%</span> Efficacy Win Rate
                     </div>
-                    <ShieldAlert className={`w-4 h-4 shrink-0 ${alert.severity === 'high' ? 'text-red-400' : 'text-amber-400'}`} />
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-
-          {/* ══ 7.1 — PROACTIVE AI INSIGHTS ═══════════════════════════ */}
-          {proactiveInsights.length > 0 && (
-            <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-5 text-white shadow-md border border-slate-800">
-              <div className="flex items-center justify-between mb-3.5">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-xl bg-amber-400/20 text-amber-300 flex items-center justify-center ring-1 ring-amber-400/30">
-                    <Sparkles className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-sm tracking-wide flex items-center gap-2">
-                      Proactive AI Insights
-                      <span className="text-[10px] font-semibold bg-indigo-500/30 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-400/30">
-                        {proactiveInsights.length} Live Signals
-                      </span>
-                    </h3>
-                    <p className="text-[11px] text-slate-300">Automated intelligence generated from current field observations & lifecycle data</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-                {proactiveInsights.map((insight) => {
-                  const Icon = insight.icon;
-                  return (
-                    <div
-                      key={insight.id}
-                      className="rounded-xl bg-white/10 hover:bg-white/15 backdrop-blur-sm border border-white/10 p-3.5 flex flex-col justify-between transition-all duration-200"
-                    >
-                      <div>
-                        <div className="flex items-center justify-between gap-2 mb-1.5">
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${insight.badgeBg}`}>
-                            {insight.badge}
-                          </span>
-                          <Icon className="w-4 h-4 text-white/70" />
-                        </div>
-                        <h4 className="text-xs font-bold text-white leading-snug">{insight.title}</h4>
-                        <p className="text-[11px] text-slate-300 mt-1 leading-relaxed">{insight.description}</p>
-                      </div>
-
-                      <div className="mt-3 pt-2 border-t border-white/10 flex justify-end">
-                        <button
-                          onClick={() => navigate(insight.actionRoute)}
-                          className="text-[11px] font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition"
-                        >
-                          {insight.actionLabel} <ArrowRight className="w-3 h-3" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* ── Smart Alerts ──────────────────────────────────────── */}
-          <div className="max-w-2xl">
-            <SmartAlerts compact={true} />
-          </div>
-
-          {/* ── Trials Over Time + Results Breakdown ───────────────── */}
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
-            {/* Trials Over Time – inline bar chart */}
-            <div className="lg:col-span-3 bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-              <h3 className="font-bold text-slate-800 mb-4">Trials Over Time <span className="text-xs text-slate-400 font-normal">(last 12 months)</span></h3>
-              {trialsOverTime.some(x => x.count > 0) ? (
-                <div className="flex items-end gap-1 h-40">
-                  {trialsOverTime.map(({ month, count }) => (
-                    <div key={month} className="flex-1 flex flex-col items-center gap-1 group">
-                      <span className="text-[9px] text-slate-400 hidden group-hover:block">{count}</span>
-                      <div
-                        className="w-full bg-emerald-400 rounded-t hover:bg-emerald-500 transition-all"
-                        style={{ height: `${Math.max(4, (count / maxMonthCount) * 128)}px` }}
-                        title={`${month}: ${count} trials`}
-                      />
-                      <span className="text-[9px] text-slate-400 rotate-0">{month}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="h-40 flex items-center justify-center text-slate-400 text-sm">No trial date data available</div>
-              )}
-            </div>
-
-            {/* Results Breakdown */}
-            <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-              <h3 className="font-bold text-slate-800 mb-4">Results Breakdown</h3>
-              {(stats.resultCounts.Excellent + stats.resultCounts.Good + stats.resultCounts.Fair + stats.resultCounts.Poor) > 0 ? (
-                <div className="space-y-3">
-                  {[
-                    ['Excellent', stats.resultCounts.Excellent, 'bg-emerald-500'],
-                    ['Good',      stats.resultCounts.Good,      'bg-blue-500'],
-                    ['Fair',      stats.resultCounts.Fair,      'bg-amber-500'],
-                    ['Poor',      stats.resultCounts.Poor,      'bg-red-500'],
-                  ].map(([label, count, barColor]) => {
-                    const total = trials.length || 1;
-                    return (
-                      <div key={label}>
-                        <div className="flex justify-between text-xs mb-1">
-                          <span className="font-medium text-slate-600">{label}</span>
-                          <span className="font-bold text-slate-700">{count} <span className="text-slate-400 font-normal">({Math.round((count/total)*100)}%)</span></span>
-                        </div>
-                        <MiniBar value={count} max={total} color={barColor} />
-                      </div>
-                    );
-                  })}
-                  {stats.successRate !== null && (
-                    <div className="pt-2 border-t mt-3">
-                      <p className="text-xs text-slate-500">Success rate (Good + Excellent): <span className="font-bold text-emerald-600">{stats.successRate}%</span></p>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="h-32 flex items-center justify-center text-slate-400 text-sm">No rated trials yet</div>
-              )}
-            </div>
-          </div>
-
-          {/* ══ 1.3 — TRIAL HEALTH HEATMAP ════════════════════════════ */}
-          {trialHealthData.length > 0 && (
-            <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                    <Activity className="w-4 h-4" style={{ color: catConfig.color.hex }} />
-                    Trial Health Monitor
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Active trials colored by health: <span className="text-emerald-600 font-bold">●</span> Healthy <span className="text-amber-500 font-bold">●</span> Needs Attention <span className="text-red-500 font-bold">●</span> Critical
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 text-xs text-slate-500">
-                  <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-bold">
-                    {trialHealthData.filter(t => t.status === 'green').length}
-                  </span>
-                  <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">
-                    {trialHealthData.filter(t => t.status === 'amber').length}
-                  </span>
-                  <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold">
-                    {trialHealthData.filter(t => t.status === 'red').length}
-                  </span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2">
-                {trialHealthData.map(t => {
-                  const bgColor = t.status === 'green' 
-                    ? 'bg-emerald-50 border-emerald-200 hover:bg-emerald-100' 
-                    : t.status === 'amber' 
-                    ? 'bg-amber-50 border-amber-200 hover:bg-amber-100'
-                    : 'bg-red-50 border-red-200 hover:bg-red-100';
-                  const textColor = t.status === 'green' ? 'text-emerald-700' : t.status === 'amber' ? 'text-amber-700' : 'text-red-700';
-                  const dotColor = t.status === 'green' ? 'bg-emerald-500' : t.status === 'amber' ? 'bg-amber-500' : 'bg-red-500';
-
-                  return (
-                    <button
-                      key={t.id}
-                      onClick={() => navigate('/trials')}
-                      className={`relative rounded-lg border p-2.5 text-left transition-all duration-200 group ${bgColor}`}
-                      title={`${t.name}\n${t.location}\nDays since obs: ${t.daysSinceObs === 999 ? 'Never' : t.daysSinceObs}\nObservations: ${t.obsCount}\nTrend: ${t.efficacyTrend}\nHealth: ${t.healthScore}%`}
-                    >
-                      <div className={`absolute top-1.5 right-1.5 w-2 h-2 rounded-full ${dotColor} ${t.status === 'red' ? 'animate-pulse' : ''}`} />
-                      <p className={`text-[10px] font-bold ${textColor} truncate leading-tight`}>{t.name}</p>
-                      <p className="text-[9px] text-slate-400 truncate mt-0.5">{t.location || '—'}</p>
-                      <div className="flex items-center gap-1 mt-1.5">
-                        <div className="flex-1 h-1 bg-slate-200 rounded-full overflow-hidden">
-                          <div 
-                            className={`h-full rounded-full transition-all ${t.status === 'green' ? 'bg-emerald-500' : t.status === 'amber' ? 'bg-amber-500' : 'bg-red-500'}`}
-                            style={{ width: `${t.healthScore}%` }}
-                          />
-                        </div>
-                        <span className={`text-[8px] font-bold ${textColor}`}>{t.healthScore}</span>
-                      </div>
-                      {t.efficacyTrend === 'declining' && (
-                        <TrendingUp className="w-3 h-3 text-red-400 rotate-180 mt-1" />
-                      )}
-                      {t.hasWeatherRisk && (
-                        <CloudRain className="w-3 h-3 text-amber-400 mt-0.5" />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* ══ 1.4 — DUE OBSERVATIONS CALENDAR ═══════════════════════ */}
-          {dueObservations.length > 0 && (
-            <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                    <CalendarDays className="w-4 h-4" style={{ color: catConfig.color.hex }} />
-                    Upcoming Observations
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">Next 14 days — {dueObservations.length} observation{dueObservations.length !== 1 ? 's' : ''} due</p>
-                </div>
-                <button
-                  onClick={() => navigate('/trials')}
-                  className="text-xs font-semibold flex items-center gap-1 hover:underline"
-                  style={{ color: catConfig.color.hex }}
-                >
-                  View Trials <ChevronRight className="w-3 h-3" />
-                </button>
-              </div>
-
-              <div className="space-y-1.5">
-                {dueObservations.map((item, i) => {
-                  const dateStr = item.dueDate.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-                  let statusBg, statusText, badge;
-                  if (item.isOverdue) {
-                    statusBg = 'bg-red-50 border-red-200';
-                    statusText = 'text-red-700';
-                    badge = <span className="text-[10px] font-bold bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full">OVERDUE</span>;
-                  } else if (item.isToday) {
-                    statusBg = 'bg-amber-50 border-amber-200';
-                    statusText = 'text-amber-700';
-                    badge = <span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full animate-pulse">TODAY</span>;
-                  } else if (item.diffDays <= 2) {
-                    statusBg = 'bg-blue-50 border-blue-100';
-                    statusText = 'text-blue-700';
-                    badge = <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">IN {item.diffDays}d</span>;
-                  } else {
-                    statusBg = 'bg-slate-50 border-slate-100';
-                    statusText = 'text-slate-600';
-                    badge = <span className="text-[10px] font-medium bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full">IN {item.diffDays}d</span>;
-                  }
-
-                  return (
-                    <div key={`${item.trialId}-${item.daa}-${i}`} className={`flex items-center gap-3 rounded-lg border p-2.5 ${statusBg} transition-all hover:shadow-sm`}>
-                      <div className="flex flex-col items-center w-12 shrink-0">
-                        <span className={`text-xs font-bold ${statusText}`}>{dateStr.split(' ')[1]}</span>
-                        <span className="text-[10px] text-slate-400">{dateStr.split(' ')[2]}</span>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className={`text-xs font-bold ${statusText} truncate`}>{item.trialName}</p>
-                        <p className="text-[10px] text-slate-400 truncate">
-                          DAA {item.daa} observation{item.location ? ` · ${item.location}` : ''}
-                        </p>
-                      </div>
-                      {badge}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* ── Top Formulations This Season (Ranked by Kill Rate & Control Longevity) ────────── */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
-              <div>
-                <h3 className="font-bold text-slate-800 flex items-center gap-2"><BarChart3 className="w-4 h-4" style={{ color: catConfig.color.hex }} /> Top Formulations (Kill Rate & Control Days)</h3>
-                <p className="text-xs text-slate-400 mt-0.5">Ranked by combined agronomic performance (Kill % and Sustained Control Days). Filter by year, {catConfig.targetLabel.toLowerCase()}, or location.</p>
-              </div>
-              <div className="flex flex-wrap gap-2 items-center">
-                <div className="flex items-center gap-1 text-xs text-slate-500"><Filter className="w-3 h-3" /></div>
-                <select value={fYear} onChange={e => setFYear(e.target.value)}
-                  className="text-xs border rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
-                  <option value="">All Years</option>
-                  {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
-                </select>
-                <input value={fTarget} onChange={e => setFTarget(e.target.value)}
-                  placeholder={`Filter by ${catConfig.targetLabel}`} list="dash-ftarget-list"
-                  className="text-xs border rounded-lg px-2 py-1.5 w-36 focus:outline-none focus:ring-2 focus:ring-emerald-400" />
-                <datalist id="dash-ftarget-list">{allTargets.map(w => <option key={w} value={w} />)}</datalist>
-                <input value={fLocation} onChange={e => setFLocation(e.target.value)}
-                  placeholder="Filter by Location"
-                  className="text-xs border rounded-lg px-2 py-1.5 w-36 focus:outline-none focus:ring-2 focus:ring-emerald-400" />
-                {(fYear || fTarget || fLocation) && (
-                  <button onClick={() => { setFYear(''); setFTarget(''); setFLocation(''); }}
-                    className="text-xs text-red-500 hover:underline">Clear</button>
+                  </>
                 )}
               </div>
             </div>
-            {topFormulationsFiltered.length > 0 ? (
-              <div className="space-y-2">
-                {topFormulationsFiltered.map(({ name, count, avgEff, avgDays, compositeScore }) => (
-                  <div key={name} className="flex items-center gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex justify-between text-xs mb-1">
-                        <span className="font-semibold text-slate-700 truncate">{name}</span>
-                        <span className="text-slate-500 shrink-0 ml-2 flex items-center gap-1.5">
-                          <span>{count} trial{count !== 1 ? 's' : ''}</span>
-                          {avgEff !== null && <span className="font-bold text-emerald-600">· {avgEff}% Kill</span>}
-                          {avgDays !== null && <span className="font-bold text-amber-600">· ⏳ {avgDays}d Control</span>}
+
+            {/* Quick Action Command Buttons */}
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <button
+                onClick={() => navigate('/trials')}
+                className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-md shadow-emerald-900/40 hover:shadow-emerald-900/60 hover:-translate-y-0.5 transition-all"
+              >
+                <Plus className="w-4 h-4" />
+                New Trial
+              </button>
+
+              <button
+                onClick={() => navigate('/compare')}
+                className="flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white border border-white/15 backdrop-blur-sm px-3.5 py-2 rounded-xl text-xs font-bold hover:-translate-y-0.5 transition-all"
+              >
+                <Microscope className="w-4 h-4 text-emerald-300" />
+                Compare Trials
+              </button>
+
+              <button
+                onClick={() => navigate('/assistant')}
+                className="flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white border border-white/15 backdrop-blur-sm px-3.5 py-2 rounded-xl text-xs font-bold hover:-translate-y-0.5 transition-all"
+              >
+                <Bot className="w-4 h-4 text-sky-300" />
+                AI Copilot
+              </button>
+
+              <button
+                onClick={() => navigate('/categories')}
+                className="flex items-center gap-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 px-3 py-2 rounded-xl text-xs font-semibold transition"
+                title="Switch Category"
+              >
+                <Grid3x3 className="w-3.5 h-3.5" />
+                <span>{catConfig.name}</span>
+                <ChevronDown className="w-3 h-3 text-slate-400" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-4 md:p-6 space-y-6 max-w-7xl mx-auto">
+
+          {/* ══════════════════════════════════════════════════════════════════
+              EXECUTIVE KPI SUMMARY METRIC CARDS
+              ══════════════════════════════════════════════════════════════════ */}
+          <div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <ExecutiveMetricCard
+                icon={Activity}
+                label="Total Field Trials"
+                value={trials.length}
+                subLabel={`${stats.active} Active Running · ${stats.finalized} Finalized`}
+                badgeText={stats.active > 0 ? `${stats.active} ACTIVE` : 'IDLE'}
+                badgeColor="emerald"
+                progressPct={trials.length > 0 ? Math.round((stats.finalized / trials.length) * 100) : 0}
+                onClick={() => navigate('/trials')}
+              />
+
+              <ExecutiveMetricCard
+                icon={Award}
+                label="Bio-Efficacy Success Rate"
+                value={stats.successRate !== null ? `${stats.successRate}%` : 'N/A'}
+                subLabel={`${stats.resultCounts.Excellent + stats.resultCounts.Good} positive out of ${stats.resultCounts.Excellent + stats.resultCounts.Good + stats.resultCounts.Fair + stats.resultCounts.Poor} rated`}
+                badgeText="EXCELLENT & GOOD"
+                badgeColor="blue"
+                gradient="from-sky-500/10 to-blue-500/5"
+                iconColor="text-sky-600"
+                iconBg="bg-sky-500/15"
+                borderColor="border-sky-500/20"
+                progressPct={stats.successRate}
+                onClick={() => navigate('/analytics')}
+              />
+
+              <ExecutiveMetricCard
+                icon={BarChart3}
+                label="Observations Scored"
+                value={stats.totalObs}
+                subLabel="DAA efficacy & canopy phenotyping logs"
+                badgeText="GROUND TRUTH"
+                badgeColor="purple"
+                gradient="from-purple-500/10 to-indigo-500/5"
+                iconColor="text-purple-600"
+                iconBg="bg-purple-500/15"
+                borderColor="border-purple-500/20"
+                onClick={() => navigate('/analytics')}
+              />
+
+              <ExecutiveMetricCard
+                icon={FlaskConical}
+                label="Formulations Portfolio"
+                value={formulations.length}
+                subLabel={`${ingredients.length} active ingredients registered`}
+                badgeText={`${topFormulationsFiltered.length} BENCHMARKS`}
+                badgeColor="amber"
+                gradient="from-amber-500/10 to-orange-500/5"
+                iconColor="text-amber-600"
+                iconBg="bg-amber-500/15"
+                borderColor="border-amber-500/20"
+                onClick={() => navigate('/formulations')}
+              />
+            </div>
+
+            {/* Secondary Operational Quick-Stats Ribbon */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
+              <button
+                onClick={() => navigate('/projects')}
+                className="flex items-center gap-3 p-3 rounded-xl bg-white border border-slate-200/70 shadow-xs hover:border-slate-300 hover:bg-slate-50/80 transition text-left"
+              >
+                <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                  <FolderOpen className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-slate-800">{projects.length} Active Projects</p>
+                  <p className="text-[10px] text-slate-400 truncate">Multi-trial research groups</p>
+                </div>
+              </button>
+
+              <button
+                onClick={() => navigate('/ingredients')}
+                className="flex items-center gap-3 p-3 rounded-xl bg-white border border-slate-200/70 shadow-xs hover:border-slate-300 hover:bg-slate-50/80 transition text-left"
+              >
+                <div className="w-8 h-8 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center shrink-0">
+                  <Leaf className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-slate-800">{ingredients.length} Ingredients</p>
+                  <p className="text-[10px] text-slate-400 truncate">MoA & active compounds</p>
+                </div>
+              </button>
+
+              <button
+                onClick={() => navigate('/alerts')}
+                className="flex items-center gap-3 p-3 rounded-xl bg-white border border-slate-200/70 shadow-xs hover:border-slate-300 hover:bg-slate-50/80 transition text-left"
+              >
+                <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                  <Camera className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-slate-800">{stats.reminderCount} Photo Reminders</p>
+                  <p className="text-[10px] text-slate-400 truncate">Due for imagery capture</p>
+                </div>
+              </button>
+
+              <button
+                onClick={() => navigate('/alerts')}
+                className="flex items-center gap-3 p-3 rounded-xl bg-white border border-slate-200/70 shadow-xs hover:border-slate-300 hover:bg-slate-50/80 transition text-left"
+              >
+                <div className="w-8 h-8 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center shrink-0">
+                  <Sprout className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-slate-800">{stats.autoFinalizedCount} Auto-Closed</p>
+                  <p className="text-[10px] text-slate-400 truncate">Concluded by inactivity</p>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {/* ══════════════════════════════════════════════════════════════════
+              AI SPRAY ADVISOR & FIELD INTEL SECTION (PROMINENTLY BROUGHT TO TOP!)
+              ══════════════════════════════════════════════════════════════════ */}
+          {catConfig.showSprayAdvisor && (
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white flex items-center justify-center shadow-sm">
+                    <CloudRain className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                      Microclimate & AI Spray Intelligence
+                      <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-300/60">
+                        HIGH PRIORITY
+                      </span>
+                    </h2>
+                    <p className="text-xs text-slate-500">Real-time droplet evaporation, delta-T risk, and optimal spray timing</p>
+                  </div>
+                </div>
+
+                {/* Location Selector for Spray Advisor */}
+                {availableLocations.length > 1 && (
+                  <div className="flex items-center gap-2 bg-white border border-slate-200/90 rounded-xl px-3 py-1.5 shadow-xs">
+                    <MapPin className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span className="text-xs font-bold text-slate-600">Location:</span>
+                    <select
+                      value={selectedLocationIdx}
+                      onChange={e => setSelectedLocationIdx(Number(e.target.value))}
+                      className="text-xs font-semibold text-slate-800 bg-transparent focus:outline-none cursor-pointer"
+                    >
+                      {availableLocations.map((loc, idx) => (
+                        <option key={`${loc.lat}-${loc.lon}-${idx}`} value={idx}>
+                          {loc.displayName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {/* Two-Column Grid: Spray Advisor + Proactive AI Signals */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                {/* Left: Spray Advisor */}
+                <div className="lg:col-span-7 xl:col-span-8">
+                  {activeTrialLocation ? (
+                    <SprayAdvisor
+                      lat={activeTrialLocation.lat}
+                      lon={activeTrialLocation.lon}
+                      locationName={activeTrialLocation.name}
+                    />
+                  ) : (
+                    <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs text-center">
+                      <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
+                        <MapPin className="w-6 h-6" />
+                      </div>
+                      <h4 className="text-sm font-bold text-slate-700">GPS Coordinates Needed for Spray Advisor</h4>
+                      <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                        Add latitude and longitude coordinates to your active field trials to unlock real-time Open-Meteo weather forecasts, Delta-T psychrometric drift tracking, and optimal spray window recommendations.
+                      </p>
+                      <button
+                        onClick={() => navigate('/trials')}
+                        className="mt-4 inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition shadow-xs"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Update Trial Locations
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Right: Proactive AI Signals & Weather Warnings */}
+                <div className="lg:col-span-5 xl:col-span-4 flex flex-col gap-3.5">
+                  {/* Weather Alert Banners (if any) */}
+                  {(forecastAlerts.length > 0 || forecastLoading) && (
+                    <div className="space-y-2">
+                      {forecastLoading ? (
+                        <div className="bg-sky-50 border border-sky-200/80 rounded-2xl px-4 py-3 flex items-center gap-3 animate-pulse">
+                          <CloudRain className="w-4 h-4 text-sky-500 animate-spin" />
+                          <span className="text-xs font-medium text-sky-700">Verifying 48h weather forecast across plot coordinates...</span>
+                        </div>
+                      ) : (
+                        forecastAlerts.map((alert, i) => (
+                          <div
+                            key={i}
+                            className={`rounded-2xl p-3.5 flex items-start gap-3 border shadow-xs transition-all ${
+                              alert.severity === 'high'
+                                ? 'bg-gradient-to-r from-rose-50 to-red-50 border-rose-200'
+                                : 'bg-gradient-to-r from-amber-50 to-orange-50 border-amber-200'
+                            }`}
+                          >
+                            <div className={`p-2 rounded-xl shrink-0 ${alert.severity === 'high' ? 'bg-rose-500 text-white' : 'bg-amber-500 text-white'}`}>
+                              {alert.type === 'rain' && <CloudRain className="w-4 h-4" />}
+                              {alert.type === 'wind' && <Wind className="w-4 h-4" />}
+                              {alert.type === 'temp' && <Thermometer className="w-4 h-4" />}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-1">
+                                <span className={`text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded-full ${alert.severity === 'high' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'}`}>
+                                  {alert.severity === 'high' ? 'High Risk' : 'Advisory'}
+                                </span>
+                                <span className="text-[10px] text-slate-400 flex items-center gap-0.5">
+                                  <MapPin className="w-2.5 h-2.5" /> {alert.location}
+                                </span>
+                              </div>
+                              <p className={`text-xs font-bold mt-1 leading-snug ${alert.severity === 'high' ? 'text-rose-900' : 'text-amber-900'}`}>
+                                {alert.msg}
+                              </p>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+
+                  {/* Proactive AI Insights Panel */}
+                  <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-950 rounded-2xl p-4.5 text-white shadow-md border border-indigo-500/20 flex-1 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between mb-3 border-b border-indigo-500/20 pb-2.5">
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-lg bg-amber-400/20 text-amber-300 flex items-center justify-center ring-1 ring-amber-400/30">
+                            <Sparkles className="w-3.5 h-3.5" />
+                          </div>
+                          <h3 className="font-bold text-xs tracking-wide text-white">
+                            Autonomous AI Signals
+                          </h3>
+                        </div>
+                        <span className="text-[10px] font-bold bg-indigo-500/30 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-400/30">
+                          {proactiveInsights.length} Live
                         </span>
                       </div>
-                      <MiniBar value={compositeScore} max={100} color="bg-emerald-500" />
+
+                      {proactiveInsights.length > 0 ? (
+                        <div className="space-y-2.5">
+                          {proactiveInsights.slice(0, 3).map((insight) => {
+                            const Icon = insight.icon;
+                            return (
+                              <div
+                                key={insight.id}
+                                className="rounded-xl bg-white/5 hover:bg-white/10 backdrop-blur-xs border border-white/10 p-3 transition-all duration-200"
+                              >
+                                <div className="flex items-center justify-between gap-1.5 mb-1">
+                                  <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${insight.badgeBg}`}>
+                                    {insight.badge}
+                                  </span>
+                                  <Icon className="w-3.5 h-3.5 text-white/60" />
+                                </div>
+                                <h4 className="text-xs font-bold text-white leading-snug">{insight.title}</h4>
+                                <p className="text-[11px] text-slate-300 mt-1 line-clamp-2 leading-relaxed">{insight.description}</p>
+                                <div className="mt-2 pt-1.5 border-t border-white/5 flex justify-end">
+                                  <button
+                                    onClick={() => navigate(insight.actionRoute)}
+                                    className="text-[11px] font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition"
+                                  >
+                                    {insight.actionLabel} <ArrowRight className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="py-6 text-center text-slate-400 text-xs">
+                          <ShieldCheck className="w-8 h-8 mx-auto mb-2 text-emerald-400 opacity-80" />
+                          All active field plots are performing within expected tolerance levels.
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="mt-3 pt-2.5 border-t border-white/10 flex items-center justify-between text-[11px] text-slate-400">
+                      <span>Live ML Intelligence</span>
+                      <button
+                        onClick={() => navigate('/assistant')}
+                        className="text-indigo-300 hover:text-white font-bold flex items-center gap-1 transition"
+                      >
+                        Ask AI Copilot <ChevronRight className="w-3 h-3" />
+                      </button>
                     </div>
                   </div>
-                ))}
+                </div>
               </div>
-            ) : (
-              <div className="py-6 text-center text-slate-400 text-sm">No formulation data{fYear || fTarget || fLocation ? ' for these filters' : ''}</div>
-            )}
-          </div>
-
-
-          {/* ── Spray Advisor ──────────────────────────────────────── */}
-          {catConfig.showSprayAdvisor && (
-          <div className="mb-6">
-              {trialLocation && (
-                <SprayAdvisor 
-                  lat={trialLocation.lat} 
-                  lon={trialLocation.lon} 
-                  locationName={trialLocation.name}
-                />
-              )}
-          </div>
+            </div>
           )}
 
-          {/* ── Weather Dashboard ──────────────────────────────────────── */}
-          <div className="mb-6">
-            <WeatherDashboard 
-              trials={trials} 
-              activeCategory={activeCategory}
-              getAppState={getAppState}
-            />
-          </div>
-
-          {/* ── Top Performing Formulations by Target ───────────────── */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-            <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-4">
-              <div>
-                <h3 className="font-bold text-slate-800 flex items-center gap-2"><Sprout className="w-4 h-4" style={{ color: catConfig.color.hex }} /> Top Performing Formulations by {catConfig.targetLabel}</h3>
-                <p className="text-xs text-slate-400 mt-0.5">Find which formulations perform best against a specific {catConfig.targetLabel.toLowerCase()}.</p>
+          {/* ══════════════════════════════════════════════════════════════════
+              VISUAL PERFORMANCE ANALYTICS (TRIALS OVER TIME & RESULTS BREAKDOWN)
+              ══════════════════════════════════════════════════════════════════ */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            {/* Trials Progression Over Time */}
+            <div className="lg:col-span-7 bg-white rounded-2xl shadow-xs border border-slate-200/80 p-5 hover:shadow-md transition-shadow">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                    <BarChart3 className="w-4 h-4 text-emerald-600" />
+                    Trials Progression Velocity
+                    <span className="text-xs text-slate-400 font-normal">(Last 12 Months)</span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">Seasonal trial initiation and plot deployment rates</p>
+                </div>
+                <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200/60">
+                  Peak: {maxMonthCount} Trials
+                </span>
               </div>
-              <div className="flex flex-wrap gap-2 items-end">
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">{catConfig.targetLabel}</label>
-                  <input value={targetQuery} onChange={e => setTargetQuery(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleFindByTarget()}
-                    list="dash-target-datalist"
-                    placeholder={`Select ${catConfig.targetLabel.toLowerCase()}...`}
-                    className="border rounded-lg px-3 py-1.5 text-sm w-52 focus:outline-none focus:ring-2 focus:ring-emerald-400" />
-                  <datalist id="dash-target-datalist">{allTargets.map(w => <option key={w} value={w} />)}</datalist>
+
+              {trialsOverTime.some(x => x.count > 0) ? (
+                <div className="flex items-end gap-1.5 sm:gap-2 h-44 pt-6 pb-2 border-b border-slate-100">
+                  {trialsOverTime.map(({ month, count }) => {
+                    const isPeak = count === maxMonthCount && count > 0;
+                    return (
+                      <div key={month} className="flex-1 flex flex-col items-center gap-1.5 group relative h-full justify-end">
+                        <div className="absolute -top-6 text-[10px] font-bold text-slate-700 bg-white border border-slate-200 px-1.5 py-0.5 rounded shadow-xs opacity-0 group-hover:opacity-100 transition-opacity z-20 pointer-events-none whitespace-nowrap">
+                          {month}: {count} trials
+                        </div>
+                        <div
+                          className={`w-full rounded-t-lg transition-all duration-300 ${
+                            isPeak
+                              ? 'bg-gradient-to-t from-emerald-600 to-teal-400 shadow-xs'
+                              : count > 0
+                              ? 'bg-gradient-to-t from-emerald-500/80 to-teal-400/70 hover:from-emerald-600 hover:to-teal-500'
+                              : 'bg-slate-100'
+                          }`}
+                          style={{ height: `${Math.max(6, (count / maxMonthCount) * 120)}px` }}
+                        />
+                        <span className={`text-[10px] font-medium transition-colors ${isPeak ? 'text-emerald-700 font-bold' : 'text-slate-400 group-hover:text-slate-700'}`}>
+                          {month}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Min efficacy (%)</label>
-                  <input type="number" value={minEfficacy} onChange={e => setMinEfficacy(Number(e.target.value))}
-                    min="0" max="100"
-                    className="border rounded-lg px-3 py-1.5 text-sm w-24 focus:outline-none focus:ring-2 focus:ring-emerald-400" />
+              ) : (
+                <div className="h-44 flex items-center justify-center text-slate-400 text-sm">No historical trial timeline recorded</div>
+              )}
+            </div>
+
+            {/* Results & Bio-Suppression Breakdown */}
+            <div className="lg:col-span-5 bg-white rounded-2xl shadow-xs border border-slate-200/80 p-5 hover:shadow-md transition-shadow flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                      <Award className="w-4 h-4 text-emerald-600" />
+                      Results Distribution
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">Finalized agronomic bio-efficacy ratings</p>
+                  </div>
+                  {stats.successRate !== null && (
+                    <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200/60">
+                      {stats.successRate}% Win Rate
+                    </span>
+                  )}
                 </div>
-                <button onClick={handleFindByTarget}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 rounded-lg text-sm font-bold flex items-center gap-2 transition">
-                  <Search className="w-4 h-4" /> Find
+
+                {(stats.resultCounts.Excellent + stats.resultCounts.Good + stats.resultCounts.Fair + stats.resultCounts.Poor) > 0 ? (
+                  <div className="space-y-3 pt-1">
+                    {[
+                      ['Excellent (≥90% Kill)', stats.resultCounts.Excellent, 'from-emerald-600 to-emerald-400', 'text-emerald-700'],
+                      ['Good (70–89% Kill)', stats.resultCounts.Good, 'from-sky-600 to-sky-400', 'text-sky-700'],
+                      ['Fair (50–69% Kill)', stats.resultCounts.Fair, 'from-amber-500 to-amber-300', 'text-amber-700'],
+                      ['Poor (<50% Kill)', stats.resultCounts.Poor, 'from-rose-500 to-rose-300', 'text-rose-700'],
+                    ].map(([label, count, barGradient, textCol]) => {
+                      const total = trials.length || 1;
+                      const pct = Math.round((count / total) * 100);
+                      return (
+                        <div key={label} className="group">
+                          <div className="flex justify-between items-center text-xs mb-1">
+                            <span className="font-semibold text-slate-700 flex items-center gap-1.5">
+                              <span className={`w-2 h-2 rounded-full bg-gradient-to-r ${barGradient}`} />
+                              {label}
+                            </span>
+                            <span className="font-bold text-slate-700">
+                              {count} <span className="text-slate-400 font-normal">({pct}%)</span>
+                            </span>
+                          </div>
+                          <ModernBar value={count} max={total} color={barGradient} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="h-36 flex items-center justify-center text-slate-400 text-sm">No rated trial records available</div>
+                )}
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+                <span>Standard GEP Performance Metric</span>
+                <button onClick={() => navigate('/analytics')} className="text-emerald-600 hover:text-emerald-700 font-bold flex items-center gap-1">
+                  Full Analytics <ChevronRight className="w-3 h-3" />
                 </button>
               </div>
             </div>
-
-            {targetResults === null ? (
-              <p className="text-sm text-slate-400 text-center py-4">Enter a {catConfig.targetLabel.toLowerCase()} name and click Find to see results.</p>
-            ) : targetResults.results.length === 0 ? (
-              <p className="text-sm text-slate-500 py-4">No trials found for "{targetResults.query}" with ≥{minEfficacy}% efficacy.</p>
-            ) : (
-              <div>
-                <p className="text-xs text-slate-400 mb-3">{targetResults.total} trial{targetResults.total !== 1 ? 's' : ''} matched "{targetResults.query}" — top {targetResults.results.length} formulation{targetResults.results.length !== 1 ? 's' : ''}</p>
-                <div className="space-y-2">
-                  {targetResults.results.map((g, i) => (
-                    <div key={g.name} className="flex items-center gap-3 p-3 rounded-lg border border-slate-100 hover:bg-slate-50 transition">
-                      <span className="text-xs font-bold text-slate-400 w-5 text-center">#{i + 1}</span>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-slate-800 truncate">{g.name}</p>
-                        <p className="text-xs text-slate-400">{g.trials.length} trial{g.trials.length !== 1 ? 's' : ''}</p>
-                      </div>
-                      {g.avgEfficacy > 0 ? (
-                        <div className="text-right shrink-0">
-                          <span className={`text-sm font-bold ${g.avgEfficacy >= 90 ? 'text-emerald-600' : g.avgEfficacy >= 70 ? 'text-blue-600' : 'text-amber-600'}`}>
-                            {g.avgEfficacy.toFixed(1)}%
-                          </span>
-                          <p className="text-xs text-slate-400">avg {catConfig.primaryMetric.key}</p>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-slate-400">No {catConfig.primaryMetric.key} data</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
 
-          {/* ══ 1.1 — ACTIVITY FEED / TIMELINE ════════════════════════ */}
-          {activityFeed.length > 0 && (
-            <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-              <h3 className="font-bold text-slate-800 flex items-center gap-2 mb-4">
-                <Clock className="w-4 h-4" style={{ color: catConfig.color.hex }} />
-                Recent Activity
-                <span className="text-xs text-slate-400 font-normal">— last {activityFeed.length} events across all categories</span>
-              </h3>
+          {/* ══════════════════════════════════════════════════════════════════
+              TRIAL HEALTH COMMAND HEATMAP (INTERACTIVE PLOT MATRIX)
+              ══════════════════════════════════════════════════════════════════ */}
+          {trialHealthData.length > 0 && (
+            <div className="bg-white rounded-2xl shadow-xs border border-slate-200/80 p-5 hover:shadow-md transition-shadow">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+                <div>
+                  <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-emerald-600" />
+                    Trial Health Monitor
+                    <span className="text-xs font-semibold text-slate-400">({trials.filter(t => t.IsCompleted !== true && t.IsCompleted !== 'true').length} Active Plots)</span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Real-time score evaluating observation interval freshness, efficacy trend, and weather risks
+                  </p>
+                </div>
 
-              <div className="relative">
-                {/* Timeline line */}
-                <div className="absolute left-[15px] top-2 bottom-2 w-0.5 bg-slate-100 rounded-full" />
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Status Filter Tabs */}
+                  <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs">
+                    <button
+                      onClick={() => setHealthFilter('all')}
+                      className={`px-2.5 py-1 rounded-lg font-bold transition ${healthFilter === 'all' ? 'bg-white text-slate-800 shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}
+                    >
+                      All ({trialHealthData.length})
+                    </button>
+                    <button
+                      onClick={() => setHealthFilter('green')}
+                      className={`px-2.5 py-1 rounded-lg font-bold transition ${healthFilter === 'green' ? 'bg-emerald-500 text-white shadow-xs' : 'text-emerald-700 hover:bg-emerald-50'}`}
+                    >
+                      Healthy ({trialHealthData.filter(t => t.status === 'green').length})
+                    </button>
+                    <button
+                      onClick={() => setHealthFilter('amber')}
+                      className={`px-2.5 py-1 rounded-lg font-bold transition ${healthFilter === 'amber' ? 'bg-amber-500 text-white shadow-xs' : 'text-amber-700 hover:bg-amber-50'}`}
+                    >
+                      Needs Care ({trialHealthData.filter(t => t.status === 'amber').length})
+                    </button>
+                    <button
+                      onClick={() => setHealthFilter('red')}
+                      className={`px-2.5 py-1 rounded-lg font-bold transition ${healthFilter === 'red' ? 'bg-rose-500 text-white shadow-xs' : 'text-rose-700 hover:bg-rose-50'}`}
+                    >
+                      Critical ({trialHealthData.filter(t => t.status === 'red').length})
+                    </button>
+                  </div>
 
-                <div className="space-y-0.5">
+                  {/* Search */}
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={healthSearch}
+                      onChange={e => setHealthSearch(e.target.value)}
+                      placeholder="Search plot..."
+                      className="pl-8 pr-3 py-1 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-400 w-36"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {filteredHealthData.length > 0 ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2.5">
+                  {filteredHealthData.map(t => {
+                    const bgColor = t.status === 'green'
+                      ? 'bg-emerald-50/70 border-emerald-200/80 hover:bg-emerald-100/70'
+                      : t.status === 'amber'
+                      ? 'bg-amber-50/70 border-amber-200/80 hover:bg-amber-100/70'
+                      : 'bg-rose-50/70 border-rose-200/80 hover:bg-rose-100/70';
+                    const textColor = t.status === 'green' ? 'text-emerald-800' : t.status === 'amber' ? 'text-amber-800' : 'text-rose-800';
+                    const dotColor = t.status === 'green' ? 'bg-emerald-500' : t.status === 'amber' ? 'bg-amber-500' : 'bg-rose-500';
+
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => navigate('/trials')}
+                        className={`relative rounded-xl border p-3 text-left transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xs group ${bgColor}`}
+                        title={`${t.name}\n${t.location}\nScored: ${t.daysSinceObs === 999 ? 'Never' : `${t.daysSinceObs}d ago`}\nHealth: ${t.healthScore}/100`}
+                      >
+                        <div className="flex items-center justify-between gap-1 mb-1">
+                          <span className={`w-2 h-2 rounded-full ${dotColor} ${t.status === 'red' ? 'animate-pulse' : ''}`} />
+                          <span className={`text-[10px] font-extrabold ${textColor}`}>{t.healthScore}%</span>
+                        </div>
+
+                        <p className={`text-[11px] font-bold ${textColor} truncate leading-tight`}>{t.name}</p>
+                        <p className="text-[10px] text-slate-500 truncate mt-0.5 flex items-center gap-0.5">
+                          <MapPin className="w-2.5 h-2.5 shrink-0" />
+                          {t.location || 'Plot'}
+                        </p>
+
+                        <div className="mt-2 pt-1.5 border-t border-black/5 flex items-center justify-between text-[9px] text-slate-500 font-medium">
+                          <span>{t.daysSinceObs === 999 ? 'No obs' : `${t.daysSinceObs}d ago`}</span>
+                          {t.efficacyTrend === 'declining' && (
+                            <span className="text-rose-600 font-bold flex items-center">
+                              <TrendingDown className="w-3 h-3 inline" />
+                            </span>
+                          )}
+                          {t.hasWeatherRisk && (
+                            <CloudRain className="w-3 h-3 text-amber-500 inline" />
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="py-8 text-center text-slate-400 text-xs">No active trials match this health filter.</div>
+              )}
+            </div>
+          )}
+
+          {/* ══════════════════════════════════════════════════════════════════
+              OPERATIONAL TIMELINE & UPCOMING OBSERVATIONS (2 COLUMNS)
+              ══════════════════════════════════════════════════════════════════ */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            {/* Upcoming Observations Schedule */}
+            <div className="lg:col-span-6 bg-white rounded-2xl shadow-xs border border-slate-200/80 p-5 hover:shadow-md transition-shadow">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                    <CalendarDays className="w-4 h-4 text-emerald-600" />
+                    Upcoming Observation Schedule
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">Next 14 days · {dueObservations.length} observation{dueObservations.length !== 1 ? 's' : ''} scheduled</p>
+                </div>
+                <button
+                  onClick={() => navigate('/trials')}
+                  className="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
+                >
+                  All Trials <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {dueObservations.length > 0 ? (
+                <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+                  {dueObservations.map((item, i) => {
+                    const dateStr = item.dueDate.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+                    let statusBg, statusText, badge;
+
+                    if (item.isOverdue) {
+                      statusBg = 'bg-rose-50/70 border-rose-200';
+                      statusText = 'text-rose-800';
+                      badge = <span className="text-[10px] font-extrabold bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full border border-rose-200 animate-pulse">OVERDUE</span>;
+                    } else if (item.isToday) {
+                      statusBg = 'bg-amber-50/70 border-amber-200';
+                      statusText = 'text-amber-800';
+                      badge = <span className="text-[10px] font-extrabold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full border border-amber-300">TODAY</span>;
+                    } else if (item.diffDays <= 2) {
+                      statusBg = 'bg-sky-50/70 border-sky-200';
+                      statusText = 'text-sky-800';
+                      badge = <span className="text-[10px] font-bold bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full border border-sky-200">IN {item.diffDays}d</span>;
+                    } else {
+                      statusBg = 'bg-slate-50/80 border-slate-200/70';
+                      statusText = 'text-slate-700';
+                      badge = <span className="text-[10px] font-semibold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">IN {item.diffDays}d</span>;
+                    }
+
+                    return (
+                      <div
+                        key={`${item.trialId}-${item.daa}-${i}`}
+                        onClick={() => navigate('/trials')}
+                        className={`flex items-center gap-3 rounded-xl border p-3 ${statusBg} transition-all hover:shadow-xs cursor-pointer group`}
+                      >
+                        <div className="flex flex-col items-center justify-center w-12 h-11 bg-white rounded-lg shadow-xs border border-black/5 shrink-0">
+                          <span className={`text-xs font-black ${statusText}`}>{dateStr.split(' ')[1]}</span>
+                          <span className="text-[9px] text-slate-400 font-bold uppercase">{dateStr.split(' ')[2]}</span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-xs font-bold ${statusText} truncate group-hover:underline`}>{item.trialName}</p>
+                          <p className="text-[10px] text-slate-500 truncate mt-0.5">
+                            DAA {item.daa} observation milestone{item.location ? ` · ${item.location}` : ''}
+                          </p>
+                        </div>
+                        {badge}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="py-10 text-center text-slate-400 text-xs">
+                  <CheckCircle className="w-8 h-8 text-emerald-400 mx-auto mb-2 opacity-80" />
+                  No observations due within the next 14 days.
+                </div>
+              )}
+            </div>
+
+            {/* Live Field Activity Feed */}
+            <div className="lg:col-span-6 bg-white rounded-2xl shadow-xs border border-slate-200/80 p-5 hover:shadow-md transition-shadow">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-emerald-600" />
+                    Live Activity Stream
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">Recent audit events across field trials</p>
+                </div>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Audit Stream</span>
+              </div>
+
+              {activityFeed.length > 0 ? (
+                <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
                   {activityFeed.map((event, i) => {
                     const colorMap = {
-                      emerald: 'bg-emerald-500', blue: 'bg-blue-500', purple: 'bg-purple-500',
-                      amber: 'bg-amber-500', indigo: 'bg-indigo-500', teal: 'bg-teal-500',
+                      emerald: 'bg-emerald-500 text-white',
+                      blue: 'bg-sky-500 text-white',
+                      purple: 'bg-purple-500 text-white',
+                      amber: 'bg-amber-500 text-white',
+                      indigo: 'bg-indigo-500 text-white',
+                      teal: 'bg-teal-500 text-white',
                     };
                     const iconMap = {
-                      plus: <Plus className="w-2.5 h-2.5 text-white" />,
-                      check: <CheckCircle className="w-2.5 h-2.5 text-white" />,
-                      eye: <Eye className="w-2.5 h-2.5 text-white" />,
-                      camera: <Camera className="w-2.5 h-2.5 text-white" />,
-                      folder: <FolderOpen className="w-2.5 h-2.5 text-white" />,
-                      flask: <FlaskConical className="w-2.5 h-2.5 text-white" />,
+                      plus: <Plus className="w-3 h-3" />,
+                      check: <CheckCircle className="w-3 h-3" />,
+                      eye: <Eye className="w-3 h-3" />,
+                      camera: <Camera className="w-3 h-3" />,
+                      folder: <FolderOpen className="w-3 h-3" />,
+                      flask: <FlaskConical className="w-3 h-3" />,
                     };
 
                     const timeAgo = (() => {
@@ -1155,30 +1427,224 @@ export default function Dashboard({ onMenuClick }) {
                       if (hrs < 24) return `${hrs}h ago`;
                       const days = Math.floor(hrs / 24);
                       if (days < 7) return `${days}d ago`;
-                      if (days < 30) return `${Math.floor(days / 7)}w ago`;
                       return event.time.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
                     })();
 
                     return (
-                      <div key={`${event.type}-${i}`} className="flex items-start gap-3 py-1.5 pl-0 group">
-                        {/* Timeline dot */}
-                        <div className={`w-[30px] h-[30px] rounded-full ${colorMap[event.color] || 'bg-slate-400'} flex items-center justify-center shrink-0 z-10 ring-2 ring-white`}>
-                          {iconMap[event.icon] || <Activity className="w-2.5 h-2.5 text-white" />}
+                      <div key={`${event.type}-${i}`} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-slate-50 transition border border-slate-100">
+                        <div className={`w-8 h-8 rounded-lg ${colorMap[event.color] || 'bg-slate-400 text-white'} flex items-center justify-center shrink-0 shadow-xs`}>
+                          {iconMap[event.icon] || <Activity className="w-3.5 h-3.5" />}
                         </div>
-                        {/* Content */}
-                        <div className="flex-1 min-w-0 pt-0.5">
-                          <p className="text-xs font-semibold text-slate-700 truncate group-hover:text-slate-900 transition">{event.label}</p>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-bold text-slate-800 truncate">{event.label}</p>
                           {event.detail && <p className="text-[10px] text-slate-400 truncate">{event.detail}</p>}
                         </div>
-                        {/* Time */}
-                        <span className="text-[10px] text-slate-400 shrink-0 pt-1">{timeAgo}</span>
+                        <span className="text-[10px] font-semibold text-slate-400 shrink-0">{timeAgo}</span>
                       </div>
                     );
                   })}
                 </div>
+              ) : (
+                <div className="py-10 text-center text-slate-400 text-xs">No recent actions recorded.</div>
+              )}
+            </div>
+          </div>
+
+          {/* ══════════════════════════════════════════════════════════════════
+              TOP FORMULATIONS LEADERBOARD & TARGET WEED FINDER (2 COLUMNS)
+              ══════════════════════════════════════════════════════════════════ */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            {/* Top Formulations Leaderboard */}
+            <div className="lg:col-span-7 bg-white rounded-2xl shadow-xs border border-slate-200/80 p-5 hover:shadow-md transition-shadow">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                <div>
+                  <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                    <Award className="w-4 h-4 text-emerald-600" />
+                    Top Formulation Leaderboard
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">Ranked by combined Kill % and Sustained Control Days</p>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 items-center">
+                  <select
+                    value={fYear}
+                    onChange={e => setFYear(e.target.value)}
+                    className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                  >
+                    <option value="">All Years</option>
+                    {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
+                  </select>
+
+                  <input
+                    value={fTarget}
+                    onChange={e => setFTarget(e.target.value)}
+                    placeholder={`Filter ${catConfig.targetLabel}`}
+                    list="dash-ftarget-list"
+                    className="text-xs border border-slate-200 rounded-lg px-2 py-1 w-28 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                  />
+                  <datalist id="dash-ftarget-list">{allTargets.map(w => <option key={w} value={w} />)}</datalist>
+
+                  {(fYear || fTarget || fLocation) && (
+                    <button
+                      onClick={() => { setFYear(''); setFTarget(''); setFLocation(''); }}
+                      className="text-xs text-rose-600 font-bold hover:underline"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {topFormulationsFiltered.length > 0 ? (
+                <div className="space-y-2.5">
+                  {topFormulationsFiltered.map(({ name, count, avgEff, avgDays, compositeScore }, idx) => {
+                    const isTop1 = idx === 0;
+                    const isTop2 = idx === 1;
+                    const isTop3 = idx === 2;
+
+                    return (
+                      <div
+                        key={name}
+                        onClick={() => navigate('/formulations')}
+                        className={`p-3 rounded-xl border transition-all hover:shadow-xs cursor-pointer ${
+                          isTop1
+                            ? 'bg-gradient-to-r from-amber-50/60 to-white border-amber-200/80'
+                            : 'bg-white border-slate-100 hover:border-slate-200'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-xs mb-1.5">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className={`w-5 h-5 rounded-full flex items-center justify-center font-black text-[10px] shrink-0 ${
+                              isTop1 ? 'bg-amber-400 text-amber-950 shadow-xs' : isTop2 ? 'bg-slate-300 text-slate-800' : isTop3 ? 'bg-amber-700/20 text-amber-800' : 'bg-slate-100 text-slate-500'
+                            }`}>
+                              {idx + 1}
+                            </span>
+                            <span className="font-bold text-slate-800 truncate">{name}</span>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0 text-xs">
+                            <span className="text-[11px] text-slate-500 font-medium">{count} trial{count !== 1 ? 's' : ''}</span>
+                            {avgEff !== null && (
+                              <span className="font-extrabold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/60">
+                                {avgEff}% Kill
+                              </span>
+                            )}
+                            {avgDays !== null && (
+                              <span className="font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200/60">
+                                ⏳ {avgDays}d
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <ModernBar value={compositeScore} max={100} color={isTop1 ? 'from-amber-500 to-emerald-500' : 'from-emerald-500 to-teal-400'} />
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="py-8 text-center text-slate-400 text-xs">No formulation benchmarks found for selected filters.</div>
+              )}
+            </div>
+
+            {/* Target Weed / Pest Finder */}
+            <div className="lg:col-span-5 bg-white rounded-2xl shadow-xs border border-slate-200/80 p-5 hover:shadow-md transition-shadow flex flex-col justify-between">
+              <div>
+                <div className="mb-4">
+                  <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                    <Target className="w-4 h-4 text-emerald-600" />
+                    Target {catConfig.targetLabel} Match Finder
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">Lookup top treatments validated against a target pest or weed</p>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">Target Species</label>
+                    <input
+                      value={targetQuery}
+                      onChange={e => setTargetQuery(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleFindByTarget()}
+                      list="dash-target-datalist"
+                      placeholder={`Enter ${catConfig.targetLabel.toLowerCase()}...`}
+                      className="border border-slate-200 rounded-xl px-3 py-2 text-xs w-full focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                    />
+                    <datalist id="dash-target-datalist">{allTargets.map(w => <option key={w} value={w} />)}</datalist>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1">
+                      <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">Min Kill Threshold: {minEfficacy}%</label>
+                      <input
+                        type="range"
+                        min="50"
+                        max="95"
+                        step="5"
+                        value={minEfficacy}
+                        onChange={e => setMinEfficacy(Number(e.target.value))}
+                        className="w-full accent-emerald-600"
+                      />
+                    </div>
+                    <button
+                      onClick={handleFindByTarget}
+                      className="mt-4 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-xs"
+                    >
+                      <Search className="w-3.5 h-3.5" /> Search
+                    </button>
+                  </div>
+                </div>
+
+                {/* Target Search Results */}
+                <div className="mt-4">
+                  {targetResults === null ? (
+                    <div className="py-6 text-center text-slate-400 text-xs">
+                      Type a {catConfig.targetLabel.toLowerCase()} above and search to view efficacy ranking.
+                    </div>
+                  ) : targetResults.results.length === 0 ? (
+                    <div className="py-6 text-center text-slate-500 text-xs">
+                      No treatments found for "{targetResults.query}" meeting ≥{minEfficacy}% efficacy.
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                      <p className="text-[11px] font-semibold text-slate-400 mb-2">
+                        {targetResults.total} trials matched "{targetResults.query}"
+                      </p>
+                      {targetResults.results.map((g, i) => (
+                        <div key={g.name} className="flex items-center gap-2.5 p-2.5 rounded-xl border border-slate-100 hover:bg-slate-50 transition">
+                          <span className="text-[10px] font-black text-slate-400 w-4 text-center">#{i + 1}</span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-bold text-slate-800 truncate">{g.name}</p>
+                            <p className="text-[10px] text-slate-400">{g.trials.length} plot trials</p>
+                          </div>
+                          <span className={`text-xs font-extrabold px-2 py-0.5 rounded-md ${
+                            g.avgEfficacy >= 90 ? 'bg-emerald-50 text-emerald-700' : 'bg-sky-50 text-sky-700'
+                          }`}>
+                            {g.avgEfficacy.toFixed(0)}% Kill
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-3 pt-2.5 border-t border-slate-100 text-right">
+                <button onClick={() => navigate('/formulations')} className="text-xs font-bold text-emerald-600 hover:text-emerald-700">
+                  Formulation Explorer →
+                </button>
               </div>
             </div>
-          )}
+          </div>
+
+          {/* ══════════════════════════════════════════════════════════════════
+              WEATHER REPOSITORY DASHBOARD (HISTORICAL & MULTI-LOCATION)
+              ══════════════════════════════════════════════════════════════════ */}
+          <div>
+            <WeatherDashboard
+              trials={trials}
+              activeCategory={activeCategory}
+              getAppState={getAppState}
+            />
+          </div>
 
         </div>
       </div>
