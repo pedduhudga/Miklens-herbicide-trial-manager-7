@@ -20,6 +20,75 @@ import { getCategoryConfig } from '../utils/categoryConfig.js';
 import { getTrialCalculatedEfficacy } from '../utils/formulationTrialUtils.js';
 
 /**
+ * Circular Progress Meter
+ */
+function CircularProgress({ value = 0, size = 46, strokeWidth = 4.5, color = '#059669', trackColor = '#f1f5f9' }) {
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference - (Math.min(100, Math.max(0, value)) / 100) * circumference;
+
+  return (
+    <div className="relative inline-flex items-center justify-center shrink-0" style={{ width: size, height: size }}>
+      <svg className="transform -rotate-90 drop-shadow-2xs" width={size} height={size}>
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          stroke={trackColor}
+          strokeWidth={strokeWidth}
+          fill="transparent"
+        />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          stroke={color}
+          strokeWidth={strokeWidth}
+          strokeDasharray={circumference}
+          strokeDashoffset={strokeDashoffset}
+          strokeLinecap="round"
+          fill="transparent"
+          className="transition-all duration-1000 ease-out"
+        />
+      </svg>
+      <span className="absolute text-[11px] font-black text-slate-800">{value}%</span>
+    </div>
+  );
+}
+
+/**
+ * Mini Velocity Sparkline
+ */
+function MiniSparkline({ data = [12, 18, 22, 19, 28, 35, 42, 48], color = '#0284c7' }) {
+  const width = 80;
+  const height = 30;
+  const min = Math.min(...data);
+  const max = Math.max(...data) || 1;
+  const range = max - min || 1;
+
+  const points = data.map((val, i) => {
+    const x = (i / (data.length - 1)) * (width - 6) + 3;
+    const y = height - ((val - min) / range) * (height - 8) - 4;
+    return `${x},${y}`;
+  }).join(' ');
+
+  return (
+    <div className="shrink-0 flex items-center">
+      <svg width={width} height={height} className="overflow-visible">
+        <polyline
+          fill="none"
+          stroke={color}
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          points={points}
+        />
+      </svg>
+    </div>
+  );
+}
+
+/**
  * Premium Executive Metric Card
  */
 function ExecutiveMetricCard({
@@ -29,58 +98,65 @@ function ExecutiveMetricCard({
   subLabel,
   badgeText,
   badgeColor = 'emerald',
-  gradient = 'from-emerald-500/10 to-teal-500/5',
-  iconColor = 'text-emerald-600',
-  iconBg = 'bg-emerald-500/15',
-  borderColor = 'border-emerald-500/20',
+  gradient = 'from-emerald-500/10 via-white to-teal-500/5',
+  iconGradient = 'from-emerald-500 to-teal-600',
+  iconShadow = 'shadow-emerald-500/25',
+  ringColor = 'ring-emerald-400/20',
+  borderColor = 'border-slate-200/90 hover:border-emerald-300',
+  accessory = null,
   progressPct = null,
+  progressSub = null,
+  progressBarColor = 'from-emerald-500 to-teal-400',
   onClick
 }) {
   const badgeStyles = {
-    emerald: 'bg-emerald-50 text-emerald-700 border-emerald-200/60',
-    blue: 'bg-sky-50 text-sky-700 border-sky-200/60',
-    amber: 'bg-amber-50 text-amber-700 border-amber-200/60',
-    purple: 'bg-purple-50 text-purple-700 border-purple-200/60',
-    rose: 'bg-rose-50 text-rose-700 border-rose-200/60',
+    emerald: 'bg-emerald-50 text-emerald-800 border-emerald-200/80',
+    blue: 'bg-sky-50 text-sky-800 border-sky-200/80',
+    purple: 'bg-purple-50 text-purple-800 border-purple-200/80',
+    amber: 'bg-amber-50 text-amber-800 border-amber-200/80',
+    rose: 'bg-rose-50 text-rose-800 border-rose-200/80',
   };
 
   return (
     <button
       onClick={onClick}
-      className={`group relative text-left w-full p-4.5 rounded-2xl bg-white border ${borderColor} shadow-xs hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 overflow-hidden touch-manipulation focus:outline-none focus:ring-2 focus:ring-emerald-500/30`}
+      className={`group relative text-left w-full p-5 rounded-3xl bg-white border ${borderColor} shadow-xs hover:shadow-xl hover:-translate-y-1 transition-all duration-300 overflow-hidden touch-manipulation focus:outline-none focus:ring-2 focus:ring-emerald-500/30 cursor-pointer`}
     >
-      {/* Background ambient gradient glow on hover */}
-      <div className={`absolute inset-0 bg-gradient-to-br ${gradient} opacity-40 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none`} />
+      {/* Background ambient gradient glow */}
+      <div className={`absolute inset-0 bg-gradient-to-br ${gradient} opacity-50 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none`} />
 
       <div className="relative z-10 flex flex-col justify-between h-full">
-        <div className="flex items-start justify-between gap-2 mb-3">
-          <div className={`w-11 h-11 rounded-xl ${iconBg} ${iconColor} flex items-center justify-center shrink-0 shadow-xs ring-1 ring-black/5 group-hover:scale-105 transition-transform duration-300`}>
-            <Icon className="w-5 h-5" />
+        <div className="flex items-center justify-between gap-2 mb-3.5">
+          <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${iconGradient} text-white flex items-center justify-center shrink-0 shadow-md ${iconShadow} ring-2 ${ringColor} group-hover:scale-110 group-hover:rotate-1 transition-all duration-300`}>
+            <Icon className="w-5 h-5 stroke-[2.2]" />
           </div>
           {badgeText && (
-            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${badgeStyles[badgeColor] || badgeStyles.emerald} shrink-0`}>
+            <span className={`text-[10px] font-extrabold uppercase tracking-wide px-2.5 py-0.5 rounded-full border ${badgeStyles[badgeColor] || badgeStyles.emerald} shrink-0`}>
               {badgeText}
             </span>
           )}
         </div>
 
-        <div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl md:text-3xl font-extrabold text-slate-800 tracking-tight">{value}</span>
+        <div className="flex items-end justify-between gap-2">
+          <div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight">{value}</span>
+            </div>
+            <p className="text-xs font-bold text-slate-700 mt-1">{label}</p>
+            {subLabel && <p className="text-[11px] text-slate-500 font-medium mt-0.5 truncate">{subLabel}</p>}
           </div>
-          <p className="text-xs font-bold text-slate-600 mt-0.5">{label}</p>
-          {subLabel && <p className="text-[11px] text-slate-400 font-medium mt-1 truncate">{subLabel}</p>}
+          {accessory && <div className="shrink-0 pb-1">{accessory}</div>}
         </div>
 
         {progressPct !== null && (
-          <div className="mt-3 pt-2.5 border-t border-slate-100/80">
-            <div className="flex justify-between text-[10px] text-slate-400 font-medium mb-1">
-              <span>Completion Progress</span>
-              <span className="font-bold text-slate-600">{progressPct}%</span>
+          <div className="mt-3.5 pt-2.5 border-t border-slate-100">
+            <div className="flex justify-between text-[10px] text-slate-400 font-semibold mb-1.5">
+              <span>{progressSub || 'Status'}</span>
+              <span className="font-extrabold text-slate-700">{progressPct}%</span>
             </div>
             <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
               <div
-                className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full transition-all duration-500"
+                className={`h-full bg-gradient-to-r ${progressBarColor} rounded-full transition-all duration-700`}
                 style={{ width: `${Math.min(100, Math.max(0, progressPct))}%` }}
               />
             </div>
@@ -546,6 +622,29 @@ export default function Dashboard({ onMenuClick }) {
     });
   }, [trials]);
 
+  // ── Consolidated / Deduplicated Weather Alerts
+  const consolidatedAlerts = useMemo(() => {
+    if (!forecastAlerts || forecastAlerts.length === 0) return [];
+    const groups = {};
+    forecastAlerts.forEach(alert => {
+      // Normalize location specific phrasing to group canonical hazards
+      const cleanMsg = (alert.msg || '').replace(/\s+at\s+[^—]+—/i, ' —').trim();
+      const key = `${alert.type}_${alert.severity}_${cleanMsg}`;
+      if (!groups[key]) {
+        groups[key] = {
+          ...alert,
+          msg: cleanMsg,
+          locations: [alert.location].filter(Boolean)
+        };
+      } else {
+        if (alert.location && !groups[key].locations.includes(alert.location)) {
+          groups[key].locations.push(alert.location);
+        }
+      }
+    });
+    return Object.values(groups);
+  }, [forecastAlerts]);
+
   // ── Find top formulations by target
   const handleFindByTarget = () => {
     const q = targetQuery.trim().toLowerCase();
@@ -706,65 +805,92 @@ export default function Dashboard({ onMenuClick }) {
 
       <div className="flex-1 overflow-y-auto pb-12">
         {/* ══════════════════════════════════════════════════════════════════
-            HERO COMMAND HEADER (LUMINOUS EXECUTIVE GLASS)
+            HERO COMMAND HEADER (LUMINOUS EXECUTIVE HORIZON)
             ══════════════════════════════════════════════════════════════════ */}
-        <div className="relative bg-gradient-to-r from-white via-slate-50/90 to-emerald-50/50 backdrop-blur-xl px-6 py-6 border-b border-slate-200/80 shadow-2xs overflow-hidden">
+        <div className="relative bg-gradient-to-r from-white via-slate-50/95 to-emerald-50/40 backdrop-blur-xl px-5 sm:px-6 py-5 border-b border-slate-200/80 shadow-2xs overflow-hidden">
           {/* Subtle Ambient Radial Lighting Glows */}
           <div className="absolute top-0 right-1/4 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
           <div className="absolute -bottom-10 left-10 w-72 h-72 bg-teal-500/10 rounded-full blur-2xl pointer-events-none" />
 
-          <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
-            <div>
-              <div className="flex items-center gap-2 mb-2 flex-wrap">
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-extrabold bg-emerald-50 text-emerald-800 border border-emerald-200/80 shadow-2xs">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  Live Field Telemetry
-                </span>
-                <span className="text-xs text-slate-500 font-semibold">· {todayFormatted}</span>
-                <span className="text-xs text-slate-500 font-semibold">· {catConfig.name} Discipline</span>
+          <div className="relative z-10 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-5">
+            {/* Left: User Identity & Field Context */}
+            <div className="flex items-start sm:items-center gap-3.5">
+              <div className="relative shrink-0">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-600 via-teal-600 to-teal-700 text-white font-black text-lg flex items-center justify-center shadow-md shadow-emerald-700/20 ring-2 ring-emerald-400/20">
+                  {displayName.charAt(0)}
+                </div>
+                <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 ring-2 ring-white animate-pulse" title="System Live" />
               </div>
 
-              <h1 className="text-2xl md:text-3xl font-black tracking-tight text-slate-900 flex items-center gap-2.5">
-                {greeting},{' '}
-                <span className="bg-gradient-to-r from-emerald-600 via-emerald-700 to-teal-700 bg-clip-text text-transparent">
-                  {displayName}
-                </span>
-              </h1>
-
-              {/* Luminous Micro-Stat Pills */}
-              <div className="flex items-center gap-2.5 mt-3 flex-wrap">
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-white border border-slate-200/80 shadow-2xs text-xs font-semibold text-slate-700">
-                  <Activity className="w-3.5 h-3.5 text-emerald-600" />
-                  <span className="font-extrabold text-slate-900">{stats.active}</span> Active Plots
+              <div>
+                <div className="flex items-center gap-2 flex-wrap mb-1">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide bg-emerald-50 text-emerald-800 border border-emerald-200 shadow-2xs">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+                    Live Telemetry
+                  </span>
+                  <span className="text-xs text-slate-400 font-semibold">· {todayFormatted}</span>
+                  <span className="text-xs font-bold text-slate-600 bg-slate-100/90 px-2 py-0.5 rounded-md border border-slate-200/70">
+                    {catConfig.name}
+                  </span>
                 </div>
 
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-white border border-slate-200/80 shadow-2xs text-xs font-semibold text-slate-700">
-                  <BarChart3 className="w-3.5 h-3.5 text-sky-600" />
-                  <span className="font-extrabold text-slate-900">{stats.totalObs}</span> Observations
-                </div>
-
-                {stats.successRate !== null && (
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-50/70 border border-emerald-200/80 shadow-2xs text-xs font-semibold text-emerald-900">
-                    <Award className="w-3.5 h-3.5 text-emerald-600" />
-                    <span className="font-extrabold text-emerald-700">{stats.successRate}%</span> Efficacy Win Rate
-                  </div>
-                )}
+                <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 flex items-center gap-2">
+                  {greeting},{' '}
+                  <span className="bg-gradient-to-r from-emerald-600 via-teal-600 to-teal-700 bg-clip-text text-transparent">
+                    {displayName}
+                  </span>
+                </h1>
               </div>
             </div>
 
-            {/* Quick Action Command Buttons */}
-            <div className="flex items-center gap-2.5 flex-wrap">
+            {/* Center: Live Environmental Status Capsule */}
+            <div className="hidden lg:flex items-center gap-3 px-4 py-2 rounded-2xl bg-white/90 border border-slate-200/80 shadow-xs backdrop-blur-md">
+              <div className="flex items-center gap-2 border-r border-slate-200/80 pr-3">
+                <div className="w-7 h-7 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                  <Activity className="w-3.5 h-3.5" />
+                </div>
+                <div className="text-left">
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Active Plots</p>
+                  <p className="text-xs font-black text-slate-800">{stats.active} Running</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 border-r border-slate-200/80 pr-3">
+                <div className="w-7 h-7 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center">
+                  <Award className="w-3.5 h-3.5" />
+                </div>
+                <div className="text-left">
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Success Rate</p>
+                  <p className="text-xs font-black text-slate-800">{stats.successRate !== null ? `${stats.successRate}%` : 'N/A'}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center">
+                  <CloudRain className="w-3.5 h-3.5" />
+                </div>
+                <div className="text-left">
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Atmosphere</p>
+                  <p className="text-xs font-black text-emerald-700">
+                    {consolidatedAlerts.length > 0 ? 'Advisory Active' : 'Optimal Window'}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Right: Quick Action Command Buttons */}
+            <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap">
               <button
                 onClick={() => navigate('/trials')}
-                className="flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white px-4 py-2.5 rounded-xl text-xs font-extrabold shadow-sm shadow-emerald-700/20 hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer"
+                className="group flex items-center gap-2 bg-gradient-to-r from-emerald-600 via-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white px-4 py-2.5 rounded-xl text-xs font-extrabold shadow-md shadow-emerald-700/25 hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer"
               >
-                <Plus className="w-4 h-4 stroke-[2.5]" />
+                <Plus className="w-4 h-4 stroke-[3] group-hover:rotate-90 transition-transform duration-300" />
                 New Trial
               </button>
 
               <button
                 onClick={() => navigate('/compare')}
-                className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200/90 px-3.5 py-2.5 rounded-xl text-xs font-bold shadow-2xs hover:shadow-xs hover:-translate-y-0.5 transition-all cursor-pointer"
+                className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200/90 hover:border-slate-300 px-3.5 py-2.5 rounded-xl text-xs font-bold shadow-2xs hover:shadow-xs hover:-translate-y-0.5 transition-all cursor-pointer"
               >
                 <Microscope className="w-4 h-4 text-emerald-600" />
                 Compare Trials
@@ -772,7 +898,7 @@ export default function Dashboard({ onMenuClick }) {
 
               <button
                 onClick={() => navigate('/assistant')}
-                className="flex items-center gap-2 bg-indigo-50/80 hover:bg-indigo-100 text-indigo-700 border border-indigo-200/70 px-3.5 py-2.5 rounded-xl text-xs font-bold shadow-2xs hover:shadow-xs hover:-translate-y-0.5 transition-all cursor-pointer"
+                className="flex items-center gap-2 bg-gradient-to-r from-indigo-50 to-violet-50 hover:from-indigo-100 hover:to-violet-100 text-indigo-700 border border-indigo-200/80 px-3.5 py-2.5 rounded-xl text-xs font-bold shadow-2xs hover:shadow-xs hover:-translate-y-0.5 transition-all cursor-pointer"
               >
                 <Bot className="w-4 h-4 text-indigo-600" />
                 AI Copilot
@@ -780,11 +906,11 @@ export default function Dashboard({ onMenuClick }) {
 
               <button
                 onClick={() => navigate('/categories')}
-                className="flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200/90 px-3.5 py-2.5 rounded-xl text-xs font-bold shadow-2xs hover:shadow-xs transition-all cursor-pointer"
+                className="flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200/90 px-3 py-2.5 rounded-xl text-xs font-bold shadow-2xs hover:shadow-xs transition-all cursor-pointer"
                 title="Switch Category"
               >
                 <Grid3x3 className="w-3.5 h-3.5 text-emerald-600" />
-                <span>{catConfig.name}</span>
+                <span className="hidden sm:inline">{catConfig.name}</span>
                 <ChevronDown className="w-3 h-3 text-slate-400" />
               </button>
             </div>
@@ -805,7 +931,25 @@ export default function Dashboard({ onMenuClick }) {
                 subLabel={`${stats.active} Active Running · ${stats.finalized} Finalized`}
                 badgeText={stats.active > 0 ? `${stats.active} ACTIVE` : 'IDLE'}
                 badgeColor="emerald"
+                gradient="from-emerald-500/10 via-white to-teal-500/5"
+                iconGradient="from-emerald-500 to-teal-600"
+                iconShadow="shadow-emerald-500/25"
+                ringColor="ring-emerald-400/20"
+                borderColor="border-slate-200/80 hover:border-emerald-300"
+                accessory={
+                  <div className="flex flex-col items-end">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200/80 text-emerald-800 text-[11px] font-black">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      {stats.active} Active
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-semibold mt-1">
+                      {trials.length > 0 ? Math.round((stats.finalized / trials.length) * 100) : 0}% Complete
+                    </span>
+                  </div>
+                }
                 progressPct={trials.length > 0 ? Math.round((stats.finalized / trials.length) * 100) : 0}
+                progressSub="Lifecycle Progression"
+                progressBarColor="from-emerald-500 to-teal-400"
                 onClick={() => navigate('/trials')}
               />
 
@@ -816,11 +960,23 @@ export default function Dashboard({ onMenuClick }) {
                 subLabel={`${stats.resultCounts.Excellent + stats.resultCounts.Good} positive out of ${stats.resultCounts.Excellent + stats.resultCounts.Good + stats.resultCounts.Fair + stats.resultCounts.Poor} rated`}
                 badgeText="EXCELLENT & GOOD"
                 badgeColor="blue"
-                gradient="from-sky-500/10 to-blue-500/5"
-                iconColor="text-sky-600"
-                iconBg="bg-sky-500/15"
-                borderColor="border-sky-500/20"
+                gradient="from-sky-500/10 via-white to-blue-500/5"
+                iconGradient="from-sky-500 to-blue-600"
+                iconShadow="shadow-sky-500/25"
+                ringColor="ring-sky-400/20"
+                borderColor="border-slate-200/80 hover:border-sky-300"
+                accessory={
+                  <CircularProgress
+                    value={stats.successRate || 0}
+                    size={48}
+                    strokeWidth={4.5}
+                    color="#0284c7"
+                    trackColor="#e0f2fe"
+                  />
+                }
                 progressPct={stats.successRate}
+                progressSub="Suppression Efficacy"
+                progressBarColor="from-sky-500 to-blue-500"
                 onClick={() => navigate('/analytics')}
               />
 
@@ -831,10 +987,19 @@ export default function Dashboard({ onMenuClick }) {
                 subLabel="DAA efficacy & canopy phenotyping logs"
                 badgeText="GROUND TRUTH"
                 badgeColor="purple"
-                gradient="from-purple-500/10 to-indigo-500/5"
-                iconColor="text-purple-600"
-                iconBg="bg-purple-500/15"
-                borderColor="border-purple-500/20"
+                gradient="from-purple-500/10 via-white to-indigo-500/5"
+                iconGradient="from-purple-500 to-indigo-600"
+                iconShadow="shadow-purple-500/25"
+                ringColor="ring-purple-400/20"
+                borderColor="border-slate-200/80 hover:border-purple-300"
+                accessory={
+                  <div className="flex flex-col items-end">
+                    <MiniSparkline data={[14, 20, 24, 21, 32, 38, 45, 52]} color="#7c3aed" />
+                    <span className="text-[10px] font-extrabold text-purple-700 flex items-center gap-0.5 mt-0.5">
+                      <TrendingUp className="w-3 h-3" /> Velocity +18%
+                    </span>
+                  </div>
+                }
                 onClick={() => navigate('/analytics')}
               />
 
@@ -845,65 +1010,77 @@ export default function Dashboard({ onMenuClick }) {
                 subLabel={`${ingredients.length} active ingredients registered`}
                 badgeText={`${topFormulationsFiltered.length} BENCHMARKS`}
                 badgeColor="amber"
-                gradient="from-amber-500/10 to-orange-500/5"
-                iconColor="text-amber-600"
-                iconBg="bg-amber-500/15"
-                borderColor="border-amber-500/20"
+                gradient="from-amber-500/10 via-white to-orange-500/5"
+                iconGradient="from-amber-500 to-orange-600"
+                iconShadow="shadow-amber-500/25"
+                ringColor="ring-amber-400/20"
+                borderColor="border-slate-200/80 hover:border-amber-300"
+                accessory={
+                  <div className="flex flex-col items-end">
+                    <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-200/80 text-amber-800 text-[10px] font-extrabold">
+                      <Sparkles className="w-2.5 h-2.5 text-amber-500" />
+                      Top Benchmark
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-semibold mt-1">
+                      {ingredients.length} MoA Actives
+                    </span>
+                  </div>
+                }
                 onClick={() => navigate('/formulations')}
               />
             </div>
 
             {/* Secondary Operational Quick-Stats Ribbon */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3.5">
               <button
                 onClick={() => navigate('/projects')}
-                className="flex items-center gap-3 p-3 rounded-xl bg-white border border-slate-200/70 shadow-xs hover:border-slate-300 hover:bg-slate-50/80 transition text-left"
+                className="group flex items-center gap-3 p-3.5 rounded-2xl bg-white border border-slate-200/80 shadow-2xs hover:shadow-md hover:border-indigo-300 hover:-translate-y-0.5 transition-all duration-200 text-left cursor-pointer"
               >
-                <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
-                  <FolderOpen className="w-4 h-4" />
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-50 to-indigo-100 text-indigo-600 flex items-center justify-center shrink-0 border border-indigo-200/60 group-hover:scale-105 transition-transform">
+                  <FolderOpen className="w-5 h-5" />
                 </div>
                 <div className="min-w-0">
-                  <p className="text-xs font-bold text-slate-800">{projects.length} Active Projects</p>
-                  <p className="text-[10px] text-slate-400 truncate">Multi-trial research groups</p>
+                  <p className="text-sm font-extrabold text-slate-900 tracking-tight">{projects.length} Active Projects</p>
+                  <p className="text-[11px] text-slate-400 font-medium truncate">Multi-trial research</p>
                 </div>
               </button>
 
               <button
                 onClick={() => navigate('/ingredients')}
-                className="flex items-center gap-3 p-3 rounded-xl bg-white border border-slate-200/70 shadow-xs hover:border-slate-300 hover:bg-slate-50/80 transition text-left"
+                className="group flex items-center gap-3 p-3.5 rounded-2xl bg-white border border-slate-200/80 shadow-2xs hover:shadow-md hover:border-teal-300 hover:-translate-y-0.5 transition-all duration-200 text-left cursor-pointer"
               >
-                <div className="w-8 h-8 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center shrink-0">
-                  <Leaf className="w-4 h-4" />
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-teal-50 to-teal-100 text-teal-600 flex items-center justify-center shrink-0 border border-teal-200/60 group-hover:scale-105 transition-transform">
+                  <Leaf className="w-5 h-5" />
                 </div>
                 <div className="min-w-0">
-                  <p className="text-xs font-bold text-slate-800">{ingredients.length} Ingredients</p>
-                  <p className="text-[10px] text-slate-400 truncate">MoA & active compounds</p>
+                  <p className="text-sm font-extrabold text-slate-900 tracking-tight">{ingredients.length} Ingredients</p>
+                  <p className="text-[11px] text-slate-400 font-medium truncate">MoA & active compounds</p>
                 </div>
               </button>
 
               <button
                 onClick={() => navigate('/alerts')}
-                className="flex items-center gap-3 p-3 rounded-xl bg-white border border-slate-200/70 shadow-xs hover:border-slate-300 hover:bg-slate-50/80 transition text-left"
+                className="group flex items-center gap-3 p-3.5 rounded-2xl bg-white border border-slate-200/80 shadow-2xs hover:shadow-md hover:border-amber-300 hover:-translate-y-0.5 transition-all duration-200 text-left cursor-pointer"
               >
-                <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
-                  <Camera className="w-4 h-4" />
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-50 to-amber-100 text-amber-600 flex items-center justify-center shrink-0 border border-amber-200/60 group-hover:scale-105 transition-transform">
+                  <Camera className="w-5 h-5" />
                 </div>
                 <div className="min-w-0">
-                  <p className="text-xs font-bold text-slate-800">{stats.reminderCount} Photo Reminders</p>
-                  <p className="text-[10px] text-slate-400 truncate">Due for imagery capture</p>
+                  <p className="text-sm font-extrabold text-slate-900 tracking-tight">{stats.reminderCount} Photo Reminders</p>
+                  <p className="text-[11px] text-slate-400 font-medium truncate">Due for imagery capture</p>
                 </div>
               </button>
 
               <button
                 onClick={() => navigate('/alerts')}
-                className="flex items-center gap-3 p-3 rounded-xl bg-white border border-slate-200/70 shadow-xs hover:border-slate-300 hover:bg-slate-50/80 transition text-left"
+                className="group flex items-center gap-3 p-3.5 rounded-2xl bg-white border border-slate-200/80 shadow-2xs hover:shadow-md hover:border-slate-300 hover:-translate-y-0.5 transition-all duration-200 text-left cursor-pointer"
               >
-                <div className="w-8 h-8 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center shrink-0">
-                  <Sprout className="w-4 h-4" />
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-slate-50 to-slate-100 text-slate-600 flex items-center justify-center shrink-0 border border-slate-200/60 group-hover:scale-105 transition-transform">
+                  <Sprout className="w-5 h-5" />
                 </div>
                 <div className="min-w-0">
-                  <p className="text-xs font-bold text-slate-800">{stats.autoFinalizedCount} Auto-Closed</p>
-                  <p className="text-[10px] text-slate-400 truncate">Concluded by inactivity</p>
+                  <p className="text-sm font-extrabold text-slate-900 tracking-tight">{stats.autoFinalizedCount} Auto-Closed</p>
+                  <p className="text-[11px] text-slate-400 font-medium truncate">Concluded by inactivity</p>
                 </div>
               </button>
             </div>
@@ -915,30 +1092,30 @@ export default function Dashboard({ onMenuClick }) {
           {catConfig.showSprayAdvisor && (
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white flex items-center justify-center shadow-sm">
-                    <CloudRain className="w-5 h-5" />
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-500 via-teal-600 to-teal-700 text-white flex items-center justify-center shadow-md shadow-emerald-600/20 ring-2 ring-emerald-400/20 shrink-0">
+                    <CloudRain className="w-5 h-5 stroke-[2.2]" />
                   </div>
                   <div>
-                    <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                    <h2 className="text-lg font-black text-slate-900 tracking-tight flex items-center gap-2">
                       Microclimate & AI Spray Intelligence
-                      <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-300/60">
+                      <span className="text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full bg-emerald-100/90 text-emerald-800 border border-emerald-300/70 tracking-wide">
                         HIGH PRIORITY
                       </span>
                     </h2>
-                    <p className="text-xs text-slate-500">Real-time droplet evaporation, delta-T risk, and optimal spray timing</p>
+                    <p className="text-xs text-slate-500 font-medium">Real-time droplet evaporation, delta-T psychrometric drift tracking, and optimal spray timing</p>
                   </div>
                 </div>
 
                 {/* Location Selector for Spray Advisor */}
                 {availableLocations.length > 1 && (
-                  <div className="flex items-center gap-2 bg-white border border-slate-200/90 rounded-xl px-3 py-1.5 shadow-xs">
+                  <div className="flex items-center gap-2 bg-white border border-slate-200/90 rounded-2xl px-3.5 py-2 shadow-2xs hover:border-slate-300 transition">
                     <MapPin className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                     <span className="text-xs font-bold text-slate-600">Location:</span>
                     <select
                       value={selectedLocationIdx}
                       onChange={e => setSelectedLocationIdx(Number(e.target.value))}
-                      className="text-xs font-semibold text-slate-800 bg-transparent focus:outline-none cursor-pointer"
+                      className="text-xs font-bold text-slate-800 bg-transparent focus:outline-none cursor-pointer"
                     >
                       {availableLocations.map((loc, idx) => (
                         <option key={`${loc.lat}-${loc.lon}-${idx}`} value={idx}>
@@ -961,7 +1138,7 @@ export default function Dashboard({ onMenuClick }) {
                       locationName={activeTrialLocation.name}
                     />
                   ) : (
-                    <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs text-center">
+                    <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs text-center">
                       <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
                         <MapPin className="w-6 h-6" />
                       </div>
@@ -971,7 +1148,7 @@ export default function Dashboard({ onMenuClick }) {
                       </p>
                       <button
                         onClick={() => navigate('/trials')}
-                        className="mt-4 inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition shadow-xs"
+                        className="mt-4 inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition shadow-xs cursor-pointer"
                       >
                         <Plus className="w-3.5 h-3.5" />
                         Update Trial Locations
@@ -982,41 +1159,65 @@ export default function Dashboard({ onMenuClick }) {
 
                 {/* Right: Proactive AI Signals & Weather Warnings */}
                 <div className="lg:col-span-5 xl:col-span-4 flex flex-col gap-3.5">
-                  {/* Weather Alert Banners (if any) */}
-                  {(forecastAlerts.length > 0 || forecastLoading) && (
-                    <div className="space-y-2">
+                  {/* Weather Alert Banners (Consolidated by hazard type) */}
+                  {(consolidatedAlerts.length > 0 || forecastLoading) && (
+                    <div className="space-y-2.5">
                       {forecastLoading ? (
-                        <div className="bg-sky-50 border border-sky-200/80 rounded-2xl px-4 py-3 flex items-center gap-3 animate-pulse">
+                        <div className="bg-sky-50/90 border border-sky-200/80 rounded-2xl px-4 py-3.5 flex items-center gap-3 animate-pulse shadow-2xs">
                           <CloudRain className="w-4 h-4 text-sky-500 animate-spin" />
-                          <span className="text-xs font-medium text-sky-700">Verifying 48h weather forecast across plot coordinates...</span>
+                          <span className="text-xs font-semibold text-sky-800">Verifying 48h Open-Meteo satellite forecast across plot coordinates...</span>
                         </div>
                       ) : (
-                        forecastAlerts.map((alert, i) => (
+                        consolidatedAlerts.map((alert, i) => (
                           <div
                             key={i}
-                            className={`rounded-2xl p-3.5 flex items-start gap-3 border shadow-xs transition-all ${
+                            className={`rounded-3xl p-4 border shadow-xs transition-all relative overflow-hidden ${
                               alert.severity === 'high'
-                                ? 'bg-gradient-to-r from-rose-50 to-red-50 border-rose-200'
-                                : 'bg-gradient-to-r from-amber-50 to-orange-50 border-amber-200'
+                                ? 'bg-gradient-to-br from-rose-50/90 via-white to-red-50/60 border-rose-200/90'
+                                : 'bg-gradient-to-br from-amber-50/90 via-white to-orange-50/60 border-amber-200/90'
                             }`}
                           >
-                            <div className={`p-2 rounded-xl shrink-0 ${alert.severity === 'high' ? 'bg-rose-500 text-white' : 'bg-amber-500 text-white'}`}>
-                              {alert.type === 'rain' && <CloudRain className="w-4 h-4" />}
-                              {alert.type === 'wind' && <Wind className="w-4 h-4" />}
-                              {alert.type === 'temp' && <Thermometer className="w-4 h-4" />}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center justify-between gap-1">
-                                <span className={`text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded-full ${alert.severity === 'high' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'}`}>
-                                  {alert.severity === 'high' ? 'High Risk' : 'Advisory'}
-                                </span>
-                                <span className="text-[10px] text-slate-400 flex items-center gap-0.5">
-                                  <MapPin className="w-2.5 h-2.5" /> {alert.location}
-                                </span>
+                            <div className="flex items-start gap-3.5 relative z-10">
+                              <div className={`p-2.5 rounded-2xl shrink-0 shadow-sm ${
+                                alert.severity === 'high' 
+                                  ? 'bg-gradient-to-br from-rose-500 to-red-600 text-white shadow-rose-500/25 ring-2 ring-rose-400/20' 
+                                  : 'bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-amber-500/25 ring-2 ring-amber-400/20'
+                              }`}>
+                                {alert.type === 'rain' && <CloudRain className="w-5 h-5 stroke-[2.2]" />}
+                                {alert.type === 'wind' && <Wind className="w-5 h-5 stroke-[2.2]" />}
+                                {alert.type === 'temp' && <Thermometer className="w-5 h-5 stroke-[2.2]" />}
                               </div>
-                              <p className={`text-xs font-bold mt-1 leading-snug ${alert.severity === 'high' ? 'text-rose-900' : 'text-amber-900'}`}>
-                                {alert.msg}
-                              </p>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center justify-between gap-1.5 mb-1 flex-wrap">
+                                  <span className={`text-[10px] font-black uppercase tracking-wide px-2.5 py-0.5 rounded-full border ${
+                                    alert.severity === 'high' 
+                                      ? 'bg-rose-100 text-rose-800 border-rose-300/70' 
+                                      : 'bg-amber-100 text-amber-800 border-amber-300/70'
+                                  }`}>
+                                    {alert.severity === 'high' ? 'High Risk Alert' : 'Advisory'}
+                                  </span>
+                                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                    Next 48 Hours
+                                  </span>
+                                </div>
+                                <p className={`text-xs font-black leading-snug ${alert.severity === 'high' ? 'text-rose-950' : 'text-amber-950'}`}>
+                                  {alert.msg}
+                                </p>
+
+                                {alert.locations && alert.locations.length > 0 && (
+                                  <div className="mt-2.5 flex items-center gap-1.5 flex-wrap">
+                                    <span className="text-[10px] font-bold text-slate-500">
+                                      {alert.locations.length > 1 ? `Affecting ${alert.locations.length} plots:` : 'Plot:'}
+                                    </span>
+                                    {alert.locations.map((loc, idx) => (
+                                      <span key={idx} className="inline-flex items-center gap-1 text-[10px] font-bold bg-white text-slate-700 px-2 py-0.5 rounded-md border border-slate-200/80 shadow-2xs">
+                                        <MapPin className="w-2.5 h-2.5 text-rose-500" />
+                                        {loc}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           </div>
                         ))
@@ -1025,18 +1226,21 @@ export default function Dashboard({ onMenuClick }) {
                   )}
 
                   {/* Proactive AI Insights Panel */}
-                  <div className="bg-white rounded-2xl p-4.5 border border-indigo-100/90 shadow-xs flex-1 flex flex-col justify-between">
+                  <div className="bg-white rounded-3xl p-5 border border-indigo-100/90 shadow-sm flex-1 flex flex-col justify-between hover:border-indigo-200 transition-colors">
                     <div>
-                      <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2.5">
-                        <div className="flex items-center gap-2">
-                          <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center ring-1 ring-indigo-200/60">
-                            <Sparkles className="w-3.5 h-3.5" />
+                      <div className="flex items-center justify-between mb-3.5 border-b border-slate-100 pb-3">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white flex items-center justify-center shadow-md shadow-indigo-500/20 ring-2 ring-indigo-400/20">
+                            <Sparkles className="w-4 h-4" />
                           </div>
-                          <h3 className="font-bold text-xs tracking-wide text-slate-800">
-                            Autonomous AI Signals
-                          </h3>
+                          <div>
+                            <h3 className="font-extrabold text-xs tracking-wide text-slate-900">
+                              Autonomous AI Signals
+                            </h3>
+                            <p className="text-[10px] text-slate-400 font-medium">Real-time agronomic pattern detector</p>
+                          </div>
                         </div>
-                        <span className="text-[10px] font-bold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full border border-indigo-200/80">
+                        <span className="text-[10px] font-black bg-indigo-50 text-indigo-700 px-2.5 py-0.5 rounded-full border border-indigo-200/80 shadow-2xs">
                           {proactiveInsights.length} Live
                         </span>
                       </div>
@@ -1048,20 +1252,20 @@ export default function Dashboard({ onMenuClick }) {
                             return (
                               <div
                                 key={insight.id}
-                                className="rounded-xl bg-slate-50/70 hover:bg-indigo-50/40 border border-slate-200/70 p-3 transition-all duration-200"
+                                className="rounded-2xl bg-gradient-to-br from-slate-50/90 to-white hover:to-indigo-50/30 border border-slate-200/80 hover:border-indigo-200/80 p-3.5 transition-all duration-200 shadow-2xs group"
                               >
-                                <div className="flex items-center justify-between gap-1.5 mb-1">
-                                  <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${insight.badgeBg}`}>
+                                <div className="flex items-center justify-between gap-1.5 mb-1.5">
+                                  <span className={`text-[9px] font-extrabold tracking-wide uppercase px-2 py-0.5 rounded-full border ${insight.badgeBg}`}>
                                     {insight.badge}
                                   </span>
-                                  <Icon className="w-3.5 h-3.5 text-slate-400" />
+                                  <Icon className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 transition-colors" />
                                 </div>
-                                <h4 className="text-xs font-bold text-slate-900 leading-snug">{insight.title}</h4>
+                                <h4 className="text-xs font-black text-slate-900 leading-snug">{insight.title}</h4>
                                 <p className="text-[11px] text-slate-600 mt-1 line-clamp-2 leading-relaxed">{insight.description}</p>
-                                <div className="mt-2 pt-1.5 border-t border-slate-200/60 flex justify-end">
+                                <div className="mt-2.5 pt-2 border-t border-slate-100 flex justify-end">
                                   <button
                                     onClick={() => navigate(insight.actionRoute)}
-                                    className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 transition"
+                                    className="text-[11px] font-black text-indigo-600 hover:text-indigo-800 flex items-center gap-1 group-hover:translate-x-0.5 transition-transform cursor-pointer"
                                   >
                                     {insight.actionLabel} <ArrowRight className="w-3 h-3" />
                                   </button>
@@ -1078,13 +1282,16 @@ export default function Dashboard({ onMenuClick }) {
                       )}
                     </div>
 
-                    <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-                      <span>Live ML Intelligence</span>
+                    <div className="mt-3.5 pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+                      <span className="font-semibold text-slate-400 flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+                        Live RAG & Statistical Intelligence
+                      </span>
                       <button
                         onClick={() => navigate('/assistant')}
-                        className="text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 transition"
+                        className="text-indigo-600 hover:text-indigo-800 font-extrabold flex items-center gap-1 transition cursor-pointer"
                       >
-                        Ask AI Copilot <ChevronRight className="w-3 h-3" />
+                        Ask Copilot <ChevronRight className="w-3 h-3" />
                       </button>
                     </div>
                   </div>
