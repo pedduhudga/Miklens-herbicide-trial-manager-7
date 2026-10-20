@@ -706,46 +706,48 @@ export default function Dashboard({ onMenuClick }) {
 
       <div className="flex-1 overflow-y-auto pb-12">
         {/* ══════════════════════════════════════════════════════════════════
-            HERO COMMAND HEADER
+            HERO COMMAND HEADER (LUMINOUS EXECUTIVE GLASS)
             ══════════════════════════════════════════════════════════════════ */}
-        <div className="relative bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950 px-6 py-6 text-white border-b border-emerald-500/20 shadow-md overflow-hidden">
-          {/* Subtle Ambient Radial Lighting */}
+        <div className="relative bg-gradient-to-r from-white via-slate-50/90 to-emerald-50/50 backdrop-blur-xl px-6 py-6 border-b border-slate-200/80 shadow-2xs overflow-hidden">
+          {/* Subtle Ambient Radial Lighting Glows */}
           <div className="absolute top-0 right-1/4 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
           <div className="absolute -bottom-10 left-10 w-72 h-72 bg-teal-500/10 rounded-full blur-2xl pointer-events-none" />
 
           <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
             <div>
-              <div className="flex items-center gap-2.5 mb-1.5 flex-wrap">
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-extrabold bg-emerald-50 text-emerald-800 border border-emerald-200/80 shadow-2xs">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                   Live Field Telemetry
                 </span>
-                <span className="text-xs text-slate-400 font-medium">· {todayFormatted}</span>
-                <span className="text-xs text-slate-400 font-medium">· {catConfig.name} Discipline</span>
+                <span className="text-xs text-slate-500 font-semibold">· {todayFormatted}</span>
+                <span className="text-xs text-slate-500 font-semibold">· {catConfig.name} Discipline</span>
               </div>
 
-              <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-white flex items-center gap-3">
-                {greeting}, {displayName}
+              <h1 className="text-2xl md:text-3xl font-black tracking-tight text-slate-900 flex items-center gap-2.5">
+                {greeting},{' '}
+                <span className="bg-gradient-to-r from-emerald-600 via-emerald-700 to-teal-700 bg-clip-text text-transparent">
+                  {displayName}
+                </span>
               </h1>
 
-              <div className="flex items-center gap-4 text-xs text-slate-300 mt-2 flex-wrap">
-                <div className="flex items-center gap-1.5">
-                  <Activity className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="font-semibold text-white">{stats.active}</span> Active Trials Running
+              {/* Luminous Micro-Stat Pills */}
+              <div className="flex items-center gap-2.5 mt-3 flex-wrap">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-white border border-slate-200/80 shadow-2xs text-xs font-semibold text-slate-700">
+                  <Activity className="w-3.5 h-3.5 text-emerald-600" />
+                  <span className="font-extrabold text-slate-900">{stats.active}</span> Active Plots
                 </div>
-                <span className="text-slate-600">|</span>
-                <div className="flex items-center gap-1.5">
-                  <BarChart3 className="w-3.5 h-3.5 text-sky-400" />
-                  <span className="font-semibold text-white">{stats.totalObs}</span> Observations Scored
+
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-white border border-slate-200/80 shadow-2xs text-xs font-semibold text-slate-700">
+                  <BarChart3 className="w-3.5 h-3.5 text-sky-600" />
+                  <span className="font-extrabold text-slate-900">{stats.totalObs}</span> Observations
                 </div>
+
                 {stats.successRate !== null && (
-                  <>
-                    <span className="text-slate-600">|</span>
-                    <div className="flex items-center gap-1.5">
-                      <Award className="w-3.5 h-3.5 text-amber-400" />
-                      <span className="font-semibold text-emerald-400">{stats.successRate}%</span> Efficacy Win Rate
-                    </div>
-                  </>
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-50/70 border border-emerald-200/80 shadow-2xs text-xs font-semibold text-emerald-900">
+                    <Award className="w-3.5 h-3.5 text-emerald-600" />
+                    <span className="font-extrabold text-emerald-700">{stats.successRate}%</span> Efficacy Win Rate
+                  </div>
                 )}
               </div>
             </div>
@@ -754,34 +756,34 @@ export default function Dashboard({ onMenuClick }) {
             <div className="flex items-center gap-2.5 flex-wrap">
               <button
                 onClick={() => navigate('/trials')}
-                className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-md shadow-emerald-900/40 hover:shadow-emerald-900/60 hover:-translate-y-0.5 transition-all"
+                className="flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white px-4 py-2.5 rounded-xl text-xs font-extrabold shadow-sm shadow-emerald-700/20 hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer"
               >
-                <Plus className="w-4 h-4" />
+                <Plus className="w-4 h-4 stroke-[2.5]" />
                 New Trial
               </button>
 
               <button
                 onClick={() => navigate('/compare')}
-                className="flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white border border-white/15 backdrop-blur-sm px-3.5 py-2 rounded-xl text-xs font-bold hover:-translate-y-0.5 transition-all"
+                className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200/90 px-3.5 py-2.5 rounded-xl text-xs font-bold shadow-2xs hover:shadow-xs hover:-translate-y-0.5 transition-all cursor-pointer"
               >
-                <Microscope className="w-4 h-4 text-emerald-300" />
+                <Microscope className="w-4 h-4 text-emerald-600" />
                 Compare Trials
               </button>
 
               <button
                 onClick={() => navigate('/assistant')}
-                className="flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white border border-white/15 backdrop-blur-sm px-3.5 py-2 rounded-xl text-xs font-bold hover:-translate-y-0.5 transition-all"
+                className="flex items-center gap-2 bg-indigo-50/80 hover:bg-indigo-100 text-indigo-700 border border-indigo-200/70 px-3.5 py-2.5 rounded-xl text-xs font-bold shadow-2xs hover:shadow-xs hover:-translate-y-0.5 transition-all cursor-pointer"
               >
-                <Bot className="w-4 h-4 text-sky-300" />
+                <Bot className="w-4 h-4 text-indigo-600" />
                 AI Copilot
               </button>
 
               <button
                 onClick={() => navigate('/categories')}
-                className="flex items-center gap-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 px-3 py-2 rounded-xl text-xs font-semibold transition"
+                className="flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200/90 px-3.5 py-2.5 rounded-xl text-xs font-bold shadow-2xs hover:shadow-xs transition-all cursor-pointer"
                 title="Switch Category"
               >
-                <Grid3x3 className="w-3.5 h-3.5" />
+                <Grid3x3 className="w-3.5 h-3.5 text-emerald-600" />
                 <span>{catConfig.name}</span>
                 <ChevronDown className="w-3 h-3 text-slate-400" />
               </button>
@@ -1023,18 +1025,18 @@ export default function Dashboard({ onMenuClick }) {
                   )}
 
                   {/* Proactive AI Insights Panel */}
-                  <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-950 rounded-2xl p-4.5 text-white shadow-md border border-indigo-500/20 flex-1 flex flex-col justify-between">
+                  <div className="bg-white rounded-2xl p-4.5 border border-indigo-100/90 shadow-xs flex-1 flex flex-col justify-between">
                     <div>
-                      <div className="flex items-center justify-between mb-3 border-b border-indigo-500/20 pb-2.5">
+                      <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2.5">
                         <div className="flex items-center gap-2">
-                          <div className="w-7 h-7 rounded-lg bg-amber-400/20 text-amber-300 flex items-center justify-center ring-1 ring-amber-400/30">
+                          <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center ring-1 ring-indigo-200/60">
                             <Sparkles className="w-3.5 h-3.5" />
                           </div>
-                          <h3 className="font-bold text-xs tracking-wide text-white">
+                          <h3 className="font-bold text-xs tracking-wide text-slate-800">
                             Autonomous AI Signals
                           </h3>
                         </div>
-                        <span className="text-[10px] font-bold bg-indigo-500/30 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-400/30">
+                        <span className="text-[10px] font-bold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full border border-indigo-200/80">
                           {proactiveInsights.length} Live
                         </span>
                       </div>
@@ -1046,20 +1048,20 @@ export default function Dashboard({ onMenuClick }) {
                             return (
                               <div
                                 key={insight.id}
-                                className="rounded-xl bg-white/5 hover:bg-white/10 backdrop-blur-xs border border-white/10 p-3 transition-all duration-200"
+                                className="rounded-xl bg-slate-50/70 hover:bg-indigo-50/40 border border-slate-200/70 p-3 transition-all duration-200"
                               >
                                 <div className="flex items-center justify-between gap-1.5 mb-1">
                                   <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${insight.badgeBg}`}>
                                     {insight.badge}
                                   </span>
-                                  <Icon className="w-3.5 h-3.5 text-white/60" />
+                                  <Icon className="w-3.5 h-3.5 text-slate-400" />
                                 </div>
-                                <h4 className="text-xs font-bold text-white leading-snug">{insight.title}</h4>
-                                <p className="text-[11px] text-slate-300 mt-1 line-clamp-2 leading-relaxed">{insight.description}</p>
-                                <div className="mt-2 pt-1.5 border-t border-white/5 flex justify-end">
+                                <h4 className="text-xs font-bold text-slate-900 leading-snug">{insight.title}</h4>
+                                <p className="text-[11px] text-slate-600 mt-1 line-clamp-2 leading-relaxed">{insight.description}</p>
+                                <div className="mt-2 pt-1.5 border-t border-slate-200/60 flex justify-end">
                                   <button
                                     onClick={() => navigate(insight.actionRoute)}
-                                    className="text-[11px] font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition"
+                                    className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 transition"
                                   >
                                     {insight.actionLabel} <ArrowRight className="w-3 h-3" />
                                   </button>
@@ -1070,17 +1072,17 @@ export default function Dashboard({ onMenuClick }) {
                         </div>
                       ) : (
                         <div className="py-6 text-center text-slate-400 text-xs">
-                          <ShieldCheck className="w-8 h-8 mx-auto mb-2 text-emerald-400 opacity-80" />
+                          <ShieldCheck className="w-8 h-8 mx-auto mb-2 text-emerald-500 opacity-80" />
                           All active field plots are performing within expected tolerance levels.
                         </div>
                       )}
                     </div>
 
-                    <div className="mt-3 pt-2.5 border-t border-white/10 flex items-center justify-between text-[11px] text-slate-400">
+                    <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
                       <span>Live ML Intelligence</span>
                       <button
                         onClick={() => navigate('/assistant')}
-                        className="text-indigo-300 hover:text-white font-bold flex items-center gap-1 transition"
+                        className="text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 transition"
                       >
                         Ask AI Copilot <ChevronRight className="w-3 h-3" />
                       </button>
