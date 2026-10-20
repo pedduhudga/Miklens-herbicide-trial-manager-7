@@ -19,162 +19,35 @@ import { getCategoryConfig } from '../utils/categoryConfig.js';
 import { getTrialCalculatedEfficacy } from '../utils/formulationTrialUtils.js';
 
 /**
- * Circular Progress Meter
+ * Minimalist Agronomic Metric Card (Matching Reference Design)
  */
-function CircularProgress({ value = 0, size = 46, strokeWidth = 4.5, color = '#059669', trackColor = '#f1f5f9' }) {
-  const radius = (size - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const strokeDashoffset = circumference - (Math.min(100, Math.max(0, value)) / 100) * circumference;
-
-  return (
-    <div className="relative inline-flex items-center justify-center shrink-0" style={{ width: size, height: size }}>
-      <svg className="transform -rotate-90 drop-shadow-2xs" width={size} height={size}>
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          stroke={trackColor}
-          strokeWidth={strokeWidth}
-          fill="transparent"
-        />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          stroke={color}
-          strokeWidth={strokeWidth}
-          strokeDasharray={circumference}
-          strokeDashoffset={strokeDashoffset}
-          strokeLinecap="round"
-          fill="transparent"
-          className="transition-all duration-1000 ease-out"
-        />
-      </svg>
-      <span className="absolute text-[11px] font-black text-slate-800">{value}%</span>
-    </div>
-  );
-}
-
-/**
- * Mini Velocity Sparkline
- */
-function MiniSparkline({ data = [12, 18, 22, 19, 28, 35, 42, 48], color = '#0284c7' }) {
-  const width = 80;
-  const height = 30;
-  const min = Math.min(...data);
-  const max = Math.max(...data) || 1;
-  const range = max - min || 1;
-
-  const points = data.map((val, i) => {
-    const x = (i / (data.length - 1)) * (width - 6) + 3;
-    const y = height - ((val - min) / range) * (height - 8) - 4;
-    return `${x},${y}`;
-  }).join(' ');
-
-  return (
-    <div className="shrink-0 flex items-center">
-      <svg width={width} height={height} className="overflow-visible">
-        <polyline
-          fill="none"
-          stroke={color}
-          strokeWidth="2.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          points={points}
-        />
-      </svg>
-    </div>
-  );
-}
-
-/**
- * Premium Executive Metric Card
- */
-function ExecutiveMetricCard({
-  icon: Icon,
-  label,
-  value,
-  subLabel,
-  badgeText,
-  badgeColor = 'emerald',
-  gradient = 'from-emerald-500/10 via-white to-teal-500/5',
-  iconGradient = 'from-emerald-500 to-teal-600',
-  iconShadow = 'shadow-emerald-500/25',
-  ringColor = 'ring-emerald-400/20',
-  borderColor = 'border-slate-200/90 hover:border-emerald-300',
-  accessory = null,
-  progressPct = null,
-  progressSub = null,
-  progressBarColor = 'from-emerald-500 to-teal-400',
-  onClick
-}) {
-  const badgeStyles = {
-    emerald: 'bg-emerald-50 text-emerald-800 border-emerald-200/80',
-    blue: 'bg-sky-50 text-sky-800 border-sky-200/80',
-    purple: 'bg-purple-50 text-purple-800 border-purple-200/80',
-    amber: 'bg-amber-50 text-amber-800 border-amber-200/80',
-    rose: 'bg-rose-50 text-rose-800 border-rose-200/80',
-  };
-
+function MinimalMetricCard({ icon: Icon, label, value, subLabel, onClick }) {
   return (
     <button
       onClick={onClick}
-      className={`group relative text-left w-full p-5 rounded-3xl bg-white border ${borderColor} shadow-xs hover:shadow-xl hover:-translate-y-1 transition-all duration-300 overflow-hidden touch-manipulation focus:outline-none focus:ring-2 focus:ring-emerald-500/30 cursor-pointer`}
+      className="text-left w-full p-4 sm:p-5 rounded-2xl bg-white border border-slate-200/80 shadow-[0_1px_2px_rgba(0,0,0,0.03)] hover:border-[#154734]/40 hover:shadow-sm transition-all duration-200 cursor-pointer group flex flex-col justify-between"
     >
-      {/* Background ambient gradient glow */}
-      <div className={`absolute inset-0 bg-gradient-to-br ${gradient} opacity-50 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none`} />
-
-      <div className="relative z-10 flex flex-col justify-between h-full">
-        <div className="flex items-center justify-between gap-2 mb-3.5">
-          <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${iconGradient} text-white flex items-center justify-center shrink-0 shadow-md ${iconShadow} ring-2 ${ringColor} group-hover:scale-110 group-hover:rotate-1 transition-all duration-300`}>
-            <Icon className="w-5 h-5 stroke-[2.2]" />
-          </div>
-          {badgeText && (
-            <span className={`text-[10px] font-extrabold uppercase tracking-wide px-2.5 py-0.5 rounded-full border ${badgeStyles[badgeColor] || badgeStyles.emerald} shrink-0`}>
-              {badgeText}
-            </span>
-          )}
-        </div>
-
-        <div className="flex items-end justify-between gap-2">
-          <div>
-            <div className="flex items-baseline gap-2">
-              <span className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight">{value}</span>
-            </div>
-            <p className="text-xs font-bold text-slate-700 mt-1">{label}</p>
-            {subLabel && <p className="text-[11px] text-slate-500 font-medium mt-0.5 truncate">{subLabel}</p>}
-          </div>
-          {accessory && <div className="shrink-0 pb-1">{accessory}</div>}
-        </div>
-
-        {progressPct !== null && (
-          <div className="mt-3.5 pt-2.5 border-t border-slate-100">
-            <div className="flex justify-between text-[10px] text-slate-400 font-semibold mb-1.5">
-              <span>{progressSub || 'Status'}</span>
-              <span className="font-extrabold text-slate-700">{progressPct}%</span>
-            </div>
-            <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-              <div
-                className={`h-full bg-gradient-to-r ${progressBarColor} rounded-full transition-all duration-700`}
-                style={{ width: `${Math.min(100, Math.max(0, progressPct))}%` }}
-              />
-            </div>
-          </div>
-        )}
+      <div className="w-9 h-9 rounded-xl bg-[#eef5f1] text-[#154734] border border-[#d6e5dc] flex items-center justify-center shrink-0 mb-3.5 group-hover:scale-105 transition-transform">
+        <Icon className="w-4 h-4 stroke-[2.2]" />
+      </div>
+      <div>
+        <p className="text-xs font-medium text-slate-500">{label}</p>
+        <p className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight mt-0.5">{value}</p>
+        {subLabel && <p className="text-[11px] text-slate-400 font-normal mt-1 truncate">{subLabel}</p>}
       </div>
     </button>
   );
 }
 
 /**
- * Modern Progress Bar
+ * Modern Clean Progress Bar
  */
-function ModernBar({ value, max, color = 'from-emerald-500 to-teal-400' }) {
+function ModernBar({ value, max, color = 'bg-[#154734]' }) {
   const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
   return (
-    <div className="h-2 bg-slate-100/90 rounded-full overflow-hidden p-0.5 border border-slate-200/50">
+    <div className="h-2 bg-slate-100 rounded-full overflow-hidden border border-slate-200/40">
       <div
-        className={`h-full rounded-full bg-gradient-to-r ${color} transition-all duration-500 shadow-xs`}
+        className={`h-full rounded-full ${color} transition-all duration-500`}
         style={{ width: `${pct}%` }}
       />
     </div>
@@ -627,116 +500,69 @@ export default function Dashboard({ onMenuClick }) {
   });
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50/80">
+    <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#f8faf9]">
       <TopBar title="Agronomic Command Center" onMenuClick={onMenuClick} />
 
       <div className="flex-1 overflow-y-auto pb-12">
         {/* ══════════════════════════════════════════════════════════════════
-            HERO COMMAND HEADER (LUMINOUS EXECUTIVE HORIZON)
+            MINIMALIST EXECUTIVE HERO HEADER (MATCHING REFERENCE)
             ══════════════════════════════════════════════════════════════════ */}
-        <div className="relative bg-gradient-to-r from-white via-slate-50/95 to-emerald-50/40 backdrop-blur-xl px-5 sm:px-6 py-5 border-b border-slate-200/80 shadow-2xs overflow-hidden">
-          {/* Subtle Ambient Radial Lighting Glows */}
-          <div className="absolute top-0 right-1/4 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute -bottom-10 left-10 w-72 h-72 bg-teal-500/10 rounded-full blur-2xl pointer-events-none" />
+        <div className="relative bg-white border-b border-slate-200/80 overflow-hidden">
+          {/* Subtle Panoramic Field Backdrop on the right */}
+          <div className="absolute inset-y-0 right-0 w-full sm:w-2/3 lg:w-1/2 pointer-events-none overflow-hidden select-none">
+            <img
+              src="/field_banner.jpg"
+              alt="Agronomic Field"
+              className="w-full h-full object-cover object-right opacity-30"
+            />
+            {/* Smooth gradient fade to white from left */}
+            <div className="absolute inset-0 bg-gradient-to-r from-white via-white/80 to-transparent" />
+          </div>
 
-          <div className="relative z-10 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-5">
-            {/* Left: User Identity & Field Context */}
-            <div className="flex items-start sm:items-center gap-3.5">
-              <div className="relative shrink-0">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-600 via-teal-600 to-teal-700 text-white font-black text-lg flex items-center justify-center shadow-md shadow-emerald-700/20 ring-2 ring-emerald-400/20">
-                  {displayName.charAt(0)}
-                </div>
-                <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 ring-2 ring-white animate-pulse" title="System Live" />
+          <div className="relative z-10 px-5 sm:px-8 py-6 max-w-7xl mx-auto flex flex-col md:flex-row md:items-end md:justify-between gap-5">
+            <div>
+              {/* Breadcrumb & Date */}
+              <div className="flex items-center gap-2 text-xs text-slate-500 font-medium mb-2">
+                <span className="text-[#154734] font-semibold">{catConfig.name}</span>
+                <span>/</span>
+                <span className="text-slate-700">Dashboard</span>
+                <span className="text-slate-300">·</span>
+                <span>{todayFormatted}</span>
               </div>
 
-              <div>
-                <div className="flex items-center gap-2 flex-wrap mb-1">
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide bg-emerald-50 text-emerald-800 border border-emerald-200 shadow-2xs">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
-                    Live Telemetry
-                  </span>
-                  <span className="text-xs text-slate-400 font-semibold">· {todayFormatted}</span>
-                  <span className="text-xs font-bold text-slate-600 bg-slate-100/90 px-2 py-0.5 rounded-md border border-slate-200/70">
-                    {catConfig.name}
-                  </span>
-                </div>
-
-                <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 flex items-center gap-2">
-                  {greeting},{' '}
-                  <span className="bg-gradient-to-r from-emerald-600 via-teal-600 to-teal-700 bg-clip-text text-transparent">
-                    {displayName}
-                  </span>
-                </h1>
-              </div>
+              {/* Title & Subtitle */}
+              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
+                {greeting}, {displayName}
+              </h1>
+              <p className="text-xs sm:text-sm text-slate-500 font-normal mt-1 max-w-xl">
+                A clear view of trial progress, efficacy and field conditions.
+              </p>
             </div>
 
-            {/* Center: Live Environmental Status Capsule */}
-            <div className="hidden lg:flex items-center gap-3 px-4 py-2 rounded-2xl bg-white/90 border border-slate-200/80 shadow-xs backdrop-blur-md">
-              <div className="flex items-center gap-2 border-r border-slate-200/80 pr-3">
-                <div className="w-7 h-7 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-                  <Activity className="w-3.5 h-3.5" />
-                </div>
-                <div className="text-left">
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Active Plots</p>
-                  <p className="text-xs font-black text-slate-800">{stats.active} Running</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 border-r border-slate-200/80 pr-3">
-                <div className="w-7 h-7 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center">
-                  <Award className="w-3.5 h-3.5" />
-                </div>
-                <div className="text-left">
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Success Rate</p>
-                  <p className="text-xs font-black text-slate-800">{stats.successRate !== null ? `${stats.successRate}%` : 'N/A'}</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center">
-                  <CloudRain className="w-3.5 h-3.5" />
-                </div>
-                <div className="text-left">
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Atmosphere</p>
-                  <p className="text-xs font-black text-emerald-700">
-                    {consolidatedAlerts.length > 0 ? 'Advisory Active' : 'Optimal Window'}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Right: Quick Action Command Buttons */}
-            <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap">
+            {/* Action Buttons */}
+            <div className="flex items-center gap-2.5 flex-wrap shrink-0">
               <button
                 onClick={() => navigate('/trials')}
-                className="group flex items-center gap-2 bg-gradient-to-r from-emerald-600 via-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white px-4 py-2.5 rounded-xl text-xs font-extrabold shadow-md shadow-emerald-700/25 hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer"
+                className="inline-flex items-center gap-2 bg-[#154734] hover:bg-[#0e3828] text-white px-4 py-2.5 rounded-xl text-xs font-semibold shadow-xs hover:shadow transition-all duration-200 cursor-pointer"
               >
-                <Plus className="w-4 h-4 stroke-[3] group-hover:rotate-90 transition-transform duration-300" />
-                New Trial
+                <Plus className="w-4 h-4 stroke-[2.5]" />
+                New trial
               </button>
 
               <button
                 onClick={() => navigate('/compare')}
-                className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200/90 hover:border-slate-300 px-3.5 py-2.5 rounded-xl text-xs font-bold shadow-2xs hover:shadow-xs hover:-translate-y-0.5 transition-all cursor-pointer"
+                className="inline-flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200/90 hover:border-slate-300 px-4 py-2.5 rounded-xl text-xs font-semibold shadow-2xs hover:shadow-xs transition-all duration-200 cursor-pointer"
               >
-                <Microscope className="w-4 h-4 text-emerald-600" />
-                Compare Trials
-              </button>
-
-              <button
-                onClick={() => navigate('/assistant')}
-                className="flex items-center gap-2 bg-gradient-to-r from-indigo-50 to-violet-50 hover:from-indigo-100 hover:to-violet-100 text-indigo-700 border border-indigo-200/80 px-3.5 py-2.5 rounded-xl text-xs font-bold shadow-2xs hover:shadow-xs hover:-translate-y-0.5 transition-all cursor-pointer"
-              >
-                <Bot className="w-4 h-4 text-indigo-600" />
-                AI Copilot
+                <Microscope className="w-4 h-4 text-slate-500" />
+                Compare trials
               </button>
 
               <button
                 onClick={() => navigate('/categories')}
-                className="flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200/90 px-3 py-2.5 rounded-xl text-xs font-bold shadow-2xs hover:shadow-xs transition-all cursor-pointer"
+                className="inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200/90 px-3 py-2.5 rounded-xl text-xs font-semibold shadow-2xs hover:shadow-xs transition-all cursor-pointer"
                 title="Switch Category"
               >
-                <Grid3x3 className="w-3.5 h-3.5 text-emerald-600" />
+                <Grid3x3 className="w-3.5 h-3.5 text-slate-500" />
                 <span className="hidden sm:inline">{catConfig.name}</span>
                 <ChevronDown className="w-3 h-3 text-slate-400" />
               </button>
@@ -745,145 +571,113 @@ export default function Dashboard({ onMenuClick }) {
         </div>
 
         <div className="p-4 md:p-6 space-y-6 max-w-7xl mx-auto">
+          {/* ══════════════════════════════════════════════════════════════════
+              MINIMALIST KPI METRIC CARDS (EXACT REFERENCE 4-CARD ROW)
+              ══════════════════════════════════════════════════════════════════ */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <MinimalMetricCard
+              icon={Leaf}
+              label="Active trials"
+              value={stats.active}
+              subLabel="Currently running"
+              onClick={() => navigate('/trials')}
+            />
+
+            <MinimalMetricCard
+              icon={Layers}
+              label="Total trials"
+              value={trials.length}
+              subLabel={`${stats.active} active · ${stats.finalized} finalized`}
+              onClick={() => navigate('/trials')}
+            />
+
+            <MinimalMetricCard
+              icon={BarChart3}
+              label="Observations"
+              value={stats.totalObs.toLocaleString()}
+              subLabel="Field & greenhouse records"
+              onClick={() => navigate('/analytics')}
+            />
+
+            <MinimalMetricCard
+              icon={FlaskConical}
+              label="Formulations"
+              value={formulations.length}
+              subLabel="Active proprietary recipes"
+              onClick={() => navigate('/formulations')}
+            />
+          </div>
 
           {/* ══════════════════════════════════════════════════════════════════
-              EXECUTIVE KPI SUMMARY METRIC CARDS
+              TRIAL PROGRESS & OPERATIONAL STATUS (MATCHING REFERENCE)
               ══════════════════════════════════════════════════════════════════ */}
-          <div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <ExecutiveMetricCard
-                icon={Activity}
-                label="Total Field Trials"
-                value={trials.length}
-                subLabel={`${stats.active} Active Running · ${stats.finalized} Finalized`}
-                badgeText={stats.active > 0 ? `${stats.active} ACTIVE` : 'IDLE'}
-                badgeColor="emerald"
-                gradient="from-emerald-500/10 via-white to-teal-500/5"
-                iconGradient="from-emerald-500 to-teal-600"
-                iconShadow="shadow-emerald-500/25"
-                ringColor="ring-emerald-400/20"
-                borderColor="border-slate-200/80 hover:border-emerald-300"
-                accessory={
-                  <div className="flex flex-col items-end">
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200/80 text-emerald-800 text-[11px] font-black">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                      {stats.active} Active
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-semibold mt-1">
-                      {trials.length > 0 ? Math.round((stats.finalized / trials.length) * 100) : 0}% Complete
-                    </span>
-                  </div>
-                }
-                progressPct={trials.length > 0 ? Math.round((stats.finalized / trials.length) * 100) : 0}
-                progressSub="Lifecycle Progression"
-                progressBarColor="from-emerald-500 to-teal-400"
-                onClick={() => navigate('/trials')}
-              />
+          <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 tracking-tight">Trial progress</h3>
+                <p className="text-xs text-slate-500 font-normal">
+                  Overall progress across all {catConfig.name.toLowerCase()} trials
+                </p>
+              </div>
+              <div className="text-left sm:text-right">
+                <p className="text-xs font-semibold text-slate-700">
+                  {stats.active} active · {stats.finalized} finalized
+                </p>
+                <p className="text-[11px] text-slate-400 font-medium">
+                  {trials.length > 0 ? Math.round((stats.finalized / trials.length) * 100) : 0}% complete
+                </p>
+              </div>
+            </div>
 
-              <ExecutiveMetricCard
-                icon={Award}
-                label="Bio-Efficacy Success Rate"
-                value={stats.successRate !== null ? `${stats.successRate}%` : 'N/A'}
-                subLabel={`${stats.resultCounts.Excellent + stats.resultCounts.Good} positive out of ${stats.resultCounts.Excellent + stats.resultCounts.Good + stats.resultCounts.Fair + stats.resultCounts.Poor} rated`}
-                badgeText="EXCELLENT & GOOD"
-                badgeColor="blue"
-                gradient="from-sky-500/10 via-white to-blue-500/5"
-                iconGradient="from-sky-500 to-blue-600"
-                iconShadow="shadow-sky-500/25"
-                ringColor="ring-sky-400/20"
-                borderColor="border-slate-200/80 hover:border-sky-300"
-                accessory={
-                  <CircularProgress
-                    value={stats.successRate || 0}
-                    size={48}
-                    strokeWidth={4.5}
-                    color="#0284c7"
-                    trackColor="#e0f2fe"
-                  />
-                }
-                progressPct={stats.successRate}
-                progressSub="Suppression Efficacy"
-                progressBarColor="from-sky-500 to-blue-500"
-                onClick={() => navigate('/analytics')}
-              />
-
-              <ExecutiveMetricCard
-                icon={BarChart3}
-                label="Observations Scored"
-                value={stats.totalObs}
-                subLabel="DAA efficacy & canopy phenotyping logs"
-                badgeText="GROUND TRUTH"
-                badgeColor="purple"
-                gradient="from-purple-500/10 via-white to-indigo-500/5"
-                iconGradient="from-purple-500 to-indigo-600"
-                iconShadow="shadow-purple-500/25"
-                ringColor="ring-purple-400/20"
-                borderColor="border-slate-200/80 hover:border-purple-300"
-                accessory={
-                  <div className="flex flex-col items-end">
-                    <MiniSparkline data={[14, 20, 24, 21, 32, 38, 45, 52]} color="#7c3aed" />
-                    <span className="text-[10px] font-extrabold text-purple-700 flex items-center gap-0.5 mt-0.5">
-                      <TrendingUp className="w-3 h-3" /> Velocity +18%
-                    </span>
-                  </div>
-                }
-                onClick={() => navigate('/analytics')}
-              />
-
-              <ExecutiveMetricCard
-                icon={FlaskConical}
-                label="Formulations Portfolio"
-                value={formulations.length}
-                subLabel="Active proprietary recipes & field blends"
-                badgeText={`${topFormulationsFiltered.length} BENCHMARKS`}
-                badgeColor="amber"
-                gradient="from-amber-500/10 via-white to-orange-500/5"
-                iconGradient="from-amber-500 to-orange-600"
-                iconShadow="shadow-amber-500/25"
-                ringColor="ring-amber-400/20"
-                borderColor="border-slate-200/80 hover:border-amber-300"
-                accessory={
-                  <div className="flex flex-col items-end">
-                    <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-200/80 text-amber-800 text-[10px] font-extrabold">
-                      <Sparkles className="w-2.5 h-2.5 text-amber-500" />
-                      Top Benchmark
-                    </div>
-                    <span className="text-[10px] text-slate-400 font-semibold mt-1">
-                      {formulations.length} Blends
-                    </span>
-                  </div>
-                }
-                onClick={() => navigate('/formulations')}
+            {/* Deep forest green progress bar */}
+            <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden border border-slate-200/50 mb-4">
+              <div
+                className="h-full rounded-full bg-[#154734] transition-all duration-700"
+                style={{
+                  width: `${trials.length > 0 ? Math.min(100, Math.round((stats.finalized / trials.length) * 100)) : 0}%`
+                }}
               />
             </div>
 
-            {/* Secondary Operational Quick-Stats Ribbon */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mt-3.5">
+            {/* Secondary Operational Status Badges */}
+            <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-slate-100 text-xs text-slate-600">
               <button
                 onClick={() => navigate('/alerts')}
-                className="group flex items-center gap-3 p-3.5 rounded-2xl bg-white border border-slate-200/80 shadow-2xs hover:shadow-md hover:border-amber-300 hover:-translate-y-0.5 transition-all duration-200 text-left cursor-pointer"
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100/80 border border-slate-200/70 transition cursor-pointer"
               >
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-50 to-amber-100 text-amber-600 flex items-center justify-center shrink-0 border border-amber-200/60 group-hover:scale-105 transition-transform">
-                  <Camera className="w-5 h-5" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-extrabold text-slate-900 tracking-tight">{stats.reminderCount} Photo Reminders</p>
-                  <p className="text-[11px] text-slate-400 font-medium truncate">Plots due for scheduled imagery capture</p>
-                </div>
+                <Camera className="w-3.5 h-3.5 text-slate-600" />
+                <span className="font-semibold text-slate-800">{stats.reminderCount}</span>
+                <span className="text-slate-500 font-normal">Photo Reminders</span>
               </button>
 
               <button
                 onClick={() => navigate('/alerts')}
-                className="group flex items-center gap-3 p-3.5 rounded-2xl bg-white border border-slate-200/80 shadow-2xs hover:shadow-md hover:border-slate-300 hover:-translate-y-0.5 transition-all duration-200 text-left cursor-pointer"
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100/80 border border-slate-200/70 transition cursor-pointer"
               >
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-slate-50 to-slate-100 text-slate-600 flex items-center justify-center shrink-0 border border-slate-200/60 group-hover:scale-105 transition-transform">
-                  <Sprout className="w-5 h-5" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-extrabold text-slate-900 tracking-tight">{stats.autoFinalizedCount} Auto-Closed</p>
-                  <p className="text-[11px] text-slate-400 font-medium truncate">Archived due to protocol conclusion / inactivity</p>
-                </div>
+                <Sprout className="w-3.5 h-3.5 text-slate-600" />
+                <span className="font-semibold text-slate-800">{stats.autoFinalizedCount}</span>
+                <span className="text-slate-500 font-normal">Auto-Closed</span>
               </button>
+
+              {stats.successRate !== null && (
+                <button
+                  onClick={() => navigate('/analytics')}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#eef5f1] hover:bg-[#e4efe8] border border-[#d6e5dc] text-[#154734] transition cursor-pointer"
+                >
+                  <Award className="w-3.5 h-3.5 text-[#154734]" />
+                  <span className="font-semibold">{stats.successRate}%</span>
+                  <span className="text-[#154734]/80 font-normal">Suppression Win Rate</span>
+                </button>
+              )}
+
+              <div className="ml-auto">
+                <button
+                  onClick={() => navigate('/trials')}
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-[#154734] hover:text-[#0e3828] cursor-pointer"
+                >
+                  View all trials <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           </div>
 
@@ -894,29 +688,29 @@ export default function Dashboard({ onMenuClick }) {
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-500 via-teal-600 to-teal-700 text-white flex items-center justify-center shadow-md shadow-emerald-600/20 ring-2 ring-emerald-400/20 shrink-0">
-                    <CloudRain className="w-5 h-5 stroke-[2.2]" />
+                  <div className="w-9 h-9 rounded-xl bg-[#eef5f1] text-[#154734] border border-[#d6e5dc] flex items-center justify-center shrink-0">
+                    <CloudRain className="w-4 h-4 stroke-[2.2]" />
                   </div>
                   <div>
-                    <h2 className="text-lg font-black text-slate-900 tracking-tight flex items-center gap-2">
+                    <h2 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight flex items-center gap-2">
                       Microclimate & AI Spray Intelligence
-                      <span className="text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full bg-emerald-100/90 text-emerald-800 border border-emerald-300/70 tracking-wide">
-                        HIGH PRIORITY
+                      <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-md bg-[#eef5f1] text-[#154734] border border-[#d6e5dc]">
+                        Advisory Active
                       </span>
                     </h2>
-                    <p className="text-xs text-slate-500 font-medium">Real-time droplet evaporation, delta-T psychrometric drift tracking, and optimal spray timing</p>
+                    <p className="text-xs text-slate-500 font-normal">Real-time droplet evaporation, delta-T psychrometric drift tracking, and optimal spray timing</p>
                   </div>
                 </div>
 
                 {/* Location Selector for Spray Advisor */}
                 {availableLocations.length > 1 && (
-                  <div className="flex items-center gap-2 bg-white border border-slate-200/90 rounded-2xl px-3.5 py-2 shadow-2xs hover:border-slate-300 transition">
-                    <MapPin className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                    <span className="text-xs font-bold text-slate-600">Location:</span>
+                  <div className="flex items-center gap-2 bg-white border border-slate-200/90 rounded-xl px-3 py-1.5 shadow-2xs hover:border-slate-300 transition">
+                    <MapPin className="w-3.5 h-3.5 text-[#154734] shrink-0" />
+                    <span className="text-xs font-medium text-slate-500">Location:</span>
                     <select
                       value={selectedLocationIdx}
                       onChange={e => setSelectedLocationIdx(Number(e.target.value))}
-                      className="text-xs font-bold text-slate-800 bg-transparent focus:outline-none cursor-pointer"
+                      className="text-xs font-semibold text-slate-800 bg-transparent focus:outline-none cursor-pointer"
                     >
                       {availableLocations.map((loc, idx) => (
                         <option key={`${loc.lat}-${loc.lon}-${idx}`} value={idx}>
@@ -930,64 +724,64 @@ export default function Dashboard({ onMenuClick }) {
 
               {/* Weather Alert Banners (Consolidated across plots) */}
               {(consolidatedAlerts.length > 0 || forecastLoading) && (
-                <div className="space-y-2.5">
+                <div className="space-y-2">
                   {forecastLoading ? (
-                    <div className="bg-sky-50/90 border border-sky-200/80 rounded-2xl px-4 py-3 flex items-center gap-3 animate-pulse shadow-2xs">
-                      <CloudRain className="w-4 h-4 text-sky-500 animate-spin" />
-                      <span className="text-xs font-semibold text-sky-800">Verifying 48h Open-Meteo satellite forecast across plot coordinates...</span>
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 flex items-center gap-3 animate-pulse">
+                      <CloudRain className="w-4 h-4 text-slate-400 animate-spin" />
+                      <span className="text-xs font-medium text-slate-600">Verifying 48h Open-Meteo satellite forecast across plot coordinates...</span>
                     </div>
                   ) : (
                     consolidatedAlerts.map((alert, i) => (
                       <div
                         key={i}
-                        className={`rounded-2xl p-3.5 sm:p-4 border shadow-xs transition-all relative overflow-hidden ${
+                        className={`rounded-xl p-3 sm:p-3.5 border transition-all ${
                           alert.severity === 'high'
-                            ? 'bg-gradient-to-r from-rose-50/90 via-white to-red-50/60 border-rose-200/90'
-                            : 'bg-gradient-to-r from-amber-50/90 via-white to-orange-50/60 border-amber-200/90'
+                            ? 'bg-rose-50/70 border-rose-200/90'
+                            : 'bg-amber-50/70 border-amber-200/90'
                         }`}
                       >
-                        <div className="flex items-center gap-3.5 relative z-10">
-                          <div className={`p-2.5 rounded-xl shrink-0 shadow-sm ${
+                        <div className="flex items-center gap-3">
+                          <div className={`p-2 rounded-lg shrink-0 ${
                             alert.severity === 'high' 
-                              ? 'bg-gradient-to-br from-rose-500 to-red-600 text-white shadow-rose-500/25 ring-2 ring-rose-400/20' 
-                              : 'bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-amber-500/25 ring-2 ring-amber-400/20'
+                              ? 'bg-rose-100 text-rose-700' 
+                              : 'bg-amber-100 text-amber-700'
                           }`}>
-                            {alert.type === 'rain' && <CloudRain className="w-4 h-4 stroke-[2.2]" />}
-                            {alert.type === 'wind' && <Wind className="w-4 h-4 stroke-[2.2]" />}
-                            {alert.type === 'temp' && <Thermometer className="w-4 h-4 stroke-[2.2]" />}
+                            {alert.type === 'rain' && <CloudRain className="w-4 h-4 stroke-[2]" />}
+                            {alert.type === 'wind' && <Wind className="w-4 h-4 stroke-[2]" />}
+                            {alert.type === 'temp' && <Thermometer className="w-4 h-4 stroke-[2]" />}
                           </div>
                           <div className="flex-1 min-w-0 sm:flex sm:items-center sm:justify-between gap-3">
                             <div>
                               <div className="flex items-center gap-2 mb-0.5">
-                                <span className={`text-[9px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full border ${
+                                <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded ${
                                   alert.severity === 'high' 
-                                    ? 'bg-rose-100 text-rose-800 border-rose-300/70' 
-                                    : 'bg-amber-100 text-amber-800 border-amber-300/70'
+                                    ? 'bg-rose-200/70 text-rose-800' 
+                                    : 'bg-amber-200/70 text-amber-800'
                                 }`}>
                                   {alert.severity === 'high' ? 'High Risk Alert' : 'Advisory'}
                                 </span>
-                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                <span className="text-[10px] font-medium text-slate-500">
                                   Next 48 Hours
                                 </span>
                               </div>
-                              <p className={`text-xs font-black leading-snug ${alert.severity === 'high' ? 'text-rose-950' : 'text-amber-950'}`}>
+                              <p className={`text-xs font-semibold leading-snug ${alert.severity === 'high' ? 'text-rose-950' : 'text-amber-950'}`}>
                                 {alert.msg}
                               </p>
                             </div>
 
                             {alert.locations && alert.locations.length > 0 && (
                               <div className="mt-1.5 sm:mt-0 flex items-center gap-1.5 flex-wrap shrink-0">
-                                <span className="text-[10px] font-bold text-slate-500">
+                                <span className="text-[10px] font-medium text-slate-500">
                                   {alert.locations.length > 1 ? `Affecting ${alert.locations.length} plots:` : 'Plot:'}
                                 </span>
                                 {alert.locations.slice(0, 3).map((loc, idx) => (
-                                  <span key={idx} className="inline-flex items-center gap-1 text-[10px] font-bold bg-white text-slate-700 px-2 py-0.5 rounded-md border border-slate-200/80 shadow-2xs">
+                                  <span key={idx} className="inline-flex items-center gap-1 text-[10px] font-medium bg-white text-slate-700 px-2 py-0.5 rounded border border-slate-200">
                                     <MapPin className="w-2.5 h-2.5 text-rose-500" />
                                     {loc}
                                   </span>
                                 ))}
                                 {alert.locations.length > 3 && (
-                                  <span className="text-[10px] font-bold text-slate-400">+{alert.locations.length - 3} more</span>
+                                  <span className="text-[10px] font-medium text-slate-400">+{alert.locations.length - 3} more</span>
                                 )}
                               </div>
                             )}
@@ -1034,17 +828,17 @@ export default function Dashboard({ onMenuClick }) {
               ══════════════════════════════════════════════════════════════════ */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
             {/* Trials Progression Over Time */}
-            <div className="lg:col-span-7 bg-white rounded-2xl shadow-xs border border-slate-200/80 p-5 hover:shadow-md transition-shadow">
+            <div className="lg:col-span-7 bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.03)] border border-slate-200/80 p-5 hover:shadow-sm transition-shadow">
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
-                    <BarChart3 className="w-4 h-4 text-emerald-600" />
+                  <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                    <BarChart3 className="w-4 h-4 text-[#154734]" />
                     Trials Progression Velocity
                     <span className="text-xs text-slate-400 font-normal">(Last 12 Months)</span>
                   </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">Seasonal trial initiation and plot deployment rates</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Seasonal trial initiation and plot deployment rates</p>
                 </div>
-                <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200/60">
+                <span className="text-xs font-semibold text-[#154734] bg-[#eef5f1] px-2.5 py-1 rounded-full border border-[#d6e5dc]">
                   Peak: {maxMonthCount} Trials
                 </span>
               </div>
@@ -1059,16 +853,16 @@ export default function Dashboard({ onMenuClick }) {
                           {month}: {count} trials
                         </div>
                         <div
-                          className={`w-full rounded-t-lg transition-all duration-300 ${
+                          className={`w-full rounded-t-md transition-all duration-300 ${
                             isPeak
-                              ? 'bg-gradient-to-t from-emerald-600 to-teal-400 shadow-xs'
+                              ? 'bg-[#154734]'
                               : count > 0
-                              ? 'bg-gradient-to-t from-emerald-500/80 to-teal-400/70 hover:from-emerald-600 hover:to-teal-500'
+                              ? 'bg-[#2a7251] hover:bg-[#154734]'
                               : 'bg-slate-100'
                           }`}
                           style={{ height: `${Math.max(6, (count / maxMonthCount) * 120)}px` }}
                         />
-                        <span className={`text-[10px] font-medium transition-colors ${isPeak ? 'text-emerald-700 font-bold' : 'text-slate-400 group-hover:text-slate-700'}`}>
+                        <span className={`text-[10px] font-medium transition-colors ${isPeak ? 'text-[#154734] font-bold' : 'text-slate-400 group-hover:text-slate-700'}`}>
                           {month}
                         </span>
                       </div>
@@ -1081,18 +875,18 @@ export default function Dashboard({ onMenuClick }) {
             </div>
 
             {/* Results & Bio-Suppression Breakdown */}
-            <div className="lg:col-span-5 bg-white rounded-2xl shadow-xs border border-slate-200/80 p-5 hover:shadow-md transition-shadow flex flex-col justify-between">
+            <div className="lg:col-span-5 bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.03)] border border-slate-200/80 p-5 hover:shadow-sm transition-shadow flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between mb-4">
                   <div>
-                    <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
-                      <Award className="w-4 h-4 text-emerald-600" />
+                    <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                      <Award className="w-4 h-4 text-[#154734]" />
                       Results Distribution
                     </h3>
-                    <p className="text-xs text-slate-400 mt-0.5">Finalized agronomic bio-efficacy ratings</p>
+                    <p className="text-xs text-slate-500 mt-0.5">Finalized agronomic bio-efficacy ratings</p>
                   </div>
                   {stats.successRate !== null && (
-                    <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200/60">
+                    <span className="text-xs font-semibold text-[#154734] bg-[#eef5f1] px-2.5 py-1 rounded-full border border-[#d6e5dc]">
                       {stats.successRate}% Win Rate
                     </span>
                   )}
@@ -1101,25 +895,25 @@ export default function Dashboard({ onMenuClick }) {
                 {(stats.resultCounts.Excellent + stats.resultCounts.Good + stats.resultCounts.Fair + stats.resultCounts.Poor) > 0 ? (
                   <div className="space-y-3 pt-1">
                     {[
-                      ['Excellent (≥90% Kill)', stats.resultCounts.Excellent, 'from-emerald-600 to-emerald-400', 'text-emerald-700'],
-                      ['Good (70–89% Kill)', stats.resultCounts.Good, 'from-sky-600 to-sky-400', 'text-sky-700'],
-                      ['Fair (50–69% Kill)', stats.resultCounts.Fair, 'from-amber-500 to-amber-300', 'text-amber-700'],
-                      ['Poor (<50% Kill)', stats.resultCounts.Poor, 'from-rose-500 to-rose-300', 'text-rose-700'],
-                    ].map(([label, count, barGradient, textCol]) => {
+                      ['Excellent (≥90% Kill)', stats.resultCounts.Excellent, 'bg-[#154734]'],
+                      ['Good (70–89% Kill)', stats.resultCounts.Good, 'bg-[#2a7251]'],
+                      ['Fair (50–69% Kill)', stats.resultCounts.Fair, 'bg-slate-400'],
+                      ['Poor (<50% Kill)', stats.resultCounts.Poor, 'bg-slate-300'],
+                    ].map(([label, count, barColor]) => {
                       const total = trials.length || 1;
                       const pct = Math.round((count / total) * 100);
                       return (
                         <div key={label} className="group">
                           <div className="flex justify-between items-center text-xs mb-1">
-                            <span className="font-semibold text-slate-700 flex items-center gap-1.5">
-                              <span className={`w-2 h-2 rounded-full bg-gradient-to-r ${barGradient}`} />
+                            <span className="font-medium text-slate-700 flex items-center gap-1.5">
+                              <span className={`w-2 h-2 rounded-full ${barColor}`} />
                               {label}
                             </span>
-                            <span className="font-bold text-slate-700">
+                            <span className="font-semibold text-slate-800">
                               {count} <span className="text-slate-400 font-normal">({pct}%)</span>
                             </span>
                           </div>
-                          <ModernBar value={count} max={total} color={barGradient} />
+                          <ModernBar value={count} max={total} color={barColor} />
                         </div>
                       );
                     })}
@@ -1131,7 +925,7 @@ export default function Dashboard({ onMenuClick }) {
 
               <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
                 <span>Standard GEP Performance Metric</span>
-                <button onClick={() => navigate('/analytics')} className="text-emerald-600 hover:text-emerald-700 font-bold flex items-center gap-1">
+                <button onClick={() => navigate('/analytics')} className="text-[#154734] hover:text-[#0e3828] font-semibold flex items-center gap-1 cursor-pointer">
                   Full Analytics <ChevronRight className="w-3 h-3" />
                 </button>
               </div>
@@ -1143,18 +937,18 @@ export default function Dashboard({ onMenuClick }) {
               ══════════════════════════════════════════════════════════════════ */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
             {/* Upcoming Observations Schedule */}
-            <div className="lg:col-span-6 bg-white rounded-2xl shadow-xs border border-slate-200/80 p-5 hover:shadow-md transition-shadow">
+            <div className="lg:col-span-6 bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.03)] border border-slate-200/80 p-5 hover:shadow-sm transition-shadow">
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
-                    <CalendarDays className="w-4 h-4 text-emerald-600" />
+                  <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                    <CalendarDays className="w-4 h-4 text-[#154734]" />
                     Upcoming Observation Schedule
                   </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">Next 14 days · {dueObservations.length} observation{dueObservations.length !== 1 ? 's' : ''} scheduled</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Next 14 days · {dueObservations.length} observation{dueObservations.length !== 1 ? 's' : ''} scheduled</p>
                 </div>
                 <button
                   onClick={() => navigate('/trials')}
-                  className="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1 cursor-pointer"
+                  className="text-xs font-semibold text-[#154734] hover:text-[#0e3828] flex items-center gap-1 cursor-pointer"
                 >
                   All Trials <ChevronRight className="w-3.5 h-3.5" />
                 </button>
@@ -1167,35 +961,35 @@ export default function Dashboard({ onMenuClick }) {
                     let statusBg, statusText, badge;
 
                     if (item.isOverdue) {
-                      statusBg = 'bg-rose-50/70 border-rose-200';
-                      statusText = 'text-rose-800';
-                      badge = <span className="text-[10px] font-extrabold bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full border border-rose-200 animate-pulse">OVERDUE</span>;
+                      statusBg = 'bg-rose-50/70 border-rose-200/80';
+                      statusText = 'text-rose-900';
+                      badge = <span className="text-[10px] font-bold bg-rose-100 text-rose-700 px-2 py-0.5 rounded border border-rose-200">OVERDUE</span>;
                     } else if (item.isToday) {
-                      statusBg = 'bg-amber-50/70 border-amber-200';
-                      statusText = 'text-amber-800';
-                      badge = <span className="text-[10px] font-extrabold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full border border-amber-300">TODAY</span>;
+                      statusBg = 'bg-amber-50/70 border-amber-200/80';
+                      statusText = 'text-amber-900';
+                      badge = <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded border border-amber-300">TODAY</span>;
                     } else if (item.diffDays <= 2) {
-                      statusBg = 'bg-sky-50/70 border-sky-200';
-                      statusText = 'text-sky-800';
-                      badge = <span className="text-[10px] font-bold bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full border border-sky-200">IN {item.diffDays}d</span>;
+                      statusBg = 'bg-slate-50 border-slate-200/80';
+                      statusText = 'text-slate-800';
+                      badge = <span className="text-[10px] font-semibold bg-[#eef5f1] text-[#154734] px-2 py-0.5 rounded border border-[#d6e5dc]">IN {item.diffDays}d</span>;
                     } else {
-                      statusBg = 'bg-slate-50/80 border-slate-200/70';
+                      statusBg = 'bg-slate-50/60 border-slate-200/60';
                       statusText = 'text-slate-700';
-                      badge = <span className="text-[10px] font-semibold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">IN {item.diffDays}d</span>;
+                      badge = <span className="text-[10px] font-medium bg-white text-slate-600 px-2 py-0.5 rounded border border-slate-200">IN {item.diffDays}d</span>;
                     }
 
                     return (
                       <div
                         key={`${item.trialId}-${item.daa}-${i}`}
                         onClick={() => navigate('/trials')}
-                        className={`flex items-center gap-3 rounded-xl border p-3 ${statusBg} transition-all hover:shadow-xs cursor-pointer group`}
+                        className={`flex items-center gap-3 rounded-xl border p-3 ${statusBg} transition-all hover:border-[#154734]/30 cursor-pointer group`}
                       >
-                        <div className="flex flex-col items-center justify-center w-12 h-11 bg-white rounded-lg shadow-xs border border-black/5 shrink-0">
-                          <span className={`text-xs font-black ${statusText}`}>{dateStr.split(' ')[1]}</span>
-                          <span className="text-[9px] text-slate-400 font-bold uppercase">{dateStr.split(' ')[2]}</span>
+                        <div className="flex flex-col items-center justify-center w-12 h-11 bg-white rounded-lg shadow-2xs border border-slate-200/70 shrink-0">
+                          <span className={`text-xs font-bold ${statusText}`}>{dateStr.split(' ')[1]}</span>
+                          <span className="text-[9px] text-slate-400 font-semibold uppercase">{dateStr.split(' ')[2]}</span>
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className={`text-xs font-bold ${statusText} truncate group-hover:underline`}>{item.trialName}</p>
+                          <p className={`text-xs font-semibold ${statusText} truncate group-hover:text-[#154734] transition`}>{item.trialName}</p>
                           <p className="text-[10px] text-slate-500 truncate mt-0.5">
                             DAA {item.daa} observation milestone{item.location ? ` · ${item.location}` : ''}
                           </p>
@@ -1207,46 +1001,46 @@ export default function Dashboard({ onMenuClick }) {
                 </div>
               ) : (
                 <div className="py-10 text-center text-slate-400 text-xs">
-                  <CheckCircle className="w-8 h-8 text-emerald-400 mx-auto mb-2 opacity-80" />
+                  <CheckCircle className="w-8 h-8 text-[#154734] mx-auto mb-2 opacity-60" />
                   No observations due within the next 14 days.
                 </div>
               )}
             </div>
 
             {/* Trial Health & Risk Status (Compact Executive Overview) */}
-            <div className="lg:col-span-6 bg-white rounded-2xl shadow-xs border border-slate-200/80 p-5 hover:shadow-md transition-shadow flex flex-col justify-between">
+            <div className="lg:col-span-6 bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.03)] border border-slate-200/80 p-5 hover:shadow-sm transition-shadow flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between mb-4">
                   <div>
-                    <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
-                      <Activity className="w-4 h-4 text-emerald-600" />
+                    <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                      <Activity className="w-4 h-4 text-[#154734]" />
                       Trial Health & Plot Status
                     </h3>
-                    <p className="text-xs text-slate-400 mt-0.5">
+                    <p className="text-xs text-slate-500 mt-0.5">
                       Interval freshness, efficacy trajectories & microclimate stress
                     </p>
                   </div>
                   <button
                     onClick={() => navigate('/trials')}
-                    className="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1 cursor-pointer"
+                    className="text-xs font-semibold text-[#154734] hover:text-[#0e3828] flex items-center gap-1 cursor-pointer"
                   >
                     View All ({healthMetrics.total}) <ChevronRight className="w-3.5 h-3.5" />
                   </button>
                 </div>
 
                 {/* Multi-Segmented Health Status Bar */}
-                <div className="p-3.5 rounded-2xl bg-slate-50/80 border border-slate-200/60 mb-4">
-                  <div className="flex items-center justify-between text-xs font-bold mb-2">
+                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/60 mb-4">
+                  <div className="flex items-center justify-between text-xs font-semibold mb-2">
                     <span className="text-slate-700">Fleet Health Distribution</span>
-                    <span className="text-emerald-700 font-extrabold">{healthMetrics.healthyPct}% Optimal</span>
+                    <span className="text-[#154734] font-bold">{healthMetrics.healthyPct}% Optimal</span>
                   </div>
                   
                   {/* Visual Bar */}
-                  <div className="h-2.5 w-full bg-slate-200 rounded-full overflow-hidden flex shadow-inner">
+                  <div className="h-2 w-full bg-slate-200/80 rounded-full overflow-hidden flex">
                     {healthMetrics.healthy > 0 && (
                       <div
                         style={{ width: `${healthMetrics.healthyPct}%` }}
-                        className="bg-emerald-500 h-full transition-all duration-500"
+                        className="bg-[#154734] h-full transition-all duration-500"
                         title={`Healthy: ${healthMetrics.healthy} plots (${healthMetrics.healthyPct}%)`}
                       />
                     )}
@@ -1269,26 +1063,26 @@ export default function Dashboard({ onMenuClick }) {
                   {/* Badges / Legend */}
                   <div className="flex items-center justify-between gap-2 mt-3 pt-2 border-t border-slate-200/50 text-[11px]">
                     <div className="flex items-center gap-1.5">
-                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                      <span className="text-slate-600 font-bold">Healthy:</span>
-                      <span className="font-extrabold text-emerald-700">{healthMetrics.healthy}</span>
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#154734]" />
+                      <span className="text-slate-600 font-medium">Healthy:</span>
+                      <span className="font-bold text-[#154734]">{healthMetrics.healthy}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                      <span className="text-slate-600 font-bold">Needs Care:</span>
-                      <span className="font-extrabold text-amber-700">{healthMetrics.needsCare}</span>
+                      <span className="text-slate-600 font-medium">Needs Care:</span>
+                      <span className="font-bold text-amber-700">{healthMetrics.needsCare}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
-                      <span className="text-slate-600 font-bold">Critical:</span>
-                      <span className="font-extrabold text-rose-700">{healthMetrics.critical}</span>
+                      <span className="text-slate-600 font-medium">Critical:</span>
+                      <span className="font-bold text-rose-700">{healthMetrics.critical}</span>
                     </div>
                   </div>
                 </div>
 
                 {/* Priority Attention Plots (Max 3) */}
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-400 uppercase tracking-wider px-1">
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-1">
                     <span>Priority Focus Plots</span>
                     <span>Status / Risk</span>
                   </div>
@@ -1301,7 +1095,7 @@ export default function Dashboard({ onMenuClick }) {
                         <div
                           key={t.id}
                           onClick={() => navigate('/trials')}
-                          className={`flex items-center justify-between gap-3 p-2.5 rounded-xl border transition hover:shadow-2xs cursor-pointer group ${
+                          className={`flex items-center justify-between gap-3 p-2.5 rounded-xl border transition cursor-pointer group ${
                             isCritical 
                               ? 'bg-rose-50/50 border-rose-200/80 hover:bg-rose-50' 
                               : isWarning 
@@ -1311,8 +1105,8 @@ export default function Dashboard({ onMenuClick }) {
                         >
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2">
-                              <span className={`w-2 h-2 rounded-full shrink-0 ${isCritical ? 'bg-rose-500 animate-pulse' : isWarning ? 'bg-amber-500' : 'bg-emerald-500'}`} />
-                              <p className="text-xs font-bold text-slate-800 truncate group-hover:text-emerald-700 transition">
+                              <span className={`w-2 h-2 rounded-full shrink-0 ${isCritical ? 'bg-rose-500' : isWarning ? 'bg-amber-500' : 'bg-[#154734]'}`} />
+                              <p className="text-xs font-semibold text-slate-800 truncate group-hover:text-[#154734] transition">
                                 {t.name}
                               </p>
                             </div>
@@ -1333,12 +1127,12 @@ export default function Dashboard({ onMenuClick }) {
                                 <TrendingDown className="w-3 h-3" />
                               </span>
                             )}
-                            <span className={`text-[11px] font-black px-2 py-0.5 rounded-lg border ${
+                            <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${
                               isCritical 
                                 ? 'bg-rose-100 text-rose-800 border-rose-300' 
                                 : isWarning 
                                 ? 'bg-amber-100 text-amber-800 border-amber-300' 
-                                : 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                                : 'bg-[#eef5f1] text-[#154734] border-[#d6e5dc]'
                             }`}>
                               {t.healthScore}%
                             </span>
@@ -1348,7 +1142,7 @@ export default function Dashboard({ onMenuClick }) {
                     })
                   ) : (
                     <div className="py-6 text-center text-slate-400 text-xs flex flex-col items-center justify-center">
-                      <CheckCircle className="w-6 h-6 text-emerald-500 mb-1" />
+                      <CheckCircle className="w-6 h-6 text-[#154734] mb-1" />
                       All active trials scored and within expected ranges.
                     </div>
                   )}
@@ -1359,7 +1153,7 @@ export default function Dashboard({ onMenuClick }) {
                 <span className="font-medium text-slate-400">Continuous plot risk modeling</span>
                 <button
                   onClick={() => navigate('/trials')}
-                  className="font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-0.5 cursor-pointer"
+                  className="font-semibold text-[#154734] hover:text-[#0e3828] flex items-center gap-0.5 cursor-pointer"
                 >
                   Inspect plot treatments <ChevronRight className="w-3 h-3" />
                 </button>
@@ -1372,21 +1166,21 @@ export default function Dashboard({ onMenuClick }) {
               ══════════════════════════════════════════════════════════════════ */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
             {/* Top Formulations Leaderboard */}
-            <div className="lg:col-span-7 bg-white rounded-2xl shadow-xs border border-slate-200/80 p-5 hover:shadow-md transition-shadow">
+            <div className="lg:col-span-7 bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.03)] border border-slate-200/80 p-5 hover:shadow-sm transition-shadow">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
                 <div>
-                  <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
-                    <Award className="w-4 h-4 text-emerald-600" />
+                  <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                    <Award className="w-4 h-4 text-[#154734]" />
                     Top Formulation Leaderboard
                   </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">Ranked by combined Kill % and Sustained Control Days</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Ranked by combined Kill % and Sustained Control Days</p>
                 </div>
 
                 <div className="flex flex-wrap gap-1.5 items-center">
                   <select
                     value={fYear}
                     onChange={e => setFYear(e.target.value)}
-                    className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                    className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-[#154734]"
                   >
                     <option value="">All Years</option>
                     {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
@@ -1397,14 +1191,14 @@ export default function Dashboard({ onMenuClick }) {
                     onChange={e => setFTarget(e.target.value)}
                     placeholder={`Filter ${catConfig.targetLabel}`}
                     list="dash-ftarget-list"
-                    className="text-xs border border-slate-200 rounded-lg px-2 py-1 w-28 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                    className="text-xs border border-slate-200 rounded-lg px-2 py-1 w-28 focus:outline-none focus:ring-1 focus:ring-[#154734]"
                   />
                   <datalist id="dash-ftarget-list">{allTargets.map(w => <option key={w} value={w} />)}</datalist>
 
                   {(fYear || fTarget || fLocation) && (
                     <button
                       onClick={() => { setFYear(''); setFTarget(''); setFLocation(''); }}
-                      className="text-xs text-rose-600 font-bold hover:underline"
+                      className="text-xs text-rose-600 font-semibold hover:underline cursor-pointer"
                     >
                       Reset
                     </button>
@@ -1416,44 +1210,38 @@ export default function Dashboard({ onMenuClick }) {
                 <div className="space-y-2.5">
                   {topFormulationsFiltered.map(({ name, count, avgEff, avgDays, compositeScore }, idx) => {
                     const isTop1 = idx === 0;
-                    const isTop2 = idx === 1;
-                    const isTop3 = idx === 2;
 
                     return (
                       <div
                         key={name}
                         onClick={() => navigate('/formulations')}
-                        className={`p-3 rounded-xl border transition-all hover:shadow-xs cursor-pointer ${
-                          isTop1
-                            ? 'bg-gradient-to-r from-amber-50/60 to-white border-amber-200/80'
-                            : 'bg-white border-slate-100 hover:border-slate-200'
-                        }`}
+                        className="p-3 rounded-xl border border-slate-100 hover:border-slate-200 bg-white transition-all hover:shadow-2xs cursor-pointer"
                       >
                         <div className="flex items-center justify-between text-xs mb-1.5">
                           <div className="flex items-center gap-2 min-w-0">
-                            <span className={`w-5 h-5 rounded-full flex items-center justify-center font-black text-[10px] shrink-0 ${
-                              isTop1 ? 'bg-amber-400 text-amber-950 shadow-xs' : isTop2 ? 'bg-slate-300 text-slate-800' : isTop3 ? 'bg-amber-700/20 text-amber-800' : 'bg-slate-100 text-slate-500'
+                            <span className={`w-5 h-5 rounded-full flex items-center justify-center font-bold text-[10px] shrink-0 ${
+                              isTop1 ? 'bg-[#eef5f1] text-[#154734] border border-[#d6e5dc]' : 'bg-slate-100 text-slate-600'
                             }`}>
                               {idx + 1}
                             </span>
-                            <span className="font-bold text-slate-800 truncate">{name}</span>
+                            <span className="font-semibold text-slate-800 truncate">{name}</span>
                           </div>
 
                           <div className="flex items-center gap-2 shrink-0 text-xs">
-                            <span className="text-[11px] text-slate-500 font-medium">{count} trial{count !== 1 ? 's' : ''}</span>
+                            <span className="text-[11px] text-slate-400 font-medium">{count} trial{count !== 1 ? 's' : ''}</span>
                             {avgEff !== null && (
-                              <span className="font-extrabold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/60">
+                              <span className="font-semibold text-[#154734] bg-[#eef5f1] px-2 py-0.5 rounded-md border border-[#d6e5dc]">
                                 {avgEff}% Kill
                               </span>
                             )}
                             {avgDays !== null && (
-                              <span className="font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200/60">
-                                ⏳ {avgDays}d
+                              <span className="font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
+                                {avgDays}d
                               </span>
                             )}
                           </div>
                         </div>
-                        <ModernBar value={compositeScore} max={100} color={isTop1 ? 'from-amber-500 to-emerald-500' : 'from-emerald-500 to-teal-400'} />
+                        <ModernBar value={compositeScore} max={100} color={isTop1 ? 'bg-[#154734]' : 'bg-[#2a7251]'} />
                       </div>
                     );
                   })}
@@ -1464,33 +1252,33 @@ export default function Dashboard({ onMenuClick }) {
             </div>
 
             {/* Target Weed / Pest Finder */}
-            <div className="lg:col-span-5 bg-white rounded-2xl shadow-xs border border-slate-200/80 p-5 hover:shadow-md transition-shadow flex flex-col justify-between">
+            <div className="lg:col-span-5 bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.03)] border border-slate-200/80 p-5 hover:shadow-sm transition-shadow flex flex-col justify-between">
               <div>
                 <div className="mb-4">
-                  <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
-                    <Target className="w-4 h-4 text-emerald-600" />
+                  <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                    <Target className="w-4 h-4 text-[#154734]" />
                     Target {catConfig.targetLabel} Match Finder
                   </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">Lookup top treatments validated against a target pest or weed</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Lookup top treatments validated against a target pest or weed</p>
                 </div>
 
                 <div className="space-y-3">
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">Target Species</label>
+                    <label className="block text-[11px] font-semibold text-slate-600 uppercase mb-1">Target Species</label>
                     <input
                       value={targetQuery}
                       onChange={e => setTargetQuery(e.target.value)}
                       onKeyDown={e => e.key === 'Enter' && handleFindByTarget()}
                       list="dash-target-datalist"
                       placeholder={`Enter ${catConfig.targetLabel.toLowerCase()}...`}
-                      className="border border-slate-200 rounded-xl px-3 py-2 text-xs w-full focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                      className="border border-slate-200 rounded-xl px-3 py-2 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[#154734]"
                     />
                     <datalist id="dash-target-datalist">{allTargets.map(w => <option key={w} value={w} />)}</datalist>
                   </div>
 
                   <div className="flex items-center gap-3">
                     <div className="flex-1">
-                      <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">Min Kill Threshold: {minEfficacy}%</label>
+                      <label className="block text-[11px] font-semibold text-slate-600 uppercase mb-1">Min Kill Threshold: {minEfficacy}%</label>
                       <input
                         type="range"
                         min="50"
@@ -1498,12 +1286,12 @@ export default function Dashboard({ onMenuClick }) {
                         step="5"
                         value={minEfficacy}
                         onChange={e => setMinEfficacy(Number(e.target.value))}
-                        className="w-full accent-emerald-600"
+                        className="w-full accent-[#154734]"
                       />
                     </div>
                     <button
                       onClick={handleFindByTarget}
-                      className="mt-4 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-xs"
+                      className="mt-4 bg-[#154734] hover:bg-[#0e3828] text-white px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition shadow-xs cursor-pointer"
                     >
                       <Search className="w-3.5 h-3.5" /> Search
                     </button>
@@ -1527,13 +1315,13 @@ export default function Dashboard({ onMenuClick }) {
                       </p>
                       {targetResults.results.map((g, i) => (
                         <div key={g.name} className="flex items-center gap-2.5 p-2.5 rounded-xl border border-slate-100 hover:bg-slate-50 transition">
-                          <span className="text-[10px] font-black text-slate-400 w-4 text-center">#{i + 1}</span>
+                          <span className="text-[10px] font-bold text-slate-400 w-4 text-center">#{i + 1}</span>
                           <div className="flex-1 min-w-0">
-                            <p className="text-xs font-bold text-slate-800 truncate">{g.name}</p>
+                            <p className="text-xs font-semibold text-slate-800 truncate">{g.name}</p>
                             <p className="text-[10px] text-slate-400">{g.trials.length} plot trials</p>
                           </div>
-                          <span className={`text-xs font-extrabold px-2 py-0.5 rounded-md ${
-                            g.avgEfficacy >= 90 ? 'bg-emerald-50 text-emerald-700' : 'bg-sky-50 text-sky-700'
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-md ${
+                            g.avgEfficacy >= 90 ? 'bg-[#eef5f1] text-[#154734]' : 'bg-slate-100 text-slate-700'
                           }`}>
                             {g.avgEfficacy.toFixed(0)}% Kill
                           </span>
@@ -1545,7 +1333,7 @@ export default function Dashboard({ onMenuClick }) {
               </div>
 
               <div className="mt-3 pt-2.5 border-t border-slate-100 text-right">
-                <button onClick={() => navigate('/formulations')} className="text-xs font-bold text-emerald-600 hover:text-emerald-700">
+                <button onClick={() => navigate('/formulations')} className="text-xs font-semibold text-[#154734] hover:text-[#0e3828] cursor-pointer">
                   Formulation Explorer →
                 </button>
               </div>
