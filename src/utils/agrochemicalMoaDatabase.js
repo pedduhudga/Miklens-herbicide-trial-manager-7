@@ -1359,7 +1359,7 @@ export function normalizeChemicalName(rawName) {
   return rawName
     .toLowerCase()
     // Remove formulation codes like 41% SL, 240 EC, 10% WP, 50 SC, etc.
-    .replace(/\b\d+(\.\d+)?\s*(%|ec|sl|sc|wg|wp|sg|cs|me|ew|fs|sp|w/w|w/v|g\/l|kg\/ha)\b/gi, '')
+    .replace(/\b\d+(\.\d+)?\s*(%|ec|sl|sc|wg|wp|sg|cs|me|ew|fs|sp|w\/w|w\/v|g\/l|kg\/ha)\b/gi, '')
     // Remove salt and ester derivatives
     .replace(/\b(potassium|sodium|isopropylamine|dimethylammonium|ammonium|choline|ester|ethyl|methyl|butyl|isooctyl|salt|technical|tech)\b/gi, '')
     // Remove punctuation except hyphens/commas inside names like 2,4-d
