@@ -13,7 +13,6 @@ import { useAuth } from './hooks/useAuth.js';
 import { useAppState } from './hooks/useAppState.jsx';
 import { useSync } from './hooks/useSync.js';
 import { getAllData } from './services/dataLayer.js';
-import { initAI } from './services/ai.js';
 import { getCategoryConfig } from './utils/categoryConfig.js';
 
 function safeLazy(importFn) {
@@ -250,8 +249,21 @@ function AppLayout() {
     const loadAppData = async () => {
       window.dispatchEvent(new CustomEvent('app:loading', { detail: { show: true } }));
 
-      // Initialize AI Service
-      initAI(getAppState);
+      // Initialize AI Service asynchronously in background without delaying data loading
+      import('./services/ai.js').then(({ initAI }) => {
+        initAI(getAppState);
+      }).catch(err => {
+        console.warn('[AI] Deferred AI service initialization failed:', err);
+      });
+
+      // Prefetch common operational tabs during idle moments for zero-latency switching
+      if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+        window.requestIdleCallback(() => {
+          import('./pages/Trials.jsx');
+          import('./pages/Dashboard.jsx');
+          import('./pages/Projects.jsx');
+        }, { timeout: 3500 });
+      }
 
       try {
         const result = await getAllData({}, getAppState);

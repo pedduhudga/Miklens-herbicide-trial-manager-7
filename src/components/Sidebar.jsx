@@ -5,7 +5,7 @@ import {
   ListChecks, FileBox, ShoppingBag, Sparkles, BarChartBig,
   MapPin, Search, Database, Settings, Users, LogOut, Calculator, Bell,
   TrendingDown, ShieldAlert, Flame, Compass, ChevronDown,
-  Leaf, Shield, Bug, Beaker, Sprout, Grid3x3, Key, Lock, Eye, EyeOff, X, CheckCircle, RefreshCw
+  Leaf, Shield, Bug, Beaker, Sprout, Grid3x3, Key, Lock, Eye, EyeOff, X, CheckCircle, RefreshCw, Download
 } from 'lucide-react';
 import { useAppState } from '../hooks/useAppState.jsx';
 import { useAuth } from '../hooks/useAuth.js';
@@ -13,6 +13,7 @@ import { CATEGORIES, getCategoryConfig, hasAccess } from '../utils/categoryConfi
 import { getFirebaseAuth } from '../services/firebase.js';
 import { signInWithEmailAndPassword, updatePassword } from 'firebase/auth';
 import { fbUpdateUserProfile } from '../services/firebaseAuth.js';
+import { triggerHaptic } from '../utils/nativeCapabilities.js';
 
 const ICON_MAP = {
   Leaf, Shield, Bug, Beaker, Sprout,
@@ -70,9 +71,21 @@ export default function Sidebar({ isOpen, onClose }) {
   const CatIcon = ICON_MAP[catConfig.icon] || FlaskConical;
 
   const [catDropdownOpen, setCatDropdownOpen] = useState(false);
+  const [canInstall, setCanInstall] = useState(false);
 
   // Change Password Modal state
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+
+  React.useEffect(() => {
+    const handleCanInstall = () => setCanInstall(true);
+    const handleInstalled = () => setCanInstall(false);
+    window.addEventListener('pwa:can-install', handleCanInstall);
+    window.addEventListener('pwa:installed', handleInstalled);
+    return () => {
+      window.removeEventListener('pwa:can-install', handleCanInstall);
+      window.removeEventListener('pwa:installed', handleInstalled);
+    };
+  }, []);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -371,6 +384,20 @@ export default function Sidebar({ isOpen, onClose }) {
               </div>
             </div>
             
+            {canInstall && (
+              <button
+                onClick={() => {
+                  triggerHaptic('selection');
+                  window.dispatchEvent(new CustomEvent('pwa-show-install'));
+                }}
+                className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl bg-emerald-50 text-emerald-800 hover:bg-emerald-100 transition-all duration-200 font-bold mb-1 shadow-2xs border border-emerald-200/60"
+                title="Install Miklens Trial Manager PWA to home screen"
+              >
+                <Download className="w-5 h-5 text-emerald-600" />
+                <span>Install PWA App</span>
+              </button>
+            )}
+
             {firebaseEnabled && (
               <button
                 onClick={() => {

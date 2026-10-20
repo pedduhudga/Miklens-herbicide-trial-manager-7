@@ -37,8 +37,19 @@ if ('serviceWorker' in navigator) {
 }
 
 
-ReactDOM.createRoot(document.getElementById('root')).render(
+const rootContainer = document.getElementById('root');
+const root = ReactDOM.createRoot(rootContainer);
+root.render(
   <React.StrictMode>
     <App />
   </React.StrictMode>,
-)
+);
+
+// Flag that React application mounted successfully
+window.__appMounted = true;
+const initialLoader = document.querySelector('.initial-loader');
+if (initialLoader) {
+  initialLoader.style.transition = 'opacity 0.25s ease-out';
+  initialLoader.style.opacity = '0';
+  setTimeout(() => initialLoader.remove(), 250);
+}

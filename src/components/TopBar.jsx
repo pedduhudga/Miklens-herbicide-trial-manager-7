@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Menu, Sun, SunMedium } from 'lucide-react';
+import { Menu, Sun, SunMedium, Download } from 'lucide-react';
 import SyncStatus from './SyncStatus.jsx';
 import { triggerHaptic } from '../utils/nativeCapabilities.js';
 
@@ -7,6 +7,23 @@ export default function TopBar({ title, onMenuClick }) {
   const [highContrast, setHighContrast] = useState(() => {
     return typeof document !== 'undefined' && document.body.classList.contains('high-contrast');
   });
+  const [canInstall, setCanInstall] = useState(false);
+
+  useEffect(() => {
+    const handleCanInstall = () => setCanInstall(true);
+    const handleInstalled = () => setCanInstall(false);
+    window.addEventListener('pwa:can-install', handleCanInstall);
+    window.addEventListener('pwa:installed', handleInstalled);
+    return () => {
+      window.removeEventListener('pwa:can-install', handleCanInstall);
+      window.removeEventListener('pwa:installed', handleInstalled);
+    };
+  }, []);
+
+  const handleInstallClick = () => {
+    triggerHaptic('selection');
+    window.dispatchEvent(new CustomEvent('pwa-show-install'));
+  };
 
   const toggleHighContrast = () => {
     triggerHaptic('light');
@@ -53,6 +70,17 @@ export default function TopBar({ title, onMenuClick }) {
       </h1>
 
       <div className="flex items-center gap-2">
+        {canInstall && (
+          <button
+            onClick={handleInstallClick}
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200/80 font-bold text-xs shadow-2xs transition active:scale-95"
+            title="Install Miklens Trial Manager PWA to home screen"
+          >
+            <Download className="w-3.5 h-3.5 text-emerald-600" />
+            <span className="hidden sm:inline">Install</span>
+          </button>
+        )}
+
         <button
           onClick={toggleHighContrast}
           className={`p-2 rounded-xl border transition btn-interactive touch-manipulation ${

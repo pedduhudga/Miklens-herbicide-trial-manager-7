@@ -4,7 +4,6 @@ import { updateTrial } from './dataLayer.js';
 import { safeJsonParse } from '../utils/helpers.js';
 import { buildAiObservationPayload } from '../utils/categoryObservationUtils.js';
 import { getPrimaryObservationField } from '../utils/categoryConfig.js';
-import { analyzePhotoForEfficacy } from './ai.js';
 import { analyzeWeedCover } from '../utils/imageAnalysis.js';
 import { saveSyncQueueOffline } from './offlineStorage.js';
 
@@ -609,6 +608,7 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                                             const daa = window.calculateDAA(item.photo.date, t.Date);
                                             const workingTrial = { ...t, EfficacyDataJSON: JSON.stringify(eData || []) };
                                             const category = t.Category || 'herbicide';
+                                            const { analyzePhotoForEfficacy } = await import('./ai.js');
                                             const eff = await analyzePhotoForEfficacy(item.photo.fileData, item.photo.mimeType, { trial: workingTrial, daa: daa, category });
                                             if (eff) {
                                                 const photoDate = new Date(item.photo.date);

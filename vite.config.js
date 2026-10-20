@@ -13,21 +13,19 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
-    // Increase chunk size warning limit for large vendor bundles
-    chunkSizeWarningLimit: 1500,
-    // Advanced code splitting for better performance
+    target: 'es2022',
+    cssCodeSplit: true,
+    chunkSizeWarningLimit: 1200,
+    modulePreload: {
+      polyfill: false
+    },
     rollupOptions: {
       output: {
         manualChunks(id) {
           if (id.includes('node_modules')) {
             // Core React ecosystem
-            if (id.includes('react') || id.includes('react-dom') || id.includes('scheduler')) {
+            if (id.includes('react') || id.includes('react-dom') || id.includes('scheduler') || id.includes('react-router')) {
               return 'vendor-react';
-            }
-            
-            // Router
-            if (id.includes('react-router')) {
-              return 'vendor-router';
             }
 
             // Firebase (large) 
@@ -35,12 +33,17 @@ export default defineConfig({
               return 'vendor-firebase';
             }
 
+            // Client-side Database & Storage
+            if (id.includes('dexie')) {
+              return 'vendor-storage';
+            }
+
             // PDF generation (very large)
             if (id.includes('jspdf') || id.includes('html2canvas') || id.includes('pdfkit')) {
               return 'vendor-pdf';
             }
 
-            // Office documents (very large - separate from PDF)
+            // Office documents (split into isolated lazy chunks)
             if (id.includes('exceljs')) {
               return 'vendor-excel';
             }
@@ -51,12 +54,12 @@ export default defineConfig({
               return 'vendor-docx';
             }
 
-            // Charts (large)
+            // Charts & Graphs
             if (id.includes('chart.js') || id.includes('vis-network')) {
               return 'vendor-charts';
             }
 
-            // Maps (large)
+            // Maps
             if (id.includes('leaflet') || id.includes('react-leaflet')) {
               return 'vendor-maps';
             }
@@ -76,14 +79,14 @@ export default defineConfig({
               return 'vendor-qr';
             }
 
-            // Utilities (file handling, compression)
-            if (id.includes('file-saver') || id.includes('jszip')) {
-              return 'vendor-utils';
+            // Icons
+            if (id.includes('lucide-react')) {
+              return 'vendor-icons';
             }
 
-            // Icons
-            if (id.includes('lucide')) {
-              return 'vendor-icons';
+            // Utilities
+            if (id.includes('file-saver') || id.includes('jszip')) {
+              return 'vendor-utils';
             }
 
             // Capacitor (mobile)

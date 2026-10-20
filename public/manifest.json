@@ -115,5 +115,21 @@
       "icons": [{ "src": "./icons/icon-96x96.png", "sizes": "96x96", "type": "image/png" }]
     }
   ],
+  "screenshots": [
+    {
+      "src": "./icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Miklens Bio-Efficacy Trial Manager"
+    },
+    {
+      "src": "./icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Mobile Field Scouting & Bio-Evaluation"
+    }
+  ],
   "related_applications": []
 }

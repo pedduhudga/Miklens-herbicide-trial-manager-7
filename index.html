@@ -48,23 +48,32 @@
       })();
     </script>
 
-    <!-- External Libraries -->
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- Preconnect & DNS-Prefetch for lightning-fast network resolution -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="dns-prefetch" href="https://fonts.googleapis.com">
+    <link rel="dns-prefetch" href="https://fonts.gstatic.com">
+    <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com">
+    <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+    <link rel="dns-prefetch" href="https://unpkg.com">
+
+    <!-- External Typography & Lightweight Stylesheets -->
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.css" rel="stylesheet" media="print" onload="this.media='all'">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" media="print" onload="this.media='all'">
 
-    <!-- External Libraries (Preserved CDNs) -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/html-docx-js@0.3.1/dist/html-docx.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.min.js"></script>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Non-blocking External Utility Libraries (deferred to unlock instant FCP/TTI) -->
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/html-docx-js@0.3.1/dist/html-docx.min.js"></script>
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.min.js"></script>
+    <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-    <!-- PWA Manifest -->
+    <!-- PWA Manifest & Multi-Resolution Icons -->
     <link rel="manifest" href="./manifest.json">
+    <link rel="icon" type="image/png" sizes="32x32" href="./icons/icon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="./icons/icon-16x16.png">
     <link rel="icon" type="image/svg+xml" href="./favicon.svg">
-    <link rel="icon" type="image/svg+xml" sizes="32x32" href="./favicon.svg">
-    <link rel="icon" type="image/svg+xml" sizes="16x16" href="./favicon.svg">
 
     <!-- Apple Touch Icons (using PNG for iOS compatibility) -->
     <link rel="apple-touch-icon" href="./icons/icon-180x180.png">
@@ -78,12 +87,6 @@
     <meta name="msapplication-square150x150logo" content="./icons/icon-150x150.png">
     <meta name="msapplication-square310x310logo" content="./icons/icon-310x310.png">
     <meta name="msapplication-wide310x150logo" content="./icons/icon-310x150.png">
-
-    <!-- Preconnect & DNS-Prefetch for lightning-fast asset resolution -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="dns-prefetch" href="https://fonts.googleapis.com">
-    <link rel="dns-prefetch" href="https://fonts.gstatic.com">
 
     <title>Miklens Trial Manager</title>
     <style>

@@ -21,6 +21,7 @@ import {
   ChevronRight, X, FileJson, Download, Upload
 } from 'lucide-react';
 import { useAppState } from '../hooks/useAppState.jsx';
+import { triggerHaptic } from '../utils/nativeCapabilities.js';
 
 export default function SyncStatus() {
   const [status, setStatus] = useState(SYNC_STATUS.ONLINE);
@@ -178,7 +179,7 @@ export default function SyncStatus() {
       {/* Field-Optimized Status Badge with Haptics */}
       <button
         onClick={() => {
-          import('../utils/nativeCapabilities.js').then(m => m.triggerHaptic('light')).catch(() => {});
+          triggerHaptic('light');
           setIsExpanded(!isExpanded);
         }}
         className={`flex items-center gap-1.5 px-3 py-1.5 md:px-3 md:py-2 rounded-xl text-xs font-semibold border transition shadow-sm touch-manipulation btn-interactive ${

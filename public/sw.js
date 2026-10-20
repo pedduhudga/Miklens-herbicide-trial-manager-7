@@ -152,6 +152,14 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(staleWhileRevalidate(request, DYNAMIC_CACHE));
 });
 
+// Listen for skip-waiting instructions from client updates
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    console.log('[SW] Skipping waiting via client message');
+    self.skipWaiting();
+  }
+});
+
 // Helper: Check if request is navigation / HTML
 function isNavigationRequest(request, url) {
   return request.mode === 'navigate' ||
@@ -162,34 +170,46 @@ function isNavigationRequest(request, url) {
 
 // Helper: Check if asset is an immutable hashed Vite bundle
 function isImmutableHashedAsset(url) {
-  return url.pathname.includes('/assets/') && /\-[A-Za-z0-9_\-]{8,}\.(js|css|woff2|png|svg)$/.test(url.pathname);
+  return url.pathname.includes('/assets/') && /\-[A-Za-z0-9_\-]{6,}\.(js|css|woff2|png|svg)$/.test(url.pathname);
 }
 
-// Handler for Navigation requests using Navigation Preload
+// Handler for Navigation requests using Navigation Preload & Instant Cache Fallback
 async function handleNavigationRequest(event, request) {
-  try {
-    // 1. Check if preload response is available from Navigation Preload
-    const preloadResponse = await event.preloadResponse;
-    if (preloadResponse) {
-      caches.open(DYNAMIC_CACHE).then(cache => cache.put(request, preloadResponse.clone())).catch(() => {});
-      return preloadResponse;
-    }
+  // 1. Instant 0ms load: Check if cached index.html is available
+  const cachedIndex = await caches.match('./index.html') || await caches.match('./') || await caches.match('/index.html');
 
-    // 2. Try network fetch
-    const networkResponse = await fetch(request);
+  // Background revalidation promise
+  const revalidatePromise = (async () => {
+    try {
+      const preloadResponse = event.preloadResponse ? await event.preloadResponse : null;
+      const networkResponse = preloadResponse || await fetch(request);
+      if (networkResponse && networkResponse.ok) {
+        const dynamicCache = await caches.open(DYNAMIC_CACHE);
+        await dynamicCache.put(request, networkResponse.clone());
+        const staticCache = await caches.open(STATIC_CACHE);
+        await staticCache.put('./index.html', networkResponse.clone());
+      }
+    } catch (e) {
+      // Offline / network failure - cached version was already served
+    }
+  })();
+
+  if (cachedIndex) {
+    if (event.waitUntil) event.waitUntil(revalidatePromise);
+    return cachedIndex; // Instant 0ms startup!
+  }
+
+  // 2. First visit (cache empty): Await network or navigation preload
+  try {
+    const preloadResponse = event.preloadResponse ? await event.preloadResponse : null;
+    const networkResponse = preloadResponse || await fetch(request);
     if (networkResponse && networkResponse.ok) {
-      const cache = await caches.open(DYNAMIC_CACHE);
-      cache.put(request, networkResponse.clone()).catch(() => {});
+      const cache = await caches.open(STATIC_CACHE);
+      cache.put('./index.html', networkResponse.clone()).catch(() => {});
       return networkResponse;
     }
   } catch (err) {
-    console.log('[SW] Network navigation failed, falling back to cache:', request.url);
-  }
-
-  // 3. Instant fallback to cached index.html for SPA offline routing
-  const cachedIndex = await caches.match('./index.html') || await caches.match('./') || await caches.match('/index.html');
-  if (cachedIndex) {
-    return cachedIndex;
+    console.log('[SW] Network navigation failed, falling back to offline screen:', request.url);
   }
 
   return new Response('Miklens Trial Manager is offline. Please connect to the internet to load new data.', {
@@ -208,7 +228,7 @@ async function cacheFirstImmutable(request, cacheName = STATIC_CACHE) {
 
   try {
     const networkResponse = await fetch(request);
-    if (networkResponse && networkResponse.ok) {
+    if (networkResponse && (networkResponse.ok || networkResponse.type === 'opaque')) {
       const cache = await caches.open(cacheName);
       cache.put(request, networkResponse.clone()).catch(() => {});
     }
@@ -219,10 +239,15 @@ async function cacheFirstImmutable(request, cacheName = STATIC_CACHE) {
   }
 }
 
-// Helper: Check if request is for static asset
+// Helper: Check if request is for static asset (including fonts and CDNs)
 function isStaticAsset(url) {
   const staticExtensions = ['.js', '.css', '.woff', '.woff2', '.ttf', '.eot', '.svg'];
   return staticExtensions.some(ext => url.pathname.endsWith(ext)) ||
+         url.hostname.includes('fonts.googleapis.com') ||
+         url.hostname.includes('fonts.gstatic.com') ||
+         url.hostname.includes('cdnjs.cloudflare.com') ||
+         url.hostname.includes('cdn.jsdelivr.net') ||
+         url.hostname.includes('unpkg.com') ||
          url.pathname.includes('/static/') ||
          url.pathname.includes('/icons/');
 }
@@ -256,15 +281,15 @@ async function cacheFirst(request, cacheName = STATIC_CACHE) {
   
   try {
     const networkResponse = await fetch(request);
-    if (networkResponse.ok) {
+    if (networkResponse && (networkResponse.ok || networkResponse.type === 'opaque')) {
       const cache = await caches.open(cacheName);
-      cache.put(request, networkResponse.clone());
+      cache.put(request, networkResponse.clone()).catch(() => {});
     }
     return networkResponse;
   } catch (error) {
     console.warn('[SW] Cache First failed for:', request.url);
     if (isImage(new URL(request.url))) {
-      const fallback = await caches.match('./favicon.svg');
+      const fallback = await caches.match('./favicon.svg') || await caches.match('./icons/icon-192x192.png');
       if (fallback) return fallback;
     }
     throw error;

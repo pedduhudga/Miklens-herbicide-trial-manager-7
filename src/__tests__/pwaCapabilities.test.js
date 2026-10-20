@@ -13,6 +13,10 @@ import {
 import fs from 'fs';
 import path from 'path';
 
+if (typeof global.navigator === 'undefined') {
+  global.navigator = {};
+}
+
 describe('PWA Native Capabilities System', () => {
   beforeEach(() => {
     vi.restoreAllMocks();

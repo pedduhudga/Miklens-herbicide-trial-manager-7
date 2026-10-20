@@ -69,6 +69,7 @@ export default function PWAStatus() {
       setDeferredPrompt(e);
       if (!isStandalonePWA() && !dismissed) {
         setIsInstallable(true);
+        window.dispatchEvent(new CustomEvent('pwa:can-install'));
       }
     };
 
@@ -79,6 +80,7 @@ export default function PWAStatus() {
       setIsInstallable(false);
       setShowInstallModal(false);
       setDeferredPrompt(null);
+      window.dispatchEvent(new CustomEvent('pwa:installed'));
     };
 
     // Network listeners
@@ -92,11 +94,22 @@ export default function PWAStatus() {
       triggerHaptic('medium');
     };
 
+    const handleExternalShowInstall = () => {
+      triggerHaptic('selection');
+      setShowInstallModal(true);
+    };
+
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     window.addEventListener('appinstalled', handleAppInstalled);
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     window.addEventListener('sw-update-available', handleSWUpdate);
+    window.addEventListener('pwa-show-install', handleExternalShowInstall);
+
+    // Initial check for iOS PWA installation capability
+    if (isAppleDevice && !isStandalonePWA() && !dismissed) {
+      window.dispatchEvent(new CustomEvent('pwa:can-install'));
+    }
 
     setIsOnline(navigator.onLine);
 
@@ -118,6 +131,7 @@ export default function PWAStatus() {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
       window.removeEventListener('sw-update-available', handleSWUpdate);
+      window.removeEventListener('pwa-show-install', handleExternalShowInstall);
     };
   }, [dismissed]);
 
