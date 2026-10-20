@@ -2740,6 +2740,7 @@ export function exportMultipleTrialsToCSV(trials, category = null) {
       const baseVal = baseObs ? (getObservationPrimaryValue(trialCat, baseObs) ?? 0) : 0;
 
       sortedObs.forEach((obs, idx) => {
+        if (!obs) return;
         const obsDate = obs.date || '';
         const daa = obs.daa ?? idx * 7;
         const pVal = getObservationPrimaryValue(trialCat, obs) ?? 0;

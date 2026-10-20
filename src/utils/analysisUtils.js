@@ -27,7 +27,8 @@ export function validateEfficacyData (efficacy, categoryId = 'herbicide', includ
                     return isFinite(n) ? n : null;
                 };
 
-                const dataToValidate = includeAI ? efficacy : efficacy.filter(o => o && o.source !== 'AI');
+                const dataToValidate = (includeAI ? efficacy : efficacy.filter(o => o?.source !== 'AI'))
+                    .filter(o => o && typeof o === 'object');
 
                 if (categoryId !== 'herbicide') {
                     const normalized = [];

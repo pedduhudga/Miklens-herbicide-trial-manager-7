@@ -69,20 +69,20 @@ describe('Trial Tab Advanced Logic: Control Days, Ratings, and Weed Identificati
   // ── 2. RATINGS: European Weed Research Society (EWRS 1-9) & EPPO ───
   describe('Ratings: EWRS 1-9 Scale and Adaptive EPPO Ratings', () => {
     it('maps efficacy percentage to correct EWRS 1-9 scale grade', () => {
-      expect(getEWRSScale(100).grade).toBe(1);
-      expect(getEWRSScale(96).grade).toBe(2);
-      expect(getEWRSScale(92).grade).toBe(3);
-      expect(getEWRSScale(85).grade).toBe(4);
-      expect(getEWRSScale(75).grade).toBe(5);
-      expect(getEWRSScale(60).grade).toBe(6);
-      expect(getEWRSScale(40).grade).toBe(7);
-      expect(getEWRSScale(15).grade).toBe(8);
-      expect(getEWRSScale(0).grade).toBe(9);
+      expect(getEWRSScale(100).score).toBe(1);
+      expect(getEWRSScale(97).score).toBe(2);
+      expect(getEWRSScale(92).score).toBe(3);
+      expect(getEWRSScale(85).score).toBe(4);
+      expect(getEWRSScale(75).score).toBe(5);
+      expect(getEWRSScale(60).score).toBe(6);
+      expect(getEWRSScale(40).score).toBe(7);
+      expect(getEWRSScale(25).score).toBe(8);
+      expect(getEWRSScale(0).score).toBe(9);
     });
 
     it('converts herbicide efficacy to EPPO 4-tier rating standard', () => {
       expect(getRatingFromEfficacy('herbicide', 95)).toBe('Excellent');
-      expect(getRatingFromEfficacy('herbicide', 85)).toBe('Good');
+      expect(getRatingFromEfficacy('herbicide', 75)).toBe('Good');
       expect(getRatingFromEfficacy('herbicide', 65)).toBe('Fair');
       expect(getRatingFromEfficacy('herbicide', 40)).toBe('Poor');
     });

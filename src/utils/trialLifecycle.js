@@ -142,7 +142,7 @@ export function getDetailedControlDaysInfo(trial, controlTrial = null) {
   
   let maxDAAFound = 0;
   let prevDaa = 0;
-  let prevWce = 100; // Baseline before spray starts at 100% potential
+  let prevWce = null;
   let effectiveControlDays = 0;
   let breakdownOccurred = false;
   let breakdownDaa = null;
@@ -204,19 +204,13 @@ export function getDetailedControlDaysInfo(trial, controlTrial = null) {
       }
     }
 
-    // Baseline observation (DAA 0) defaults to 100% control expectation
-    if (computedWCE === null || isNaN(computedWCE) || daa === 0) {
-      computedWCE = 100;
-    }
-
     if (daa === 0) {
       prevDaa = 0;
-      prevWce = 100;
       continue;
     }
 
     // Scientific Threshold: Effective control requires WCE >= 70%
-    if (computedWCE >= 70) {
+    if (computedWCE !== null && computedWCE >= 70) {
       if (!breakdownOccurred) {
         effectiveControlDays = Math.max(effectiveControlDays, daa);
         prevDaa = daa;
@@ -227,7 +221,7 @@ export function getDetailedControlDaysInfo(trial, controlTrial = null) {
       if (!breakdownOccurred) {
         breakdownOccurred = true;
         // Linear Interpolation: Calculate exact threshold crossing day (WCE = 70%)
-        if (prevWce > computedWCE && prevWce >= 70) {
+        if (prevWce !== null && prevWce > computedWCE && prevWce >= 70) {
           const interpolated = prevDaa + (daa - prevDaa) * ((prevWce - 70) / (prevWce - computedWCE));
           breakdownDaa = Math.max(prevDaa, Math.min(daa, Math.round(interpolated * 10) / 10));
           effectiveControlDays = Math.round(breakdownDaa);
@@ -235,9 +229,9 @@ export function getDetailedControlDaysInfo(trial, controlTrial = null) {
           reason = `Regrowth breakdown occurred at DAA ${breakdownDaa} (WCE dropped to ${Math.round(computedWCE)}%)`;
         } else {
           // If already below 70% from first observation, control is ineffective
-          breakdownDaa = prevDaa;
-          effectiveControlDays = prevDaa;
-          reason = `Initial control below 70% standard threshold (${Math.round(computedWCE)}%)`;
+          breakdownDaa = 0;
+          effectiveControlDays = 0;
+          reason = `Initial control below 70% standard threshold (${Math.round(computedWCE ?? 0)}%)`;
         }
       }
     }

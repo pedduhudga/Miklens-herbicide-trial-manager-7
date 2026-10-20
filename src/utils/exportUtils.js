@@ -924,6 +924,7 @@ export function exportTrialObservations(trials, category, filename = 'TrialObser
             });
         } else {
             effData.forEach((obs, idx) => {
+                if (!obs) return;
                 observations.push({
                     Trial_ID: trial.ID,
                     FormulationName: trial.FormulationName,

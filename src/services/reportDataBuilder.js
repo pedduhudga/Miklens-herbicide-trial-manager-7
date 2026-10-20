@@ -1917,6 +1917,7 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
         category
       );
       for (const obs of efficacy) {
+        if (!obs) continue;
         const val = toNum(obs[phytoKey]);
         if (val !== null && val > 0) hasPhytoData = true;
         if (val !== null) {

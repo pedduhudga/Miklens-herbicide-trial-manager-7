@@ -12,9 +12,17 @@ export default function VoiceFieldScoutModal({
   knownTargets = [],
   activeCategory = 'herbicide'
 }) {
+  const effectiveFormulations = (knownFormulations && knownFormulations.length > 0)
+    ? knownFormulations
+    : (currentTrial ? [currentTrial.FormulationName, currentTrial.FormulationID].filter(Boolean) : []);
+
+  const effectiveTargets = (knownTargets && knownTargets.length > 0)
+    ? knownTargets
+    : (currentTrial ? [currentTrial.WeedSpecies, currentTrial.TargetWeed, currentTrial.Target, currentTrial.DiseaseTarget, currentTrial.PestTarget].filter(Boolean) : []);
+
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
-  const [parsedData, setParsedData] = useState(null);
+  const [parsedData, setParsedData] = useState(() => parseVoiceObservation('', { knownFormulations: effectiveFormulations, knownTargets: effectiveTargets }));
   const [errorMsg, setErrorMsg] = useState('');
   const [manualText, setManualText] = useState('');
   const recognizerRef = useRef(null);
@@ -24,14 +32,6 @@ export default function VoiceFieldScoutModal({
   const metricLabel = catConfig.primaryMetric?.label || (activeCategory === 'herbicide' ? 'Kill Rate' : 'Efficacy');
 
   const supported = isSpeechRecognitionSupported();
-
-  const effectiveFormulations = (knownFormulations && knownFormulations.length > 0)
-    ? knownFormulations
-    : (currentTrial ? [currentTrial.FormulationName, currentTrial.FormulationID].filter(Boolean) : []);
-
-  const effectiveTargets = (knownTargets && knownTargets.length > 0)
-    ? knownTargets
-    : (currentTrial ? [currentTrial.WeedSpecies, currentTrial.TargetWeed, currentTrial.Target, currentTrial.DiseaseTarget, currentTrial.PestTarget].filter(Boolean) : []);
 
   // Reset state on open
   useEffect(() => {
@@ -266,16 +266,16 @@ export default function VoiceFieldScoutModal({
               </div>
             </div>
 
-            {(parsedData?.weather?.temp || parsedData?.weather?.rain || parsedData?.phytotoxicityPct !== null) && (
+            {(Boolean(parsedData?.weather?.temp) || Boolean(parsedData?.weather?.rain) || (parsedData?.phytotoxicityPct != null)) && (
               <div className="flex flex-wrap gap-2 pt-1 text-[11px]">
                 {parsedData?.weather?.temp && (
                   <span className="px-2 py-0.5 bg-white border border-slate-200 rounded-lg text-slate-600 flex items-center gap-1 font-medium">
                     <Thermometer className="w-3 h-3 text-amber-500" /> {parsedData.weather.temp}°C {parsedData.weather.rain || ''}
                   </span>
                 )}
-                {parsedData?.phytotoxicityPct !== null && (
+                {parsedData?.phytotoxicityPct != null && (
                   <span className="px-2 py-0.5 bg-rose-50 border border-rose-200 rounded-lg text-rose-800 flex items-center gap-1 font-semibold">
-                    <ShieldAlert className="w-3 h-3 text-rose-600" /> Phyto: {parsedData.phytotoxicityPct}% {parsedData.cropInjury ? `(${parsedData.cropInjury})` : ''}
+                    <ShieldAlert className="w-3 h-3 text-rose-600" /> Phyto: {parsedData.phytotoxicityPct}% {parsedData?.cropInjury ? `(${parsedData.cropInjury})` : ''}
                   </span>
                 )}
                 {parsedData?.bbch && (
@@ -306,7 +306,7 @@ export default function VoiceFieldScoutModal({
             <button
               type="button"
               onClick={handleApply}
-              disabled={parsedData?.efficacy === null && !parsedData?.notes && !parsedData?.plot && parsedData?.daa === null}
+              disabled={!parsedData || (parsedData.efficacy === null && !parsedData.notes && !parsedData.plot && parsedData.daa === null)}
               className="flex-1 py-2.5 px-4 rounded-xl font-bold text-white bg-emerald-600 hover:bg-emerald-700 transition flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Check className="w-4 h-4" />

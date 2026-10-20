@@ -653,6 +653,7 @@ export function buildInstitutionalReportData(targetData, globalState = {}, userO
   let phytoMean = 0;
   let phytoReps = [0, 0, 0, 0, 0];
   sortedObs.forEach(o => {
+    if (!o) return;
     if (Array.isArray(o.phytotoxicityPlantReps) && o.phytotoxicityPlantReps.length > 0) {
       phytoReps = o.phytotoxicityPlantReps.map(Number);
       phytoMean = phytoReps.reduce((a, b) => a + b, 0) / phytoReps.length;
@@ -807,6 +808,7 @@ export function buildInstitutionalReportData(targetData, globalState = {}, userO
     let pReps = [0, 0, 0, 0, 0];
     if (!isCtrl) {
       sortedTObs.forEach(o => {
+        if (!o) return;
         if (Array.isArray(o.phytotoxicityPlantReps) && o.phytotoxicityPlantReps.length > 0) {
           pReps = o.phytotoxicityPlantReps.map(Number);
           pScore = pReps.reduce((a, b) => a + b, 0) / pReps.length;

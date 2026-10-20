@@ -326,8 +326,8 @@ export default function Trials({ onMenuClick }) {
         ...prev,
         daa: daaVal,
         date: today,
-        notes: parsed.notes ? (prev.notes ? `${prev.notes} | ${parsed.notes}` : parsed.notes) : prev.notes,
-        phytotoxicityPct: parsed.phytotoxicityPct ?? prev.phytotoxicityPct,
+        notes: parsed?.notes ? (prev.notes ? `${prev.notes} | ${parsed.notes}` : parsed.notes) : prev.notes,
+        phytotoxicityPct: parsed?.phytotoxicityPct ?? prev.phytotoxicityPct,
         phytotoxicityNotes: parsed.cropInjury ? (prev.phytotoxicityNotes ? `${prev.phytotoxicityNotes} | ${parsed.cropInjury}` : parsed.cropInjury) : prev.phytotoxicityNotes,
         bbchStage: parsed.bbch ? String(parsed.bbch) : prev.bbchStage,
         weatherTemp: parsed.weather?.temp ? String(parsed.weather.temp) : prev.weatherTemp,
@@ -11907,15 +11907,17 @@ If none are present, write "None".`;
         />
       )}
 
-      <VoiceFieldScoutModal
-        isOpen={isVoiceScoutOpen}
-        onClose={() => setIsVoiceScoutOpen(false)}
-        onApply={handleApplyVoiceScout}
-        currentTrial={activeTrial}
-        knownFormulations={formulations}
-        activeCategory={activeCategory}
-        knownTargets={Array.from(new Set(trials.map(t => t.WeedSpecies || t.DiseaseTarget || t.PestTarget || t.Target).filter(Boolean)))}
-      />
+      {isVoiceScoutOpen && (
+        <VoiceFieldScoutModal
+          isOpen={isVoiceScoutOpen}
+          onClose={() => setIsVoiceScoutOpen(false)}
+          onApply={handleApplyVoiceScout}
+          currentTrial={activeTrial}
+          knownFormulations={formulations}
+          activeCategory={activeCategory}
+          knownTargets={Array.from(new Set(trials.map(t => t?.WeedSpecies || t?.DiseaseTarget || t?.PestTarget || t?.Target).filter(Boolean)))}
+        />
+      )}
 
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
       <input ref={harvestFileRef} type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
