@@ -134,7 +134,6 @@ export default function SprayAdvisor({ lat, lon, locationName = 'Current Locatio
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('decision'); // 'decision' | 'timeline' | 'forecast'
   const [selectedHourIdx, setSelectedHourIdx] = useState(null);
-  const [fxSimulation, setFxSimulation] = useState('auto'); // 'auto' | 'thunderstorm' | 'rain' | 'wind' | 'sun' | 'night' | 'frost' | 'optimal'
 
   const loadAnalysis = useCallback(async () => {
     clearWeatherCache();
@@ -172,37 +171,46 @@ export default function SprayAdvisor({ lat, lon, locationName = 'Current Locatio
   const currentVerdict = analysis?.current?.verdict || 'SAFE_TO_SPRAY';
   const currentScore = analysis?.current?.score ?? 80;
 
-  // Derive immersive weather visual effect from live atmospheric conditions or manual simulation
+  // Derive immersive weather visual effect automatically from live atmospheric conditions
   const activeWeatherEffect = useMemo(() => {
-    if (fxSimulation && fxSimulation !== 'auto') {
-      return fxSimulation;
-    }
-
     if (!analysis?.current?.conditions) return 'none';
     const c = analysis.current.conditions;
     const isNight = analysis.current.isNight;
     const precip = c.precipitation ?? 0;
     const wind = c.windSpeed ?? 0;
     const temp = c.temperature ?? 20;
+    const deltaT = analysis.current.deltaT ?? 4.0;
 
-    // Cold / Frost hazard (< 4°C)
-    if (temp < 4) return 'frost';
-    // Thunderstorm: heavy precip + wind
-    if (precip > 2 && wind > 15) return 'thunderstorm';
-    // Rain: any meaningful precipitation or wash-off hazard
-    if (precip > 0.3 || analysis.current.rainfastHazard) return 'rain';
-    // Wind: strong drift risk
-    if (wind > 18) return 'wind';
-    // Night / nocturnal temperature inversion
+    // 1. Severe storm active now (heavy precipitation + strong wind)
+    if (precip > 2.0 && wind > 14) return 'thunderstorm';
+
+    // 2. Active rain falling right now (> 0.4mm)
+    if (precip > 0.4) return 'rain';
+
+    // 3. Nocturnal Inversion (nighttime conditions)
+    // At night, stomata close and nocturnal inversion traps chemical droplets
     if (isNight) return 'night';
-    // Hot sun: high temperature or high Delta-T evaporation risk
-    if (temp > 30 || (analysis.current.deltaT ?? 0) > 8) return 'sun';
-    // Optimal: safe spray window
+
+    // 4. Strong Wind & spray drift hazard (> 17 km/h)
+    if (wind > 17) return 'wind';
+
+    // 5. Freezing / Frost hazard (< 4°C)
+    if (temp < 4) return 'frost';
+
+    // 6. Scorching Heat / Rapid droplet evaporation (temp > 30°C or delta-T > 8°C)
+    if (temp > 30 || deltaT > 8) return 'sun';
+
+    // 7. Imminent rainwash hazard (rain arriving within 2h during daytime)
+    if (analysis.current.rainfastHazard && (analysis.current.rainArrivesInHours ?? 5) <= 2) return 'rain';
+
+    // 8. Safe to Spray Window
     if (currentVerdict === 'SAFE_TO_SPRAY') return 'optimal';
-    // Moderate sun for caution
-    if (temp > 25) return 'sun';
-    return 'none';
-  }, [analysis, currentVerdict, fxSimulation]);
+
+    // 9. Warm daytime sunlight
+    if (temp > 24) return 'sun';
+
+    return 'optimal';
+  }, [analysis, currentVerdict]);
 
   // Selected hour in timeline or fallback to current conditions
   const inspectedHour = useMemo(() => {
@@ -221,16 +229,19 @@ export default function SprayAdvisor({ lat, lon, locationName = 'Current Locatio
     const precip = c.precipitation ?? 0;
     const wind = c.windSpeed ?? 0;
     const temp = c.temperature ?? 20;
+    const deltaT = inspectedHour.deltaT ?? 4.0;
     const isNight = inspectedHour.hour < 6 || inspectedHour.hour >= 19;
 
-    if (temp < 4) return 'frost';
-    if (precip > 2 && wind > 15) return 'thunderstorm';
-    if (precip > 0.3 || inspectedHour.rainSoon) return 'rain';
-    if (wind > 18) return 'wind';
+    if (precip > 2.0 && wind > 14) return 'thunderstorm';
+    if (precip > 0.4) return 'rain';
     if (isNight) return 'night';
-    if (temp > 30 || (inspectedHour.deltaT ?? 0) > 8) return 'sun';
+    if (wind > 17) return 'wind';
+    if (temp < 4) return 'frost';
+    if (temp > 30 || deltaT > 8) return 'sun';
+    if (inspectedHour.rainSoon) return 'rain';
     if (inspectedHour.verdict === 'optimal') return 'optimal';
-    return 'none';
+    if (temp > 24) return 'sun';
+    return 'optimal';
   }, [inspectedHour]);
 
   if (!lat || !lon) {
@@ -353,60 +364,8 @@ export default function SprayAdvisor({ lat, lon, locationName = 'Current Locatio
                 HERO DECISION VERDICT: CAN I SPRAY RIGHT NOW? (INSTANT CLARITY)
                 ══════════════════════════════════════════════════════════════════ */}
             {activeTab === 'decision' && (
-              <div className="space-y-4">
-                {/* Microclimate Atmosphere Simulator / Telemetry Mode Switcher */}
-                <div className="flex items-center justify-between gap-2 p-2.5 bg-slate-50/90 rounded-2xl border border-slate-200/80 flex-wrap shadow-2xs">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span className="text-[11px] font-black text-slate-800 uppercase tracking-wider">
-                      Atmosphere FX:
-                    </span>
-                    {fxSimulation === 'auto' ? (
-                      <span className="text-[10px] font-black text-emerald-800 bg-emerald-100/90 border border-emerald-300/80 px-2 py-0.5 rounded-full flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                        Live Sync ({activeWeatherEffect.toUpperCase()})
-                      </span>
-                    ) : (
-                      <span className="text-[10px] font-black text-indigo-800 bg-indigo-100/90 border border-indigo-300/80 px-2 py-0.5 rounded-full flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
-                        Simulation ({fxSimulation.toUpperCase()})
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-1 overflow-x-auto max-w-full py-0.5">
-                    {[
-                      { id: 'auto', label: 'Live Auto', icon: '📡' },
-                      { id: 'thunderstorm', label: 'Thunderstorm', icon: '⛈️' },
-                      { id: 'rain', label: 'Rain Wash-off', icon: '🌧️' },
-                      { id: 'wind', label: 'Wind Drift', icon: '💨' },
-                      { id: 'sun', label: 'Scorching Sun', icon: '☀️' },
-                      { id: 'night', label: 'Inversion/Night', icon: '🌙' },
-                      { id: 'frost', label: 'Frost Alert', icon: '❄️' },
-                      { id: 'optimal', label: 'Optimal Window', icon: '✨' }
-                    ].map(item => {
-                      const isSelected = fxSimulation === item.id;
-                      return (
-                        <button
-                          key={item.id}
-                          type="button"
-                          onClick={() => setFxSimulation(item.id)}
-                          className={`px-2.5 py-1 rounded-xl text-[11px] font-black flex items-center gap-1 transition-all whitespace-nowrap cursor-pointer ${
-                            isSelected
-                              ? 'bg-slate-900 text-white shadow-xs scale-102 ring-1 ring-slate-800'
-                              : 'bg-white text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200/80'
-                          }`}
-                          title={`Preview ${item.label} atmosphere`}
-                        >
-                          <span>{item.icon}</span>
-                          <span>{item.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Visual Verdict Hero Banner with Atmospheric Weather FX */}
+              <div className="space-y-5">
+                {/* Visual Verdict Hero Banner with Automatic Atmospheric Weather FX */}
                 <div 
                   className={`relative rounded-3xl p-5 border-2 shadow-sm transition-all overflow-hidden ${
                     currentVerdict === 'SAFE_TO_SPRAY'
@@ -416,11 +375,8 @@ export default function SprayAdvisor({ lat, lon, locationName = 'Current Locatio
                       : 'bg-gradient-to-br from-rose-500/10 via-white to-red-500/5 border-rose-300/90'
                   }`}
                 >
-                  {/* Immersive Weather Visual FX Layer */}
-                  <AtmosphericWeatherFX 
-                    effect={activeWeatherEffect} 
-                    badge={fxSimulation !== 'auto' ? `Simulated: ${fxSimulation}` : null}
-                  />
+                  {/* Immersive Weather Visual FX Layer (Automatic 60fps Canvas Engine) */}
+                  <AtmosphericWeatherFX effect={activeWeatherEffect} />
                   <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div className="flex items-start gap-3.5">
                       {/* Pulse Status Beacon */}
