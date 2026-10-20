@@ -211,6 +211,7 @@ export default function Trials({ onMenuClick }) {
   const [filterProject, setFilterProject] = useState('');
   const [sortBy, setSortBy] = useState('date-desc');
   const [filterOwner, setFilterOwner] = useState('all');
+  const [performanceFilter, setPerformanceFilter] = useState('all');
   const [showFilters, setShowFilters] = useState(false);
   const [isTimelineView, setIsTimelineView] = useState(() => {
     const saved = localStorage.getItem('isTimelineView');
@@ -936,14 +937,15 @@ export default function Trials({ onMenuClick }) {
     user,
     filterOwner,
     registeredUsers: state.users || [],
-    activeCategory
+    activeCategory,
+    performanceFilter
   });
 
   const [displayLimit, setDisplayLimit] = useState(36);
 
   useEffect(() => {
     setDisplayLimit(36);
-  }, [activeTab, deferredSearch, filterFormulation, filterResult, filterProject, filterDateStart, filterDateEnd, sortBy, filterOwner, activeCategory]);
+  }, [activeTab, deferredSearch, filterFormulation, filterResult, filterProject, filterDateStart, filterDateEnd, sortBy, filterOwner, activeCategory, performanceFilter]);
 
   const visibleGridTrials = useMemo(() => {
     return filteredTrials.slice(0, displayLimit);
@@ -5526,14 +5528,90 @@ Rules:
 
 
 
-  // ── TABS ──────────────────────────────────────────────────────────
+  // ── TABS & R&D ANALYTICS ──────────────────────────────────────────
   const tabCounts = useMemo(() => ({
     all: trials.length,
+    active: trials.filter(t => !(t.IsCompleted === true || t.IsCompleted === 'true' || t.ControlFinalized === true || t.ControlFinalized === 'true')).length,
     standard: trials.filter(t => !t.ProjectID).length,
     rcbd: trials.filter(t => !!t.ProjectID).length,
     control: trials.filter(t => (t.IsControl === true || t.IsControl === 'true') && !t.ProjectID).length,
     finalized: trials.filter(t => t.IsCompleted === true || t.IsCompleted === 'true').length,
   }), [trials]);
+
+  const performanceCounts = useMemo(() => {
+    let highKill = 0;
+    let longControl = 0;
+    let needsObs = 0;
+    let hasPhotos = 0;
+    const now = Date.now();
+    const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
+    trials.forEach(t => {
+      const eff = getTrialCalculatedEfficacy(t, activeCategory);
+      if (eff !== null && eff !== undefined && eff >= 70) highKill++;
+
+      const effDays = calculateEffectiveControlDays(t);
+      const days = effDays > 0 ? effDays : (parseInt(t.FinalControlDuration, 10) || 0);
+      if (days >= 15) longControl++;
+
+      const isFinalized = t.IsCompleted === true || t.IsCompleted === 'true' || t.ControlFinalized === true || t.ControlFinalized === 'true';
+      if (!isFinalized) {
+        const rawObs = safeJsonParse(t.EfficacyDataJSON || t.observations, []);
+        const obs = Array.isArray(rawObs) ? rawObs : [];
+        if (obs.length === 0) {
+          needsObs++;
+        } else {
+          let lastTime = 0;
+          obs.forEach(o => {
+            const d = o.date || o.ObservationDate || o.timestamp;
+            if (d) {
+              const parsed = parseCustomDate(d) || new Date(d);
+              if (!isNaN(parsed.getTime()) && parsed.getTime() > lastTime) {
+                lastTime = parsed.getTime();
+              }
+            }
+          });
+          if (lastTime === 0 || (now - lastTime) >= SEVEN_DAYS_MS) {
+            needsObs++;
+          }
+        }
+      }
+
+      const p1 = safeJsonParse(t.PhotoURLs, []);
+      const p2 = safeJsonParse(t.WeedPhotosJSON, []);
+      const photos = [...(Array.isArray(p1) ? p1 : []), ...(Array.isArray(p2) ? p2 : [])];
+      if (photos.some(p => p && !p.deleted && (p.url || p.dataUrl || p.driveId || p.thumbnailUrl || (typeof p === 'string' && p.length > 0)))) {
+        hasPhotos++;
+      }
+    });
+
+    return { highKill, longControl, needsObs, hasPhotos };
+  }, [trials, activeCategory]);
+
+  const avgEfficacy = useMemo(() => {
+    let sum = 0, count = 0;
+    trials.forEach(t => {
+      const eff = getTrialCalculatedEfficacy(t, activeCategory);
+      if (eff !== null && eff !== undefined && !isNaN(eff)) {
+        sum += eff;
+        count++;
+      }
+    });
+    return count > 0 ? Math.round(sum / count) : 0;
+  }, [trials, activeCategory]);
+
+  const avgControlDays = useMemo(() => {
+    let sum = 0, count = 0;
+    trials.forEach(t => {
+      const effDays = calculateEffectiveControlDays(t);
+      const days = effDays > 0 ? effDays : (parseInt(t.FinalControlDuration, 10) || 0);
+      if (days > 0) {
+        sum += days;
+        count++;
+      }
+    });
+    return count > 0 ? Math.round(sum / count) : 0;
+  }, [trials]);
 
   const ownerOptions = useMemo(() => {
     const emailSet = new Set();
@@ -6461,6 +6539,68 @@ If none are present, write "None".`;
       )}
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden w-full max-w-full min-w-0">
+        {/* Modern Field Trials R&D Analytics Hero Banner */}
+        <div className="mx-3 sm:mx-4 mt-3 mb-2 relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 p-5 text-white shadow-lg border border-slate-700/60">
+          <div className="absolute -right-10 -top-10 w-60 h-60 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute right-1/3 -bottom-10 w-44 h-44 bg-teal-500/10 rounded-full blur-2xl pointer-events-none" />
+
+          <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
+            <div>
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5">
+                  <Activity className="w-3 h-3" /> Field R&D Trial Intelligence
+                </span>
+                <span className="text-xs text-slate-400 capitalize">• {activeCategory} Diagnostics</span>
+              </div>
+              <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-white flex items-center gap-2">
+                Trial Field Plots
+                <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-white/10 text-slate-200">
+                  {trials.length} Plots
+                </span>
+              </h1>
+              <p className="text-slate-300 text-xs mt-1 max-w-xl leading-relaxed">
+                Live agronomic monitoring, weed/pest control efficacy tracking, photo comparisons, and EPPO/EWRS residual lifecycles.
+              </p>
+            </div>
+
+            {/* Quick KPI stats strip */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 shrink-0">
+              <div className="bg-white/5 backdrop-blur-xs rounded-xl p-2.5 border border-white/10 flex flex-col">
+                <span className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Active Plots</span>
+                <span className="text-base sm:text-lg font-bold text-white mt-0.5">{tabCounts.active}</span>
+                <span className="text-[10px] text-slate-400">In-progress live</span>
+              </div>
+              <div className="bg-emerald-500/10 backdrop-blur-xs rounded-xl p-2.5 border border-emerald-500/20 flex flex-col">
+                <span className="text-[10px] font-medium text-emerald-300 uppercase tracking-wider flex items-center gap-1">
+                  ⚡ Mean Efficacy
+                </span>
+                <span className="text-base sm:text-lg font-bold text-emerald-400 mt-0.5">
+                  {avgEfficacy > 0 ? `${avgEfficacy}%` : '–'}
+                </span>
+                <span className="text-[10px] text-emerald-300/70">{performanceCounts.highKill} high-kill plots</span>
+              </div>
+              <div className="bg-amber-500/10 backdrop-blur-xs rounded-xl p-2.5 border border-amber-500/20 flex flex-col">
+                <span className="text-[10px] font-medium text-amber-300 uppercase tracking-wider flex items-center gap-1">
+                  ⏳ Mean Residual
+                </span>
+                <span className="text-base sm:text-lg font-bold text-amber-400 mt-0.5">
+                  {avgControlDays > 0 ? `${avgControlDays}d` : '–'}
+                </span>
+                <span className="text-[10px] text-amber-300/70">{performanceCounts.longControl} with ≥15d control</span>
+              </div>
+              <div className="bg-blue-500/10 backdrop-blur-xs rounded-xl p-2.5 border border-blue-500/20 flex flex-col">
+                <span className="text-[10px] font-medium text-blue-300 uppercase tracking-wider flex items-center gap-1">
+                  📸 Photographed
+                </span>
+                <span className="text-base sm:text-lg font-bold text-blue-400 mt-0.5">
+                  {performanceCounts.hasPhotos}
+                </span>
+                <span className="text-[10px] text-blue-300/70">{tabCounts.finalized} finalized</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* ── TOOLBAR (Modularized) ── */}
         <TrialFiltersBar
           search={search}
@@ -6508,10 +6648,14 @@ If none are present, write "None".`;
             setFilterDateEnd('');
             setSortBy('date-desc');
             setFilterOwner('all');
+            setPerformanceFilter('all');
           }}
           activeTab={activeTab}
           setActiveTab={setActiveTab}
           tabCounts={tabCounts}
+          performanceFilter={performanceFilter}
+          setPerformanceFilter={setPerformanceFilter}
+          performanceCounts={performanceCounts}
         />
 
         {/* ── GRID ── */}

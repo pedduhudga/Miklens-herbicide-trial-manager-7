@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   Search, X, SlidersHorizontal, Grid, Calendar, FileDown,
-  RefreshCw, FolderPlus, Plus, Columns3, Mic
+  RefreshCw, FolderPlus, Plus, Columns3, Mic, Sparkles, Clock, Camera, AlertTriangle, CheckCircle2
 } from 'lucide-react';
 
 export default function TrialFiltersBar({
@@ -44,7 +44,10 @@ export default function TrialFiltersBar({
   onResetFilters,
   activeTab,
   setActiveTab,
-  tabCounts = {}
+  tabCounts = {},
+  performanceFilter = 'all',
+  setPerformanceFilter,
+  performanceCounts = {}
 }) {
   return (
     <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-slate-100 px-3 sm:px-4 py-2.5 sm:py-3 space-y-2 sm:space-y-3 w-full max-w-full overflow-hidden">
@@ -371,28 +374,128 @@ export default function TrialFiltersBar({
       )}
 
       {/* Tabs */}
-      <div className="flex gap-1 overflow-x-auto pb-0.5">
-        {[
-          ['all', 'All'],
-          ['standard', 'Standard'],
-          ['rcbd', 'Project-Grouped'],
-          ['control', 'Control'],
-          ['finalized', 'Finalized']
-        ].map(([k, label]) => (
+      <div className="flex items-center justify-between gap-2 overflow-x-auto pb-0.5">
+        <div className="flex gap-1 items-center shrink-0">
+          {[
+            ['all', 'All Plots'],
+            ['active', 'Active / Live'],
+            ['standard', 'Standard'],
+            ['rcbd', 'Project-Grouped'],
+            ['control', 'Control'],
+            ['finalized', 'Finalized']
+          ].map(([k, label]) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setActiveTab(k)}
+              className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition flex items-center gap-1.5 ${
+                activeTab === k
+                  ? 'bg-emerald-600 text-white shadow-2xs'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <span>{label}</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                activeTab === k ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-600'
+              }`}>
+                {tabCounts[k] || 0}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Quick Agronomic Performance Filter Chips */}
+      {setPerformanceFilter && (
+        <div className="flex items-center gap-1.5 overflow-x-auto pt-0.5 pb-0.5 text-xs">
+          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider shrink-0 mr-1 flex items-center gap-1">
+            <Sparkles className="w-3 h-3 text-emerald-500" /> Focus:
+          </span>
           <button
-            key={k}
             type="button"
-            onClick={() => setActiveTab(k)}
-            className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition ${
-              activeTab === k
-                ? 'bg-emerald-600 text-white'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            onClick={() => setPerformanceFilter('all')}
+            className={`px-2.5 py-1 rounded-lg font-semibold transition shrink-0 flex items-center gap-1.5 text-xs ${
+              performanceFilter === 'all'
+                ? 'bg-slate-900 text-white shadow-2xs'
+                : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
             }`}
           >
-            {label} <span className="ml-1 opacity-70">({tabCounts[k] || 0})</span>
+            <span>All</span>
           </button>
-        ))}
-      </div>
+          <button
+            type="button"
+            onClick={() => setPerformanceFilter('high-kill')}
+            className={`px-2.5 py-1 rounded-lg font-semibold transition shrink-0 flex items-center gap-1.5 text-xs ${
+              performanceFilter === 'high-kill'
+                ? 'bg-emerald-600 text-white shadow-2xs'
+                : 'bg-white border border-slate-200 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700'
+            }`}
+          >
+            <span>⚡ High Kill (≥70%)</span>
+            {performanceCounts?.highKill !== undefined && (
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                performanceFilter === 'high-kill' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-700'
+              }`}>
+                {performanceCounts.highKill}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setPerformanceFilter('long-control')}
+            className={`px-2.5 py-1 rounded-lg font-semibold transition shrink-0 flex items-center gap-1.5 text-xs ${
+              performanceFilter === 'long-control'
+                ? 'bg-amber-600 text-white shadow-2xs'
+                : 'bg-white border border-slate-200 text-slate-600 hover:bg-amber-50 hover:text-amber-700'
+            }`}
+          >
+            <span>⏳ Long Residual (≥15d)</span>
+            {performanceCounts?.longControl !== undefined && (
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                performanceFilter === 'long-control' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-700'
+              }`}>
+                {performanceCounts.longControl}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setPerformanceFilter('needs-obs')}
+            className={`px-2.5 py-1 rounded-lg font-semibold transition shrink-0 flex items-center gap-1.5 text-xs ${
+              performanceFilter === 'needs-obs'
+                ? 'bg-rose-600 text-white shadow-2xs'
+                : 'bg-white border border-slate-200 text-slate-600 hover:bg-rose-50 hover:text-rose-700'
+            }`}
+          >
+            <span>⚠️ Needs Observation (&gt;7d)</span>
+            {performanceCounts?.needsObs !== undefined && (
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                performanceFilter === 'needs-obs' ? 'bg-white/20 text-white' : 'bg-rose-100 text-rose-700'
+              }`}>
+                {performanceCounts.needsObs}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setPerformanceFilter('has-photos')}
+            className={`px-2.5 py-1 rounded-lg font-semibold transition shrink-0 flex items-center gap-1.5 text-xs ${
+              performanceFilter === 'has-photos'
+                ? 'bg-blue-600 text-white shadow-2xs'
+                : 'bg-white border border-slate-200 text-slate-600 hover:bg-blue-50 hover:text-blue-700'
+            }`}
+          >
+            <span>📸 With Photos</span>
+            {performanceCounts?.hasPhotos !== undefined && (
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                performanceFilter === 'has-photos' ? 'bg-white/20 text-white' : 'bg-blue-100 text-blue-700'
+              }`}>
+                {performanceCounts.hasPhotos}
+              </span>
+            )}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

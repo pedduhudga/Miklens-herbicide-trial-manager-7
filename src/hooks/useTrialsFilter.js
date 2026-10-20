@@ -34,16 +34,24 @@ export function useTrialsFilter(trials, {
   user,
   filterOwner,
   registeredUsers = [],
-  activeCategory = 'herbicide'
+  activeCategory = 'herbicide',
+  performanceFilter = 'all'
 }) {
   return useMemo(() => {
     let list = [...trials];
     
     // Tab filters
-    if (activeTab === 'standard') list = list.filter(t => !t.ProjectID);
-    else if (activeTab === 'rcbd') list = list.filter(t => !!t.ProjectID);
-    else if (activeTab === 'control') list = list.filter(t => (t.IsControl === true || t.IsControl === 'true') && !t.ProjectID);
-    else if (activeTab === 'finalized') list = list.filter(t => t.IsCompleted === true || t.IsCompleted === 'true');
+    if (activeTab === 'active') {
+      list = list.filter(t => !(t.IsCompleted === true || t.IsCompleted === 'true' || t.ControlFinalized === true || t.ControlFinalized === 'true'));
+    } else if (activeTab === 'standard') {
+      list = list.filter(t => !t.ProjectID);
+    } else if (activeTab === 'rcbd') {
+      list = list.filter(t => !!t.ProjectID);
+    } else if (activeTab === 'control') {
+      list = list.filter(t => (t.IsControl === true || t.IsControl === 'true') && !t.ProjectID);
+    } else if (activeTab === 'finalized') {
+      list = list.filter(t => t.IsCompleted === true || t.IsCompleted === 'true');
+    }
 
     // Owner / Scientist filters
     if (filterOwner && filterOwner !== 'all') {
@@ -96,12 +104,14 @@ export function useTrialsFilter(trials, {
       }
     }
 
-    // Fuzzy search
+    // Comprehensive multi-field Fuzzy search
     if (deferredSearch) {
       list = list.filter(t => {
         const searchParts = [
+          t.TrialName,
           t.FormulationName,
           t.FormulationID,
+          t.ProjectName,
           t.InvestigatorName,
           t.Location,
           t.WeedSpecies,
@@ -112,10 +122,16 @@ export function useTrialsFilter(trials, {
           t.Crop,
           t.Variety,
           t.ID,
+          t.TrialDesign,
+          t.PotLabel,
+          t.PotRow ? `Row ${t.PotRow}` : '',
+          t.PotCol ? `Col ${t.PotCol}` : '',
+          t.Dosage,
+          t.BBCHCode,
           t.Notes,
           t.Conclusion,
-          t.Replication,
-          t.PlotNumber,
+          t.Replication ? `Rep ${t.Replication}` : '',
+          t.PlotNumber ? `Plot ${t.PlotNumber}` : '',
           t.Date
         ].filter(Boolean).join(' ');
         return fuzzyMatch(searchParts, deferredSearch);
@@ -130,6 +146,56 @@ export function useTrialsFilter(trials, {
     // Date range filters
     if (filterDateStart) list = list.filter(t => t.Date && t.Date >= filterDateStart);
     if (filterDateEnd)   list = list.filter(t => t.Date && t.Date <= filterDateEnd);
+
+    // Helper to extract control days from trial (strictly matching TrialCard logic)
+    const getTrialControlDays = (t) => {
+      const effDays = calculateEffectiveControlDays(t);
+      if (effDays > 0) return effDays;
+      if (t.FinalControlDuration && !isNaN(parseInt(t.FinalControlDuration, 10))) {
+        const parsed = parseInt(t.FinalControlDuration, 10);
+        if (parsed > 0) return parsed;
+      }
+      return 0;
+    };
+
+    // Quick Performance Filter Chips
+    if (performanceFilter === 'high-kill') {
+      list = list.filter(t => {
+        const eff = getTrialCalculatedEfficacy(t, activeCategory);
+        return eff !== null && eff !== undefined && eff >= 70;
+      });
+    } else if (performanceFilter === 'long-control') {
+      list = list.filter(t => getTrialControlDays(t) >= 15);
+    } else if (performanceFilter === 'needs-obs') {
+      const now = Date.now();
+      const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+      list = list.filter(t => {
+        const isFinalized = t.IsCompleted === true || t.IsCompleted === 'true' || t.ControlFinalized === true || t.ControlFinalized === 'true';
+        if (isFinalized) return false;
+        const rawObs = safeJsonParse(t.EfficacyDataJSON || t.observations, []);
+        const obs = Array.isArray(rawObs) ? rawObs : [];
+        if (obs.length === 0) return true;
+        let lastTime = 0;
+        obs.forEach(o => {
+          const d = o.date || o.ObservationDate || o.timestamp;
+          if (d) {
+            const parsed = parseCustomDate(d) || new Date(d);
+            if (!isNaN(parsed.getTime()) && parsed.getTime() > lastTime) {
+              lastTime = parsed.getTime();
+            }
+          }
+        });
+        if (lastTime === 0) return true;
+        return (now - lastTime) >= SEVEN_DAYS_MS;
+      });
+    } else if (performanceFilter === 'has-photos') {
+      list = list.filter(t => {
+        const p1 = safeJsonParse(t.PhotoURLs, []);
+        const p2 = safeJsonParse(t.WeedPhotosJSON, []);
+        const photos = [...(Array.isArray(p1) ? p1 : []), ...(Array.isArray(p2) ? p2 : [])];
+        return photos.some(p => p && !p.deleted && (p.url || p.dataUrl || p.driveId || p.thumbnailUrl || (typeof p === 'string' && p.length > 0)));
+      });
+    }
 
     // Pot Trial Comparison helper
     const comparePots = (x, y) => {
@@ -158,17 +224,6 @@ export function useTrialsFilter(trials, {
       if (parsed && !isNaN(parsed.getTime())) return parsed.getTime();
       const std = new Date(d);
       return isNaN(std.getTime()) ? 0 : std.getTime();
-    };
-
-    // Helper to extract control days from trial (strictly matching TrialCard logic)
-    const getTrialControlDays = (t) => {
-      const effDays = calculateEffectiveControlDays(t);
-      if (effDays > 0) return effDays;
-      if (t.FinalControlDuration && !isNaN(parseInt(t.FinalControlDuration, 10))) {
-        const parsed = parseInt(t.FinalControlDuration, 10);
-        if (parsed > 0) return parsed;
-      }
-      return 0;
     };
 
     // Sort order mapping
@@ -251,6 +306,8 @@ export function useTrialsFilter(trials, {
     sortBy,
     user,
     filterOwner,
-    activeCategory
+    registeredUsers,
+    activeCategory,
+    performanceFilter
   ]);
 }
