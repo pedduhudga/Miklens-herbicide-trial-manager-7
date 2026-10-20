@@ -317,6 +317,101 @@ export async function analyzeSprayWindow(lat, lon, targetDate = null) {
       });
     }
 
+    // 24-Hour Timeline for target day (visual heatmap)
+    const hourlyTimeline = [];
+    const targetDateStr = safeTargetDate || todayStr;
+    
+    for (let i = 0; i < hourly.time.length; i++) {
+      const timeStr = hourly.time[i];
+      if (!timeStr.startsWith(targetDateStr)) continue;
+      
+      const hourTime = new Date(timeStr);
+      const h = hourTime.getHours();
+      const cond = {
+        temperature: hourly.temperature_2m[i],
+        humidity: hourly.relative_humidity_2m[i],
+        windSpeed: hourly.wind_speed_10m[i],
+        precipitation: hourly.precipitation[i] || 0
+      };
+      const scoreObj = calculateSprayScore(cond);
+      
+      // Rainfast check for this hour (next 4h)
+      let rainSoon = false;
+      let rainInH = null;
+      for (let offset = 1; offset <= 4 && i + offset < hourly.time.length; offset++) {
+        const p = hourly.precipitation[i + offset] || 0;
+        const prob = hourly.precipitation_probability ? (hourly.precipitation_probability[i + offset] || 0) : 0;
+        if (p > 0.4 || prob >= 60) {
+          rainSoon = true;
+          rainInH = offset;
+          break;
+        }
+      }
+      
+      let hScore = scoreObj.score;
+      const hIssues = [...scoreObj.issues];
+      if (rainSoon) {
+        hScore = Math.min(35, hScore - 40);
+        hIssues.unshift(`Rain forecast in ~${rainInH}h (Washoff hazard)`);
+      }
+      
+      let hVerdict = 'optimal';
+      if (hScore < 50) hVerdict = 'avoid';
+      else if (hScore < 75) hVerdict = 'caution';
+      
+      hourlyTimeline.push({
+        time: hourTime,
+        hour: h,
+        score: hScore,
+        verdict: hVerdict,
+        conditions: cond,
+        deltaT: scoreObj.deltaT,
+        issues: hIssues,
+        rainSoon,
+        precipitationProbability: hourly.precipitation_probability ? (hourly.precipitation_probability[i] || 0) : 0
+      });
+    }
+
+    // Windows to Avoid
+    const avoidWindows = [];
+    let currentAvoid = null;
+    hourlyTimeline.forEach((ht) => {
+      if (ht.verdict === 'avoid' && ht.hour >= 6 && ht.hour <= 20) {
+        if (!currentAvoid) {
+          currentAvoid = {
+            startHour: ht.hour,
+            endHour: ht.hour + 1,
+            reasons: new Set(ht.issues.length ? ht.issues : ['Adverse weather']),
+            scores: [ht.score]
+          };
+        } else {
+          currentAvoid.endHour = ht.hour + 1;
+          ht.issues.forEach(iss => currentAvoid.reasons.add(iss));
+          currentAvoid.scores.push(ht.score);
+        }
+      } else {
+        if (currentAvoid) {
+          avoidWindows.push({
+            startHour: currentAvoid.startHour,
+            endHour: currentAvoid.endHour,
+            timeLabel: `${formatHour(currentAvoid.startHour)} – ${formatHour(currentAvoid.endHour)}`,
+            reason: Array.from(currentAvoid.reasons).slice(0, 2).join('; '),
+            avgScore: Math.round(currentAvoid.scores.reduce((a, b) => a + b, 0) / currentAvoid.scores.length)
+          });
+          currentAvoid = null;
+        }
+      }
+    });
+    if (currentAvoid) {
+      avoidWindows.push({
+        startHour: currentAvoid.startHour,
+        endHour: currentAvoid.endHour,
+        timeLabel: `${formatHour(currentAvoid.startHour)} – ${formatHour(currentAvoid.endHour)}`,
+        reason: Array.from(currentAvoid.reasons).slice(0, 2).join('; '),
+        avgScore: Math.round(currentAvoid.scores.reduce((a, b) => a + b, 0) / currentAvoid.scores.length)
+      });
+    }
+
     // Sort by score descending
     windows.sort((a, b) => b.score - a.score);
     
@@ -329,11 +424,14 @@ export async function analyzeSprayWindow(lat, lon, targetDate = null) {
     return {
       current: getCurrentConditions(hourly, currentHour),
       bestWindow,
+      windows, // for AI assistant tools compatibility
       allWindows: windows.slice(0, 20), // Top 20 windows
       groupedByDay,
       location: forecast.location,
       recommendation: generateRecommendation(bestWindow, windows),
-      futureHours // array of forecasts for UI
+      futureHours,
+      hourlyTimeline,
+      avoidWindows
     };
     
   } catch (error) {
@@ -343,7 +441,18 @@ export async function analyzeSprayWindow(lat, lon, targetDate = null) {
 }
 
 /**
- * Get current weather conditions
+ * Format 24-hour integer into 12-hour AM/PM label
+ */
+export function formatHour(hour) {
+  const h = parseInt(hour, 10);
+  if (isNaN(h)) return '12:00 PM';
+  const period = h >= 12 ? 'PM' : 'AM';
+  const displayHour = h % 12 === 0 ? 12 : h % 12;
+  return `${String(displayHour).padStart(2, '0')}:00 ${period}`;
+}
+
+/**
+ * Get current weather conditions with Rainfastness Lookahead
  */
 function getCurrentConditions(hourly, currentHour) {
   const idx = hourly.time.findIndex(t => {
@@ -361,13 +470,70 @@ function getCurrentConditions(hourly, currentHour) {
   };
   
   const analysis = calculateSprayScore(conditions);
-  
+
+  // Lookahead: Rainfastness Horizon (next 4-5 hours)
+  let rainfastHazard = false;
+  let rainArrivesInHours = null;
+  let maxPrecipProb4h = 0;
+  for (let offset = 1; offset <= 5 && idx + offset < hourly.time.length; offset++) {
+    const p = hourly.precipitation[idx + offset] || 0;
+    const prob = hourly.precipitation_probability ? (hourly.precipitation_probability[idx + offset] || 0) : 0;
+    if (prob > maxPrecipProb4h) maxPrecipProb4h = prob;
+    if (p > 0.4 || prob >= 60) {
+      if (!rainfastHazard) {
+        rainfastHazard = true;
+        rainArrivesInHours = offset;
+      }
+    }
+  }
+
+  let finalScore = analysis.score;
+  const issues = [...analysis.issues];
+
+  if (rainfastHazard) {
+    // If rain arrives within 4 hours, herbicide will be washed off!
+    finalScore = Math.min(35, finalScore - 40);
+    issues.unshift(`Imminent Rain (~${rainArrivesInHours}h): Rainwash hazard. Herbicide requires 4h dry canopy.`);
+  }
+
+  let verdict = 'SAFE_TO_SPRAY';
+  let verdictHeadline = 'Safe to Spray Now';
+  let verdictSummary = 'All weather conditions (Delta-T, wind, and rainfast horizon) are optimal for effective chemical absorption.';
+  let verdictColor = 'emerald';
+
+  if (finalScore >= 75 && !rainfastHazard) {
+    verdict = 'SAFE_TO_SPRAY';
+    verdictHeadline = 'Safe to Spray Now';
+    verdictSummary = 'All atmospheric thresholds are met. Foliar uptake is maximized with low drift risk.';
+    verdictColor = 'emerald';
+  } else if (finalScore >= 50 && !rainfastHazard) {
+    verdict = 'SPRAY_WITH_CAUTION';
+    verdictHeadline = 'Spray With Caution';
+    verdictSummary = 'Sub-optimal window. Use coarse droplet nozzles to avoid drift, and monitor local wind shifts.';
+    verdictColor = 'amber';
+  } else {
+    verdict = 'DO_NOT_SPRAY';
+    verdictHeadline = 'Avoid Spraying — Hazard Active';
+    verdictSummary = rainfastHazard 
+      ? `Rain expected in ~${rainArrivesInHours}h (${maxPrecipProb4h}% prob). Foliar spray will be stripped by rain washoff before absorption.`
+      : (analysis.deltaT > 10 ? 'High Delta-T (>10°C). Rapid droplet evaporation will cause chemical failure.' : 'High wind or unfavorable weather creates severe drift/washoff risk.');
+    verdictColor = 'rose';
+  }
+
   return {
     conditions,
-    score: analysis.score,
-    riskLevel: getRiskLevel(analysis.score),
-    issues: analysis.issues,
-    deltaT: analysis.deltaT
+    score: finalScore,
+    rawScore: analysis.score,
+    riskLevel: getRiskLevel(finalScore),
+    issues,
+    deltaT: analysis.deltaT,
+    rainfastHazard,
+    rainArrivesInHours,
+    maxPrecipProb4h,
+    verdict,
+    verdictHeadline,
+    verdictSummary,
+    verdictColor
   };
 }
 
