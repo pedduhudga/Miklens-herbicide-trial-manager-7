@@ -1729,7 +1729,7 @@ export default function Formulations({ onMenuClick }) {
             })}
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 transition-all duration-200 ${selectedForCompare.size >= 1 ? 'pb-32 sm:pb-20' : 'pb-20 sm:pb-10'}`}>
             {sortedFormulations.map(form => {
               const ownUid = user?.uid || user?.ID || user?.id;
               const isOwn = isOwnData(form);
@@ -1766,27 +1766,28 @@ export default function Formulations({ onMenuClick }) {
         )}
 
 
-        {/* Floating Bottom Comparison Dock */}
+        {/* Floating Bottom Comparison Dock (Elevated above mobile BottomNav) */}
         {selectedForCompare.size >= 1 && (
-          <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 backdrop-blur-md text-white px-5 py-3 rounded-2xl shadow-2xl border border-slate-700 flex items-center gap-4 animate-in slide-in-from-bottom-5">
+          <div className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom,8px))] md:bottom-5 left-1/2 -translate-x-1/2 z-[55] w-[calc(100vw-24px)] sm:w-auto max-w-lg bg-slate-900/95 backdrop-blur-md text-white px-4 sm:px-5 py-2.5 sm:py-3 rounded-2xl shadow-2xl border border-slate-700 flex items-center justify-between gap-3 animate-slide-up select-none">
             <div className="flex items-center gap-2">
-              <Scale className="w-4 h-4 text-emerald-400" />
-              <span className="text-xs font-bold tracking-wide">
-                {selectedForCompare.size} of 4 Formulations Selected
+              <Scale className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="text-xs font-bold tracking-wide truncate">
+                {selectedForCompare.size} of 4 Selected
               </span>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 shrink-0">
               <button
                 type="button"
                 onClick={() => setIsCompareModalOpen(true)}
-                className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5 active:scale-95"
+                className="px-3.5 py-1.5 bg-[#154734] hover:bg-[#0e3525] border border-emerald-400/40 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center gap-1.5 active:scale-95 touch-manipulation"
               >
-                <Scale className="w-3.5 h-3.5" /> Compare Side-by-Side
+                <Scale className="w-3.5 h-3.5" /> 
+                <span>Compare</span>
               </button>
               <button
                 type="button"
                 onClick={() => setSelectedForCompare(new Set())}
-                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition"
+                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition active:scale-95 touch-manipulation"
                 title="Clear selection"
               >
                 Clear

@@ -471,6 +471,15 @@ input, textarea, select, [contenteditable="true"], .selectable-text, table, td, 
     -webkit-overflow-scrolling: touch;
 }
 
+/* Hide scrollbar utility for sleek mobile horizontal swiping */
+.no-scrollbar::-webkit-scrollbar {
+    display: none;
+}
+.no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+
 .pb-safe {
     padding-bottom: env(safe-area-inset-bottom) !important;
 }

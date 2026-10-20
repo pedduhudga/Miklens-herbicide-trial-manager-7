@@ -6331,29 +6331,37 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
         </Modal>
       )}
 
-      {/* Floating Selection Bar for spots */}
+      {/* Floating Selection Bar for spots (Elevated above mobile BottomNav) */}
       {selectedForBulk.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-800 text-white px-5 py-3 rounded-full shadow-2xl flex items-center gap-4 z-50">
-          <span className={`font-bold text-sm`}><span className={`${theme.bgSecondary} px-2 py-0.5 rounded-full mr-2`}>{selectedForBulk.size}</span>Selected</span>
-          <div className="h-4 w-px bg-slate-600" />
-          <button
-            onClick={() => {
-              const sel = subTrials.filter(t => selectedForBulk.has(t.ID));
-              checkDownload(exportMasterCSV, activeProject, sel);
-            }}
-            className="flex items-center gap-1.5 text-sm hover:text-emerald-400 transition"
-          >
-            <FileText className="w-4 h-4" /> Export CSV
-          </button>
-          <button
-            onClick={handleBulkDeleteSubTrials}
-            className="flex items-center gap-1.5 text-sm hover:text-red-400 transition"
-          >
-            <Trash2 className="w-4 h-4" /> Delete
-          </button>
-          <button onClick={() => setSelectedForBulk(new Set())} className="ml-1 text-slate-400 hover:text-white">
-            <X className="w-4 h-4" />
-          </button>
+        <div className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom,8px))] md:bottom-6 left-1/2 -translate-x-1/2 w-[calc(100vw-24px)] sm:w-auto max-w-lg bg-slate-900/95 backdrop-blur-md text-white px-4 sm:px-5 py-2.5 sm:py-3 rounded-2xl shadow-2xl border border-slate-700/80 flex items-center justify-between gap-3 z-[55] animate-slide-up select-none">
+          <span className="font-bold text-xs sm:text-sm flex items-center">
+            <span className={`${theme.bgSecondary} px-2 py-0.5 rounded-full mr-1.5 text-xs font-bold`}>{selectedForBulk.size}</span>
+            Selected
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                const sel = subTrials.filter(t => selectedForBulk.has(t.ID));
+                checkDownload(exportMasterCSV, activeProject, sel);
+              }}
+              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs flex items-center gap-1.5 transition active:scale-95 touch-manipulation"
+            >
+              <FileText className="w-3.5 h-3.5" /> Export CSV
+            </button>
+            <button
+              onClick={handleBulkDeleteSubTrials}
+              className="px-3 py-1.5 rounded-xl bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-800/80 font-semibold text-xs flex items-center gap-1.5 transition active:scale-95 touch-manipulation"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-400" /> Delete
+            </button>
+            <button 
+              onClick={() => setSelectedForBulk(new Set())} 
+              className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition ml-0.5"
+              title="Clear selection"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
 

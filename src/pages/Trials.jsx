@@ -6699,7 +6699,7 @@ If none are present, write "None".`;
         />
 
         {/* ── GRID ── */}
-        <div className="p-4">
+        <div className={`p-4 transition-all duration-200 ${selectedForBulk.size > 0 ? 'pb-36 sm:pb-24' : 'pb-24 sm:pb-12'}`}>
           {activeTab === 'rcbd' && (
             <div className="mb-4 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-100 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
               <div className="flex items-start gap-3">
@@ -7167,9 +7167,9 @@ If none are present, write "None".`;
         </div>
       </div>
 
-      {/* ── SELECTION BAR ── */}
+      {/* ── BULK SELECTION DOCK (Elevated above mobile BottomNav) ── */}
       {selectedForBulk.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-800 text-white px-5 py-3 rounded-full shadow-2xl flex items-center gap-4 z-50">
+        <div className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom,8px))] md:bottom-6 left-1/2 -translate-x-1/2 w-[calc(100vw-20px)] sm:w-auto max-w-2xl bg-slate-900/95 backdrop-blur-md text-white px-3 sm:px-5 py-2 sm:py-3 rounded-2xl shadow-2xl border border-slate-700/90 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 z-[55] animate-slide-up select-none">
           {(() => {
             const crossCategoryCount = Array.from(selectedForBulk).filter(id => {
               const trial = trials.find(t => t.ID === id);
@@ -7178,39 +7178,123 @@ If none are present, write "None".`;
             const validCount = selectedForBulk.size - crossCategoryCount;
             
             return (
-              <>
-                <span className="font-bold text-sm">
-                  <span className="bg-emerald-500 px-2 py-0.5 rounded-full mr-2">{selectedForBulk.size}</span>
-                  Selected
+              <div className="flex items-center justify-between sm:justify-start gap-2">
+                <span className="font-bold text-xs sm:text-sm flex items-center shrink-0">
+                  <span className="bg-[#154734] border border-emerald-400/40 text-white px-2 py-0.5 rounded-full mr-1.5 text-xs font-extrabold">
+                    {selectedForBulk.size}
+                  </span>
+                  <span>Selected</span>
                   {crossCategoryCount > 0 && (
-                    <span className="bg-amber-500 px-2 py-0.5 rounded-full ml-2 text-xs">
-                      {crossCategoryCount} cross-category
+                    <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full ml-1.5 text-[10px]">
+                      {crossCategoryCount} diff category
                     </span>
                   )}
                 </span>
-                <div className="h-4 w-px bg-slate-600" />
-                <button 
-                  onClick={navigateToCompare} 
-                  disabled={validCount < 2}
-                  className={`flex items-center gap-1.5 text-sm transition ${
-                    validCount < 2 
-                      ? 'text-slate-500 cursor-not-allowed' 
-                      : 'hover:text-emerald-400'
-                  }`}
-                  title={validCount < 2 ? `Need at least 2 ${activeCategory} trials to compare` : ''}
+                <button
+                  type="button"
+                  onClick={clearBulk}
+                  className="sm:hidden text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition active:scale-95"
+                  title="Clear selection"
                 >
-                  <BarChart3 className="w-4 h-4" />
-                  Compare {validCount > 0 && `(${validCount})`}
+                  <X className="w-4 h-4" />
                 </button>
-              </>
+              </div>
             );
           })()}
-          {!isViewer && <button onClick={handleBulkFinalize} className="flex items-center gap-1.5 text-sm hover:text-emerald-400 transition"><CheckCircle className="w-4 h-4" />Finalize</button>}
-          {!isViewer && <button onClick={() => setIsBulkEditOpen(true)} className="flex items-center gap-1.5 text-sm hover:text-amber-400 transition"><Edit className="w-4 h-4" />Bulk Edit</button>}
-          {!isViewer && <button onClick={() => setIsBulkQrModalOpen(true)} className="flex items-center gap-1.5 text-sm hover:text-blue-400 transition"><Printer className="w-4 h-4" />Print Cards</button>}
-          {canDownload && <button onClick={() => { const sel = trials.filter(t => selectedForBulk.has(t.ID)); exportMultipleTrialsToCSV(sel, activeCategory); }} className="flex items-center gap-1.5 text-sm hover:text-emerald-400 transition"><FileSpreadsheet className="w-4 h-4" />Export CSV</button>}
-          {!isViewer && <button onClick={handleBulkDelete} className="flex items-center gap-1.5 text-sm hover:text-red-400 transition"><Trash2 className="w-4 h-4" />Delete</button>}
-          <button onClick={clearBulk} className="ml-1 text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
+
+          {/* Action Buttons Strip - Horizontally scrollable on mobile */}
+          <div className="relative min-w-0 flex-1">
+            <div className="flex items-center gap-1 sm:gap-2 overflow-x-auto no-scrollbar scroll-smooth py-0.5 -mx-1 px-1 touch-pan-x overscroll-x-contain">
+              {(() => {
+                const crossCategoryCount = Array.from(selectedForBulk).filter(id => {
+                  const trial = trials.find(t => t.ID === id);
+                  return trial && (trial.Category || 'herbicide') !== activeCategory;
+                }).length;
+                const validCount = selectedForBulk.size - crossCategoryCount;
+
+                return (
+                  <button 
+                    type="button"
+                    onClick={navigateToCompare} 
+                    disabled={validCount < 2}
+                    className={`px-2.5 sm:px-3 py-1.5 rounded-xl font-bold text-[11px] sm:text-xs flex items-center gap-1.5 transition shrink-0 active:scale-95 touch-manipulation ${
+                      validCount < 2 
+                        ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed' 
+                        : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs'
+                    }`}
+                    title={validCount < 2 ? `Need at least 2 ${activeCategory} trials to compare` : ''}
+                  >
+                    <BarChart3 className="w-3.5 h-3.5" />
+                    <span>Compare {validCount > 0 ? `(${validCount})` : ''}</span>
+                  </button>
+                );
+              })()}
+
+              {!isViewer && (
+                <button 
+                  type="button"
+                  onClick={() => setIsBulkEditOpen(true)} 
+                  className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-[11px] sm:text-xs flex items-center gap-1.5 transition shrink-0 active:scale-95 touch-manipulation"
+                >
+                  <Edit className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Bulk Edit</span>
+                </button>
+              )}
+
+              {!isViewer && (
+                <button 
+                  type="button"
+                  onClick={handleBulkFinalize} 
+                  className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-[11px] sm:text-xs flex items-center gap-1.5 transition shrink-0 active:scale-95 touch-manipulation"
+                >
+                  <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Finalize</span>
+                </button>
+              )}
+
+              {!isViewer && (
+                <button 
+                  type="button"
+                  onClick={() => setIsBulkQrModalOpen(true)} 
+                  className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-[11px] sm:text-xs flex items-center gap-1.5 transition shrink-0 active:scale-95 touch-manipulation"
+                >
+                  <Printer className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Print Cards</span>
+                </button>
+              )}
+
+              {canDownload && (
+                <button 
+                  type="button"
+                  onClick={() => { const sel = trials.filter(t => selectedForBulk.has(t.ID)); exportMultipleTrialsToCSV(sel, activeCategory); }} 
+                  className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-[11px] sm:text-xs flex items-center gap-1.5 transition shrink-0 active:scale-95 touch-manipulation"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-teal-400" />
+                  <span>Export CSV</span>
+                </button>
+              )}
+
+              {!isViewer && (
+                <button 
+                  type="button"
+                  onClick={handleBulkDelete} 
+                  className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-800/80 font-semibold text-[11px] sm:text-xs flex items-center gap-1.5 transition shrink-0 active:scale-95 touch-manipulation"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Delete</span>
+                </button>
+              )}
+
+              <button 
+                type="button"
+                onClick={clearBulk} 
+                className="hidden sm:flex text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition ml-1"
+                title="Clear selection"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
