@@ -25,7 +25,6 @@ import { calculateDAA, toDateKey, formatPhotoDate, toDatetimeLocal, formatDate, 
 import { normalizeObservation } from '../utils/categoryObservationUtils.js';
 import { validateEfficacyData } from '../utils/analysisUtils.js';
 import { canonicalizeWeedSpecies, getWeedBiology, getWeedEPPOCode } from '../utils/weedUtils.js';
-import { EPPO_CODES } from '../utils/eppoBBCHData.js';
 import CameraCapture from '../components/CameraCapture.jsx';
 import CropperModal from '../components/CropperModal.jsx';
 import CategoryValidationAlert, { showCategoryValidationToast } from '../components/CategoryValidationAlert.jsx';
