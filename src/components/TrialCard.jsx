@@ -184,12 +184,12 @@ const TrialCard = memo(function TrialCard({
     return list;
   }, [photos, efficacyData]);
 
-  // Auto-advance photos gently (every 4 seconds) if multiple photos exist and user isn't hovering
+  // Gentle auto-preview ONLY when actively hovering over this card's photo gallery
   useEffect(() => {
-    if (allCardPhotos.length <= 1 || isCarouselHovered) return;
+    if (allCardPhotos.length <= 1 || !isCarouselHovered) return;
     const interval = setInterval(() => {
       setActivePhotoIdx(prev => (prev + 1) % allCardPhotos.length);
-    }, 4000);
+    }, 3200);
     return () => clearInterval(interval);
   }, [allCardPhotos.length, isCarouselHovered]);
 
@@ -894,8 +894,8 @@ const TrialCard = memo(function TrialCard({
         {/* ══ JIO-MART STYLE IN-CARD PHOTO CAROUSEL ═══════════════════════ */}
         {allCardPhotos.length > 0 && (
           <div
-            className="mt-2 relative rounded-lg overflow-hidden bg-slate-900/10 border border-slate-100 group select-none cursor-pointer touch-pan-y"
-            style={{ height: '115px', touchAction: 'pan-y' }}
+            className="mt-2.5 relative rounded-xl overflow-hidden bg-slate-950/20 border border-slate-200/80 shadow-xs group select-none cursor-pointer h-36 sm:h-40 w-full"
+            style={{ touchAction: 'pan-y' }}
             onClick={(e) => {
               stopPropagation(e);
               if (touchCoordsRef.current.isSwipe) {
@@ -910,58 +910,69 @@ const TrialCard = memo(function TrialCard({
             onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}
           >
-            {/* Active Image */}
-            {(() => {
-              const currentPhoto = allCardPhotos[activePhotoIdx % allCardPhotos.length];
-              const resolvedSrc = currentPhoto?.src || getPhotoThumbnailSrc(currentPhoto?.rawItem, 320) || resolvePhotoSrc(currentPhoto?.rawItem, 320);
-              return resolvedSrc ? (
-                <>
-                  {/* Blurred Backdrop Ambience for Uncropped 'contain' mode */}
-                  {photoFitMode === 'contain' && (
-                    <img
-                      src={resolvedSrc}
-                      alt=""
-                      aria-hidden="true"
-                      className="absolute inset-0 w-full h-full object-cover blur-xs opacity-35 scale-110 pointer-events-none"
-                    />
-                  )}
-                  <img
-                    src={resolvedSrc}
-                    alt={currentPhoto?.label || 'Trial photo'}
-                    className={`relative z-1 w-full h-full ${photoFitMode === 'contain' ? 'object-contain' : 'object-cover'} transition-all duration-300 group-hover:scale-[1.02]`}
-                    loading="lazy"
-                    onError={(e) => {
-                      const driveId = getDriveFileId(resolvedSrc) || getDriveFileId(currentPhoto?.rawItem);
-                      if (driveId && !e.currentTarget.dataset.fallbackTried) {
-                        e.currentTarget.dataset.fallbackTried = '1';
-                        e.currentTarget.src = `https://drive.google.com/uc?export=view&id=${driveId}`;
-                      } else if (driveId && e.currentTarget.dataset.fallbackTried === '1') {
-                        e.currentTarget.dataset.fallbackTried = '2';
-                        e.currentTarget.src = `https://drive.google.com/uc?export=download&id=${driveId}`;
-                      }
-                    }}
-                  />
-                </>
-              ) : (
-                <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 bg-slate-100">
-                  <ImageIcon className="w-4 h-4 mb-0.5 opacity-50" />
-                  <span className="text-[9px]">Photo available</span>
-                </div>
-              );
-            })()}
+            {/* Smooth Hardware-Accelerated Sliding Track */}
+            <div
+              className="flex h-full w-full transition-transform duration-350 ease-[cubic-bezier(0.25,1,0.5,1)] will-change-transform"
+              style={{
+                transform: `translateX(-${(activePhotoIdx % allCardPhotos.length) * 100}%)`,
+              }}
+            >
+              {allCardPhotos.map((p, pIdx) => {
+                const resolvedSrc = p.src || getPhotoThumbnailSrc(p.rawItem, 400) || resolvePhotoSrc(p.rawItem, 400);
+                return (
+                  <div key={p.id || pIdx} className="w-full h-full shrink-0 relative overflow-hidden bg-slate-900/10">
+                    {resolvedSrc ? (
+                      <>
+                        {/* Blurred Backdrop Ambience for Uncropped 'contain' mode */}
+                        {photoFitMode === 'contain' && (
+                          <img
+                            src={resolvedSrc}
+                            alt=""
+                            aria-hidden="true"
+                            className="absolute inset-0 w-full h-full object-cover blur-sm opacity-35 scale-110 pointer-events-none"
+                          />
+                        )}
+                        <img
+                          src={resolvedSrc}
+                          alt={p.label || 'Trial photo'}
+                          className={`relative z-1 w-full h-full ${photoFitMode === 'contain' ? 'object-contain' : 'object-cover'} transition-transform duration-300`}
+                          loading={pIdx === 0 ? 'eager' : 'lazy'}
+                          draggable={false}
+                          onError={(e) => {
+                            const driveId = getDriveFileId(resolvedSrc) || getDriveFileId(p.rawItem);
+                            if (driveId && !e.currentTarget.dataset.fallbackTried) {
+                              e.currentTarget.dataset.fallbackTried = '1';
+                              e.currentTarget.src = `https://drive.google.com/uc?export=view&id=${driveId}`;
+                            } else if (driveId && e.currentTarget.dataset.fallbackTried === '1') {
+                              e.currentTarget.dataset.fallbackTried = '2';
+                              e.currentTarget.src = `https://drive.google.com/uc?export=download&id=${driveId}`;
+                            }
+                          }}
+                        />
+                      </>
+                    ) : (
+                      <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 bg-slate-100">
+                        <ImageIcon className="w-5 h-5 mb-1 opacity-50" />
+                        <span className="text-[10px]">Photo available</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
 
             {/* Top Overlay Bar: DAA Tag, Fit/Fill Toggle, Expand Fullscreen, Photo Counter */}
-            <div className="absolute top-1 left-1 right-1 flex items-center justify-between z-10 pointer-events-none">
+            <div className="absolute top-1.5 left-1.5 right-1.5 flex items-center justify-between z-10 pointer-events-none">
               <div>
                 {allCardPhotos[activePhotoIdx % allCardPhotos.length]?.daa !== null &&
                 allCardPhotos[activePhotoIdx % allCardPhotos.length]?.daa !== undefined ? (
-                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-600/90 text-white backdrop-blur-xs shadow-xs">
+                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-md bg-emerald-600/90 text-white backdrop-blur-md shadow-xs border border-white/20">
                     DAA {allCardPhotos[activePhotoIdx % allCardPhotos.length].daa}
                   </span>
                 ) : <span />}
               </div>
 
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1.5">
                 {/* Fit / Fill Toggle */}
                 <button
                   type="button"
@@ -969,10 +980,10 @@ const TrialCard = memo(function TrialCard({
                     e.stopPropagation();
                     setPhotoFitMode(m => m === 'contain' ? 'cover' : 'contain');
                   }}
-                  className="pointer-events-auto px-1.5 py-0.5 rounded bg-black/60 hover:bg-black/80 text-white text-[9px] font-semibold backdrop-blur-xs transition shadow-xs flex items-center gap-0.5"
+                  className="pointer-events-auto px-2 py-0.5 rounded-md bg-black/55 hover:bg-black/80 text-white text-[9px] font-semibold backdrop-blur-md transition shadow-xs border border-white/15 flex items-center gap-0.5 active:scale-95"
                   title={photoFitMode === 'contain' ? 'Currently: Full Uncropped photo. Click to Fill frame.' : 'Currently: Fill frame. Click to view Full Uncropped photo.'}
                 >
-                  {photoFitMode === 'contain' ? 'Full' : 'Fill'}
+                  {photoFitMode === 'contain' ? 'Fit' : 'Fill'}
                 </button>
 
                 {/* Lightbox / Zoom full photo button */}
@@ -982,7 +993,7 @@ const TrialCard = memo(function TrialCard({
                     e.stopPropagation();
                     setLightboxPhoto(allCardPhotos[activePhotoIdx % allCardPhotos.length]);
                   }}
-                  className="pointer-events-auto w-5 h-5 rounded bg-black/60 hover:bg-black/80 text-white flex items-center justify-center backdrop-blur-xs transition shadow-xs"
+                  className="pointer-events-auto w-6 h-6 rounded-md bg-black/55 hover:bg-black/80 text-white flex items-center justify-center backdrop-blur-md transition shadow-xs border border-white/15 active:scale-95"
                   title="Expand to Fullscreen Photo Lightbox"
                 >
                   <Maximize2 className="w-3 h-3" />
@@ -990,7 +1001,7 @@ const TrialCard = memo(function TrialCard({
 
                 {/* Photo Counter Badge */}
                 {allCardPhotos.length > 1 && (
-                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-black/60 text-white backdrop-blur-xs shadow-xs">
+                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-md bg-black/55 text-white backdrop-blur-md shadow-xs border border-white/15">
                     {(activePhotoIdx % allCardPhotos.length) + 1}/{allCardPhotos.length}
                   </span>
                 )}
@@ -1003,35 +1014,43 @@ const TrialCard = memo(function TrialCard({
                 <button
                   type="button"
                   onClick={handlePrevPhoto}
-                  className="absolute left-1 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-white/95 hover:bg-white text-slate-800 shadow-md flex items-center justify-center opacity-85 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity z-10 active:scale-95"
+                  className="absolute left-1.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-black/45 hover:bg-black/75 text-white shadow-md backdrop-blur-md border border-white/20 flex items-center justify-center opacity-90 sm:opacity-0 sm:group-hover:opacity-100 transition-all duration-200 z-10 active:scale-95"
                   title="Previous photo"
                 >
-                  <ChevronLeft className="w-3 h-3" />
+                  <ChevronLeft className="w-4 h-4" />
                 </button>
                 <button
                   type="button"
                   onClick={handleNextPhoto}
-                  className="absolute right-1 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-white/95 hover:bg-white text-slate-800 shadow-md flex items-center justify-center opacity-85 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity z-10 active:scale-95"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-black/45 hover:bg-black/75 text-white shadow-md backdrop-blur-md border border-white/20 flex items-center justify-center opacity-90 sm:opacity-0 sm:group-hover:opacity-100 transition-all duration-200 z-10 active:scale-95"
                   title="Next photo"
                 >
-                  <ChevronRight className="w-3 h-3" />
+                  <ChevronRight className="w-4 h-4" />
                 </button>
 
-                {/* Dot Indicators */}
-                <div className="absolute bottom-1 left-0 right-0 flex items-center justify-center gap-1 z-10 pointer-events-none">
-                  {allCardPhotos.slice(0, 6).map((_, dotIdx) => (
-                    <span
-                      key={dotIdx}
-                      className={`h-1.5 rounded-full transition-all ${
-                        dotIdx === (activePhotoIdx % allCardPhotos.length)
-                          ? 'w-3 bg-white shadow-xs'
-                          : 'w-1.5 bg-white/60'
-                      }`}
-                    />
-                  ))}
-                  {allCardPhotos.length > 6 && (
-                    <span className="text-[8px] text-white/90 font-bold ml-0.5">+</span>
-                  )}
+                {/* Clickable Interactive Dot Indicators */}
+                <div className="absolute bottom-1.5 left-0 right-0 flex items-center justify-center z-10 pointer-events-none">
+                  <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/40 backdrop-blur-md border border-white/15 pointer-events-auto shadow-xs">
+                    {allCardPhotos.slice(0, 7).map((_, dotIdx) => (
+                      <button
+                        key={dotIdx}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActivePhotoIdx(dotIdx);
+                        }}
+                        aria-label={`Go to photo ${dotIdx + 1}`}
+                        className={`h-1.5 rounded-full transition-all duration-300 cursor-pointer ${
+                          dotIdx === (activePhotoIdx % allCardPhotos.length)
+                            ? 'w-4 bg-white shadow-xs'
+                            : 'w-1.5 bg-white/50 hover:bg-white/85'
+                        }`}
+                      />
+                    ))}
+                    {allCardPhotos.length > 7 && (
+                      <span className="text-[8px] text-white/90 font-bold ml-0.5">+</span>
+                    )}
+                  </div>
                 </div>
               </>
             )}
