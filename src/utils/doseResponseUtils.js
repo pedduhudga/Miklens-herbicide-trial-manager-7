@@ -49,6 +49,13 @@ export function fitFourPLModel(data, options = {}) {
   // Iterative least squares (Gauss-Newton algorithm)
   const maxIter = 100;
   const tolerance = 1e-6;
+  let prevSSRes = Infinity;
+  let jtJ = [
+    [0, 0, 0, 0],
+    [0, 0, 0, 0],
+    [0, 0, 0, 0],
+    [0, 0, 0, 0]
+  ];
   
   for (let iter = 0; iter < maxIter; iter++) {
     // Calculate residuals
@@ -61,7 +68,7 @@ export function fitFourPLModel(data, options = {}) {
     const ssRes = residuals.reduce((sum, r) => sum + r * r, 0);
     
     if (iter > 0 && Math.abs(ssRes - prevSSRes) < tolerance) break;
-    const prevSSRes = ssRes;
+    prevSSRes = ssRes;
     
     // Numerical gradient (Jacobian approximation)
     const h = 1e-5;
@@ -76,7 +83,7 @@ export function fitFourPLModel(data, options = {}) {
     });
     
     // Gauss-Newton update
-    const jtJ = [
+    jtJ = [
       [0, 0, 0, 0],
       [0, 0, 0, 0],
       [0, 0, 0, 0],

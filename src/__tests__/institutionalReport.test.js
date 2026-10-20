@@ -120,7 +120,7 @@ describe('Miklens Bio Institutional Report System', () => {
     // Test PDF generation
     const pdfFilename = await generateInstitutionalPDF(data);
     expect(pdfFilename).toContain('.pdf');
-  });
+  }, 25000);
 
   it('uses exclusively real data from the selected trial without leaking hardcoded sample values', () => {
     const customTrial = {

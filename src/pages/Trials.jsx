@@ -4756,6 +4756,16 @@ Rules:
         } 
       }));
     }
+
+    if (categoryFilteredTrials.length < 2) {
+      window.dispatchEvent(new CustomEvent('app:toast', { 
+        detail: { 
+          msg: `At least 2 trials from the current (${activeCategory}) category are required for comparison.`, 
+          type: 'warning' 
+        } 
+      }));
+      return;
+    }
     
     updateState({ selectedTrials: categoryFilteredTrials });
     navigate('/compare');

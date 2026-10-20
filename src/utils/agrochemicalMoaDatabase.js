@@ -283,7 +283,7 @@ export const HRAC_DATABASE = {
     code: 'HRAC 9', group: 'HRAC 9', hracGroup: '9', wssa: 'Group 9', committee: 'HRAC',
     name: 'Inhibition of EPSP Synthase', class: 'Broad-spectrum Non-selective Systemic',
     chemicalFamily: 'Glycine / Organophosphorus', systemicity: 'Symplastic Systemic (Phloem & Xylem Translocation)',
-    targetSite: 'Inhibition of 5-enolpyruvylshikimate-3-phosphate (EPSP) synthase',
+    targetSite: 'Inhibition of 5-enolpyruvylshikimate-3-phosphate (EPSP) synthase (EPSP synthase)',
     resistanceRisk: 'Medium to High (High under continuous exclusive mono-cropping)',
     crossResistanceRisk: 'Isolated to EPSPS target & vacuolar sequestration'
   },
@@ -1032,7 +1032,16 @@ export const IRAC_DATABASE = {
     targetSite: 'Anti-feedant, growth regulation and ovicidal coating',
     resistanceRisk: 'Negligible', crossResistanceRisk: 'Zero'
   },
-  'bacillus': {
+  'thuringiensis': {
+    code: 'IRAC 11A', group: 'IRAC 11A', iracGroup: '11A', committee: 'IRAC',
+    name: 'Microbial Disruptors of Midgut Membranes', class: 'Bio-Insecticide (Bt Cry toxins)',
+    chemicalFamily: 'Bacillus thuringiensis protein endotoxins', systemicity: 'Stomach Ingestion Only',
+    targetSite: 'Cry/Vip toxin binding to cadherin receptors inducing midgut membrane pore formation',
+    resistanceRisk: 'Medium (Receptor mutation / down-regulation in target pests)',
+    crossResistanceRisk: 'Specific to Cry/Vip protein subtypes',
+    isOrganic: true
+  },
+  'bacillus thuringiensis': {
     code: 'IRAC 11A', group: 'IRAC 11A', iracGroup: '11A', committee: 'IRAC',
     name: 'Microbial Disruptors of Midgut Membranes', class: 'Bio-Insecticide (Bt Cry toxins)',
     chemicalFamily: 'Bacillus thuringiensis protein endotoxins', systemicity: 'Stomach Ingestion Only',
@@ -1062,6 +1071,14 @@ export const ORGANIC_BIO_DATABASE = {
     isOrganic: true, organicStandard: 'OMRI / NPOP / USDA-NOP Eligible'
   },
   'subtilis': {
+    code: 'FRAC BM02', group: 'FRAC BM', fracGroup: 'BM', committee: 'FRAC (Bio)',
+    name: 'Bacterial Lipopeptide Membrane Disruptor', class: 'Bio-Fungicide & Bactericide',
+    chemicalFamily: 'Bacillus subtilis / amyloliquefaciens ferment', systemicity: 'Protective Foliar & Root Colonizer',
+    targetSite: 'Multi-site: Secretion of cyclic lipopeptides (surfactin, iturin, fengycin) disrupting pathogen cell membranes + Systemic Acquired Resistance (SAR)',
+    resistanceRisk: 'None / Negligible', crossResistanceRisk: 'Zero',
+    isOrganic: true, organicStandard: 'OMRI / NPOP / USDA-NOP Eligible'
+  },
+  'bacillus subtilis': {
     code: 'FRAC BM02', group: 'FRAC BM', fracGroup: 'BM', committee: 'FRAC (Bio)',
     name: 'Bacterial Lipopeptide Membrane Disruptor', class: 'Bio-Fungicide & Bactericide',
     chemicalFamily: 'Bacillus subtilis / amyloliquefaciens ferment', systemicity: 'Protective Foliar & Root Colonizer',
@@ -1337,7 +1354,14 @@ export const ADJUVANT_DATABASE = {
     targetSite: 'Accelerates foliar cuticle penetration and prevents spray drift bounce',
     resistanceRisk: 'Not Applicable', crossResistanceRisk: 'Universal'
   },
-  'ammonium': {
+  'ammonium sulfate': {
+    code: 'Conditioner', group: 'Conditioner', hracGroup: 'Adj', fracGroup: 'Adj', iracGroup: 'Adj', committee: 'Adjuvant',
+    name: 'Water Conditioner & Antagonism Blocker (AMS)', class: 'Hard Water Ion Chelator',
+    chemicalFamily: 'Inorganic Salt (Ammonium Sulfate)', systemicity: 'Tank-mix Water Conditioning',
+    targetSite: 'Sequester hard water cations (Ca2+, Mg2+, Fe3+) to prevent herbicide inactivation',
+    resistanceRisk: 'Not Applicable', crossResistanceRisk: 'Universal'
+  },
+  'ams': {
     code: 'Conditioner', group: 'Conditioner', hracGroup: 'Adj', fracGroup: 'Adj', iracGroup: 'Adj', committee: 'Adjuvant',
     name: 'Water Conditioner & Antagonism Blocker (AMS)', class: 'Hard Water Ion Chelator',
     chemicalFamily: 'Inorganic Salt (Ammonium Sulfate)', systemicity: 'Tank-mix Water Conditioning',
@@ -1387,35 +1411,21 @@ export function identifyMoA(activeName, category = 'herbicide') {
   const isFungicide = cat === 'fungicide';
   const isInsecticide = cat === 'pesticide' || cat === 'insecticide';
 
-  // 1. Check Adjuvants first (common to all categories)
-  for (const [key, data] of Object.entries(ADJUVANT_DATABASE)) {
-    if (rawClean.includes(key) || normalized.includes(key) || key.includes(normalized)) {
-      return { active: key, ...data };
-    }
-  }
-
-  // 2. Check Organic / Bio-Rational Database
-  for (const [key, data] of Object.entries(ORGANIC_BIO_DATABASE)) {
-    if (rawClean.includes(key) || normalized.includes(key) || key.includes(normalized)) {
-      return { active: key, ...data };
-    }
-  }
-
-  // 3. Select prioritized category database
+  // 1. Select prioritized category database (HRAC for herbicide, FRAC for fungicide, IRAC for insecticide)
   const targetDb = isFungicide
     ? FRAC_DATABASE
     : isInsecticide
     ? IRAC_DATABASE
     : HRAC_DATABASE;
 
-  // Search in priority database
+  // Search in priority category database first
   for (const [key, data] of Object.entries(targetDb)) {
     if (rawClean.includes(key) || normalized.includes(key) || key.includes(normalized)) {
       return { active: key, ...data };
     }
   }
 
-  // 4. Cross-committee fallback: check remaining databases if not found in primary
+  // 2. Cross-committee fallback: check remaining active databases
   const otherDbs = [
     { cat: 'HRAC', db: HRAC_DATABASE },
     { cat: 'FRAC', db: FRAC_DATABASE },
@@ -1432,6 +1442,20 @@ export function identifyMoA(activeName, category = 'herbicide') {
       if (rawClean.includes(key) || normalized.includes(key) || key.includes(normalized)) {
         return { active: key, ...data };
       }
+    }
+  }
+
+  // 3. Check Organic / Bio-Rational Database
+  for (const [key, data] of Object.entries(ORGANIC_BIO_DATABASE)) {
+    if (rawClean.includes(key) || normalized.includes(key) || key.includes(normalized)) {
+      return { active: key, ...data };
+    }
+  }
+
+  // 4. Check Adjuvants & Conditioners last
+  for (const [key, data] of Object.entries(ADJUVANT_DATABASE)) {
+    if (rawClean.includes(key) || normalized.includes(key) || key.includes(normalized)) {
+      return { active: key, ...data };
     }
   }
 
@@ -1542,6 +1566,7 @@ export function analyzeFormulationMoASynergy(ingredients = [], category = 'herbi
   const hasMultisiteMancozeb = activeNames.some(n => n.includes('mancozeb') || n.includes('chlorothalonil') || n.includes('copper'));
   const hasDiamide = detectedMoas.some(m => m.code === 'IRAC 28');
   const hasNeonic = detectedMoas.some(m => m.code === 'IRAC 4A');
+  const hasPpo = detectedMoas.some(m => m.hracGroup === '14') || activeNames.some(n => n.includes('oxyfluorfen') || n.includes('carfentrazone') || n.includes('flumioxazin') || n.includes('sulfentrazone'));
 
   // Herbicides Rules
   if (hasGlyphosate && hasContactDesiccant) {
@@ -1556,8 +1581,31 @@ export function analyzeFormulationMoASynergy(ingredients = [], category = 'herbi
     antagonismAlerts.push({
       type: 'Antagonism Warning',
       severity: 'Medium',
-      title: 'Graminicide Efficacy Reduction',
+      title: 'Graminicide Efficacy Reduction (Antagonism)',
       description: 'Synthetic auxins (Group 4) or ALS inhibitors (Group 2) can depress ACCase grass control. Consider increasing graminicide rate by 15-20%.'
+    });
+  }
+
+  // Herbicide Synergy Rules
+  if (hasGlyphosate && hasPpo) {
+    synergies.push({
+      type: 'Burndown Acceleration Synergy',
+      title: 'HRAC 9 (EPSPS) + HRAC 14 (PPO) Desiccant Burndown Synergy',
+      benefit: 'Combines ultra-fast foliar cell membrane disruption on broadleaves with systemic phloem translocation for complete rhizome eradication.'
+    });
+  }
+  if (hasGlyphosate && hasAuxin) {
+    synergies.push({
+      type: 'Broadleaf Spectrum Synergy',
+      title: 'HRAC 9 (EPSPS) + HRAC 4 (Synthetic Auxin) Dual-Systemic Synergy',
+      benefit: 'Overcomes glyphosate tolerance in deep-rooted perennial broadleaf weeds via complementary cellular disruption pathways.'
+    });
+  }
+  if (uniqueGroups.length >= 2 && synergies.length === 0 && antagonismAlerts.length === 0 && committee === 'HRAC') {
+    synergies.push({
+      type: 'Multi-Site MoA Synergy',
+      title: `${committee} ${uniqueGroups.join('+')} Multi-Site Synergy`,
+      benefit: 'Multi-target site interaction reduces selection pressure and broadens weed control spectrum.'
     });
   }
 
@@ -1581,7 +1629,7 @@ export function analyzeFormulationMoASynergy(ingredients = [], category = 'herbi
   if (hasDiamide && hasNeonic) {
     synergies.push({
       type: 'Dual Feeding Mode Synergy',
-      title: 'IRAC 28 (Diamide) + IRAC 4A (Neonicotinoid) Broad-Spectrum Synergy',
+      title: 'Dual Feeding Mode Synergy: IRAC 28 (Diamide) + IRAC 4A (Neonicotinoid) Broad-Spectrum Synergy',
       benefit: 'Simultaneously controls chewing caterpillars (ryanodine receptors) and sap-feeding sucking pests (nicotinic receptors).'
     });
   }

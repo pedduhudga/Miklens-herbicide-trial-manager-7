@@ -105,7 +105,7 @@ export async function analyzePlantPhenotype(imageSource, options = {}) {
       const isNecrotic = !isGreen && (
         (r > 70 && g > 50 && b < 100 && r >= g - 15 && (r + g) > 2 * b) ||
         (r > 100 && g > 90 && b < 80) || // Chlorotic yellowing
-        (exr > 10 && r > g) // Elevated Excess Red from desiccation
+        (exr > 10 && r > g && r > 60 && (r + g + b) > 100) // Elevated Excess Red from desiccation with minimum luminance
       );
 
       if (isGreen) {
@@ -197,7 +197,8 @@ export function generatePhenotypeHeatmap(imageSource, options = {}) {
     const isGreen = (exg > 15 && ngrdi > 0.05 && g > b);
     const isNecrotic = !isGreen && (
       (r > 70 && g > 50 && b < 100 && r >= g - 15 && (r + g) > 2 * b) ||
-      (r > 100 && g > 90 && b < 80)
+      (r > 100 && g > 90 && b < 80) ||
+      (exr > 10 && r > g && r > 60 && (r + g + b) > 100)
     );
 
     if (isGreen) {

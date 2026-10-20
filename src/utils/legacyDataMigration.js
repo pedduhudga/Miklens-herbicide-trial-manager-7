@@ -200,7 +200,7 @@ export function getFormulationName(record) {
  * @param {Array} allFormulations - All formulation records for context
  * @returns {Object} - {suggestedCategory, confidence, reasoning}
  */
-export function suggestCategoryForLegacyRecord(record, allFormulations = []) {
+export function suggestCategoryForLegacyRecord(record, allFormulations = [], allProjects = [], fallbackCategory = null) {
   if (!record) {
     return { suggestedCategory: null, confidence: 'none', reasoning: 'Invalid record' };
   }
@@ -238,6 +238,19 @@ export function suggestCategoryForLegacyRecord(record, allFormulations = []) {
     }
   }
 
+  // Method 2.5: Check associated Project category if available
+  if (record.ProjectID && Array.isArray(allProjects) && allProjects.length > 0) {
+    const matchingProject = allProjects.find(p => String(p.ID || p.id) === String(record.ProjectID));
+    if (matchingProject && matchingProject.Category) {
+      if (!suggestedCategory) {
+        suggestedCategory = matchingProject.Category;
+        reasoning.push(`Associated Project "${matchingProject.Name || matchingProject.ID}" specifies ${matchingProject.Category}`);
+      } else if (suggestedCategory === matchingProject.Category) {
+        reasoning.push(`Project category confirms ${matchingProject.Category}`);
+      }
+    }
+  }
+
   // Method 3: Check if formulation exists in current data with category
   if (formulationName && allFormulations.length > 0) {
     const matchingFormulation = allFormulations.find(f => 
@@ -253,12 +266,18 @@ export function suggestCategoryForLegacyRecord(record, allFormulations = []) {
     }
   }
 
+  // Method 4: Contextual fallback without blindly defaulting to herbicide
+  if (!suggestedCategory && fallbackCategory) {
+    suggestedCategory = fallbackCategory;
+    reasoning.push(`Assigned to active workspace category (${fallbackCategory})`);
+  }
+
   // Determine confidence level
   let confidence = 'none';
   if (suggestedCategory) {
     if (reasoning.length >= 2) {
       confidence = 'high';
-    } else if (reasoning.length === 1) {
+    } else if (reasoning.length === 1 && !reasoning[0].startsWith('Assigned to active workspace')) {
       confidence = 'medium';
     } else {
       confidence = 'low';
@@ -278,7 +297,7 @@ export function suggestCategoryForLegacyRecord(record, allFormulations = []) {
  * @param {Array} allFormulations - All formulation records for context
  * @returns {Array} - Array of {record, suggestion} objects
  */
-export function processLegacyRecords(records, allFormulations = []) {
+export function processLegacyRecords(records, allFormulations = [], allProjects = [], fallbackCategory = null) {
   if (!Array.isArray(records)) {
     return [];
   }
@@ -287,7 +306,7 @@ export function processLegacyRecords(records, allFormulations = []) {
     .filter(record => !record.Category) // Only process uncategorized records
     .map(record => ({
       record,
-      suggestion: suggestCategoryForLegacyRecord(record, allFormulations)
+      suggestion: suggestCategoryForLegacyRecord(record, allFormulations, allProjects, fallbackCategory)
     }));
 }
 
@@ -302,9 +321,11 @@ export function generateLegacyMigrationReport(state) {
   }
 
   const allFormulations = state.formulations || [];
+  const allProjects = state.projects || [];
+  const fallbackCategory = state.activeCategory || null;
   const collections = {
     trials: state.trials || [],
-    projects: state.projects || [],
+    projects: allProjects,
     formulations: allFormulations,
     ingredients: state.ingredients || [],
     blocks: state.blocks || []
@@ -327,7 +348,7 @@ export function generateLegacyMigrationReport(state) {
     const legacyRecords = records.filter(r => !r.Category);
     const categorizedRecords = records.filter(r => r.Category);
     
-    const suggestions = processLegacyRecords(legacyRecords, allFormulations);
+    const suggestions = processLegacyRecords(legacyRecords, allFormulations, allProjects, fallbackCategory);
     const highConfidence = suggestions.filter(s => s.suggestion.confidence === 'high');
     const ambiguous = suggestions.filter(s => !s.suggestion.suggestedCategory);
 

@@ -113,9 +113,9 @@ export function calculateColbySynergy(actives = [], observedEfficacy = null) {
     deltaEfficacy = parseFloat((obs - expectedEfficacy).toFixed(2));
     synergyFactor = expectedEfficacy > 0 ? parseFloat((obs / expectedEfficacy).toFixed(3)) : 1.0;
 
-    if (synergyFactor > 1.10) {
+    if (synergyFactor > 1.05 || (synergyFactor > 1.0 && deltaEfficacy >= 5)) {
       classification = 'Synergistic';
-    } else if (synergyFactor < 0.90) {
+    } else if (synergyFactor < 0.95 || (synergyFactor < 1.0 && deltaEfficacy <= -5)) {
       classification = 'Antagonistic';
     } else {
       classification = 'Additive';

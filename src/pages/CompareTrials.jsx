@@ -486,9 +486,9 @@ ${contextData}`;
     exportComparisonPdf(trialSeries, allDaa, aiSummary, activeCategory, chartImgData);
   };
 
-  if (categoryFilteredTrials.length === 0) {
-    // Show different messages based on whether there are selected trials but wrong category
+  if (categoryFilteredTrials.length < 2) {
     const hasSelectedTrials = selectedTrials.length > 0;
+    const isSingleTrial = categoryFilteredTrials.length === 1;
     return (
       <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50">
         <TopBar title="Compare Trials" onMenuClick={onMenuClick} />
@@ -523,12 +523,16 @@ ${contextData}`;
         <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-8 text-center">
           <Activity className="w-12 h-12 mb-4 opacity-30" />
           <p className="font-semibold text-lg">
-            {hasSelectedTrials ? `No ${activeCategory} trials selected` : 'No trials selected'}
+            {isSingleTrial 
+              ? `At least 2 ${activeCategory} trials are required for comparison`
+              : (hasSelectedTrials ? `No ${activeCategory} trials selected` : 'No trials selected')}
           </p>
           <p className="text-sm mt-2 max-w-sm">
-            {hasSelectedTrials 
-              ? `Switch to the correct category or select ${activeCategory} trials from the Trials page to compare.`
-              : 'Go to the Trials page, select 2+ trials using the bulk selection bar, then click Compare.'
+            {isSingleTrial
+              ? `You currently have only 1 trial selected from the ${activeCategory} category. Select at least one more ${activeCategory} trial to run comparative statistics.`
+              : (hasSelectedTrials 
+                  ? `Selected trials belong to other categories. Switch to the corresponding category or select ${activeCategory} trials to compare.`
+                  : 'Go to the Trials page, select 2+ trials using the bulk selection bar, then click Compare.')
             }
           </p>
           <button onClick={() => navigate('/trials')} className="mt-5 flex items-center gap-2 px-5 py-2.5 rounded-lg font-semibold text-white transition" style={{ backgroundColor: config.color.hex }}>

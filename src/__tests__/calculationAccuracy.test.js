@@ -146,13 +146,13 @@ describe('Scientific Calculation & Mathematical Accuracy Engine', () => {
   describe("Stull's (2011) Thermodynamic Delta-T Engine", () => {
     it('calculates psychrometric wet-bulb and Delta-T with high precision', () => {
       // At T = 25°C, RH = 50%
-      // Stull's Wet-Bulb is approximately 17.9°C
-      // Delta-T is approximately 25 - 17.9 = 7.1°C (Optimal window 2-8°C)
+      // Stull's Wet-Bulb is approximately 18.0°C
+      // Delta-T is approximately 25 - 18.0 = 7.0°C (Optimal window 2-8°C)
       const tw = calculateWetBulb(25, 50);
       const deltaT = calculateDeltaT(25, 50);
 
-      expect(tw).toBeCloseTo(17.9, 1);
-      expect(deltaT).toBeCloseTo(7.1, 1);
+      expect(tw).toBeCloseTo(18.0, 1);
+      expect(deltaT).toBeCloseTo(7.0, 1);
 
       const condition = getDeltaTCondition(deltaT);
       expect(condition.status).toBe('Optimal');

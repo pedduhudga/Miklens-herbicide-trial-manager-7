@@ -153,68 +153,129 @@ export async function resolveConflictWithStrategy(conflictId, strategy, mergedDa
   return resolvedData;
 }
 
+function normalizeJsonArray(val) {
+  if (!val) return [];
+  if (Array.isArray(val)) return val;
+  if (typeof val === 'string') {
+    try {
+      const parsed = JSON.parse(val);
+      if (Array.isArray(parsed)) return parsed;
+      if (parsed && Array.isArray(parsed.observations)) return parsed.observations;
+      if (parsed && Array.isArray(parsed.photos)) return parsed.photos;
+      return [];
+    } catch {
+      return [];
+    }
+  }
+  if (typeof val === 'object') {
+    if (Array.isArray(val.observations)) return val.observations;
+    if (Array.isArray(val.photos)) return val.photos;
+  }
+  return [];
+}
+
+function mergeObservations(localObs, serverObs, preferLocal = true) {
+  const normLocal = normalizeJsonArray(localObs);
+  const normServer = normalizeJsonArray(serverObs);
+  if (normLocal.length === 0) return normServer;
+  if (normServer.length === 0) return normLocal;
+
+  const obsMap = new Map();
+  const getKey = (o) => String(o.id || o.ID || (o.daa !== undefined ? `daa-${o.daa}` : null) || (o.daysAfterApplication !== undefined ? `daa-${o.daysAfterApplication}` : null) || o.date || Math.random());
+
+  // First insert server observations
+  normServer.forEach(o => {
+    obsMap.set(getKey(o), { ...o });
+  });
+
+  // Then merge local observations
+  normLocal.forEach(o => {
+    const key = getKey(o);
+    if (obsMap.has(key)) {
+      const existing = obsMap.get(key);
+      const primary = preferLocal ? o : existing;
+      const secondary = preferLocal ? existing : o;
+      // Merge properties so photos, notes, metrics aren't lost
+      obsMap.set(key, { ...secondary, ...primary });
+    } else {
+      obsMap.set(key, { ...o });
+    }
+  });
+
+  return Array.from(obsMap.values()).sort((a, b) => {
+    const daaA = parseFloat(a.daa ?? a.daysAfterApplication ?? 0);
+    const daaB = parseFloat(b.daa ?? b.daysAfterApplication ?? 0);
+    if (!isNaN(daaA) && !isNaN(daaB) && daaA !== daaB) return daaA - daaB;
+    return new Date(a.date || 0) - new Date(b.date || 0);
+  });
+}
+
+function mergePhotos(localPhotos, serverPhotos) {
+  const normLocal = normalizeJsonArray(localPhotos);
+  const normServer = normalizeJsonArray(serverPhotos);
+  if (normLocal.length === 0) return normServer;
+  if (normServer.length === 0) return normLocal;
+
+  const photoMap = new Map();
+  const getPhotoKey = (p) => String(p.id || p.ID || p.url || p.photoUrl || p.fileName || p.date || Math.random());
+
+  normServer.forEach(p => photoMap.set(getPhotoKey(p), p));
+  normLocal.forEach(p => photoMap.set(getPhotoKey(p), p));
+
+  return Array.from(photoMap.values());
+}
+
 /**
  * Auto-merge conflict data
  */
 export function autoMergeConflict(localData, serverData) {
-  // Always prefer server LastModified
-  const localTime = new Date(localData.LastModified || 0);
-  const serverTime = new Date(serverData.LastModified || 0);
-  
-  // If server is newer, prefer server values but keep any local additions
-  if (serverTime >= localTime) {
-    // Merge strategy: server base + local additions for new fields
-    const merged = { ...serverData };
-    
-    // Preserve any local fields that don't exist on server
-    Object.keys(localData).forEach(key => {
-      if (!(key in serverData) && localData[key] !== null && localData[key] !== undefined) {
-        merged[key] = localData[key];
-      }
-    });
-    
-    // Special handling for efficacy data - merge arrays intelligently
-    if (localData.EfficacyDataJSON && serverData.EfficacyDataJSON) {
-      try {
-        const localEfficacy = typeof localData.EfficacyDataJSON === 'string' 
-          ? JSON.parse(localData.EfficacyDataJSON) 
-          : localData.EfficacyDataJSON;
-        const serverEfficacy = typeof serverData.EfficacyDataJSON === 'string' 
-          ? JSON.parse(serverData.EfficacyDataJSON) 
-          : serverData.EfficacyDataJSON;
-        
-        if (Array.isArray(localEfficacy) && Array.isArray(serverEfficacy)) {
-          // Merge by DAA, preferring local if same DAA
-          const efficacyByDAA = new Map();
-          
-          serverEfficacy.forEach(obs => {
-            const daa = obs.daa || obs.daysAfterApplication;
-            efficacyByDAA.set(daa, obs);
-          });
-          
-          localEfficacy.forEach(obs => {
-            const daa = obs.daa || obs.daysAfterApplication;
-            // Local takes precedence for same DAA (user recorded locally)
-            efficacyByDAA.set(daa, obs);
-          });
-          
-          // Sort by DAA
-          const mergedEfficacy = Array.from(efficacyByDAA.values())
-            .sort((a, b) => (a.daa || 0) - (b.daa || 0));
-          
-          merged.EfficacyDataJSON = JSON.stringify(mergedEfficacy);
-        }
-      } catch (err) {
-        console.warn('Failed to merge efficacy data:', err);
-      }
+  if (!localData && !serverData) return null;
+  if (!localData) return { ...serverData };
+  if (!serverData) return { ...localData };
+
+  const localTime = new Date(localData.LastModified || localData.UpdatedAt || 0).getTime();
+  const serverTime = new Date(serverData.LastModified || serverData.UpdatedAt || 0).getTime();
+  const isServerNewer = serverTime >= localTime;
+
+  // Base is the newer version, merged with non-conflicting fields from the other
+  const base = isServerNewer ? serverData : localData;
+  const secondary = isServerNewer ? localData : serverData;
+  const merged = { ...base };
+
+  // Preserve non-empty fields from secondary that are missing or null in base
+  Object.keys(secondary).forEach(key => {
+    if ((merged[key] === undefined || merged[key] === null || merged[key] === '') &&
+        secondary[key] !== undefined && secondary[key] !== null) {
+      merged[key] = secondary[key];
     }
-    
-    merged.LastModified = new Date().toISOString();
-    return merged;
+  });
+
+  // 1. Intelligently merge Efficacy observation timeline
+  if (localData.EfficacyDataJSON || serverData.EfficacyDataJSON) {
+    try {
+      const mergedObservations = mergeObservations(
+        localData.EfficacyDataJSON, 
+        serverData.EfficacyDataJSON, 
+        !isServerNewer // prefer local if local is newer
+      );
+      merged.EfficacyDataJSON = JSON.stringify(mergedObservations);
+    } catch (err) {
+      console.warn('[SyncManager] Failed to merge efficacy observations:', err);
+    }
   }
-  
-  // Local is newer, prefer local
-  return { ...localData, LastModified: new Date().toISOString() };
+
+  // 2. Intelligently merge photo gallery without dropping captures
+  if (localData.PhotosJSON || serverData.PhotosJSON) {
+    try {
+      const mergedPhotos = mergePhotos(localData.PhotosJSON, serverData.PhotosJSON);
+      merged.PhotosJSON = JSON.stringify(mergedPhotos);
+    } catch (err) {
+      console.warn('[SyncManager] Failed to merge photos:', err);
+    }
+  }
+
+  merged.LastModified = new Date().toISOString();
+  return merged;
 }
 
 /**

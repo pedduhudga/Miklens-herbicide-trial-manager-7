@@ -85,7 +85,7 @@ describe('Global Mode of Action (MoA) & Chemical Interaction Engine', () => {
       expect(triazole.chemicalFamily).toBe('Triazole');
 
       expect(sdhi.code).toBe('FRAC 7');
-      expect(oomcete.code).toBe('FRAC 4');
+      expect(oomycete.code).toBe('FRAC 4');
 
       expect(mancozeb.code).toBe('FRAC M03');
       expect(mancozeb.resistanceRisk).toContain('Low');
