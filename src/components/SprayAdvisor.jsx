@@ -12,7 +12,7 @@ import {
   CheckCircle, AlertTriangle, XCircle, Clock,
   MapPin, RefreshCw, ChevronRight, Calendar,
   ShieldCheck, ShieldAlert, Sparkles, Sun, ArrowRight,
-  Info, Check, Compass, Gauge, AlertCircle, Ban
+  Info, Check, Compass, Gauge, AlertCircle, Ban, Moon
 } from 'lucide-react';
 
 /**
@@ -340,7 +340,15 @@ export default function SprayAdvisor({ lat, lon, locationName = 'Current Locatio
                               ? 'bg-amber-100 text-amber-800 border-amber-300/80'
                               : 'bg-rose-100 text-rose-800 border-rose-300/80'
                           }`}>
-                            {currentVerdict === 'SAFE_TO_SPRAY' ? 'GO — Clear to Spray' : currentVerdict === 'SPRAY_WITH_CAUTION' ? 'CAUTION — Sub-optimal' : 'STOP — Avoid Spraying'}
+                            {currentVerdict === 'SAFE_TO_SPRAY' 
+                              ? 'GO — Clear to Spray' 
+                              : currentVerdict === 'SPRAY_WITH_CAUTION' 
+                              ? 'CAUTION — Sub-optimal' 
+                              : analysis.current?.isNight
+                              ? 'STOP — Night Inversion Active'
+                              : analysis.current?.rainfastHazard
+                              ? 'STOP — Rain Wash-off Hazard'
+                              : 'STOP — Avoid Spraying'}
                           </span>
                           <span className="text-xs text-slate-400 font-semibold">
                             Score: <strong className="text-slate-800 font-black">{currentScore}/100</strong>
@@ -378,11 +386,12 @@ export default function SprayAdvisor({ lat, lon, locationName = 'Current Locatio
                             <Clock className="w-3.5 h-3.5" /> Optimal Window Active
                           </span>
                         ) : analysis.bestWindow ? (
-                          <span className="text-slate-800">
-                            {analysis.bestWindow.dayLabel}, {analysis.bestWindow.time.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })}
+                          <span className="text-emerald-800 flex items-center justify-end gap-1 font-black">
+                            <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            {analysis.bestWindow.dayLabel}, {formatHour(analysis.bestWindow.hour)}
                           </span>
                         ) : (
-                          'Check Tomorrow'
+                          <span className="text-slate-600">Check 7-Day Outlook</span>
                         )}
                       </div>
                       <p className="text-[10px] text-slate-500 font-medium mt-0.5">
@@ -408,7 +417,7 @@ export default function SprayAdvisor({ lat, lon, locationName = 'Current Locatio
                             <h3 className="font-black text-sm text-slate-900">
                               When You CAN Spray
                             </h3>
-                            <p className="text-[11px] text-emerald-700 font-semibold">Recommended Windows for Application</p>
+                            <p className="text-[11px] text-emerald-700 font-semibold">Recommended Daylight Application Windows</p>
                           </div>
                         </div>
                         <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
@@ -426,7 +435,7 @@ export default function SprayAdvisor({ lat, lon, locationName = 'Current Locatio
                               <div className="flex items-center justify-between gap-2">
                                 <div className="flex items-center gap-2">
                                   <span className="text-xs font-black text-emerald-900">
-                                    {w.dayLabel}, {w.time.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })}
+                                    {w.dayLabel}, {formatHour(w.hour)}
                                   </span>
                                 </div>
                                 <span className="text-xs font-black px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
@@ -453,7 +462,7 @@ export default function SprayAdvisor({ lat, lon, locationName = 'Current Locatio
                         </div>
                       ) : (
                         <p className="text-xs text-slate-500 py-4 text-center">
-                          No optimal windows detected today. View the 7-day outlook for upcoming opportunities.
+                          No optimal daylight windows detected today due to adverse weather. Check 7-day outlook.
                         </p>
                       )}
                     </div>
@@ -481,7 +490,7 @@ export default function SprayAdvisor({ lat, lon, locationName = 'Current Locatio
                             <h3 className="font-black text-sm text-slate-900">
                               When You SHOULD AVOID
                             </h3>
-                            <p className="text-[11px] text-rose-700 font-semibold">High Risk Hazard Periods</p>
+                            <p className="text-[11px] text-rose-700 font-semibold">Active Hazards & Unsuitable Periods</p>
                           </div>
                         </div>
                         <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200">
@@ -491,25 +500,46 @@ export default function SprayAdvisor({ lat, lon, locationName = 'Current Locatio
 
                       {analysis.avoidWindows && analysis.avoidWindows.length > 0 ? (
                         <div className="space-y-2.5">
-                          {analysis.avoidWindows.slice(0, 3).map((aw, idx) => (
-                            <div 
-                              key={idx}
-                              className="rounded-2xl p-3 bg-white border border-rose-100/90 shadow-2xs hover:border-rose-300 transition"
-                            >
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="text-xs font-black text-rose-950">
-                                  {aw.timeLabel}
-                                </span>
-                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-800 border border-rose-200">
-                                  Avoid (Score {aw.avgScore})
-                                </span>
+                          {analysis.avoidWindows.slice(0, 3).map((aw, idx) => {
+                            const isRain = aw.category === 'rain';
+                            const isNight = aw.category === 'night';
+                            const isWind = aw.category === 'wind';
+                            return (
+                              <div 
+                                key={idx}
+                                className="rounded-2xl p-3 bg-white border border-rose-100/90 shadow-2xs hover:border-rose-300 transition"
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    {isRain ? (
+                                      <CloudRain className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                                    ) : isNight ? (
+                                      <Moon className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                                    ) : isWind ? (
+                                      <Wind className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+                                    ) : (
+                                      <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                                    )}
+                                    <span className="text-xs font-black text-rose-950 truncate">
+                                      {aw.timeLabel}
+                                    </span>
+                                  </div>
+                                  <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border shrink-0 ${
+                                    isRain 
+                                      ? 'bg-blue-50 text-blue-800 border-blue-200' 
+                                      : isNight 
+                                      ? 'bg-indigo-50 text-indigo-800 border-indigo-200' 
+                                      : 'bg-rose-50 text-rose-800 border-rose-200'
+                                  }`}>
+                                    {isRain ? 'Washoff Risk' : isNight ? 'Inversion Risk' : 'Hazard Risk'}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-rose-900 font-semibold mt-1.5 leading-snug">
+                                  {aw.reason}
+                                </p>
                               </div>
-                              <p className="text-[11px] text-rose-800 font-semibold mt-1.5 flex items-start gap-1">
-                                <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" />
-                                {aw.reason}
-                              </p>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       ) : (
                         <div className="rounded-2xl p-3 bg-white border border-slate-200 text-center py-4">

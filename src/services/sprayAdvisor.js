@@ -253,50 +253,91 @@ export async function analyzeSprayWindow(lat, lon, targetDate = null) {
     const todayStr = new Date().toISOString().split('T')[0];
     const isToday = !safeTargetDate || safeTargetDate === todayStr;
     const isPast = safeTargetDate && new Date(safeTargetDate + 'T00:00:00') < new Date(todayStr + 'T00:00:00');
-    const forecast = safeTargetDate
-      ? await fetchWeatherForecast(lat, lon, 1, safeTargetDate, safeTargetDate)
-      : await fetchWeatherForecast(lat, lon, 3);
+    
+    // Always fetch multi-day horizon (4 days / 96 hours) for today and future dates
+    // so rainstorms, rainfastness, nocturnal inversions, and next daylight windows are fully visible
+    let forecast;
+    if (isPast) {
+      forecast = await fetchWeatherForecast(lat, lon, 1, safeTargetDate, safeTargetDate);
+    } else {
+      const startDate = safeTargetDate || todayStr;
+      const startD = new Date(startDate + 'T00:00:00');
+      const endD = new Date(startD);
+      endD.setDate(endD.getDate() + 3);
+      const endDate = endD.toISOString().split('T')[0];
+      forecast = await fetchWeatherForecast(lat, lon, 4, startDate, endDate);
+    }
     
     if (!forecast || !forecast.hourly) {
       return { error: 'Unable to fetch weather data' };
     }
     
     const { hourly } = forecast;
-    const currentHour = isToday ? new Date().getHours() : 12; // default to midday for custom dates
+    // Default to current hour if today, or 8:00 AM (standard morning application check) if custom date
+    const currentHour = isToday ? new Date().getHours() : 8;
+    const targetDateStr = safeTargetDate || todayStr;
     
-    // Find best windows
+    // Find best windows across the forecast horizon
     const windows = [];
+    const nowTime = new Date();
     
     for (let i = 0; i < hourly.time.length; i++) {
       const hourTime = new Date(hourly.time[i]);
       const hour = hourTime.getHours();
-      const now = new Date();
+      
       // Skip past hours only if it is today
-      if (!isPast && isToday && hourTime <= now) continue;
-      // Skip nighttime hours (typically not spraying hours)
-      if (hour < 6 || hour > 20) continue;
+      if (!isPast && isToday && hourTime <= nowTime) continue;
+      
+      // Strictly agricultural daylight hours (06:00 to 18:00)
+      // APVMA & GRDC strictly forbid nocturnal application due to surface temperature inversion drift
+      if (hour < 6 || hour > 18) continue;
 
       const conditions = {
         temperature: hourly.temperature_2m[i],
         humidity: hourly.relative_humidity_2m[i],
         windSpeed: hourly.wind_speed_10m[i],
-        precipitation: hourly.precipitation[i] || 0
+        precipitation: hourly.precipitation[i] || 0,
+        precipitationProbability: hourly.precipitation_probability ? (hourly.precipitation_probability[i] || 0) : 0
       };
       
-      const analysis = calculateSprayScore(conditions);
-      const riskLevel = getRiskLevel(analysis.score);
+      const scoreObj = calculateSprayScore(conditions);
+      let adjustedScore = scoreObj.score;
+      const issues = [...scoreObj.issues];
+
+      // Rainfast check for this hour (subsequent 4 hours must remain dry)
+      let rainSoon = false;
+      let rainInHours = null;
+      let maxPrecipProb4h = 0;
+      for (let offset = 1; offset <= 4 && i + offset < hourly.time.length; offset++) {
+        const p = hourly.precipitation[i + offset] || 0;
+        const prob = hourly.precipitation_probability ? (hourly.precipitation_probability[i + offset] || 0) : 0;
+        if (prob > maxPrecipProb4h) maxPrecipProb4h = prob;
+        if (p > 0.3 || prob >= 60) {
+          rainSoon = true;
+          rainInHours = offset;
+          break;
+        }
+      }
+
+      if (rainSoon) {
+        adjustedScore = Math.min(35, adjustedScore - 45);
+        issues.unshift(`Rain expected in ~${rainInHours}h (${maxPrecipProb4h}% prob) — Washoff risk`);
+      }
       
-      // Only include windows with at least FAIR conditions
-      if (analysis.score >= 40) {
+      const riskLevel = getRiskLevel(adjustedScore);
+      
+      // Only recommend windows that have at least 60/100 score and NO rainwash hazard
+      if (adjustedScore >= 60 && !rainSoon) {
         windows.push({
           time: hourTime,
           hour,
-          score: analysis.score,
+          score: adjustedScore,
           riskLevel,
           conditions,
-          deltaT: analysis.deltaT,
-          issues: analysis.issues,
-          dayLabel: getDayLabel(hourTime)
+          deltaT: scoreObj.deltaT,
+          issues,
+          dayLabel: getDayLabel(hourTime),
+          formattedTime: `${getDayLabel(hourTime)}, ${formatHour(hour)}`
         });
       }
     }
@@ -319,8 +360,6 @@ export async function analyzeSprayWindow(lat, lon, targetDate = null) {
 
     // 24-Hour Timeline for target day (visual heatmap)
     const hourlyTimeline = [];
-    const targetDateStr = safeTargetDate || todayStr;
-    
     for (let i = 0; i < hourly.time.length; i++) {
       const timeStr = hourly.time[i];
       if (!timeStr.startsWith(targetDateStr)) continue;
@@ -341,7 +380,7 @@ export async function analyzeSprayWindow(lat, lon, targetDate = null) {
       for (let offset = 1; offset <= 4 && i + offset < hourly.time.length; offset++) {
         const p = hourly.precipitation[i + offset] || 0;
         const prob = hourly.precipitation_probability ? (hourly.precipitation_probability[i + offset] || 0) : 0;
-        if (p > 0.4 || prob >= 60) {
+        if (p > 0.3 || prob >= 60) {
           rainSoon = true;
           rainInH = offset;
           break;
@@ -350,13 +389,20 @@ export async function analyzeSprayWindow(lat, lon, targetDate = null) {
       
       let hScore = scoreObj.score;
       const hIssues = [...scoreObj.issues];
+      
+      const isNightH = h < 6 || h >= 19;
+      if (isNightH) {
+        hScore = Math.min(25, hScore);
+        hIssues.unshift('Nighttime / Inversion risk & closed weed stomata');
+      }
+
       if (rainSoon) {
-        hScore = Math.min(35, hScore - 40);
+        hScore = Math.min(30, hScore - 40);
         hIssues.unshift(`Rain forecast in ~${rainInH}h (Washoff hazard)`);
       }
       
       let hVerdict = 'optimal';
-      if (hScore < 50) hVerdict = 'avoid';
+      if (hScore < 50 || isNightH) hVerdict = 'avoid';
       else if (hScore < 75) hVerdict = 'caution';
       
       hourlyTimeline.push({
@@ -368,52 +414,112 @@ export async function analyzeSprayWindow(lat, lon, targetDate = null) {
         deltaT: scoreObj.deltaT,
         issues: hIssues,
         rainSoon,
+        isNight: isNightH,
         precipitationProbability: hourly.precipitation_probability ? (hourly.precipitation_probability[i] || 0) : 0
       });
     }
 
-    // Windows to Avoid
+    // Real Multi-Day Windows to Avoid (detecting storms, nocturnal inversions, wind drift, delta-T)
     const avoidWindows = [];
-    let currentAvoid = null;
-    hourlyTimeline.forEach((ht) => {
-      if (ht.verdict === 'avoid' && ht.hour >= 6 && ht.hour <= 20) {
-        if (!currentAvoid) {
-          currentAvoid = {
-            startHour: ht.hour,
-            endHour: ht.hour + 1,
-            reasons: new Set(ht.issues.length ? ht.issues : ['Adverse weather']),
-            scores: [ht.score]
+    let currentAvoidBlock = null;
+    
+    // Find current index in forecast
+    const startIndex = isToday 
+      ? Math.max(0, hourly.time.findIndex(t => t.startsWith(targetDateStr) && new Date(t).getHours() === currentHour))
+      : 0;
+    
+    for (let i = startIndex; i < Math.min(hourly.time.length, startIndex + 48); i++) {
+      const hourTime = new Date(hourly.time[i]);
+      const h = hourTime.getHours();
+      const p = hourly.precipitation[i] || 0;
+      const prob = hourly.precipitation_probability ? (hourly.precipitation_probability[i] || 0) : 0;
+      const wind = hourly.wind_speed_10m[i];
+      const temp = hourly.temperature_2m[i];
+      const rh = hourly.relative_humidity_2m[i];
+      const dt = calculateDeltaT(temp, rh);
+      
+      const isNight = h < 6 || h >= 19;
+      const isRain = p >= 0.2 || prob >= 55;
+      const isHighWind = wind >= 19;
+      const isExtremeDt = dt > 9.5;
+      
+      let hazardCategory = null;
+      let hazardTitle = '';
+      let hazardDetail = '';
+      
+      if (isRain) {
+        hazardCategory = 'rain';
+        hazardTitle = 'Rain Wash-off Hazard';
+        hazardDetail = `${prob}% rain prob, ${p > 0 ? p + 'mm/h' : 'showers'} · Washoff risk`;
+      } else if (isHighWind) {
+        hazardCategory = 'wind';
+        hazardTitle = 'Wind Drift Danger';
+        hazardDetail = `Wind up to ${Math.round(wind)} km/h · Severe off-target drift`;
+      } else if (isExtremeDt) {
+        hazardCategory = 'deltaT';
+        hazardTitle = 'High Delta-T Evaporation';
+        hazardDetail = `ΔT ${dt.toFixed(1)}°C · Rapid droplet evaporation`;
+      } else if (isNight) {
+        hazardCategory = 'night';
+        hazardTitle = 'Night Inversion & Stomata Closure';
+        hazardDetail = 'Nocturnal inversion drift hazard & heavy dew dilution';
+      }
+      
+      if (hazardCategory) {
+        if (!currentAvoidBlock || currentAvoidBlock.category !== hazardCategory || (currentAvoidBlock.dayLabel !== getDayLabel(hourTime) && hazardCategory !== 'night')) {
+          if (currentAvoidBlock) {
+            avoidWindows.push(finalizeAvoidBlock(currentAvoidBlock));
+          }
+          currentAvoidBlock = {
+            category: hazardCategory,
+            title: hazardTitle,
+            startTime: hourTime,
+            endTime: hourTime,
+            startHour: h,
+            endHour: h + 1,
+            dayLabel: getDayLabel(hourTime),
+            reasons: [hazardDetail],
+            maxProb: prob,
+            maxRain: p,
+            maxWind: wind,
+            hoursCount: 1
           };
         } else {
-          currentAvoid.endHour = ht.hour + 1;
-          ht.issues.forEach(iss => currentAvoid.reasons.add(iss));
-          currentAvoid.scores.push(ht.score);
+          currentAvoidBlock.endTime = hourTime;
+          currentAvoidBlock.endHour = h + 1;
+          currentAvoidBlock.hoursCount++;
+          if (prob > currentAvoidBlock.maxProb) currentAvoidBlock.maxProb = prob;
+          if (p > currentAvoidBlock.maxRain) currentAvoidBlock.maxRain = p;
+          if (wind > currentAvoidBlock.maxWind) currentAvoidBlock.maxWind = wind;
+          if (!currentAvoidBlock.reasons.includes(hazardDetail)) {
+            currentAvoidBlock.reasons.push(hazardDetail);
+          }
         }
       } else {
-        if (currentAvoid) {
-          avoidWindows.push({
-            startHour: currentAvoid.startHour,
-            endHour: currentAvoid.endHour,
-            timeLabel: `${formatHour(currentAvoid.startHour)} – ${formatHour(currentAvoid.endHour)}`,
-            reason: Array.from(currentAvoid.reasons).slice(0, 2).join('; '),
-            avgScore: Math.round(currentAvoid.scores.reduce((a, b) => a + b, 0) / currentAvoid.scores.length)
-          });
-          currentAvoid = null;
+        if (currentAvoidBlock) {
+          avoidWindows.push(finalizeAvoidBlock(currentAvoidBlock));
+          currentAvoidBlock = null;
         }
       }
-    });
-    if (currentAvoid) {
-      avoidWindows.push({
-        startHour: currentAvoid.startHour,
-        endHour: currentAvoid.endHour,
-        timeLabel: `${formatHour(currentAvoid.startHour)} – ${formatHour(currentAvoid.endHour)}`,
-        reason: Array.from(currentAvoid.reasons).slice(0, 2).join('; '),
-        avgScore: Math.round(currentAvoid.scores.reduce((a, b) => a + b, 0) / currentAvoid.scores.length)
-      });
+    }
+    if (currentAvoidBlock) {
+      avoidWindows.push(finalizeAvoidBlock(currentAvoidBlock));
     }
 
-    // Sort by score descending
-    windows.sort((a, b) => b.score - a.score);
+    // Sort avoid windows: severe storms first, followed by nocturnal inversion and other hazards
+    avoidWindows.sort((a, b) => {
+      const priority = { rain: 1, wind: 2, deltaT: 3, night: 4 };
+      const pa = priority[a.category] || 5;
+      const pb = priority[b.category] || 5;
+      if (pa !== pb) return pa - pb;
+      return b.hoursCount - a.hoursCount;
+    });
+
+    // Sort windows: prioritize high scores, then chronological order
+    windows.sort((a, b) => {
+      if (Math.abs(b.score - a.score) > 10) return b.score - a.score;
+      return a.time - b.time;
+    });
     
     // Group by day
     const groupedByDay = groupWindowsByDay(windows);
@@ -422,7 +528,7 @@ export async function analyzeSprayWindow(lat, lon, targetDate = null) {
     const bestWindow = windows[0] || null;
     
     return {
-      current: getCurrentConditions(hourly, currentHour),
+      current: getCurrentConditions(hourly, currentHour, targetDateStr),
       bestWindow,
       windows, // for AI assistant tools compatibility
       allWindows: windows.slice(0, 20), // Top 20 windows
@@ -441,6 +547,46 @@ export async function analyzeSprayWindow(lat, lon, targetDate = null) {
 }
 
 /**
+ * Format avoid block into clean presentation object
+ */
+function finalizeAvoidBlock(block) {
+  const startHStr = formatHour(block.startHour);
+  const endH = block.endHour % 24;
+  const endHStr = formatHour(endH);
+  
+  let timeLabel = `${block.dayLabel}, ${startHStr} – ${endHStr}`;
+  if (block.category === 'night') {
+    timeLabel = block.dayLabel === 'Today' 
+      ? `Tonight (${startHStr} – 06:00 AM)` 
+      : `${block.dayLabel} Night (${startHStr} – 06:00 AM)`;
+  } else if (block.hoursCount >= 4 && block.category === 'rain') {
+    timeLabel = `${block.dayLabel}, ${startHStr} – ${endHStr} (${block.hoursCount}h)`;
+  }
+  
+  let reason = '';
+  if (block.category === 'rain') {
+    reason = `${block.hoursCount}h continuous rain expected (up to ${block.maxProb}% prob, ${block.maxRain.toFixed(1)}mm/h) — Severe washoff hazard.`;
+  } else if (block.category === 'night') {
+    reason = 'Nocturnal surface temperature inversion traps droplets; heavy dew causes foliar wash-off.';
+  } else if (block.category === 'wind') {
+    reason = `Sustained winds up to ${Math.round(block.maxWind)} km/h will cause severe off-target drift.`;
+  } else if (block.category === 'deltaT') {
+    reason = 'High evaporative demand (Delta-T > 10°C) causes droplet desiccation before foliar uptake.';
+  } else {
+    reason = block.reasons.slice(0, 2).join('; ');
+  }
+  
+  return {
+    category: block.category,
+    title: block.title,
+    timeLabel,
+    reason,
+    hoursCount: block.hoursCount,
+    avgScore: block.category === 'rain' ? 20 : block.category === 'night' ? 25 : 35
+  };
+}
+
+/**
  * Format 24-hour integer into 12-hour AM/PM label
  */
 export function formatHour(hour) {
@@ -452,13 +598,16 @@ export function formatHour(hour) {
 }
 
 /**
- * Get current weather conditions with Rainfastness Lookahead
+ * Get current weather conditions with Inversion and Rainfastness Lookahead
  */
-function getCurrentConditions(hourly, currentHour) {
-  const idx = hourly.time.findIndex(t => {
-    const h = new Date(t).getHours();
-    return h === currentHour;
-  });
+function getCurrentConditions(hourly, currentHour, targetDateStr = null) {
+  let idx = -1;
+  if (targetDateStr) {
+    idx = hourly.time.findIndex(t => t.startsWith(targetDateStr) && new Date(t).getHours() === currentHour);
+  }
+  if (idx === -1) {
+    idx = hourly.time.findIndex(t => new Date(t).getHours() === currentHour);
+  }
   
   if (idx === -1) return null;
   
@@ -471,6 +620,10 @@ function getCurrentConditions(hourly, currentHour) {
   
   const analysis = calculateSprayScore(conditions);
 
+  // Nighttime Check: sunset to sunrise (approx. 19:00 to 06:00)
+  // Strictly avoid spraying due to nocturnal surface temperature inversions, dew dilution, and stomata closure
+  const isNight = currentHour < 6 || currentHour >= 19;
+
   // Lookahead: Rainfastness Horizon (next 4-5 hours)
   let rainfastHazard = false;
   let rainArrivesInHours = null;
@@ -479,7 +632,7 @@ function getCurrentConditions(hourly, currentHour) {
     const p = hourly.precipitation[idx + offset] || 0;
     const prob = hourly.precipitation_probability ? (hourly.precipitation_probability[idx + offset] || 0) : 0;
     if (prob > maxPrecipProb4h) maxPrecipProb4h = prob;
-    if (p > 0.4 || prob >= 60) {
+    if (p > 0.3 || prob >= 60) {
       if (!rainfastHazard) {
         rainfastHazard = true;
         rainArrivesInHours = offset;
@@ -490,34 +643,53 @@ function getCurrentConditions(hourly, currentHour) {
   let finalScore = analysis.score;
   const issues = [...analysis.issues];
 
+  if (isNight) {
+    finalScore = Math.min(25, finalScore);
+    issues.unshift('Nighttime condition: Inversion drift hazard & closed weed stomata');
+  }
+
   if (rainfastHazard) {
     // If rain arrives within 4 hours, herbicide will be washed off!
-    finalScore = Math.min(35, finalScore - 40);
+    finalScore = Math.min(30, finalScore - 40);
     issues.unshift(`Imminent Rain (~${rainArrivesInHours}h): Rainwash hazard. Herbicide requires 4h dry canopy.`);
   }
+
+  finalScore = Math.max(0, Math.min(100, finalScore));
 
   let verdict = 'SAFE_TO_SPRAY';
   let verdictHeadline = 'Safe to Spray Now';
   let verdictSummary = 'All weather conditions (Delta-T, wind, and rainfast horizon) are optimal for effective chemical absorption.';
   let verdictColor = 'emerald';
 
-  if (finalScore >= 75 && !rainfastHazard) {
+  if (isNight) {
+    verdict = 'DO_NOT_SPRAY';
+    verdictHeadline = 'Avoid Spraying — Nighttime Inversion';
+    verdictSummary = 'Night application carries severe nocturnal surface inversion drift risk, dew dilution, and dormant weed stomata. Postpone until tomorrow morning.';
+    verdictColor = 'rose';
+  } else if (rainfastHazard) {
+    verdict = 'DO_NOT_SPRAY';
+    verdictHeadline = 'Avoid Spraying — Imminent Rain Wash-off';
+    verdictSummary = `Rain expected in ~${rainArrivesInHours}h (${maxPrecipProb4h}% probability). Chemical wash-off will strip foliar spray before absorption.`;
+    verdictColor = 'rose';
+  } else if (finalScore < 50 || analysis.deltaT > 10 || conditions.windSpeed > 20 || conditions.precipitation > 0.2) {
+    verdict = 'DO_NOT_SPRAY';
+    verdictHeadline = 'Avoid Spraying — Hazard Active';
+    verdictSummary = analysis.deltaT > 10 
+      ? 'Extreme Delta-T (>10°C): Rapid droplet evaporation causes herbicide failure.'
+      : conditions.windSpeed > 20
+      ? `Excessive wind (${Math.round(conditions.windSpeed)} km/h): Off-target spray drift danger.`
+      : 'Unfavorable atmospheric conditions present high chemical risk.';
+    verdictColor = 'rose';
+  } else if (finalScore >= 75) {
     verdict = 'SAFE_TO_SPRAY';
     verdictHeadline = 'Safe to Spray Now';
     verdictSummary = 'All atmospheric thresholds are met. Foliar uptake is maximized with low drift risk.';
     verdictColor = 'emerald';
-  } else if (finalScore >= 50 && !rainfastHazard) {
+  } else {
     verdict = 'SPRAY_WITH_CAUTION';
     verdictHeadline = 'Spray With Caution';
     verdictSummary = 'Sub-optimal window. Use coarse droplet nozzles to avoid drift, and monitor local wind shifts.';
     verdictColor = 'amber';
-  } else {
-    verdict = 'DO_NOT_SPRAY';
-    verdictHeadline = 'Avoid Spraying — Hazard Active';
-    verdictSummary = rainfastHazard 
-      ? `Rain expected in ~${rainArrivesInHours}h (${maxPrecipProb4h}% prob). Foliar spray will be stripped by rain washoff before absorption.`
-      : (analysis.deltaT > 10 ? 'High Delta-T (>10°C). Rapid droplet evaporation will cause chemical failure.' : 'High wind or unfavorable weather creates severe drift/washoff risk.');
-    verdictColor = 'rose';
   }
 
   return {
@@ -530,6 +702,7 @@ function getCurrentConditions(hourly, currentHour) {
     rainfastHazard,
     rainArrivesInHours,
     maxPrecipProb4h,
+    isNight,
     verdict,
     verdictHeadline,
     verdictSummary,
