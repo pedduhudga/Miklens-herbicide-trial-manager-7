@@ -6,7 +6,6 @@ import { useNavigate } from 'react-router-dom';
 import { safeJsonParse } from '../utils/helpers.js';
 import SprayAdvisor from '../components/SprayAdvisor.jsx';
 import SmartAlerts from '../components/SmartAlerts.jsx';
-import WeatherDashboard from '../components/WeatherDashboard.jsx';
 import {
   Activity, FolderOpen, FlaskConical, CheckCircle, Plus,
   TrendingUp, TrendingDown, AlertCircle, Leaf, BarChart3, Search, ChevronRight,
@@ -199,10 +198,6 @@ export default function Dashboard({ onMenuClick }) {
   const [minEfficacy, setMinEfficacy] = useState(70);
   const [targetResults, setTargetResults] = useState(null);
 
-  // ── Health monitor filters
-  const [healthFilter, setHealthFilter] = useState('all');
-  const [healthSearch, setHealthSearch] = useState('');
-
   // ── Unique locations with coordinates for Spray Advisor
   const availableLocations = useMemo(() => {
     const locs = [];
@@ -372,61 +367,7 @@ export default function Dashboard({ onMenuClick }) {
       .slice(0, 8);
   }, [trials, fYear, fTarget, fLocation, catConfig.targetField, activeCategory]);
 
-  // ── Activity feed
-  const activityFeed = useMemo(() => {
-    const events = [];
-    const allTrials = state.trials || [];
-    const allProjects = state.projects || [];
-    const allFormulations = state.formulations || [];
-
-    allTrials.forEach(t => {
-      const cat = t.Category || 'herbicide';
-      if (t.CreatedAt) {
-        events.push({ type: 'trial_created', icon: 'plus', color: 'emerald', label: `Trial created: ${t.FormulationName || 'Untitled'}`, detail: t.Location ? `at ${t.Location}` : (t.WeedSpecies ? `on ${t.WeedSpecies}` : ''), time: new Date(t.CreatedAt), trialId: t.ID, category: cat });
-      }
-      if ((t.IsCompleted === true || t.IsCompleted === 'true') && t.FinalizationDate) {
-        events.push({ type: 'trial_finalized', icon: 'check', color: 'blue', label: `Trial finalized: ${t.FormulationName || 'Untitled'}`, detail: t.Result ? `Result: ${t.Result}` : '', time: new Date(t.FinalizationDate), trialId: t.ID, category: cat });
-      }
-      const obs = safeJsonParse(t.EfficacyDataJSON, []);
-      if (Array.isArray(obs)) {
-        obs.forEach(o => {
-          const rawD = o.date || o.ObservationDate || o.timestamp;
-          if (rawD) {
-            const d = new Date(rawD);
-            if (!isNaN(d.getTime())) {
-              events.push({ type: 'observation', icon: 'eye', color: 'purple', label: `Observation scored (DAA ${o.daa || '?'})`, detail: t.FormulationName || '', time: d, trialId: t.ID, category: cat });
-            }
-          }
-        });
-      }
-      const photos = safeJsonParse(t.PhotoURLs, []);
-      if (Array.isArray(photos) && photos.length > 0) {
-        const photoTime = t.LastModified ? new Date(t.LastModified) : (t.CreatedAt ? new Date(t.CreatedAt) : null);
-        if (photoTime && !isNaN(photoTime.getTime())) {
-          events.push({ type: 'photo', icon: 'camera', color: 'amber', label: `${photos.length} field photo${photos.length > 1 ? 's' : ''} uploaded`, detail: t.FormulationName || '', time: photoTime, trialId: t.ID, category: cat });
-        }
-      }
-    });
-
-    allProjects.forEach(p => {
-      if (p.CreatedAt) {
-        events.push({ type: 'project_created', icon: 'folder', color: 'indigo', label: `Project registered: ${p.Name || 'Untitled'}`, detail: p.Description ? p.Description.slice(0, 40) : '', time: new Date(p.CreatedAt), category: p.Category || 'herbicide' });
-      }
-    });
-
-    allFormulations.forEach(f => {
-      if (f.CreatedAt) {
-        events.push({ type: 'formulation_created', icon: 'flask', color: 'teal', label: `Formulation logged: ${f.Name || 'Untitled'}`, detail: f.Code || '', time: new Date(f.CreatedAt), category: f.Category || 'herbicide' });
-      }
-    });
-
-    return events
-      .filter(e => !isNaN(e.time.getTime()))
-      .sort((a, b) => b.time - a.time)
-      .slice(0, 10);
-  }, [state.trials, state.projects, state.formulations]);
-
-  // ── Trial Health Heatmap Data
+  // ── Trial Health Data & Executive Status
   const trialHealthData = useMemo(() => {
     const now = Date.now();
     const activeTrials = trials.filter(t => t.IsCompleted !== true && t.IsCompleted !== 'true');
@@ -491,19 +432,18 @@ export default function Dashboard({ onMenuClick }) {
     }).sort((a, b) => a.healthScore - b.healthScore);
   }, [trials]);
 
-  // Filtered health data for search & category filter
-  const filteredHealthData = useMemo(() => {
-    return trialHealthData.filter(t => {
-      if (healthFilter === 'green' && t.status !== 'green') return false;
-      if (healthFilter === 'amber' && t.status !== 'amber') return false;
-      if (healthFilter === 'red' && t.status !== 'red') return false;
-      if (healthSearch) {
-        const q = healthSearch.toLowerCase();
-        return t.name.toLowerCase().includes(q) || t.location.toLowerCase().includes(q);
-      }
-      return true;
-    });
-  }, [trialHealthData, healthFilter, healthSearch]);
+  // ── Executive Fleet Health Metrics
+  const healthMetrics = useMemo(() => {
+    const total = trialHealthData.length;
+    const healthy = trialHealthData.filter(t => t.status === 'green').length;
+    const needsCare = trialHealthData.filter(t => t.status === 'amber').length;
+    const critical = trialHealthData.filter(t => t.status === 'red').length;
+    const healthyPct = total > 0 ? Math.round((healthy / total) * 100) : 0;
+    const needsCarePct = total > 0 ? Math.round((needsCare / total) * 100) : 0;
+    const criticalPct = total > 0 ? Math.max(0, 100 - healthyPct - needsCarePct) : 0;
+    const priorityPlots = trialHealthData.filter(t => t.status !== 'green').slice(0, 3);
+    return { total, healthy, needsCare, critical, healthyPct, needsCarePct, criticalPct, priorityPlots };
+  }, [trialHealthData]);
 
   // ── Due Observations
   const dueObservations = useMemo(() => {
@@ -672,119 +612,6 @@ export default function Dashboard({ onMenuClick }) {
       .slice(0, 10);
     setTargetResults({ query: q, results: ranked, total: matched.length });
   };
-
-  // ── Proactive AI Insights
-  const proactiveInsights = useMemo(() => {
-    const insights = [];
-    const active = trials.filter(t => t.IsCompleted !== true && t.IsCompleted !== 'true');
-
-    // 1. Declining efficacy detection
-    const decliningTrials = [];
-    active.forEach(t => {
-      const eff = safeJsonParse(t.EfficacyDataJSON, []);
-      if (eff.length >= 2) {
-        const sorted = [...eff].sort((a, b) => (a.daa || 0) - (b.daa || 0));
-        const prev = sorted[sorted.length - 2];
-        const last = sorted[sorted.length - 1];
-        const prevVal = prev.controlPct ?? prev.wce ?? null;
-        const lastVal = last.controlPct ?? last.wce ?? null;
-        if (prevVal !== null && lastVal !== null && lastVal < prevVal - 10) {
-          decliningTrials.push({ trial: t, drop: Math.round(prevVal - lastVal) });
-        }
-      }
-    });
-
-    if (decliningTrials.length > 0) {
-      insights.push({
-        id: 'declining_eff',
-        type: 'danger',
-        icon: TrendingDown,
-        title: `${decliningTrials.length} active plot${decliningTrials.length > 1 ? 's show' : ' shows'} declining efficacy`,
-        description: `Loss of control detected between latest observations (up to -${Math.max(...decliningTrials.map(d => d.drop))}% drop). Review application dosage or weed regrowth.`,
-        actionLabel: 'Inspect Plots',
-        actionRoute: '/trials',
-        badge: 'ACTION REQUIRED',
-        badgeBg: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
-      });
-    }
-
-    // 2. Star performer
-    const formulaMap = {};
-    trials.forEach(t => {
-      if (!t.FormulationName) return;
-      if (!formulaMap[t.FormulationName]) formulaMap[t.FormulationName] = [];
-      const eff = getTrialCalculatedEfficacy(t, activeCategory);
-      if (eff !== null && eff > 0) formulaMap[t.FormulationName].push(eff);
-    });
-
-    const starFormulas = Object.entries(formulaMap).map(([name, effs]) => {
-      const avg = Math.round(effs.reduce((a, b) => a + b, 0) / effs.length);
-      return { name, avg, count: effs.length };
-    }).filter(f => f.count >= 2 && f.avg >= 90);
-
-    if (starFormulas.length > 0) {
-      const top = starFormulas.sort((a, b) => b.avg - a.avg)[0];
-      insights.push({
-        id: 'star_performer',
-        type: 'success',
-        icon: Sparkles,
-        title: `"${top.name}" achieves standout ${top.avg}% control across ${top.count} trials`,
-        description: `Consistently outperforming benchmark treatments this season. Candidate for multi-location registration trials.`,
-        actionLabel: 'View in Analytics',
-        actionRoute: '/analytics',
-        badge: 'TOP PERFORMER',
-        badgeBg: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-      });
-    }
-
-    // 3. Stale observations
-    const staleTrials = active.filter(t => {
-      const eff = safeJsonParse(t.EfficacyDataJSON, []);
-      let lastD = t.Date ? new Date(t.Date) : null;
-      eff.forEach(o => {
-        const d = o.date ? new Date(o.date) : null;
-        if (d && (!lastD || d > lastD)) lastD = d;
-      });
-      if (!lastD) return false;
-      return (Date.now() - lastD.getTime()) > 10 * 86400000;
-    });
-
-    if (staleTrials.length > 0) {
-      insights.push({
-        id: 'stale_obs',
-        type: 'info',
-        icon: Clock,
-        title: `${staleTrials.length} active plot${staleTrials.length > 1 ? 's have' : ' has'} no recorded observations in >10 days`,
-        description: `Timely intervals are crucial for continuous progression modeling. Plots at ${staleTrials.slice(0, 2).map(t => t.Location || t.FormulationName).join(', ')} require scoring.`,
-        actionLabel: 'Log Observations',
-        actionRoute: '/trials',
-        badge: 'TIMING ALERT',
-        badgeBg: 'bg-sky-500/20 text-sky-300 border-sky-500/30'
-      });
-    }
-
-    // 4. Resistance signal
-    const failureTrials = trials.filter(t => {
-      const eff = getTrialCalculatedEfficacy(t, activeCategory);
-      return eff !== null && eff < 45 && t.Dosage && !t.IsControl;
-    });
-
-    if (failureTrials.length > 0) {
-      insights.push({
-        id: 'resistance_signal',
-        type: 'warning',
-        icon: ShieldAlert,
-        title: `Possible resistance or sub-lethal dose on ${failureTrials.length} plot${failureTrials.length > 1 ? 's' : ''}`,
-        description: `Treated plots demonstrated <45% bio-suppression despite standard dose. Check Resistance Tracker for target biotypes.`,
-        actionLabel: 'Open Resistance Tracker',
-        actionRoute: '/resistance',
-        badge: 'BIOTYPE SUSPECT',
-        badgeBg: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
-      });
-    }
-
-    return insights;
-  }, [trials, activeCategory, catConfig.name]);
 
   const rawName = user?.Name || user?.Username || user?.username || 'Researcher';
   const cleanName = rawName.includes('@') ? rawName.split('@')[0] : rawName;
@@ -1007,7 +834,7 @@ export default function Dashboard({ onMenuClick }) {
                 icon={FlaskConical}
                 label="Formulations Portfolio"
                 value={formulations.length}
-                subLabel={`${ingredients.length} active ingredients registered`}
+                subLabel="Active proprietary recipes & field blends"
                 badgeText={`${topFormulationsFiltered.length} BENCHMARKS`}
                 badgeColor="amber"
                 gradient="from-amber-500/10 via-white to-orange-500/5"
@@ -1022,7 +849,7 @@ export default function Dashboard({ onMenuClick }) {
                       Top Benchmark
                     </div>
                     <span className="text-[10px] text-slate-400 font-semibold mt-1">
-                      {ingredients.length} MoA Actives
+                      {formulations.length} Blends
                     </span>
                   </div>
                 }
@@ -1031,33 +858,7 @@ export default function Dashboard({ onMenuClick }) {
             </div>
 
             {/* Secondary Operational Quick-Stats Ribbon */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3.5">
-              <button
-                onClick={() => navigate('/projects')}
-                className="group flex items-center gap-3 p-3.5 rounded-2xl bg-white border border-slate-200/80 shadow-2xs hover:shadow-md hover:border-indigo-300 hover:-translate-y-0.5 transition-all duration-200 text-left cursor-pointer"
-              >
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-50 to-indigo-100 text-indigo-600 flex items-center justify-center shrink-0 border border-indigo-200/60 group-hover:scale-105 transition-transform">
-                  <FolderOpen className="w-5 h-5" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-extrabold text-slate-900 tracking-tight">{projects.length} Active Projects</p>
-                  <p className="text-[11px] text-slate-400 font-medium truncate">Multi-trial research</p>
-                </div>
-              </button>
-
-              <button
-                onClick={() => navigate('/ingredients')}
-                className="group flex items-center gap-3 p-3.5 rounded-2xl bg-white border border-slate-200/80 shadow-2xs hover:shadow-md hover:border-teal-300 hover:-translate-y-0.5 transition-all duration-200 text-left cursor-pointer"
-              >
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-teal-50 to-teal-100 text-teal-600 flex items-center justify-center shrink-0 border border-teal-200/60 group-hover:scale-105 transition-transform">
-                  <Leaf className="w-5 h-5" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-extrabold text-slate-900 tracking-tight">{ingredients.length} Ingredients</p>
-                  <p className="text-[11px] text-slate-400 font-medium truncate">MoA & active compounds</p>
-                </div>
-              </button>
-
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mt-3.5">
               <button
                 onClick={() => navigate('/alerts')}
                 className="group flex items-center gap-3 p-3.5 rounded-2xl bg-white border border-slate-200/80 shadow-2xs hover:shadow-md hover:border-amber-300 hover:-translate-y-0.5 transition-all duration-200 text-left cursor-pointer"
@@ -1067,7 +868,7 @@ export default function Dashboard({ onMenuClick }) {
                 </div>
                 <div className="min-w-0">
                   <p className="text-sm font-extrabold text-slate-900 tracking-tight">{stats.reminderCount} Photo Reminders</p>
-                  <p className="text-[11px] text-slate-400 font-medium truncate">Due for imagery capture</p>
+                  <p className="text-[11px] text-slate-400 font-medium truncate">Plots due for scheduled imagery capture</p>
                 </div>
               </button>
 
@@ -1080,7 +881,7 @@ export default function Dashboard({ onMenuClick }) {
                 </div>
                 <div className="min-w-0">
                   <p className="text-sm font-extrabold text-slate-900 tracking-tight">{stats.autoFinalizedCount} Auto-Closed</p>
-                  <p className="text-[11px] text-slate-400 font-medium truncate">Concluded by inactivity</p>
+                  <p className="text-[11px] text-slate-400 font-medium truncate">Archived due to protocol conclusion / inactivity</p>
                 </div>
               </button>
             </div>
@@ -1127,175 +928,103 @@ export default function Dashboard({ onMenuClick }) {
                 )}
               </div>
 
-              {/* Two-Column Grid: Spray Advisor + Proactive AI Signals */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-                {/* Left: Spray Advisor */}
-                <div className="lg:col-span-7 xl:col-span-8">
-                  {activeTrialLocation ? (
-                    <SprayAdvisor
-                      lat={activeTrialLocation.lat}
-                      lon={activeTrialLocation.lon}
-                      locationName={activeTrialLocation.name}
-                    />
-                  ) : (
-                    <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs text-center">
-                      <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
-                        <MapPin className="w-6 h-6" />
-                      </div>
-                      <h4 className="text-sm font-bold text-slate-700">GPS Coordinates Needed for Spray Advisor</h4>
-                      <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-                        Add latitude and longitude coordinates to your active field trials to unlock real-time Open-Meteo weather forecasts, Delta-T psychrometric drift tracking, and optimal spray window recommendations.
-                      </p>
-                      <button
-                        onClick={() => navigate('/trials')}
-                        className="mt-4 inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition shadow-xs cursor-pointer"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        Update Trial Locations
-                      </button>
+              {/* Weather Alert Banners (Consolidated across plots) */}
+              {(consolidatedAlerts.length > 0 || forecastLoading) && (
+                <div className="space-y-2.5">
+                  {forecastLoading ? (
+                    <div className="bg-sky-50/90 border border-sky-200/80 rounded-2xl px-4 py-3 flex items-center gap-3 animate-pulse shadow-2xs">
+                      <CloudRain className="w-4 h-4 text-sky-500 animate-spin" />
+                      <span className="text-xs font-semibold text-sky-800">Verifying 48h Open-Meteo satellite forecast across plot coordinates...</span>
                     </div>
-                  )}
-                </div>
-
-                {/* Right: Proactive AI Signals & Weather Warnings */}
-                <div className="lg:col-span-5 xl:col-span-4 flex flex-col gap-3.5">
-                  {/* Weather Alert Banners (Consolidated by hazard type) */}
-                  {(consolidatedAlerts.length > 0 || forecastLoading) && (
-                    <div className="space-y-2.5">
-                      {forecastLoading ? (
-                        <div className="bg-sky-50/90 border border-sky-200/80 rounded-2xl px-4 py-3.5 flex items-center gap-3 animate-pulse shadow-2xs">
-                          <CloudRain className="w-4 h-4 text-sky-500 animate-spin" />
-                          <span className="text-xs font-semibold text-sky-800">Verifying 48h Open-Meteo satellite forecast across plot coordinates...</span>
-                        </div>
-                      ) : (
-                        consolidatedAlerts.map((alert, i) => (
-                          <div
-                            key={i}
-                            className={`rounded-3xl p-4 border shadow-xs transition-all relative overflow-hidden ${
-                              alert.severity === 'high'
-                                ? 'bg-gradient-to-br from-rose-50/90 via-white to-red-50/60 border-rose-200/90'
-                                : 'bg-gradient-to-br from-amber-50/90 via-white to-orange-50/60 border-amber-200/90'
-                            }`}
-                          >
-                            <div className="flex items-start gap-3.5 relative z-10">
-                              <div className={`p-2.5 rounded-2xl shrink-0 shadow-sm ${
-                                alert.severity === 'high' 
-                                  ? 'bg-gradient-to-br from-rose-500 to-red-600 text-white shadow-rose-500/25 ring-2 ring-rose-400/20' 
-                                  : 'bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-amber-500/25 ring-2 ring-amber-400/20'
-                              }`}>
-                                {alert.type === 'rain' && <CloudRain className="w-5 h-5 stroke-[2.2]" />}
-                                {alert.type === 'wind' && <Wind className="w-5 h-5 stroke-[2.2]" />}
-                                {alert.type === 'temp' && <Thermometer className="w-5 h-5 stroke-[2.2]" />}
+                  ) : (
+                    consolidatedAlerts.map((alert, i) => (
+                      <div
+                        key={i}
+                        className={`rounded-2xl p-3.5 sm:p-4 border shadow-xs transition-all relative overflow-hidden ${
+                          alert.severity === 'high'
+                            ? 'bg-gradient-to-r from-rose-50/90 via-white to-red-50/60 border-rose-200/90'
+                            : 'bg-gradient-to-r from-amber-50/90 via-white to-orange-50/60 border-amber-200/90'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3.5 relative z-10">
+                          <div className={`p-2.5 rounded-xl shrink-0 shadow-sm ${
+                            alert.severity === 'high' 
+                              ? 'bg-gradient-to-br from-rose-500 to-red-600 text-white shadow-rose-500/25 ring-2 ring-rose-400/20' 
+                              : 'bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-amber-500/25 ring-2 ring-amber-400/20'
+                          }`}>
+                            {alert.type === 'rain' && <CloudRain className="w-4 h-4 stroke-[2.2]" />}
+                            {alert.type === 'wind' && <Wind className="w-4 h-4 stroke-[2.2]" />}
+                            {alert.type === 'temp' && <Thermometer className="w-4 h-4 stroke-[2.2]" />}
+                          </div>
+                          <div className="flex-1 min-w-0 sm:flex sm:items-center sm:justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-2 mb-0.5">
+                                <span className={`text-[9px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full border ${
+                                  alert.severity === 'high' 
+                                    ? 'bg-rose-100 text-rose-800 border-rose-300/70' 
+                                    : 'bg-amber-100 text-amber-800 border-amber-300/70'
+                                }`}>
+                                  {alert.severity === 'high' ? 'High Risk Alert' : 'Advisory'}
+                                </span>
+                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                  Next 48 Hours
+                                </span>
                               </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center justify-between gap-1.5 mb-1 flex-wrap">
-                                  <span className={`text-[10px] font-black uppercase tracking-wide px-2.5 py-0.5 rounded-full border ${
-                                    alert.severity === 'high' 
-                                      ? 'bg-rose-100 text-rose-800 border-rose-300/70' 
-                                      : 'bg-amber-100 text-amber-800 border-amber-300/70'
-                                  }`}>
-                                    {alert.severity === 'high' ? 'High Risk Alert' : 'Advisory'}
-                                  </span>
-                                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                                    Next 48 Hours
-                                  </span>
-                                </div>
-                                <p className={`text-xs font-black leading-snug ${alert.severity === 'high' ? 'text-rose-950' : 'text-amber-950'}`}>
-                                  {alert.msg}
-                                </p>
+                              <p className={`text-xs font-black leading-snug ${alert.severity === 'high' ? 'text-rose-950' : 'text-amber-950'}`}>
+                                {alert.msg}
+                              </p>
+                            </div>
 
-                                {alert.locations && alert.locations.length > 0 && (
-                                  <div className="mt-2.5 flex items-center gap-1.5 flex-wrap">
-                                    <span className="text-[10px] font-bold text-slate-500">
-                                      {alert.locations.length > 1 ? `Affecting ${alert.locations.length} plots:` : 'Plot:'}
-                                    </span>
-                                    {alert.locations.map((loc, idx) => (
-                                      <span key={idx} className="inline-flex items-center gap-1 text-[10px] font-bold bg-white text-slate-700 px-2 py-0.5 rounded-md border border-slate-200/80 shadow-2xs">
-                                        <MapPin className="w-2.5 h-2.5 text-rose-500" />
-                                        {loc}
-                                      </span>
-                                    ))}
-                                  </div>
+                            {alert.locations && alert.locations.length > 0 && (
+                              <div className="mt-1.5 sm:mt-0 flex items-center gap-1.5 flex-wrap shrink-0">
+                                <span className="text-[10px] font-bold text-slate-500">
+                                  {alert.locations.length > 1 ? `Affecting ${alert.locations.length} plots:` : 'Plot:'}
+                                </span>
+                                {alert.locations.slice(0, 3).map((loc, idx) => (
+                                  <span key={idx} className="inline-flex items-center gap-1 text-[10px] font-bold bg-white text-slate-700 px-2 py-0.5 rounded-md border border-slate-200/80 shadow-2xs">
+                                    <MapPin className="w-2.5 h-2.5 text-rose-500" />
+                                    {loc}
+                                  </span>
+                                ))}
+                                {alert.locations.length > 3 && (
+                                  <span className="text-[10px] font-bold text-slate-400">+{alert.locations.length - 3} more</span>
                                 )}
                               </div>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  )}
-
-                  {/* Proactive AI Insights Panel */}
-                  <div className="bg-white rounded-3xl p-5 border border-indigo-100/90 shadow-sm flex-1 flex flex-col justify-between hover:border-indigo-200 transition-colors">
-                    <div>
-                      <div className="flex items-center justify-between mb-3.5 border-b border-slate-100 pb-3">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white flex items-center justify-center shadow-md shadow-indigo-500/20 ring-2 ring-indigo-400/20">
-                            <Sparkles className="w-4 h-4" />
-                          </div>
-                          <div>
-                            <h3 className="font-extrabold text-xs tracking-wide text-slate-900">
-                              Autonomous AI Signals
-                            </h3>
-                            <p className="text-[10px] text-slate-400 font-medium">Real-time agronomic pattern detector</p>
+                            )}
                           </div>
                         </div>
-                        <span className="text-[10px] font-black bg-indigo-50 text-indigo-700 px-2.5 py-0.5 rounded-full border border-indigo-200/80 shadow-2xs">
-                          {proactiveInsights.length} Live
-                        </span>
                       </div>
-
-                      {proactiveInsights.length > 0 ? (
-                        <div className="space-y-2.5">
-                          {proactiveInsights.slice(0, 3).map((insight) => {
-                            const Icon = insight.icon;
-                            return (
-                              <div
-                                key={insight.id}
-                                className="rounded-2xl bg-gradient-to-br from-slate-50/90 to-white hover:to-indigo-50/30 border border-slate-200/80 hover:border-indigo-200/80 p-3.5 transition-all duration-200 shadow-2xs group"
-                              >
-                                <div className="flex items-center justify-between gap-1.5 mb-1.5">
-                                  <span className={`text-[9px] font-extrabold tracking-wide uppercase px-2 py-0.5 rounded-full border ${insight.badgeBg}`}>
-                                    {insight.badge}
-                                  </span>
-                                  <Icon className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 transition-colors" />
-                                </div>
-                                <h4 className="text-xs font-black text-slate-900 leading-snug">{insight.title}</h4>
-                                <p className="text-[11px] text-slate-600 mt-1 line-clamp-2 leading-relaxed">{insight.description}</p>
-                                <div className="mt-2.5 pt-2 border-t border-slate-100 flex justify-end">
-                                  <button
-                                    onClick={() => navigate(insight.actionRoute)}
-                                    className="text-[11px] font-black text-indigo-600 hover:text-indigo-800 flex items-center gap-1 group-hover:translate-x-0.5 transition-transform cursor-pointer"
-                                  >
-                                    {insight.actionLabel} <ArrowRight className="w-3 h-3" />
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <div className="py-6 text-center text-slate-400 text-xs">
-                          <ShieldCheck className="w-8 h-8 mx-auto mb-2 text-emerald-500 opacity-80" />
-                          All active field plots are performing within expected tolerance levels.
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="mt-3.5 pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-                      <span className="font-semibold text-slate-400 flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
-                        Live RAG & Statistical Intelligence
-                      </span>
-                      <button
-                        onClick={() => navigate('/assistant')}
-                        className="text-indigo-600 hover:text-indigo-800 font-extrabold flex items-center gap-1 transition cursor-pointer"
-                      >
-                        Ask Copilot <ChevronRight className="w-3 h-3" />
-                      </button>
-                    </div>
-                  </div>
+                    ))
+                  )}
                 </div>
+              )}
+
+              {/* Full Width Spray Advisor */}
+              <div className="w-full">
+                {activeTrialLocation ? (
+                  <SprayAdvisor
+                    lat={activeTrialLocation.lat}
+                    lon={activeTrialLocation.lon}
+                    locationName={activeTrialLocation.name}
+                  />
+                ) : (
+                  <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs text-center">
+                    <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
+                      <MapPin className="w-6 h-6" />
+                    </div>
+                    <h4 className="text-sm font-bold text-slate-700">GPS Coordinates Needed for Spray Advisor</h4>
+                    <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                      Add latitude and longitude coordinates to your active field trials to unlock real-time Open-Meteo weather forecasts, Delta-T psychrometric drift tracking, and optimal spray window recommendations.
+                    </p>
+                    <button
+                      onClick={() => navigate('/trials')}
+                      className="mt-4 inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition shadow-xs cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Update Trial Locations
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1410,117 +1139,7 @@ export default function Dashboard({ onMenuClick }) {
           </div>
 
           {/* ══════════════════════════════════════════════════════════════════
-              TRIAL HEALTH COMMAND HEATMAP (INTERACTIVE PLOT MATRIX)
-              ══════════════════════════════════════════════════════════════════ */}
-          {trialHealthData.length > 0 && (
-            <div className="bg-white rounded-2xl shadow-xs border border-slate-200/80 p-5 hover:shadow-md transition-shadow">
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
-                <div>
-                  <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
-                    <Activity className="w-4 h-4 text-emerald-600" />
-                    Trial Health Monitor
-                    <span className="text-xs font-semibold text-slate-400">({trials.filter(t => t.IsCompleted !== true && t.IsCompleted !== 'true').length} Active Plots)</span>
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Real-time score evaluating observation interval freshness, efficacy trend, and weather risks
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  {/* Status Filter Tabs */}
-                  <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs">
-                    <button
-                      onClick={() => setHealthFilter('all')}
-                      className={`px-2.5 py-1 rounded-lg font-bold transition ${healthFilter === 'all' ? 'bg-white text-slate-800 shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}
-                    >
-                      All ({trialHealthData.length})
-                    </button>
-                    <button
-                      onClick={() => setHealthFilter('green')}
-                      className={`px-2.5 py-1 rounded-lg font-bold transition ${healthFilter === 'green' ? 'bg-emerald-500 text-white shadow-xs' : 'text-emerald-700 hover:bg-emerald-50'}`}
-                    >
-                      Healthy ({trialHealthData.filter(t => t.status === 'green').length})
-                    </button>
-                    <button
-                      onClick={() => setHealthFilter('amber')}
-                      className={`px-2.5 py-1 rounded-lg font-bold transition ${healthFilter === 'amber' ? 'bg-amber-500 text-white shadow-xs' : 'text-amber-700 hover:bg-amber-50'}`}
-                    >
-                      Needs Care ({trialHealthData.filter(t => t.status === 'amber').length})
-                    </button>
-                    <button
-                      onClick={() => setHealthFilter('red')}
-                      className={`px-2.5 py-1 rounded-lg font-bold transition ${healthFilter === 'red' ? 'bg-rose-500 text-white shadow-xs' : 'text-rose-700 hover:bg-rose-50'}`}
-                    >
-                      Critical ({trialHealthData.filter(t => t.status === 'red').length})
-                    </button>
-                  </div>
-
-                  {/* Search */}
-                  <div className="relative">
-                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    <input
-                      type="text"
-                      value={healthSearch}
-                      onChange={e => setHealthSearch(e.target.value)}
-                      placeholder="Search plot..."
-                      className="pl-8 pr-3 py-1 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-400 w-36"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {filteredHealthData.length > 0 ? (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2.5">
-                  {filteredHealthData.map(t => {
-                    const bgColor = t.status === 'green'
-                      ? 'bg-emerald-50/70 border-emerald-200/80 hover:bg-emerald-100/70'
-                      : t.status === 'amber'
-                      ? 'bg-amber-50/70 border-amber-200/80 hover:bg-amber-100/70'
-                      : 'bg-rose-50/70 border-rose-200/80 hover:bg-rose-100/70';
-                    const textColor = t.status === 'green' ? 'text-emerald-800' : t.status === 'amber' ? 'text-amber-800' : 'text-rose-800';
-                    const dotColor = t.status === 'green' ? 'bg-emerald-500' : t.status === 'amber' ? 'bg-amber-500' : 'bg-rose-500';
-
-                    return (
-                      <button
-                        key={t.id}
-                        onClick={() => navigate('/trials')}
-                        className={`relative rounded-xl border p-3 text-left transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xs group ${bgColor}`}
-                        title={`${t.name}\n${t.location}\nScored: ${t.daysSinceObs === 999 ? 'Never' : `${t.daysSinceObs}d ago`}\nHealth: ${t.healthScore}/100`}
-                      >
-                        <div className="flex items-center justify-between gap-1 mb-1">
-                          <span className={`w-2 h-2 rounded-full ${dotColor} ${t.status === 'red' ? 'animate-pulse' : ''}`} />
-                          <span className={`text-[10px] font-extrabold ${textColor}`}>{t.healthScore}%</span>
-                        </div>
-
-                        <p className={`text-[11px] font-bold ${textColor} truncate leading-tight`}>{t.name}</p>
-                        <p className="text-[10px] text-slate-500 truncate mt-0.5 flex items-center gap-0.5">
-                          <MapPin className="w-2.5 h-2.5 shrink-0" />
-                          {t.location || 'Plot'}
-                        </p>
-
-                        <div className="mt-2 pt-1.5 border-t border-black/5 flex items-center justify-between text-[9px] text-slate-500 font-medium">
-                          <span>{t.daysSinceObs === 999 ? 'No obs' : `${t.daysSinceObs}d ago`}</span>
-                          {t.efficacyTrend === 'declining' && (
-                            <span className="text-rose-600 font-bold flex items-center">
-                              <TrendingDown className="w-3 h-3 inline" />
-                            </span>
-                          )}
-                          {t.hasWeatherRisk && (
-                            <CloudRain className="w-3 h-3 text-amber-500 inline" />
-                          )}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="py-8 text-center text-slate-400 text-xs">No active trials match this health filter.</div>
-              )}
-            </div>
-          )}
-
-          {/* ══════════════════════════════════════════════════════════════════
-              OPERATIONAL TIMELINE & UPCOMING OBSERVATIONS (2 COLUMNS)
+              FIELD OPERATIONS HUB: UPCOMING SCHEDULE & TRIAL HEALTH STATUS (2 COLUMNS)
               ══════════════════════════════════════════════════════════════════ */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
             {/* Upcoming Observations Schedule */}
@@ -1535,7 +1154,7 @@ export default function Dashboard({ onMenuClick }) {
                 </div>
                 <button
                   onClick={() => navigate('/trials')}
-                  className="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
+                  className="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1 cursor-pointer"
                 >
                   All Trials <ChevronRight className="w-3.5 h-3.5" />
                 </button>
@@ -1594,68 +1213,157 @@ export default function Dashboard({ onMenuClick }) {
               )}
             </div>
 
-            {/* Live Field Activity Feed */}
-            <div className="lg:col-span-6 bg-white rounded-2xl shadow-xs border border-slate-200/80 p-5 hover:shadow-md transition-shadow">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
-                    <Clock className="w-4 h-4 text-emerald-600" />
-                    Live Activity Stream
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">Recent audit events across field trials</p>
+            {/* Trial Health & Risk Status (Compact Executive Overview) */}
+            <div className="lg:col-span-6 bg-white rounded-2xl shadow-xs border border-slate-200/80 p-5 hover:shadow-md transition-shadow flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                      <Activity className="w-4 h-4 text-emerald-600" />
+                      Trial Health & Plot Status
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Interval freshness, efficacy trajectories & microclimate stress
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => navigate('/trials')}
+                    className="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1 cursor-pointer"
+                  >
+                    View All ({healthMetrics.total}) <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
                 </div>
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Audit Stream</span>
+
+                {/* Multi-Segmented Health Status Bar */}
+                <div className="p-3.5 rounded-2xl bg-slate-50/80 border border-slate-200/60 mb-4">
+                  <div className="flex items-center justify-between text-xs font-bold mb-2">
+                    <span className="text-slate-700">Fleet Health Distribution</span>
+                    <span className="text-emerald-700 font-extrabold">{healthMetrics.healthyPct}% Optimal</span>
+                  </div>
+                  
+                  {/* Visual Bar */}
+                  <div className="h-2.5 w-full bg-slate-200 rounded-full overflow-hidden flex shadow-inner">
+                    {healthMetrics.healthy > 0 && (
+                      <div
+                        style={{ width: `${healthMetrics.healthyPct}%` }}
+                        className="bg-emerald-500 h-full transition-all duration-500"
+                        title={`Healthy: ${healthMetrics.healthy} plots (${healthMetrics.healthyPct}%)`}
+                      />
+                    )}
+                    {healthMetrics.needsCare > 0 && (
+                      <div
+                        style={{ width: `${healthMetrics.needsCarePct}%` }}
+                        className="bg-amber-500 h-full transition-all duration-500"
+                        title={`Needs Care: ${healthMetrics.needsCare} plots (${healthMetrics.needsCarePct}%)`}
+                      />
+                    )}
+                    {healthMetrics.critical > 0 && (
+                      <div
+                        style={{ width: `${healthMetrics.criticalPct}%` }}
+                        className="bg-rose-500 h-full transition-all duration-500"
+                        title={`Critical: ${healthMetrics.critical} plots (${healthMetrics.criticalPct}%)`}
+                      />
+                    )}
+                  </div>
+
+                  {/* Badges / Legend */}
+                  <div className="flex items-center justify-between gap-2 mt-3 pt-2 border-t border-slate-200/50 text-[11px]">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                      <span className="text-slate-600 font-bold">Healthy:</span>
+                      <span className="font-extrabold text-emerald-700">{healthMetrics.healthy}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                      <span className="text-slate-600 font-bold">Needs Care:</span>
+                      <span className="font-extrabold text-amber-700">{healthMetrics.needsCare}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
+                      <span className="text-slate-600 font-bold">Critical:</span>
+                      <span className="font-extrabold text-rose-700">{healthMetrics.critical}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Priority Attention Plots (Max 3) */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-400 uppercase tracking-wider px-1">
+                    <span>Priority Focus Plots</span>
+                    <span>Status / Risk</span>
+                  </div>
+
+                  {healthMetrics.priorityPlots.length > 0 ? (
+                    healthMetrics.priorityPlots.map((t) => {
+                      const isCritical = t.status === 'red';
+                      const isWarning = t.status === 'amber';
+                      return (
+                        <div
+                          key={t.id}
+                          onClick={() => navigate('/trials')}
+                          className={`flex items-center justify-between gap-3 p-2.5 rounded-xl border transition hover:shadow-2xs cursor-pointer group ${
+                            isCritical 
+                              ? 'bg-rose-50/50 border-rose-200/80 hover:bg-rose-50' 
+                              : isWarning 
+                              ? 'bg-amber-50/50 border-amber-200/80 hover:bg-amber-50'
+                              : 'bg-slate-50 border-slate-200/70 hover:bg-slate-100/70'
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className={`w-2 h-2 rounded-full shrink-0 ${isCritical ? 'bg-rose-500 animate-pulse' : isWarning ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+                              <p className="text-xs font-bold text-slate-800 truncate group-hover:text-emerald-700 transition">
+                                {t.name}
+                              </p>
+                            </div>
+                            <p className="text-[10px] text-slate-400 truncate mt-0.5 ml-4 flex items-center gap-1">
+                              {t.location && <span>{t.location} · </span>}
+                              <span>{t.daysSinceObs === 999 ? 'No observation' : `Scored ${t.daysSinceObs}d ago`}</span>
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            {t.hasWeatherRisk && (
+                              <span className="p-1 rounded-md bg-amber-100 text-amber-700" title="Weather risk detected">
+                                <CloudRain className="w-3 h-3" />
+                              </span>
+                            )}
+                            {t.efficacyTrend === 'declining' && (
+                              <span className="p-1 rounded-md bg-rose-100 text-rose-700" title="Declining efficacy">
+                                <TrendingDown className="w-3 h-3" />
+                              </span>
+                            )}
+                            <span className={`text-[11px] font-black px-2 py-0.5 rounded-lg border ${
+                              isCritical 
+                                ? 'bg-rose-100 text-rose-800 border-rose-300' 
+                                : isWarning 
+                                ? 'bg-amber-100 text-amber-800 border-amber-300' 
+                                : 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                            }`}>
+                              {t.healthScore}%
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="py-6 text-center text-slate-400 text-xs flex flex-col items-center justify-center">
+                      <CheckCircle className="w-6 h-6 text-emerald-500 mb-1" />
+                      All active trials scored and within expected ranges.
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {activityFeed.length > 0 ? (
-                <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
-                  {activityFeed.map((event, i) => {
-                    const colorMap = {
-                      emerald: 'bg-emerald-500 text-white',
-                      blue: 'bg-sky-500 text-white',
-                      purple: 'bg-purple-500 text-white',
-                      amber: 'bg-amber-500 text-white',
-                      indigo: 'bg-indigo-500 text-white',
-                      teal: 'bg-teal-500 text-white',
-                    };
-                    const iconMap = {
-                      plus: <Plus className="w-3 h-3" />,
-                      check: <CheckCircle className="w-3 h-3" />,
-                      eye: <Eye className="w-3 h-3" />,
-                      camera: <Camera className="w-3 h-3" />,
-                      folder: <FolderOpen className="w-3 h-3" />,
-                      flask: <FlaskConical className="w-3 h-3" />,
-                    };
-
-                    const timeAgo = (() => {
-                      const diff = Date.now() - event.time.getTime();
-                      const mins = Math.floor(diff / 60000);
-                      if (mins < 1) return 'just now';
-                      if (mins < 60) return `${mins}m ago`;
-                      const hrs = Math.floor(mins / 60);
-                      if (hrs < 24) return `${hrs}h ago`;
-                      const days = Math.floor(hrs / 24);
-                      if (days < 7) return `${days}d ago`;
-                      return event.time.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-                    })();
-
-                    return (
-                      <div key={`${event.type}-${i}`} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-slate-50 transition border border-slate-100">
-                        <div className={`w-8 h-8 rounded-lg ${colorMap[event.color] || 'bg-slate-400 text-white'} flex items-center justify-center shrink-0 shadow-xs`}>
-                          {iconMap[event.icon] || <Activity className="w-3.5 h-3.5" />}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-bold text-slate-800 truncate">{event.label}</p>
-                          {event.detail && <p className="text-[10px] text-slate-400 truncate">{event.detail}</p>}
-                        </div>
-                        <span className="text-[10px] font-semibold text-slate-400 shrink-0">{timeAgo}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="py-10 text-center text-slate-400 text-xs">No recent actions recorded.</div>
-              )}
+              <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+                <span className="font-medium text-slate-400">Continuous plot risk modeling</span>
+                <button
+                  onClick={() => navigate('/trials')}
+                  className="font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-0.5 cursor-pointer"
+                >
+                  Inspect plot treatments <ChevronRight className="w-3 h-3" />
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1842,17 +1550,6 @@ export default function Dashboard({ onMenuClick }) {
                 </button>
               </div>
             </div>
-          </div>
-
-          {/* ══════════════════════════════════════════════════════════════════
-              WEATHER REPOSITORY DASHBOARD (HISTORICAL & MULTI-LOCATION)
-              ══════════════════════════════════════════════════════════════════ */}
-          <div>
-            <WeatherDashboard
-              trials={trials}
-              activeCategory={activeCategory}
-              getAppState={getAppState}
-            />
           </div>
 
         </div>
