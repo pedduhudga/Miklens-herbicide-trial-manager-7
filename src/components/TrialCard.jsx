@@ -141,7 +141,7 @@ const TrialCard = memo(function TrialCard({
   const allCardPhotos = useMemo(() => {
     const list = [];
     photos.forEach((p, idx) => {
-      const src = getPhotoThumbnailSrc(p, 600) || resolvePhotoSrc(p) || (typeof p === 'string' ? p : (p.url || p.fileData || p.dataUrl));
+      const src = getPhotoThumbnailSrc(p, 400) || resolvePhotoSrc(p, 400) || (typeof p === 'string' ? p : (p.url || p.fileData || p.dataUrl));
       if (src) {
         list.push({
           id: p.id || p.tempId || `tp_${idx}`,
@@ -157,7 +157,7 @@ const TrialCard = memo(function TrialCard({
     if (Array.isArray(efficacyData)) {
       efficacyData.forEach((obs, oIdx) => {
         if (obs.photoUrl) {
-          const u = getPhotoThumbnailSrc(obs.photoUrl, 600) || resolvePhotoSrc(obs.photoUrl) || obs.photoUrl;
+          const u = getPhotoThumbnailSrc(obs.photoUrl, 400) || resolvePhotoSrc(obs.photoUrl, 400) || obs.photoUrl;
           if (u && !list.some(x => x.src === u)) {
             list.push({
               id: `obs_${oIdx}`,
@@ -171,7 +171,7 @@ const TrialCard = memo(function TrialCard({
         }
         if (Array.isArray(obs.photos)) {
           obs.photos.forEach((op, opIdx) => {
-            const u = getPhotoThumbnailSrc(op, 600) || resolvePhotoSrc(op) || (typeof op === 'string' ? op : (op.url || op.fileData || op.dataUrl));
+            const u = getPhotoThumbnailSrc(op, 400) || resolvePhotoSrc(op, 400) || (typeof op === 'string' ? op : (op.url || op.fileData || op.dataUrl));
             if (u && !list.some(x => x.src === u)) {
               list.push({
                 id: `obs_${oIdx}_${opIdx}`,
@@ -950,6 +950,8 @@ const TrialCard = memo(function TrialCard({
                             src={resolvedSrc}
                             alt=""
                             aria-hidden="true"
+                            loading="lazy"
+                            decoding="async"
                             className="absolute inset-0 w-full h-full object-cover blur-sm opacity-35 scale-110 pointer-events-none"
                           />
                         )}
@@ -957,16 +959,22 @@ const TrialCard = memo(function TrialCard({
                           src={resolvedSrc}
                           alt={p.label || 'Trial photo'}
                           className={`relative z-1 w-full h-full ${photoFitMode === 'contain' ? 'object-contain' : 'object-cover'} transition-transform duration-300`}
-                          loading={pIdx === 0 ? 'eager' : 'lazy'}
+                          loading="lazy"
+                          decoding="async"
                           draggable={false}
                           onError={(e) => {
                             const driveId = getDriveFileId(resolvedSrc) || getDriveFileId(p.rawItem);
-                            if (driveId && !e.currentTarget.dataset.fallbackTried) {
-                              e.currentTarget.dataset.fallbackTried = '1';
-                              e.currentTarget.src = `https://drive.google.com/uc?export=view&id=${driveId}`;
-                            } else if (driveId && e.currentTarget.dataset.fallbackTried === '1') {
-                              e.currentTarget.dataset.fallbackTried = '2';
-                              e.currentTarget.src = `https://drive.google.com/uc?export=download&id=${driveId}`;
+                            if (!driveId) return;
+                            const step = e.currentTarget.dataset.fallbackStep || '0';
+                            if (step === '0') {
+                              e.currentTarget.dataset.fallbackStep = '1';
+                              e.currentTarget.src = `https://drive.google.com/thumbnail?id=${driveId}&sz=w400`;
+                            } else if (step === '1') {
+                              e.currentTarget.dataset.fallbackStep = '2';
+                              e.currentTarget.src = `https://images.weserv.nl/?url=${encodeURIComponent(`https://drive.google.com/thumbnail?id=${driveId}&sz=w400`)}&output=webp`;
+                            } else if (step === '2') {
+                              e.currentTarget.dataset.fallbackStep = '3';
+                              e.currentTarget.src = `https://lh3.googleusercontent.com/d/${driveId}`;
                             }
                           }}
                         />
@@ -1191,12 +1199,17 @@ const TrialCard = memo(function TrialCard({
               className="max-w-full max-h-[80vh] w-auto h-auto object-contain rounded-xl shadow-2xl transition-transform allow-pinch-zoom"
               onError={(e) => {
                 const driveId = getDriveFileId(lightboxPhoto?.src) || getDriveFileId(lightboxPhoto?.rawItem);
-                if (driveId && !e.currentTarget.dataset.fallbackTried) {
-                  e.currentTarget.dataset.fallbackTried = '1';
-                  e.currentTarget.src = `https://drive.google.com/uc?export=view&id=${driveId}`;
-                } else if (driveId && e.currentTarget.dataset.fallbackTried === '1') {
-                  e.currentTarget.dataset.fallbackTried = '2';
-                  e.currentTarget.src = `https://drive.google.com/uc?export=download&id=${driveId}`;
+                if (!driveId) return;
+                const step = e.currentTarget.dataset.fallbackStep || '0';
+                if (step === '0') {
+                  e.currentTarget.dataset.fallbackStep = '1';
+                  e.currentTarget.src = `https://drive.google.com/thumbnail?id=${driveId}&sz=w1600`;
+                } else if (step === '1') {
+                  e.currentTarget.dataset.fallbackStep = '2';
+                  e.currentTarget.src = `https://images.weserv.nl/?url=${encodeURIComponent(`https://drive.google.com/thumbnail?id=${driveId}&sz=w1600`)}&output=webp`;
+                } else if (step === '2') {
+                  e.currentTarget.dataset.fallbackStep = '3';
+                  e.currentTarget.src = `https://lh3.googleusercontent.com/d/${driveId}`;
                 }
               }}
             />

@@ -10019,8 +10019,7 @@ If none are present, write "None".`;
                       <div className="grid grid-cols-3 gap-3">
                         {(harvestForm.photos || []).map((photo, pIdx) => {
                           const rawSrc = photo.fileData || photo.url || (typeof photo === 'string' ? photo : null);
-                          const driveMatch = typeof rawSrc === 'string' && rawSrc.includes('drive.google.com') && rawSrc.match(/(?:[?&]id=|\/d\/)([a-zA-Z0-9_-]{10,})/);
-                          const thumbnailSrc = driveMatch ? `https://drive.google.com/thumbnail?id=${driveMatch[1]}&sz=w200` : rawSrc;
+                          const thumbnailSrc = getPhotoThumbnailSrc(photo, 300) || rawSrc;
                           return (
                             <div key={pIdx} className="relative group rounded-xl overflow-hidden border bg-slate-50 aspect-video flex items-center justify-center">
                               <img src={thumbnailSrc} alt={`Harvest photo ${pIdx + 1}`} className="object-cover w-full h-full" />
@@ -10551,14 +10550,22 @@ If none are present, write "None".`;
               <div className="w-full md:w-1/3">
                 <img
                   src={
-                    (selectedPhotoForDetails.fileData || selectedPhotoForDetails.url || '').includes('drive.google.com') &&
-                    (selectedPhotoForDetails.fileData || selectedPhotoForDetails.url || '').match(/(?:[?&]id=|\/d\/)([a-zA-Z0-9_-]{10,})/)
-                      ? `https://drive.google.com/thumbnail?id=${(selectedPhotoForDetails.fileData || selectedPhotoForDetails.url || '').match(/(?:[?&]id=|\/d\/)([a-zA-Z0-9_-]{10,})/)[1]}&sz=w600`
-                      : (selectedPhotoForDetails.fileData || selectedPhotoForDetails.url || '')
+                    getPhotoThumbnailSrc(selectedPhotoForDetails, 600) ||
+                    resolvePhotoSrc(selectedPhotoForDetails, 600) ||
+                    (selectedPhotoForDetails.fileData || selectedPhotoForDetails.url || '')
                   }
                   alt={selectedPhotoForDetails.label || 'AI Diagnostics'}
                   className="w-full aspect-square object-cover rounded-xl border border-slate-200 bg-slate-100 shadow-sm"
-                  onError={e => { e.target.onerror = null; e.target.src = selectedPhotoForDetails.fileData || selectedPhotoForDetails.url; }}
+                  onError={e => {
+                    const driveId = getDriveFileId(selectedPhotoForDetails);
+                    if (driveId && !e.currentTarget.dataset.fallbackTried) {
+                      e.currentTarget.dataset.fallbackTried = '1';
+                      e.currentTarget.src = `https://drive.google.com/thumbnail?id=${driveId}&sz=w600`;
+                    } else {
+                      e.currentTarget.onerror = null;
+                      e.currentTarget.src = selectedPhotoForDetails.fileData || selectedPhotoForDetails.url;
+                    }
+                  }}
                 />
                 <div className="mt-3 space-y-1 text-xs text-slate-500">
                   <p><span className="font-semibold text-slate-600">Label:</span> {selectedPhotoForDetails.label || 'N/A'}</p>
