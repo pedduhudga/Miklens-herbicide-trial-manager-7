@@ -1,7 +1,6 @@
 import { saveAs } from 'file-saver';
 import jsPDF from 'jspdf';
 import pptxgen from 'pptxgenjs';
-import htmlDocx from 'html-docx-js/dist/html-docx.js';
 import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryValue } from './categoryConfig.js';
 
 // Helper utilities for DOCX exports
@@ -228,21 +227,19 @@ export async function exportScientificReportAsDOC(scope, state, options = {}) {
         <body>${contentHtml}</body>
         </html>`;
 
-        // Wait a tiny bit to ensure the UI paints the toast before the heavy blocking execution of html-docx-js
         await new Promise(r => setTimeout(r, 100));
 
-        const docxEngine = window.htmlDocx || htmlDocx;
-        if (docxEngine && typeof docxEngine.asBlob === 'function') {
-            const converted = docxEngine.asBlob(fullHtml, {
+        if (typeof window !== 'undefined' && window.htmlDocx && typeof window.htmlDocx.asBlob === 'function') {
+            const converted = window.htmlDocx.asBlob(fullHtml, {
                 orientation: 'portrait',
                 margins: { top: 1440, right: 1440, bottom: 1440, left: 1440 }
             });
             saveAs(converted, `Scientific_Report_${trial.FormulationName.replace(/[^a-z0-9]/gi, '_')}.docx`);
             window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'DOC Downloaded!', type: 'success' } }));
         } else {
-            console.warn("html-docx-js is not loaded on window. Exporting raw HTML instead.");
-            const blob = new Blob([fullHtml], { type: 'text/html' });
-            saveAs(blob, `Scientific_Report_${trial.FormulationName.replace(/[^a-z0-9]/gi, '_')}.html`);
+            const blob = new Blob(['\ufeff' + fullHtml], { type: 'application/msword;charset=utf-8' });
+            saveAs(blob, `Scientific_Report_${trial.FormulationName.replace(/[^a-z0-9]/gi, '_')}.doc`);
+            window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Word Document Downloaded!', type: 'success' } }));
         }
 
     } catch (err) {
@@ -451,18 +448,17 @@ export async function exportRegulatoryReportAsDOC(project, state, options = {}) 
 
         await new Promise(r => setTimeout(r, 100));
 
-        const docxEngineReg = window.htmlDocx || htmlDocx;
-        if (docxEngineReg && typeof docxEngineReg.asBlob === 'function') {
-            const converted = docxEngineReg.asBlob(fullHtml, {
+        if (typeof window !== 'undefined' && window.htmlDocx && typeof window.htmlDocx.asBlob === 'function') {
+            const converted = window.htmlDocx.asBlob(fullHtml, {
                 orientation: 'portrait',
                 margins: { top: 1440, right: 1440, bottom: 1440, left: 1440 }
             });
             saveAs(converted, `Regulatory_Report_${(project.Name || 'Project').replace(/[^a-z0-9]/gi, '_')}.docx`);
             window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Regulatory Report exported!', type: 'success' } }));
         } else {
-            const blob = new Blob([fullHtml], { type: 'text/html' });
-            saveAs(blob, `Regulatory_Report_${(project.Name || 'Project').replace(/[^a-z0-9]/gi, '_')}.html`);
-            window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Report exported as HTML (DOCX library unavailable)', type: 'warning' } }));
+            const blob = new Blob(['\ufeff' + fullHtml], { type: 'application/msword;charset=utf-8' });
+            saveAs(blob, `Regulatory_Report_${(project.Name || 'Project').replace(/[^a-z0-9]/gi, '_')}.doc`);
+            window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Regulatory Word Report exported!', type: 'success' } }));
         }
 
     } catch (err) {

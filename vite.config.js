@@ -50,7 +50,7 @@ export default defineConfig({
             if (id.includes('pptxgenjs')) {
               return 'vendor-pptx';  
             }
-            if (id.includes('docx') || id.includes('html-docx')) {
+            if (id.includes('docx')) {
               return 'vendor-docx';
             }
 
