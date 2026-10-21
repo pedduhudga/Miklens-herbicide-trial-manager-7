@@ -118,7 +118,8 @@ const TrialTimelineView = memo(function TrialTimelineView({
             </div>
           )}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 });

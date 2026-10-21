@@ -338,7 +338,6 @@ export default function PWAStatus() {
           </div>
         )}
       </div>
-      </div>
 
       {/* ─── NATIVE APP INSTALL INSTRUCTION MODAL (iOS & Android) ─── */}
       {showInstallModal && (
