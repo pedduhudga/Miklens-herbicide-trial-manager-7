@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   Search, X, SlidersHorizontal, Grid, Calendar, FileDown,
-  RefreshCw, FolderPlus, Plus, Columns3, Mic, Sparkles, Clock, Camera, AlertTriangle, CheckCircle2
+  RefreshCw, FolderPlus, Plus, Columns3, Mic, Sparkles, Clock, Camera, AlertTriangle, CheckCircle2, Download
 } from 'lucide-react';
 
 export default function TrialFiltersBar({
@@ -23,6 +23,8 @@ export default function TrialFiltersBar({
   syncingAllPhotos,
   syncHealOnly,
   setSyncHealOnly,
+  handlePrecacheOfflinePhotos,
+  precachingOfflinePhotos,
   armFileInputRef,
   handleARMImportChange,
   handleARMImportClick,
@@ -80,6 +82,19 @@ export default function TrialFiltersBar({
         >
           <RefreshCw className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${syncingAllPhotos ? 'animate-spin' : ''}`} />
         </button>
+
+        {/* Pre-cache photos for offline field use */}
+        {handlePrecacheOfflinePhotos && (
+          <button
+            type="button"
+            onClick={handlePrecacheOfflinePhotos}
+            disabled={precachingOfflinePhotos}
+            title="Download & cache all trial photos locally for offline viewing in the field"
+            className={`p-1.5 sm:p-2 rounded-lg border transition shrink-0 active:scale-95 ${precachingOfflinePhotos ? 'bg-indigo-50 border-indigo-300 text-indigo-600 cursor-wait' : 'border-slate-200 text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-300'}`}
+          >
+            <Download className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${precachingOfflinePhotos ? 'animate-bounce text-indigo-600' : ''}`} />
+          </button>
+        )}
 
         {/* Heal only checkbox */}
         <div

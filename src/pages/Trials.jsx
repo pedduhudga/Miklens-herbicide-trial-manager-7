@@ -40,6 +40,7 @@ import { calculateEffectiveControlDays, getDetailedControlDaysInfo } from '../ut
 import TrialFiltersBar from '../components/trials/TrialFiltersBar.jsx';
 import TrialTimelineView from '../components/trials/TrialTimelineView.jsx';
 import TrialKanbanBoard from '../components/trials/TrialKanbanBoard.jsx';
+import { prefetchTrialPhotos } from '../services/photoCacheService.js';
 import { GEMINI_FALLBACK_MODELS } from '../utils/aiConstants.js';
 import {
   generateComprehensivePdf,
@@ -649,6 +650,7 @@ export default function Trials({ onMenuClick }) {
   const [syncingPhotos, setSyncingPhotos] = useState(false);
   const [syncingAllPhotos, setSyncingAllPhotos] = useState(false);
   const [syncHealOnly, setSyncHealOnly] = useState(false);
+  const [precachingOfflinePhotos, setPrecachingOfflinePhotos] = useState(false);
 
   // --- AI weed cover detection ---
   const [detectingCover, setDetectingCover] = useState(false);
@@ -950,6 +952,21 @@ export default function Trials({ onMenuClick }) {
   const visibleGridTrials = useMemo(() => {
     return filteredTrials.slice(0, displayLimit);
   }, [filteredTrials, displayLimit]);
+
+  const gridSentinelRef = useRef(null);
+
+  useEffect(() => {
+    if (filteredTrials.length <= displayLimit) return;
+    const el = gridSentinelRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(([entry]) => {
+      if (entry?.isIntersecting) {
+        setDisplayLimit(prev => prev + 36);
+      }
+    }, { rootMargin: '400px' });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [filteredTrials.length, displayLimit]);
 
   const groupedTimelineTrials = useMemo(() => {
     if (activeTab === 'rcbd') return [];
@@ -4483,6 +4500,50 @@ Rules:
     }
   };
 
+  const handlePrecacheOfflinePhotos = useCallback(async () => {
+    const trialsToCache = filteredTrials.length > 0 ? filteredTrials : (state.trials || []);
+    if (trialsToCache.length === 0) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'No trials found to cache for offline use.', type: 'info' } }));
+      return;
+    }
+
+    setPrecachingOfflinePhotos(true);
+    window.dispatchEvent(new CustomEvent('app:toast', { 
+      detail: { 
+        toastId: 'offline-precache',
+        msg: `Caching field photos for ${trialsToCache.length} trial plots...`, 
+        type: 'info' 
+      } 
+    }));
+
+    try {
+      const res = await prefetchTrialPhotos(trialsToCache, (p) => {
+        if (p.current % 5 === 0 || p.current === p.total) {
+          window.dispatchEvent(new CustomEvent('app:toast', { 
+            detail: { 
+              toastId: 'offline-precache',
+              msg: `Downloading field photos: ${p.current}/${p.total} (${p.percent}%)...`, 
+              type: 'info' 
+            } 
+          }));
+        }
+      });
+
+      window.dispatchEvent(new CustomEvent('app:toast', { 
+        detail: { 
+          toastId: 'offline-precache',
+          msg: `✓ ${res.cachedCount} photos stored in offline cache! Ready for zero-coverage field work.`, 
+          type: 'success' 
+        } 
+      }));
+    } catch (err) {
+      console.error(err);
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Offline photo caching encountered an issue: ' + err.message, type: 'error' } }));
+    } finally {
+      setPrecachingOfflinePhotos(false);
+    }
+  }, [filteredTrials, state.trials]);
+
   const handleAnalyzeAllPhotos = async (specificTrial = null) => {
     const targetTrial = (specificTrial && specificTrial.ID) ? specificTrial : activeTrial;
     if (!targetTrial) return;
@@ -6701,6 +6762,8 @@ If none are present, write "None".`;
           syncingAllPhotos={syncingAllPhotos}
           syncHealOnly={syncHealOnly}
           setSyncHealOnly={setSyncHealOnly}
+          handlePrecacheOfflinePhotos={handlePrecacheOfflinePhotos}
+          precachingOfflinePhotos={precachingOfflinePhotos}
           armFileInputRef={armFileInputRef}
           handleARMImportChange={handleARMImportChange}
           handleARMImportClick={handleARMImportClick}
@@ -7183,7 +7246,10 @@ If none are present, write "None".`;
                   ))}
                 </div>
                 {filteredTrials.length > displayLimit && (
-                  <div className="py-4 flex justify-center">
+                  <div
+                    ref={gridSentinelRef}
+                    className="py-4 flex justify-center"
+                  >
                     <button
                       onClick={() => setDisplayLimit(prev => prev + 36)}
                       className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-sm rounded-xl shadow-md transition-all flex items-center gap-2"

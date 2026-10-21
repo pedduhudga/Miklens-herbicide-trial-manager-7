@@ -118,12 +118,10 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // CRITICAL: Bypass Service Worker for external media / Google Drive / CDN imagery / tile layers
-  // Letting the browser fetch them natively avoids CORS failures, opaque caching rejections, and net::ERR_FAILED
+  // CRITICAL: Bypass Service Worker for external APIs / Google Drive redirect links / map tiles
+  // Native fetch handles Google Drive redirects; CDN images pass through to IMAGE_CACHE for offline viewability
   if (
     url.hostname.includes('drive.google.com') ||
-    url.hostname.includes('googleusercontent.com') ||
-    url.hostname.includes('images.weserv.nl') ||
     url.hostname.includes('tile.openstreetmap.org') ||
     (url.hostname.includes('googleapis.com') && !url.pathname.includes('/v1/'))
   ) {
@@ -271,7 +269,9 @@ function isImage(url) {
          url.href.includes('data:image') ||
          url.href.includes('blob:') ||
          url.pathname.includes('/thumbnail') ||
-         url.search.includes('sz=w');
+         url.search.includes('sz=w') ||
+         url.hostname.includes('googleusercontent.com') ||
+         url.hostname.includes('images.weserv.nl');
 }
 
 // Helper: Check if request is API call
@@ -300,10 +300,15 @@ async function cacheFirst(request, cacheName = STATIC_CACHE) {
     return networkResponse;
   } catch (error) {
     console.warn('[SW] Cache First failed for:', request.url);
-    if (isImage(new URL(request.url))) {
-      const fallback = await caches.match('./favicon.svg') || await caches.match('./icons/icon-192x192.png');
-      if (fallback) return fallback;
-    }
+    try {
+      const requestUrl = new URL(request.url, self.location.origin);
+      if (isImage(requestUrl)) {
+        // Check if photo exists in dedicated field trial photos cache
+        const photoCache = await caches.open('trial-photos-v3.1.0');
+        const fallbackPhoto = await photoCache.match(request);
+        if (fallbackPhoto) return fallbackPhoto;
+      }
+    } catch {}
     throw error;
   }
 }

@@ -1,5 +1,5 @@
 import React, { memo, useMemo, useCallback, useState, useEffect, useRef } from 'react';
-import { Calendar, MapPin, FlaskConical, Activity, Image as ImageIcon, ChevronLeft, ChevronRight, Edit, MoreVertical, Eye, Copy, FolderOpen, FileDown, ScanLine, MonitorPlay, Archive, FileCode, FileSpreadsheet, Share2, BrainCircuit, Trash2, Camera, CheckCircle, Clock, Pencil, CloudSun, Sparkles, Maximize2, Minimize2, X, ShieldCheck, FileText, AlertTriangle } from 'lucide-react';
+import { Calendar, MapPin, FlaskConical, Activity, Image as ImageIcon, ChevronLeft, ChevronRight, Edit, MoreVertical, Eye, Copy, FolderOpen, FileDown, ScanLine, MonitorPlay, Archive, FileCode, FileSpreadsheet, Share2, BrainCircuit, Trash2, Camera, CheckCircle, Clock, Pencil, CloudSun, Sparkles, Maximize2, Minimize2, X, ShieldCheck, FileText, AlertTriangle, ArrowLeftRight } from 'lucide-react';
 import { safeJsonParse } from '../utils/helpers.js';
 import { formatDateTime } from '../utils/dateUtils.js';
 import { calculateEffectiveControlDays, getDetailedControlDaysInfo } from '../utils/trialLifecycle.js';
@@ -1002,6 +1002,22 @@ const TrialCard = memo(function TrialCard({
               </div>
 
               <div className="flex items-center gap-1.5">
+                {/* Compare / Split Slider button when 2+ photos exist */}
+                {allCardPhotos.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowPhotoComparison(true);
+                    }}
+                    className="pointer-events-auto px-2 py-0.5 rounded-md bg-indigo-600/85 hover:bg-indigo-600 text-white text-[9px] font-bold backdrop-blur-md transition shadow-xs border border-white/20 flex items-center gap-1 active:scale-95"
+                    title="Compare Baseline vs Observation Photos with Interactive Split Slider"
+                  >
+                    <ArrowLeftRight className="w-2.5 h-2.5" />
+                    <span>Compare</span>
+                  </button>
+                )}
+
                 {/* Fit / Fill Toggle */}
                 <button
                   type="button"
@@ -1170,7 +1186,22 @@ const TrialCard = memo(function TrialCard({
               )}
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3">
+              {allCardPhotos.length > 1 && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowPhotoComparison(true);
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition shadow flex items-center gap-1.5 active:scale-95"
+                  title="Compare Before/After with Split Slider"
+                >
+                  <ArrowLeftRight className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Compare Before/After</span>
+                  <span className="sm:hidden">Compare</span>
+                </button>
+              )}
               <span className="text-xs font-semibold text-white/80 bg-white/10 px-2.5 py-1 rounded-full">
                 {(activePhotoIdx % allCardPhotos.length) + 1} / {allCardPhotos.length}
               </span>
