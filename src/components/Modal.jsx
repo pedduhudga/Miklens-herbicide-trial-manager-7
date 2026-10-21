@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
 export default function Modal({ 
@@ -31,8 +32,8 @@ export default function Modal({
 
   if (!isOpen) return null;
 
-  return (
-    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[9999] overflow-y-auto flex items-center justify-center p-2 sm:p-4 modal-backdrop">
+  const content = (
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] overflow-y-auto flex items-center justify-center p-2 sm:p-4 modal-backdrop">
       <div
         className={`bg-white rounded-2xl shadow-2xl w-full ${maxWidth} relative modal-content max-h-[92vh] flex flex-col overflow-hidden`}
         ref={modalRef}
@@ -63,4 +64,7 @@ export default function Modal({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(content, document.body) : content;
 }
+

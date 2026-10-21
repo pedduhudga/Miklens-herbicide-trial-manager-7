@@ -40,6 +40,7 @@ import { calculateEffectiveControlDays, getDetailedControlDaysInfo } from '../ut
 import TrialFiltersBar from '../components/trials/TrialFiltersBar.jsx';
 import TrialTimelineView from '../components/trials/TrialTimelineView.jsx';
 import TrialKanbanBoard from '../components/trials/TrialKanbanBoard.jsx';
+import PhotoComparisonModal from '../components/PhotoComparisonModal.jsx';
 import { prefetchTrialPhotos } from '../services/photoCacheService.js';
 import { GEMINI_FALLBACK_MODELS } from '../utils/aiConstants.js';
 import {
@@ -651,6 +652,7 @@ export default function Trials({ onMenuClick }) {
   const [syncingAllPhotos, setSyncingAllPhotos] = useState(false);
   const [syncHealOnly, setSyncHealOnly] = useState(false);
   const [precachingOfflinePhotos, setPrecachingOfflinePhotos] = useState(false);
+  const [activePhotoComparisonTrial, setActivePhotoComparisonTrial] = useState(null);
 
   // --- AI weed cover detection ---
   const [detectingCover, setDetectingCover] = useState(false);
@@ -5626,6 +5628,10 @@ Rules:
     }
   }, []);
 
+  const handleOpenPhotoComparison = useCallback((trial) => {
+    setActivePhotoComparisonTrial(trial);
+  }, []);
+
   const handleActivateToggle = useCallback(async (trial) => {
     const isCurrentlyLive = String(trial.IsLive) !== 'false';
     const patch = isCurrentlyLive
@@ -7073,6 +7079,7 @@ If none are present, write "None".`;
                                 onEditControlDays={handleEditControlDays}
                                 onRecordWeather={handleRecordWeather}
                                 onQuickPeekFormulation={handleQuickPeekFormulation}
+                                onComparePhotos={handleOpenPhotoComparison}
                               />
                             ))}
                           </div>
@@ -7150,6 +7157,7 @@ If none are present, write "None".`;
                                 onEditControlDays={handleEditControlDays}
                                 onRecordWeather={handleRecordWeather}
                                 onQuickPeekFormulation={handleQuickPeekFormulation}
+                                onComparePhotos={handleOpenPhotoComparison}
                               />
                             ))}
                           </div>
@@ -7204,6 +7212,7 @@ If none are present, write "None".`;
                 onEditControlDays={handleEditControlDays}
                 onRecordWeather={handleRecordWeather}
                 onQuickPeekFormulation={handleQuickPeekFormulation}
+                onComparePhotos={handleOpenPhotoComparison}
               />
             ) : (
               <div className="space-y-6">
@@ -7242,6 +7251,7 @@ If none are present, write "None".`;
                       onEditControlDays={handleEditControlDays}
                       onRecordWeather={handleRecordWeather}
                       onQuickPeekFormulation={handleQuickPeekFormulation}
+                      onComparePhotos={handleOpenPhotoComparison}
                     />
                   ))}
                 </div>
@@ -12193,6 +12203,14 @@ If none are present, write "None".`;
           knownFormulations={formulations}
           activeCategory={activeCategory}
           knownTargets={Array.from(new Set(trials.map(t => t?.WeedSpecies || t?.DiseaseTarget || t?.PestTarget || t?.Target).filter(Boolean)))}
+        />
+      )}
+
+      {activePhotoComparisonTrial && (
+        <PhotoComparisonModal
+          isOpen={!!activePhotoComparisonTrial}
+          onClose={() => setActivePhotoComparisonTrial(null)}
+          trial={activePhotoComparisonTrial}
         />
       )}
 

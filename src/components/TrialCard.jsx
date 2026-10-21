@@ -101,12 +101,22 @@ const TrialCard = memo(function TrialCard({
   onEditControlDays,
   onRecordWeather,
   onQuickPeekFormulation,
+  onComparePhotos,
   isPendingSync,
 }) {
   const handleRecordWeather = useCallback((e) => {
     e.stopPropagation();
     onRecordWeather && onRecordWeather(trial);
   }, [onRecordWeather, trial]);
+
+  const handleOpenComparison = useCallback((e) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    if (onComparePhotos) {
+      onComparePhotos(trial);
+    } else {
+      setShowPhotoComparison(true);
+    }
+  }, [onComparePhotos, trial]);
   const { isViewer, user, isAdmin } = useAuth();
   const ownUid = user?.uid || user?.ID || user?.id;
   const isOwnData = isAdmin || !trial.CreatedBy || trial.CreatedBy === ownUid;
@@ -747,13 +757,12 @@ const TrialCard = memo(function TrialCard({
                   </button>
                   <button
                     onClick={(e) => {
-                      stopPropagation(e);
-                      setShowPhotoComparison(true);
+                      handleOpenComparison(e);
                       onToggleMenu && onToggleMenu(null);
                     }}
                     className="w-full flex items-center gap-2 px-3 py-2 text-xs text-indigo-700 hover:bg-indigo-50 font-medium"
                   >
-                    <Sparkles className="w-3.5 h-3.5 text-indigo-500" /> AI Photo Comparison
+                    <ArrowLeftRight className="w-3.5 h-3.5 text-indigo-500" /> Compare Photos (Before/After)
                   </button>
                   {!isViewer && isOwnData && (
                     <>
@@ -1006,10 +1015,7 @@ const TrialCard = memo(function TrialCard({
                 {allCardPhotos.length > 1 && (
                   <button
                     type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowPhotoComparison(true);
-                    }}
+                    onClick={handleOpenComparison}
                     className="pointer-events-auto px-2 py-0.5 rounded-md bg-indigo-600/85 hover:bg-indigo-600 text-white text-[9px] font-bold backdrop-blur-md transition shadow-xs border border-white/20 flex items-center gap-1 active:scale-95"
                     title="Compare Baseline vs Observation Photos with Interactive Split Slider"
                   >
@@ -1192,7 +1198,8 @@ const TrialCard = memo(function TrialCard({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    setShowPhotoComparison(true);
+                    setLightboxPhoto(null);
+                    handleOpenComparison(e);
                   }}
                   className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition shadow flex items-center gap-1.5 active:scale-95"
                   title="Compare Before/After with Split Slider"

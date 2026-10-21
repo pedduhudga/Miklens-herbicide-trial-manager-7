@@ -40,6 +40,7 @@ const TimelineGroupSection = memo(function TimelineGroupSection({
   onEditControlDays,
   onRecordWeather,
   onQuickPeekFormulation,
+  onComparePhotos,
 }) {
   const [visibleCount, setVisibleCount] = useState(16);
   const sentinelRef = useRef(null);
@@ -112,6 +113,7 @@ const TimelineGroupSection = memo(function TimelineGroupSection({
             onEditControlDays={onEditControlDays}
             onRecordWeather={onRecordWeather}
             onQuickPeekFormulation={onQuickPeekFormulation}
+            onComparePhotos={onComparePhotos}
           />
         ))}
       </div>
@@ -165,6 +167,7 @@ const TrialTimelineView = memo(function TrialTimelineView({
   onEditControlDays,
   onRecordWeather,
   onQuickPeekFormulation,
+  onComparePhotos,
 }) {
   if (!groupedTimelineTrials || groupedTimelineTrials.length === 0) {
     return (
@@ -239,6 +242,7 @@ const TrialTimelineView = memo(function TrialTimelineView({
               onEditControlDays={onEditControlDays}
               onRecordWeather={onRecordWeather}
               onQuickPeekFormulation={onQuickPeekFormulation}
+              onComparePhotos={onComparePhotos}
             />
           </div>
         );
