@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { X, Sliders, Copy, Check, Leaf, Activity, Sparkles, SlidersHorizontal, Eye, Flame, RefreshCw, ArrowLeftRight, Clock, Image as ImageIcon, Split } from 'lucide-react';
+import { X, Sliders, Copy, Check, Leaf, Activity, Sparkles, SlidersHorizontal, Eye, Flame, RefreshCw, ArrowLeftRight, Clock, Image as ImageIcon, Split, AlertCircle } from 'lucide-react';
 import { analyzePlantPhenotype, comparePhenotypeProgression } from '../utils/phenotyping.js';
+import { resolvePhotoSrc, getCorsSafePhotoUrl } from '../utils/photoUtils.js';
 
 export default function PhotoAnalyzerView({
   isOpen,
@@ -23,15 +24,17 @@ export default function PhotoAnalyzerView({
   const [activeAnalysisMode, setActiveAnalysisMode] = useState('boxes'); // 'boxes' | 'phenotype' | 'progression'
   const [phenotypeResult, setPhenotypeResult] = useState(null);
   const [phenotypeLoading, setPhenotypeLoading] = useState(false);
+  const [phenotypeError, setPhenotypeError] = useState(null);
   const [showPhenotypeMask, setShowPhenotypeMask] = useState(true);
 
   // --- Temporal Progression State ---
   const candidatePhotos = useMemo(() => {
     const list = Array.isArray(allPhotos) ? allPhotos : [];
     return list.map(p => {
-      if (typeof p === 'string') return { url: p, name: 'Observation Photo', daa: null, date: '' };
+      const resolved = resolvePhotoSrc(p);
+      if (typeof p === 'string') return { url: resolved || p, name: 'Observation Photo', daa: null, date: '' };
       return {
-        url: p.fileData || p.url || p.dataUrl || p.driveId || '',
+        url: resolved || p.fileData || p.url || '',
         name: p.fileName || p.name || p.label || 'Observation Photo',
         daa: p.daa !== undefined ? p.daa : (p.day !== undefined ? p.day : null),
         date: p.date || p.timestamp || ''
@@ -44,7 +47,12 @@ export default function PhotoAnalyzerView({
   const [isDraggingSlider, setIsDraggingSlider] = useState(false);
   const [progressionResult, setProgressionResult] = useState(null);
   const [progressionLoading, setProgressionLoading] = useState(false);
+  const [progressionError, setProgressionError] = useState(null);
   const splitContainerRef = useRef(null);
+
+  // Resolved CORS-safe versions of images for canvas rendering & split view
+  const safeImageUrl = useMemo(() => getCorsSafePhotoUrl(imageUrl) || imageUrl, [imageUrl]);
+  const safeBaselineUrl = useMemo(() => getCorsSafePhotoUrl(baselinePhotoUrl) || baselinePhotoUrl, [baselinePhotoUrl]);
 
   // Set default baseline photo when candidatePhotos change
   useEffect(() => {
@@ -76,43 +84,56 @@ export default function PhotoAnalyzerView({
 
   // Autonomous Phenotyping runner
   const runPhenotyping = useCallback(async () => {
-    if (!imgRef.current) return;
+    if (!safeImageUrl && !imageUrl) return;
     setPhenotypeLoading(true);
+    setPhenotypeError(null);
     try {
-      const res = await analyzePlantPhenotype(imgRef.current, { generateHeatmap: true });
+      const targetSrc = safeImageUrl || imageUrl;
+      const res = await analyzePlantPhenotype(targetSrc, { generateHeatmap: true });
+      if (res?.error) {
+        setPhenotypeError(res.error);
+      }
       setPhenotypeResult(res);
     } catch (err) {
       console.warn('[PhotoAnalyzerView] Phenotyping error:', err);
+      setPhenotypeError(err.message || 'Phenotyping analysis failed');
     } finally {
       setPhenotypeLoading(false);
     }
-  }, []);
+  }, [safeImageUrl, imageUrl]);
 
   // Temporal Progression runner
   const runProgressionComparison = useCallback(async (customBaseline) => {
-    const targetBaseline = customBaseline || baselinePhotoUrl;
-    if (!imageUrl || !targetBaseline) return;
+    const rawBaseline = customBaseline || baselinePhotoUrl;
+    const targetBaseline = getCorsSafePhotoUrl(rawBaseline) || rawBaseline;
+    const targetCurrent = safeImageUrl || imageUrl;
+    if (!targetCurrent || !targetBaseline) return;
     setProgressionLoading(true);
+    setProgressionError(null);
     try {
-      const res = await comparePhenotypeProgression(targetBaseline, imageUrl, {
+      const res = await comparePhenotypeProgression(targetBaseline, targetCurrent, {
         daysBetween: 7,
         generateHeatmaps: false
       });
+      if (res?.baselineMetrics?.error || res?.currentMetrics?.error) {
+        setProgressionError(res?.baselineMetrics?.error || res?.currentMetrics?.error);
+      }
       setProgressionResult(res);
     } catch (err) {
       console.warn('[PhotoAnalyzerView] Progression analysis error:', err);
+      setProgressionError(err.message || 'Progression comparison failed');
     } finally {
       setProgressionLoading(false);
     }
-  }, [imageUrl, baselinePhotoUrl]);
+  }, [safeImageUrl, imageUrl, baselinePhotoUrl]);
 
   useEffect(() => {
-    if (activeAnalysisMode === 'phenotype' && !phenotypeResult && !phenotypeLoading && imgLoaded) {
+    if (activeAnalysisMode === 'phenotype' && !phenotypeResult && !phenotypeLoading && !phenotypeError && imgLoaded) {
       runPhenotyping();
-    } else if (activeAnalysisMode === 'progression' && baselinePhotoUrl && !progressionResult && !progressionLoading) {
+    } else if (activeAnalysisMode === 'progression' && baselinePhotoUrl && !progressionResult && !progressionLoading && !progressionError) {
       runProgressionComparison();
     }
-  }, [activeAnalysisMode, phenotypeResult, phenotypeLoading, imgLoaded, runPhenotyping, baselinePhotoUrl, progressionResult, progressionLoading, runProgressionComparison]);
+  }, [activeAnalysisMode, phenotypeResult, phenotypeLoading, phenotypeError, imgLoaded, runPhenotyping, baselinePhotoUrl, progressionResult, progressionLoading, progressionError, runProgressionComparison]);
 
   // Dynamic category UI labels
   const getCategoryLabels = () => {
@@ -600,8 +621,13 @@ export default function PhotoAnalyzerView({
             >
               {/* Current Observation Photo (Base layer) */}
               <img
-                src={imageUrl}
+                src={safeImageUrl}
                 alt="Current Observation"
+                onError={(e) => {
+                  if (imageUrl && e.target.src !== imageUrl) {
+                    e.target.src = imageUrl;
+                  }
+                }}
                 className="max-w-full max-h-[65vh] object-contain rounded select-none block pointer-events-none"
               />
 
@@ -611,8 +637,13 @@ export default function PhotoAnalyzerView({
                 style={{ clipPath: `polygon(0 0, ${sliderPosition}% 0, ${sliderPosition}% 100%, 0 100%)` }}
               >
                 <img
-                  src={baselinePhotoUrl}
+                  src={safeBaselineUrl}
                   alt="Baseline Observation"
+                  onError={(e) => {
+                    if (baselinePhotoUrl && e.target.src !== baselinePhotoUrl) {
+                      e.target.src = baselinePhotoUrl;
+                    }
+                  }}
                   className="max-w-full max-h-[65vh] object-contain select-none block"
                 />
               </div>
@@ -641,8 +672,13 @@ export default function PhotoAnalyzerView({
             <div className="relative inline-block max-w-full max-h-[70vh] p-2">
               <img
                 ref={imgRef}
-                src={imageUrl}
+                src={safeImageUrl}
                 alt="Trial Analyzer"
+                onError={(e) => {
+                  if (imageUrl && e.target.src !== imageUrl) {
+                    e.target.src = imageUrl;
+                  }
+                }}
                 className="max-w-full max-h-[65vh] object-contain rounded select-none"
                 onLoad={() => setImgLoaded(true)}
               />
@@ -698,7 +734,10 @@ export default function PhotoAnalyzerView({
               type="button"
               onClick={() => {
                 setActiveAnalysisMode('phenotype');
-                if (!phenotypeResult && !phenotypeLoading) runPhenotyping();
+                if (!phenotypeResult && !phenotypeLoading) {
+                  setPhenotypeError(null);
+                  runPhenotyping();
+                }
               }}
               className={`flex-1 py-1.5 px-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 ${
                 activeAnalysisMode === 'phenotype'
@@ -713,7 +752,10 @@ export default function PhotoAnalyzerView({
               type="button"
               onClick={() => {
                 setActiveAnalysisMode('progression');
-                if (!progressionResult && !progressionLoading && baselinePhotoUrl) runProgressionComparison();
+                if (!progressionResult && !progressionLoading && baselinePhotoUrl) {
+                  setProgressionError(null);
+                  runProgressionComparison();
+                }
               }}
               className={`flex-1 py-1.5 px-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 ${
                 activeAnalysisMode === 'progression'
@@ -742,6 +784,7 @@ export default function PhotoAnalyzerView({
                       onChange={(e) => {
                         setBaselinePhotoUrl(e.target.value);
                         setProgressionResult(null);
+                        setProgressionError(null);
                         runProgressionComparison(e.target.value);
                       }}
                       className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 font-medium text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
@@ -831,10 +874,30 @@ export default function PhotoAnalyzerView({
                       </div>
                     </div>
                   </div>
+                ) : progressionLoading ? (
+                  <div className="py-8 flex flex-col items-center justify-center gap-2 text-slate-400">
+                    <RefreshCw className="w-6 h-6 text-blue-600 animate-spin" />
+                    <span className="text-xs font-medium">Comparing Chronological Canopies...</span>
+                  </div>
+                ) : progressionError ? (
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
+                    <div className="flex items-center gap-1.5 text-amber-800 font-bold text-xs">
+                      <AlertCircle className="w-4 h-4 text-amber-600" />
+                      <span>Progression comparison notice</span>
+                    </div>
+                    <p className="text-[11px] text-amber-700">{progressionError}</p>
+                    <button
+                      type="button"
+                      onClick={() => { setProgressionError(null); runProgressionComparison(); }}
+                      className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition"
+                    >
+                      Retry Comparison
+                    </button>
+                  </div>
                 ) : (
                   <button
                     type="button"
-                    onClick={() => runProgressionComparison()}
+                    onClick={() => { setProgressionError(null); runProgressionComparison(); }}
                     disabled={!baselinePhotoUrl}
                     className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow transition flex items-center justify-center gap-2"
                   >
@@ -919,16 +982,31 @@ export default function PhotoAnalyzerView({
 
                     <button
                       type="button"
-                      onClick={runPhenotyping}
+                      onClick={() => { setPhenotypeError(null); runPhenotyping(); }}
                       className="w-full py-1.5 text-[11px] font-semibold text-slate-500 hover:text-slate-700 flex items-center justify-center gap-1 hover:bg-slate-100 rounded-lg transition"
                     >
                       <RefreshCw className="w-3 h-3" /> Re-scan Pixels
                     </button>
                   </div>
+                ) : phenotypeError ? (
+                  <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl space-y-2">
+                    <div className="flex items-center gap-1.5 text-purple-800 font-bold text-xs">
+                      <AlertCircle className="w-4 h-4 text-purple-600" />
+                      <span>Pixel scan notice</span>
+                    </div>
+                    <p className="text-[11px] text-purple-700">{phenotypeError}</p>
+                    <button
+                      type="button"
+                      onClick={() => { setPhenotypeError(null); runPhenotyping(); }}
+                      className="w-full py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg transition"
+                    >
+                      Retry Autonomous Scan
+                    </button>
+                  </div>
                 ) : (
                   <button
                     type="button"
-                    onClick={runPhenotyping}
+                    onClick={() => { setPhenotypeError(null); runPhenotyping(); }}
                     className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl shadow transition flex items-center justify-center gap-2"
                   >
                     <Sparkles className="w-4 h-4" /> Start Autonomous Phenotype Scan

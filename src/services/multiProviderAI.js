@@ -923,8 +923,8 @@ export async function analyzePhoto(imageData, context = {}, onProgress = null) {
 
           // 1. Model-level overload/outage (503/404) — NEVER retry remaining keys for this dead model!
           if (isModelOutage(err)) {
-            console.warn(`[AI] ${provider.name} is experiencing service outage/overload (503/404). Cooling down for 60s and falling back to next provider.`);
-            providerBlockedUntil[provider.id] = Date.now() + 60000;
+            console.warn(`[AI] ${provider.name} is experiencing service outage/overload (503/404). Cooling down for 180s and falling back to next provider.`);
+            providerBlockedUntil[provider.id] = Date.now() + 180000;
             skipProvider = true;
             break;
           }
@@ -1236,7 +1236,7 @@ export async function generateTextWithAI(prompt, systemInstruction = '', onProgr
         } catch (err) {
           console.warn(`[AI Text] ${provider.name} key ${ki + 1} attempt ${attempt} failed:`, err.message);
           if (isModelOutage(err)) {
-            providerBlockedUntil[provider.id] = Date.now() + 60000;
+            providerBlockedUntil[provider.id] = Date.now() + 180000;
             skipProvider = true;
             break;
           }

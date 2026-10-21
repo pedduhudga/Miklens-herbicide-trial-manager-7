@@ -258,4 +258,52 @@ export function deduplicatePhotoList(photos) {
   return result;
 }
 
+/**
+ * Convert any photo URL (especially Google Drive links) to a CORS-safe URL
+ * that can be fetched via fetch(..., { mode: 'cors' }) or drawn to an HTML5 Canvas
+ * without tainting the canvas context (Access-Control-Allow-Origin: *).
+ */
+export function getCorsSafePhotoUrl(photoOrUrl, width = 640) {
+  if (!photoOrUrl) return null;
+
+  if (typeof photoOrUrl === 'string') {
+    const s = photoOrUrl.trim();
+    if (!s || s === '[base64-removed]' || s.includes('[base64-removed]')) return null;
+    if (s.startsWith('data:') || s.startsWith('blob:') || s.startsWith('local-photo-id:')) {
+      return s;
+    }
+    if (s.includes('images.weserv.nl')) {
+      return s;
+    }
+    const driveId = getDriveFileId(s);
+    if (driveId) {
+      return `https://images.weserv.nl/?url=${encodeURIComponent(`https://drive.google.com/uc?export=view&id=${driveId}`)}&w=${width}&output=jpg`;
+    }
+    if (s.startsWith('http://') || s.startsWith('https://')) {
+      return `https://images.weserv.nl/?url=${encodeURIComponent(s)}&w=${width}&output=jpg`;
+    }
+    return null;
+  }
+
+  if (typeof photoOrUrl === 'object') {
+    // 1. Local base64 or blob
+    const fd = photoOrUrl.fileData || photoOrUrl.dataUrl;
+    if (typeof fd === 'string' && (fd.startsWith('data:') || fd.startsWith('blob:'))) {
+      return fd;
+    }
+    // 2. Drive ID directly
+    const driveId = getDriveFileId(photoOrUrl);
+    if (driveId) {
+      return `https://images.weserv.nl/?url=${encodeURIComponent(`https://drive.google.com/uc?export=view&id=${driveId}`)}&w=${width}&output=jpg`;
+    }
+    // 3. Nested URL
+    const u = photoOrUrl.url || photoOrUrl.src || photoOrUrl.fileUrl || photoOrUrl.photoUrl;
+    if (typeof u === 'string' && u.trim() && !u.includes('[base64-removed]')) {
+      return getCorsSafePhotoUrl(u, width);
+    }
+  }
+
+  return null;
+}
+
 

@@ -5,23 +5,71 @@
 // - Necrosis & Chlorosis desiccation index for herbicide burn and weed mortality.
 // Runs 100% offline in ~40ms on device with ZERO cloud/API costs.
 
+import { getCorsSafePhotoUrl } from './photoUtils.js';
+
 /**
  * Load an image URL or base64 string into an HTMLImageElement
+ * Robustly routes remote & Google Drive URLs through a CORS-enabled proxy to prevent canvas tainting.
  */
 function loadImage(src) {
   return new Promise((resolve, reject) => {
+    if (!src || typeof src !== 'string') {
+      return reject(new Error('Invalid image source provided for phenotyping'));
+    }
+
+    const trimmed = src.trim();
+    // Resolve through CORS-safe proxy for remote URLs / Google Drive
+    const safeUrl = getCorsSafePhotoUrl(trimmed, 800) || trimmed;
+
     const img = new Image();
     img.crossOrigin = 'anonymous';
-    img.onload = () => resolve(img);
-    img.onerror = (e) => reject(new Error('Failed to load image for phenotyping analysis'));
-    img.src = src;
+
+    // 15-second safety timeout so hung networks never block analysis
+    const timer = setTimeout(() => {
+      img.onload = null;
+      img.onerror = null;
+      reject(new Error('Image load timed out for phenotyping analysis'));
+    }, 15000);
+
+    img.onload = () => {
+      clearTimeout(timer);
+      resolve(img);
+    };
+
+    img.onerror = () => {
+      clearTimeout(timer);
+      // If the proxied URL failed, attempt a fallback to direct src
+      if (safeUrl !== trimmed) {
+        const fallbackImg = new Image();
+        fallbackImg.crossOrigin = 'anonymous';
+        const fallbackTimer = setTimeout(() => {
+          fallbackImg.onload = null;
+          fallbackImg.onerror = null;
+          reject(new Error('Failed to load image for phenotyping analysis'));
+        }, 8000);
+
+        fallbackImg.onload = () => {
+          clearTimeout(fallbackTimer);
+          resolve(fallbackImg);
+        };
+        fallbackImg.onerror = () => {
+          clearTimeout(fallbackTimer);
+          reject(new Error('Failed to load image for phenotyping analysis'));
+        };
+        fallbackImg.src = trimmed;
+      } else {
+        reject(new Error('Failed to load image for phenotyping analysis'));
+      }
+    };
+
+    img.src = safeUrl;
   });
 }
 
 /**
  * Analyze an image or canvas for green canopy cover vs necrotic desiccation.
  * @param {HTMLImageElement|HTMLCanvasElement|string} imageSource - Image element or URL
- * @param {Object} options - { sampleStep, minBrightness }
+ * @param {Object} options - { sampleStep, minBrightness, canvas }
  * @returns {Promise<Object>} Phenotypic metrics and desiccation stats
  */
 export async function analyzePlantPhenotype(imageSource, options = {}) {
@@ -30,6 +78,19 @@ export async function analyzePlantPhenotype(imageSource, options = {}) {
   let img;
   if (typeof imageSource === 'string') {
     img = await loadImage(imageSource);
+  } else if (imageSource && (imageSource.nodeName === 'IMG' || imageSource instanceof (typeof Image !== 'undefined' ? Image : Object))) {
+    // If an <img> tag is passed without crossOrigin or with a raw remote URL that might taint canvas,
+    // re-load cleanly via CORS proxy if src exists
+    const rawSrc = imageSource.src || imageSource.currentSrc;
+    if (rawSrc && !rawSrc.startsWith('data:') && !rawSrc.startsWith('blob:') && !imageSource.crossOrigin) {
+      try {
+        img = await loadImage(rawSrc);
+      } catch {
+        img = imageSource;
+      }
+    } else {
+      img = imageSource;
+    }
   } else {
     img = imageSource;
   }
@@ -56,7 +117,46 @@ export async function analyzePlantPhenotype(imageSource, options = {}) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(img, 0, 0, width, height);
 
-  const imgData = ctx.getImageData(0, 0, width, height);
+  let imgData = null;
+  try {
+    imgData = ctx.getImageData(0, 0, width, height);
+  } catch (taintErr) {
+    console.warn('[phenotyping] Canvas tainted by cross-origin data. Attempting recovery via CORS proxy...', taintErr.message);
+    const srcUrl = img?.src || (typeof imageSource === 'string' ? imageSource : null);
+    if (srcUrl) {
+      try {
+        const cleanImg = await loadImage(srcUrl);
+        ctx.clearRect(0, 0, width, height);
+        ctx.drawImage(cleanImg, 0, 0, width, height);
+        imgData = ctx.getImageData(0, 0, width, height);
+      } catch (recoveryErr) {
+        console.warn('[phenotyping] CORS recovery failed:', recoveryErr.message);
+      }
+    }
+  }
+
+  // Graceful degradation if image data still cannot be read due to strict cross-origin restrictions
+  if (!imgData || !imgData.data) {
+    console.warn('[phenotyping] Could not extract pixel data due to cross-origin security restrictions');
+    return {
+      totalSampled: 0,
+      greenPixels: 0,
+      necroticPixels: 0,
+      totalFoliagePixels: 0,
+      greenCanopyPct: 0,
+      necroticPct: 0,
+      necrosisPct: 0,
+      calculatedDesiccationRate: 0,
+      estimatedWeedControlPct: 0,
+      variMean: 0,
+      gliMean: 0,
+      exgMean: 0,
+      heatmapDataUrl: null,
+      confidence: 'Restricted (CORS)',
+      error: 'Image is protected by cross-origin security policy'
+    };
+  }
+
   const data = imgData.data;
 
   let totalSampled = 0;
@@ -175,16 +275,27 @@ export async function analyzePlantPhenotype(imageSource, options = {}) {
 export function generatePhenotypeHeatmap(imageSource, options = {}) {
   const { sampleStep = 1 } = options;
   const img = imageSource;
+  if (!img) return null;
   const width = img.naturalWidth || img.width;
   const height = img.naturalHeight || img.height;
+  if (!width || !height) return null;
 
-  const canvas = document.createElement('canvas');
+  const canvas = typeof document !== 'undefined' ? document.createElement('canvas') : null;
+  if (!canvas) return null;
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d');
   ctx.drawImage(img, 0, 0, width, height);
 
-  const imgData = ctx.getImageData(0, 0, width, height);
+  let imgData = null;
+  try {
+    imgData = ctx.getImageData(0, 0, width, height);
+  } catch (err) {
+    console.warn('[phenotyping] Heatmap skipped: canvas tainted by cross-origin data', err.message);
+    return null;
+  }
+  if (!imgData || !imgData.data) return null;
+
   const data = imgData.data;
 
   for (let i = 0; i < data.length; i += 4 * sampleStep) {
@@ -214,8 +325,12 @@ export function generatePhenotypeHeatmap(imageSource, options = {}) {
     }
   }
 
-  ctx.putImageData(imgData, 0, 0);
-  return canvas.toDataURL('image/jpeg', 0.85);
+  try {
+    ctx.putImageData(imgData, 0, 0);
+    return canvas.toDataURL('image/jpeg', 0.85);
+  } catch {
+    return null;
+  }
 }
 
 /**
