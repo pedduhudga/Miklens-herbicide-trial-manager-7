@@ -16,10 +16,17 @@ const PROVIDERS = [
     dailyLimit: 1000,
   },
   {
-    // GA since May 2026 — high-throughput Flash
+    // GA since Oct 2026 — upgraded successor to gemini-3.5-flash with lower latency & cost
+    id: 'gemini-3.6-flash',
+    name: 'Gemini 3.6 Flash',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent',
+    dailyLimit: 500,
+  },
+  {
+    // Compatibility alias: Automatically redirects deprecated 3.5 requests to 3.6 Flash
     id: 'gemini-3.5-flash',
-    name: 'Gemini 3.5 Flash',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent',
+    name: 'Gemini 3.5 Flash (Auto-redirected to 3.6)',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent',
     dailyLimit: 500,
   },
   {
@@ -77,7 +84,10 @@ const providerBlockedUntil = new Proxy({}, {
 
 function getOrderedProviders() {
   const settings = getSettings();
-  const selectedModelId = settings.selectedModel || settings.apiModel || DEFAULT_GEMINI_MODEL;
+  let selectedModelId = settings.selectedModel || settings.apiModel || DEFAULT_GEMINI_MODEL;
+  if (selectedModelId === 'gemini-3.5-flash') {
+    selectedModelId = 'gemini-3.6-flash';
+  }
   
   const providers = [...PROVIDERS];
   const idx = providers.findIndex(p => p.id === selectedModelId);

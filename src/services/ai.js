@@ -47,7 +47,9 @@ export function resetGeminiState() {
 
 export function getActiveApiModel(getAppState) {
   if (typeof window !== 'undefined' && window._activeApiModelOverride) {
-    return window._activeApiModelOverride;
+    let override = window._activeApiModelOverride;
+    if (override === 'gemini-3.5-flash') override = 'gemini-3.6-flash';
+    return override;
   }
   let settings = {};
   if (getAppState) {
@@ -60,8 +62,11 @@ export function getActiveApiModel(getAppState) {
       if (saved) settings = JSON.parse(saved) || {};
     } catch (e) {}
   }
-  return settings.apiModel || settings.selectedModel || DEFAULT_GEMINI_MODEL;
+  const model = settings.apiModel || settings.selectedModel || DEFAULT_GEMINI_MODEL;
+  if (model === 'gemini-3.5-flash') return 'gemini-3.6-flash';
+  return model;
 }
+
 
 function getGeminiQuotaBlockKey(model, getAppState) {
   let settings = {};

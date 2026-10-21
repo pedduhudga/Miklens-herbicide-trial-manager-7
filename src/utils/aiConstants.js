@@ -1,6 +1,7 @@
-// Verified active models as of September 2026 via official Google AI for Developers docs
-// and web research. gemini-3.8-flash = GA Sept 2 2026, gemini-3.5-flash = GA May 2026,
-// gemini-3.5-flash-lite = GA July 2026, gemini-2.5-flash = Legacy (retiring Oct 20, 2026)
+// Verified active models as of October 2026 via official Google AI for Developers docs:
+// gemini-3.6-flash = GA Oct 2026 (supersedes deprecated gemini-3.5-flash),
+// gemini-3.8-flash = GA Sept 2 2026, gemini-3.5-flash-lite = GA July 2026,
+// gemini-2.5-flash = Legacy (retiring Oct 20, 2026)
 
 export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite";
 
@@ -14,9 +15,9 @@ export const AVAILABLE_GEMINI_MODELS = [
     isDefault: true
   },
   {
-    id: "gemini-3.5-flash",
-    name: "Gemini 3.5 Flash",
-    description: "Stable GA (May 2026). High-throughput multimodal crop plot analysis. Free: 500 RPD.",
+    id: "gemini-3.6-flash",
+    name: "Gemini 3.6 Flash",
+    description: "Active GA (Oct 2026). Upgraded successor to 3.5 Flash with lower latency & cost. Free: 500 RPD.",
     tier: "free_accessible"
   },
   {
@@ -37,7 +38,8 @@ export const AVAILABLE_GEMINI_MODELS = [
 
 export const GEMINI_FALLBACK_MODELS = [
   "gemini-3.5-flash-lite",
-  "gemini-3.5-flash",
+  "gemini-3.6-flash",
   "gemini-3.8-flash",
   "gemini-2.5-flash"
 ];
+
