@@ -4,23 +4,147 @@ import { getTrialCalculatedEfficacy } from '../utils/formulationTrialUtils.js';
 import { calculateEffectiveControlDays } from '../utils/trialLifecycle.js';
 import { parseCustomDate } from '../utils/dateUtils.js';
 
-const fuzzyMatch = (text, query) => {
-  if (!text) return false;
-  text = text.toLowerCase();
-  query = query.toLowerCase().trim();
-  const tokens = query.split(/\s+/).filter(Boolean);
-  if (tokens.length === 0) return true;
-  return tokens.every(token => {
-    if (text.includes(token)) return true;
-    let searchIdx = 0;
-    for (let i = 0; i < token.length; i++) {
-      searchIdx = text.indexOf(token[i], searchIdx);
-      if (searchIdx === -1) return false;
-      searchIdx++;
+// Ultra-fast Levenshtein distance for fuzzy typo tolerance
+function getLevenshteinDistance(a, b) {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  if (Math.abs(a.length - b.length) > 2) return 99;
+
+  const d = [];
+  for (let i = 0; i <= a.length; i++) d[i] = [i];
+  for (let j = 0; j <= b.length; j++) d[0][j] = j;
+
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(
+        d[i - 1][j] + 1,
+        d[i][j - 1] + 1,
+        d[i - 1][j - 1] + cost
+      );
     }
-    return true;
-  });
-};
+  }
+  return d[a.length][b.length];
+}
+
+/**
+ * Calculates an advanced search relevance score for an agronomy trial.
+ * Returns 0 if trial does not strictly match all query tokens.
+ */
+function scoreTrialSearch(trial, query) {
+  if (!query || !query.trim()) return 0;
+  const rawQuery = query.toLowerCase().trim();
+  const tokens = rawQuery.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return 0;
+
+  const trialName = String(trial.TrialName || '').toLowerCase().trim();
+  const formName = String(trial.FormulationName || '').toLowerCase().trim();
+  const formId = String(trial.FormulationID || '').toLowerCase().trim();
+  const projName = String(trial.ProjectName || '').toLowerCase().trim();
+  const target = String(trial.WeedSpecies || trial.DiseaseTarget || trial.PestTarget || trial.CropTarget || trial.Target || '').toLowerCase().trim();
+  const crop = String(trial.Crop || trial.CropCrop || '').toLowerCase().trim();
+  const variety = String(trial.Variety || '').toLowerCase().trim();
+  const inv = String(trial.InvestigatorName || '').toLowerCase().trim();
+  const loc = String(trial.Location || '').toLowerCase().trim();
+  const notes = String(trial.Notes || '').toLowerCase().trim();
+  const conclusion = String(trial.Conclusion || '').toLowerCase().trim();
+  const trialId = String(trial.ID || '').toLowerCase().trim();
+  const repStr = trial.Replication !== undefined && trial.Replication !== null ? String(trial.Replication).trim() : '';
+  const plotStr = trial.PlotNumber !== undefined && trial.PlotNumber !== null ? String(trial.PlotNumber).trim() : '';
+  const dosage = String(trial.Dosage || '').toLowerCase().trim();
+
+  let score = 0;
+
+  // Exact phrase match bonus
+  if (trialName === rawQuery) {
+    score += 5000;
+  } else if (trialName.startsWith(rawQuery)) {
+    score += 3000;
+  } else if (trialName.includes(rawQuery)) {
+    score += 2000;
+  } else if (formName === rawQuery) {
+    score += 2500;
+  } else if (formName.includes(rawQuery)) {
+    score += 1800;
+  } else if (projName.includes(rawQuery)) {
+    score += 1200;
+  } else if (target.includes(rawQuery)) {
+    score += 1000;
+  }
+
+  const tokenize = (s) => s.split(/[\s,;.()\-_/]+/).filter(Boolean);
+  const trialWords = tokenize(trialName);
+  const formWords = tokenize(formName);
+  const projWords = tokenize(projName);
+  const targetWords = tokenize(target);
+  const otherWords = [...tokenize(crop), ...tokenize(variety), ...tokenize(inv), ...tokenize(loc)];
+
+  // Conjunction: EVERY token must be matched in the trial
+  for (const token of tokens) {
+    let tokenScore = 0;
+    const isNum = /^\d+$/.test(token);
+
+    if (isNum) {
+      if (trialWords.includes(token)) {
+        tokenScore += 500;
+      } else if (formWords.includes(token)) {
+        tokenScore += 400;
+      } else if (repStr === token || `rep ${token}`.includes(token)) {
+        tokenScore += 300;
+      } else if (plotStr === token || `plot ${token}`.includes(token)) {
+        tokenScore += 300;
+      } else if (trialId === token || trialId.endsWith(`_${token}`) || trialId.endsWith(`-${token}`)) {
+        tokenScore += 200;
+      } else if (dosage.split(/[\s,;/]+/).includes(token)) {
+        tokenScore += 150;
+      } else {
+        return 0; // Number not matched as discrete entity
+      }
+    } else {
+      if (trialWords.includes(token)) {
+        tokenScore += 600;
+      } else if (formWords.includes(token)) {
+        tokenScore += 500;
+      } else if (trialWords.some(w => w.startsWith(token))) {
+        tokenScore += 350;
+      } else if (formWords.some(w => w.startsWith(token))) {
+        tokenScore += 300;
+      } else if (projWords.includes(token) || projWords.some(w => w.startsWith(token))) {
+        tokenScore += 250;
+      } else if (targetWords.includes(token) || targetWords.some(w => w.startsWith(token))) {
+        tokenScore += 250;
+      } else if (otherWords.includes(token) || otherWords.some(w => w.startsWith(token))) {
+        tokenScore += 150;
+      } else if (trialName.includes(token)) {
+        tokenScore += 200;
+      } else if (formName.includes(token)) {
+        tokenScore += 180;
+      } else if (target.includes(token)) {
+        tokenScore += 120;
+      } else if (notes.includes(token) || conclusion.includes(token)) {
+        tokenScore += 50;
+      } else {
+        const maxDist = token.length >= 7 ? 2 : token.length >= 4 ? 1 : 0;
+        if (maxDist > 0) {
+          const allKeyWords = [...trialWords, ...formWords, ...targetWords, ...projWords];
+          const hasFuzzy = allKeyWords.some(w => getLevenshteinDistance(w, token) <= maxDist);
+          if (hasFuzzy) {
+            tokenScore += 100;
+          }
+        }
+      }
+
+      if (tokenScore === 0) {
+        return 0; // Text token not matched
+      }
+    }
+
+    score += tokenScore;
+  }
+
+  return score;
+}
 
 export function useTrialsFilter(trials, {
   activeTab,
@@ -104,38 +228,15 @@ export function useTrialsFilter(trials, {
       }
     }
 
-    // Comprehensive multi-field Fuzzy search
-    if (deferredSearch) {
-      list = list.filter(t => {
-        const searchParts = [
-          t.TrialName,
-          t.FormulationName,
-          t.FormulationID,
-          t.ProjectName,
-          t.InvestigatorName,
-          t.Location,
-          t.WeedSpecies,
-          t.DiseaseTarget,
-          t.PestTarget,
-          t.CropTarget,
-          t.Target,
-          t.Crop,
-          t.Variety,
-          t.ID,
-          t.TrialDesign,
-          t.PotLabel,
-          t.PotRow ? `Row ${t.PotRow}` : '',
-          t.PotCol ? `Col ${t.PotCol}` : '',
-          t.Dosage,
-          t.BBCHCode,
-          t.Notes,
-          t.Conclusion,
-          t.Replication ? `Rep ${t.Replication}` : '',
-          t.PlotNumber ? `Plot ${t.PlotNumber}` : '',
-          t.Date
-        ].filter(Boolean).join(' ');
-        return fuzzyMatch(searchParts, deferredSearch);
-      });
+    // Advanced Relevance-Scored Search
+    if (deferredSearch && deferredSearch.trim()) {
+      list = list.reduce((acc, t) => {
+        const score = scoreTrialSearch(t, deferredSearch);
+        if (score > 0) {
+          acc.push({ ...t, _searchScore: score });
+        }
+        return acc;
+      }, []);
     }
 
     // Dropdown filters
@@ -228,6 +329,11 @@ export function useTrialsFilter(trials, {
 
     // Sort order mapping
     list.sort((a, b) => {
+      // When searching, trials with the highest relevance score appear first
+      if (deferredSearch && deferredSearch.trim()) {
+        const scoreDiff = (b._searchScore || 0) - (a._searchScore || 0);
+        if (scoreDiff !== 0) return scoreDiff;
+      }
       if (sortBy === 'best') {
         const effA = getTrialCalculatedEfficacy(a, activeCategory) ?? 0;
         const effB = getTrialCalculatedEfficacy(b, activeCategory) ?? 0;

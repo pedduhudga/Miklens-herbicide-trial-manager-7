@@ -954,6 +954,17 @@ export default function Trials({ onMenuClick }) {
   const groupedTimelineTrials = useMemo(() => {
     if (activeTab === 'rcbd') return [];
 
+    // When actively searching, group all matching trials under a prominent Search Results section
+    // sorted by relevance score, so the user doesn't have to scroll past scattered date accordions!
+    if (deferredSearch && deferredSearch.trim().length > 0) {
+      if (filteredTrials.length === 0) return [];
+      return [{
+        key: `Search Results for "${deferredSearch.trim()}" (${filteredTrials.length} ${filteredTrials.length === 1 ? 'match' : 'matches'})`,
+        isSearchGroup: true,
+        trials: filteredTrials
+      }];
+    }
+
     // When sorting by Longest Control Days, group by Duration Tiers
     if (sortBy === 'control-days') {
       const tiers = [
@@ -1040,7 +1051,7 @@ export default function Trials({ onMenuClick }) {
     });
 
     return grouped;
-  }, [filteredTrials, activeTab, sortBy, activeCategory]);
+  }, [filteredTrials, activeTab, sortBy, activeCategory, deferredSearch]);
 
   const groupedRcbdTrials = useMemo(() => {
     if (activeTab !== 'rcbd') return { groups: {}, orphaned: [] };
@@ -5431,11 +5442,13 @@ Rules:
 
   const handleQuickRate = useCallback(async (trial, rating) => {
     const newRating = trial.Result === rating ? '' : rating;
-    const updated = { ...trial, Result: newRating };
+    const isManual = !!newRating;
+    const updated = { ...trial, Result: newRating, isManualRating: isManual };
     updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updated.ID ? updated : t) });
-    try { await updateTrial({ ID: updated.ID, Result: newRating }, getAppState); } catch(e) {}
+    if (activeTrial?.ID === updated.ID) setActiveTrial(updated);
+    try { await updateTrial({ ID: updated.ID, Result: newRating, isManualRating: isManual }, getAppState); } catch(e) {}
     window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: newRating ? `Rated "${newRating}"` : 'Rating cleared', type: 'success' } }));
-  }, [state.trials, getAppState, updateState]);
+  }, [state.trials, activeTrial, getAppState, updateState]);
 
   const handleMarkComplete = useCallback(async (trial) => {
     if (!window.confirm(`Mark "${trial.FormulationName}" as completed? This will stop control day counting and deactivate the trial.`)) return;
@@ -6123,6 +6136,7 @@ If none are present, write "None".`;
   // Automatically correct existing stale ratings (e.g. legacy/deleted observations not matching Result field) on trial selection
   useEffect(() => {
     if (!detailTrial) return;
+    if (detailTrial.isManualRating) return; // Respect explicit manual ratings
     const efficacy = validateEfficacyData(safeJsonParse(detailTrial.EfficacyDataJSON, []), detailTrial.Category || activeCategory, true);
     const calculated = calculateResultRating(efficacy, detailTrial?.IsControl === true || detailTrial?.IsControl === 'true', detailTrial?.Category || activeCategory, detailTrial);
     if (calculated !== detailTrial.Result) {
@@ -6131,7 +6145,7 @@ If none are present, write "None".`;
       setActiveTrial(updated);
       updateTrial({ ID: updated.ID, Result: calculated }, getAppState).catch(console.error);
     }
-  }, [detailTrial?.ID, detailTrial?.EfficacyDataJSON, state.trials, updateState, getAppState]);
+  }, [detailTrial?.ID, detailTrial?.EfficacyDataJSON, detailTrial?.isManualRating, state.trials, updateState, getAppState]);
 
   // Close export menu on outside click
   useEffect(() => {

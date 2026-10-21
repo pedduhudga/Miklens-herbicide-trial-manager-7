@@ -49,8 +49,68 @@ export default function TrialFiltersBar({
   setPerformanceFilter,
   performanceCounts = {}
 }) {
+  const renderUtilityActions = (containerClass = '') => {
+    if (isViewer) return null;
+    return (
+      <div className={`items-center gap-1 sm:gap-1.5 shrink-0 ${containerClass}`}>
+        {/* Folder icon: ARM CSV Import */}
+        <input
+          type="file"
+          ref={armFileInputRef}
+          onChange={handleARMImportChange}
+          accept=".csv"
+          className="hidden"
+        />
+        <button
+          type="button"
+          onClick={handleARMImportClick}
+          title="Import trials from ARM CSV"
+          className="p-1.5 sm:p-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 transition shrink-0 active:scale-95"
+        >
+          <FolderPlus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+        </button>
+
+        {/* Sync photos from Google Drive */}
+        <button
+          type="button"
+          onClick={() => handleSyncAllPhotosFromDrive()}
+          disabled={syncingAllPhotos}
+          title="Sync broken/unavailable photos from Google Drive"
+          className={`p-1.5 sm:p-2 rounded-lg border transition shrink-0 active:scale-95 ${syncingAllPhotos ? 'bg-slate-100 border-slate-300 text-slate-400 cursor-not-allowed' : 'border-slate-200 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300'}`}
+        >
+          <RefreshCw className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${syncingAllPhotos ? 'animate-spin' : ''}`} />
+        </button>
+
+        {/* Heal only checkbox */}
+        <div
+          className="hidden md:flex items-center gap-1.5 px-2 py-1 rounded-lg border border-slate-200 text-slate-500 bg-white shrink-0"
+          title="Heal existing only: Only restore broken/unavailable photos already in the list"
+        >
+          <input
+            type="checkbox"
+            id="syncHealOnly"
+            checked={syncHealOnly}
+            onChange={e => setSyncHealOnly(e.target.checked)}
+            className="w-3.5 h-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+          />
+          <label htmlFor="syncHealOnly" className="text-xs select-none cursor-pointer">Heal only</label>
+        </div>
+
+        {/* Export all to CSV */}
+        <button
+          type="button"
+          onClick={exportAllCsv}
+          title="Export all trials to CSV"
+          className="p-1.5 sm:p-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 transition shrink-0 active:scale-95"
+        >
+          <FileDown className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+        </button>
+      </div>
+    );
+  };
+
   return (
-    <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-slate-100 px-3 sm:px-4 py-2.5 sm:py-3 space-y-2 sm:space-y-3 w-full max-w-full overflow-hidden">
+    <div className="sticky top-0 z-20 bg-white/98 backdrop-blur border-b border-slate-200/90 shadow-2xs px-3 sm:px-4 py-2.5 sm:py-3 space-y-2 sm:space-y-2.5 w-full max-w-full overflow-hidden">
       {/* ── ROW 1: Search, Filter Toggle, Voice Scout & New Trial ── */}
       <div className="flex items-center gap-1.5 sm:gap-2 w-full min-w-0">
         {/* Search input */}
@@ -95,8 +155,8 @@ export default function TrialFiltersBar({
           </select>
         </div>
 
-        {/* View Mode Toggle: Grid, Timeline, Kanban (visible in Row 1 on xl screens) */}
-        <div className="hidden xl:flex items-center border border-slate-200 rounded-lg p-0.5 bg-slate-50 gap-0.5 shrink-0">
+        {/* View Mode Toggle: Grid, Timeline, Kanban (visible in Row 1 on lg+ screens) */}
+        <div className="hidden lg:flex items-center border border-slate-200 rounded-lg p-0.5 bg-slate-50 gap-0.5 shrink-0">
           <button
             type="button"
             onClick={() => {
@@ -172,10 +232,10 @@ export default function TrialFiltersBar({
         )}
       </div>
 
-      {/* ── ROW 2: Owner dropdown, View Switcher, and Utility Actions (Folder icon, Sync, Export) ── */}
-      <div className="flex items-center justify-between gap-1.5 sm:gap-2 w-full min-w-0">
+      {/* ── ROW 2: Mobile / Tablet Owner dropdown, View Switcher, and Tablet Utility Actions ── */}
+      <div className="flex lg:hidden items-center justify-between gap-1.5 sm:gap-2 w-full min-w-0">
         {/* Owner dropdown (on mobile and screens < lg) */}
-        <div className="flex-1 min-w-[110px] max-w-[190px] lg:hidden">
+        <div className="flex-1 min-w-[110px] max-w-[190px]">
           <select
             value={filterOwner}
             onChange={e => setFilterOwner(e.target.value)}
@@ -196,8 +256,8 @@ export default function TrialFiltersBar({
           </select>
         </div>
 
-        {/* View Mode Switcher for screens < xl */}
-        <div className="flex xl:hidden items-center border border-slate-200 rounded-lg p-0.5 bg-slate-50 gap-0.5 shrink-0">
+        {/* View Mode Switcher for screens < lg */}
+        <div className="flex items-center border border-slate-200 rounded-lg p-0.5 bg-slate-50 gap-0.5 shrink-0">
           <button
             type="button"
             onClick={() => {
@@ -236,63 +296,8 @@ export default function TrialFiltersBar({
           </button>
         </div>
 
-        {/* Utility action buttons */}
-        {!isViewer && (
-          <div className="hidden sm:flex items-center gap-1 sm:gap-1.5 shrink-0 ml-auto">
-            {/* Folder icon: ARM CSV Import */}
-            <input
-              type="file"
-              ref={armFileInputRef}
-              onChange={handleARMImportChange}
-              accept=".csv"
-              className="hidden"
-            />
-            <button
-              type="button"
-              onClick={handleARMImportClick}
-              title="Import trials from ARM CSV"
-              className="p-1.5 sm:p-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 transition shrink-0 active:scale-95"
-            >
-              <FolderPlus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            </button>
-
-            {/* Sync photos from Google Drive */}
-            <button
-              type="button"
-              onClick={() => handleSyncAllPhotosFromDrive()}
-              disabled={syncingAllPhotos}
-              title="Sync broken/unavailable photos from Google Drive"
-              className={`p-1.5 sm:p-2 rounded-lg border transition shrink-0 active:scale-95 ${syncingAllPhotos ? 'bg-slate-100 border-slate-300 text-slate-400 cursor-not-allowed' : 'border-slate-200 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300'}`}
-            >
-              <RefreshCw className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${syncingAllPhotos ? 'animate-spin' : ''}`} />
-            </button>
-
-            {/* Heal only checkbox */}
-            <div
-              className="hidden md:flex items-center gap-1.5 px-2 py-1 rounded-lg border border-slate-200 text-slate-500 bg-white shrink-0"
-              title="Heal existing only: Only restore broken/unavailable photos already in the list"
-            >
-              <input
-                type="checkbox"
-                id="syncHealOnly"
-                checked={syncHealOnly}
-                onChange={e => setSyncHealOnly(e.target.checked)}
-                className="w-3.5 h-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
-              />
-              <label htmlFor="syncHealOnly" className="text-xs select-none cursor-pointer">Heal only</label>
-            </div>
-
-            {/* Export all to CSV */}
-            <button
-              type="button"
-              onClick={exportAllCsv}
-              title="Export all trials to CSV"
-              className="p-1.5 sm:p-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 transition shrink-0 active:scale-95"
-            >
-              <FileDown className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            </button>
-          </div>
-        )}
+        {/* Tablet Utility action buttons */}
+        {renderUtilityActions('hidden sm:flex lg:hidden ml-auto')}
       </div>
 
       {/* Filter Drawer */}
@@ -408,36 +413,41 @@ export default function TrialFiltersBar({
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar scroll-smooth py-0.5 -mx-1 px-1 touch-pan-x">
-        <div className="flex gap-1.5 items-center shrink-0">
-          {[
-            ['all', 'All Plots'],
-            ['active', 'Active / Live'],
-            ['standard', 'Standard'],
-            ['rcbd', 'Project-Grouped'],
-            ['control', 'Control'],
-            ['finalized', 'Finalized']
-          ].map(([k, label]) => (
-            <button
-              key={k}
-              type="button"
-              onClick={() => setActiveTab(k)}
-              className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-all duration-150 flex items-center gap-1.5 active:scale-95 touch-manipulation ${
-                activeTab === k
-                  ? 'bg-[#154734] text-white shadow-xs'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              <span>{label}</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
-                activeTab === k ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-600'
-              }`}>
-                {tabCounts[k] || 0}
-              </span>
-            </button>
-          ))}
+      {/* Tabs & Desktop Utility Actions */}
+      <div className="flex items-center justify-between gap-2 w-full min-w-0">
+        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar scroll-smooth py-0.5 -mx-1 px-1 touch-pan-x flex-1 min-w-0">
+          <div className="flex gap-1.5 items-center shrink-0">
+            {[
+              ['all', 'All Plots'],
+              ['active', 'Active / Live'],
+              ['standard', 'Standard'],
+              ['rcbd', 'Project-Grouped'],
+              ['control', 'Control'],
+              ['finalized', 'Finalized']
+            ].map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setActiveTab(k)}
+                className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-all duration-150 flex items-center gap-1.5 active:scale-95 touch-manipulation ${
+                  activeTab === k
+                    ? 'bg-[#154734] text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                <span>{label}</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                  activeTab === k ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-600'
+                }`}>
+                  {tabCounts[k] || 0}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
+
+        {/* Desktop Utility Actions integrated alongside tabs */}
+        {renderUtilityActions('hidden lg:flex shrink-0 ml-auto')}
       </div>
 
       {/* Quick Agronomic Performance Filter Chips */}

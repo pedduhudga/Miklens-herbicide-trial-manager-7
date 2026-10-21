@@ -34,12 +34,17 @@ const RESULT_BORDER_COLORS = {
   '': 'border-l-4 border-slate-200',
 };
 
-function ResultBadge({ result, ewrs, autoRating, onApplySuggested, isEditable }) {
-  const style = RESULT_COLORS[result] || 'bg-slate-100 text-slate-600 border-slate-200';
+function ResultBadge({ result, ewrs, autoRating, onApplySuggested, isEditable, isBaselineOnly }) {
+  const isBaseline = !result && isBaselineOnly;
+  const style = RESULT_COLORS[result] || (isBaseline ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-slate-100 text-slate-600 border-slate-200');
+  const label = result || (isBaseline ? 'Unrated (Baseline Only)' : 'Unrated');
   return (
     <div className="inline-flex items-center gap-1.5 flex-wrap">
-      <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${style}`}>
-        {result || 'Unrated'}
+      <span 
+        className={`text-[10px] font-bold px-2 py-0.5 rounded border ${style}`}
+        title={isBaseline ? 'Only pre-treatment baseline observation recorded. Log post-application observations or use Rate buttons above to set rating.' : undefined}
+      >
+        {label}
       </span>
       {ewrs && (
         <span 
@@ -515,7 +520,7 @@ const TrialCard = memo(function TrialCard({
   }, [onActivateToggle, trial]);
 
   const handleQuickRate = useCallback((e, rating) => {
-    e.stopPropagation();
+    if (e && e.stopPropagation) e.stopPropagation();
     onQuickRate && onQuickRate(trial, rating);
   }, [onQuickRate, trial]);
 
@@ -900,6 +905,7 @@ const TrialCard = memo(function TrialCard({
             autoRating={efficacyMetrics.autoRating}
             onApplySuggested={(suggested) => handleQuickRate(null, suggested)}
             isEditable={isEditable}
+            isBaselineOnly={controlDaysInfo?.status === 'baseline_only'}
           />
           {photos.length > 0 && <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full flex items-center gap-1"><ImageIcon className="w-3 h-3" />{photos.length}</span>}
           {efficacyData.length > 0 && <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{efficacyData.length} obs</span>}
