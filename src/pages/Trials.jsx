@@ -6607,34 +6607,16 @@ If none are present, write "None".`;
       )}
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden w-full max-w-full min-w-0">
-        {/* Compact Mobile Field Header */}
-        <div className="sm:hidden px-3.5 pt-3 pb-2 flex items-center justify-between border-b border-slate-200/80 bg-white/80 backdrop-blur-xs">
-          <div>
-            <div className="flex items-center gap-1.5">
-              <h1 className="text-base font-bold text-slate-800 tracking-tight">
-                Trial Field Plots
-              </h1>
-              <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
-                {trials.length}
-              </span>
-            </div>
-            <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
-              <span className="text-[#154734] font-semibold">{tabCounts.active || 0} active</span>
-              <span>•</span>
-              <span>{avgEfficacy > 0 ? `${avgEfficacy}% mean eff.` : 'Field tracking'}</span>
-              <span>•</span>
-              <span>{tabCounts.finalized || 0} closed</span>
-            </div>
+        {/* Compact Mobile Field Stats Strip */}
+        <div className="sm:hidden px-3.5 py-1.5 flex items-center justify-between border-b border-slate-200/60 bg-white/60 backdrop-blur-xs text-[11px] text-slate-600">
+          <div className="flex items-center gap-1.5 truncate">
+            <span className="font-bold text-slate-800">{trials.length} Plots</span>
+            <span>•</span>
+            <span className="text-[#154734] font-semibold">{tabCounts.active || 0} active</span>
+            <span>•</span>
+            <span>{avgEfficacy > 0 ? `${avgEfficacy}% eff.` : 'Tracking'}</span>
           </div>
-          {!isViewer && (
-            <button
-              onClick={() => handleOpenModal()}
-              className="px-3 py-1.5 bg-[#154734] hover:bg-[#0e3525] text-white rounded-xl text-xs font-semibold shadow-xs flex items-center gap-1 active:scale-95 transition touch-manipulation"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>New</span>
-            </button>
-          )}
+          <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full capitalize shrink-0">{activeCategory}</span>
         </div>
 
         {/* Desktop / Tablet Analytics Hero Banner */}

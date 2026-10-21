@@ -871,7 +871,7 @@ const TrialCard = memo(function TrialCard({
 
         {/* Quick Rating with Scientific EPPO & EWRS Scales */}
         {isEditable && (
-          <div className="mt-2 flex items-center gap-1 flex-wrap" onClick={stopPropagation}>
+          <div className="mt-2 flex items-center gap-1.5 sm:gap-1 flex-wrap" onClick={stopPropagation}>
             <span className="text-[10px] text-slate-400 mr-0.5 font-medium">Rate:</span>
             {[
               ['Excellent', 'bg-emerald-500', '≥90% WCE • EWRS 1–2'],
@@ -881,17 +881,17 @@ const TrialCard = memo(function TrialCard({
             ].map(([r, col, eppoHint]) => (
               <button key={r} onClick={e => handleQuickRate(e, r)}
                 title={trial.Result === r ? `${r} (active) — tap to clear` : `${r} (${eppoHint})`}
-                className={`text-[9px] font-bold px-1.5 py-0.5 rounded transition ${
+                className={`min-w-[30px] h-7 sm:h-6 sm:min-w-[22px] flex items-center justify-center text-[11px] sm:text-[9px] font-bold rounded-md transition active:scale-95 touch-manipulation ${
                   trial.Result === r
                     ? `${col} text-white ring-2 ring-offset-1 ring-current shadow-xs`
-                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}>
                 {r[0]}
               </button>
             ))}
             {trial.Result && (
               <button onClick={e => handleQuickRate(e, trial.Result)} title="Clear rating"
-                className="text-[9px] text-slate-400 hover:text-red-500 ml-0.5 transition px-1">
+                className="w-7 h-7 sm:w-5 sm:h-6 flex items-center justify-center text-sm sm:text-xs text-slate-400 hover:text-red-500 transition active:scale-90 px-1">
                 ×
               </button>
             )}
@@ -1112,18 +1112,18 @@ const TrialCard = memo(function TrialCard({
         </div>
       </div>
 
-      <div className="border-t px-3 py-2 flex items-center justify-between" onClick={stopPropagation}>
+      <div className="border-t px-3 py-2 flex items-center justify-between gap-2" onClick={stopPropagation}>
         {isEditable && (
-          <div className="flex gap-1">
-            <button type="button" onClick={handleQuickPhoto} title="Capture field photo" className="flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:bg-blue-50 px-2.5 py-1 rounded-lg border border-slate-200 transition active:scale-95 touch-manipulation">
+          <div className="flex gap-1.5">
+            <button type="button" onClick={handleQuickPhoto} title="Capture field photo" className="flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:bg-blue-50 px-2.5 py-1.5 min-h-[34px] rounded-lg border border-slate-200 transition active:scale-95 touch-manipulation">
               <Camera className="w-3.5 h-3.5" /> Photo
             </button>
-            <button type="button" onClick={handleQuickGalleryUpload} title="Upload photo from gallery" className="flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:bg-indigo-50 px-2.5 py-1 rounded-lg border border-slate-200 transition active:scale-95 touch-manipulation">
+            <button type="button" onClick={handleQuickGalleryUpload} title="Upload photo from gallery" className="flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 min-h-[34px] rounded-lg border border-slate-200 transition active:scale-95 touch-manipulation">
               <ImageIcon className="w-3.5 h-3.5" /> Gallery
             </button>
           </div>
         )}
-        <button type="button" onClick={() => onViewDetails(trial)} className={`text-xs font-bold text-[#154734] hover:text-[#0e3525] flex items-center gap-0.5 active:scale-95 transition touch-manipulation ${isViewer || isShared ? 'w-full justify-center' : ''}`}>
+        <button type="button" onClick={() => onViewDetails(trial)} className={`text-xs font-bold text-[#154734] hover:text-[#0e3525] flex items-center gap-0.5 py-1.5 px-2 rounded-lg hover:bg-emerald-50/50 active:scale-95 transition touch-manipulation ${isViewer || isShared ? 'w-full justify-center' : ''}`}>
           <span>View Details</span>
           <ChevronRight className="w-3.5 h-3.5 stroke-[2.5]" />
         </button>

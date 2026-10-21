@@ -227,7 +227,8 @@ export default function TrialFiltersBar({
             title="Create New Trial"
           >
             <Plus className="w-4 h-4" />
-            <span>New Trial</span>
+            <span className="hidden sm:inline">New Trial</span>
+            <span className="sm:hidden">New</span>
           </button>
         )}
       </div>

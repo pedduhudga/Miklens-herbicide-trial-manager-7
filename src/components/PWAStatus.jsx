@@ -32,8 +32,24 @@ export default function PWAStatus() {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [showUpdate, setShowUpdate] = useState(false);
   const [updateRegistration, setUpdateRegistration] = useState(null);
-  const [dismissed, setDismissed] = useState(false);
+  const [dismissed, setDismissed] = useState(() => {
+    try {
+      const until = localStorage.getItem('pwa_install_dismissed_until');
+      return until ? Number(until) > Date.now() : false;
+    } catch (e) {
+      return false;
+    }
+  });
   const [storageStats, setStorageStats] = useState(null);
+
+  const handleDismissInstall = () => {
+    triggerHaptic('light');
+    setDismissed(true);
+    try {
+      // Remember dismissal for 7 days
+      localStorage.setItem('pwa_install_dismissed_until', String(Date.now() + 7 * 86400000));
+    } catch (e) {}
+  };
   
   // Custom Install Sheet Modal State
   const [showInstallModal, setShowInstallModal] = useState(false);
@@ -216,143 +232,112 @@ export default function PWAStatus() {
           </div>
         )}
 
+        {/* Desktop status pill: Only display when offline or when wake lock is actively enabled */}
         <div className="flex items-center gap-2 self-end">
-          {wakeLockAvailable && isInstalled && (
+          {wakeLockAvailable && isInstalled && wakeLockEnabled && (
             <button
               onClick={toggleWakeLock}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border shadow-sm transition active:scale-95 ${
-                wakeLockEnabled
-                  ? 'bg-amber-50 text-amber-700 border-amber-300'
-                  : 'bg-white/90 text-slate-600 border-slate-200 hover:bg-slate-50'
-              }`}
-              title={wakeLockEnabled ? 'Screen Wake Lock Active (Screen will not dim)' : 'Keep Screen Awake during field evaluations'}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border shadow-sm transition active:scale-95 bg-amber-50 text-amber-700 border-amber-300"
+              title="Screen Wake Lock Active (Screen will not dim). Click to turn off."
             >
-              <Sun className={`w-3.5 h-3.5 ${wakeLockEnabled ? 'text-amber-500 fill-amber-400' : 'text-slate-400'}`} />
-              <span>{wakeLockEnabled ? 'Awake Active' : 'Keep Screen On'}</span>
+              <Sun className="w-3.5 h-3.5 text-amber-500 fill-amber-400" />
+              <span>Awake Active</span>
             </button>
           )}
 
-          <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium shadow-sm backdrop-blur-md border ${
-            isOnline 
-              ? 'bg-emerald-50/90 text-emerald-700 border-emerald-200' 
-              : 'bg-amber-50/90 text-amber-700 border-amber-200 animate-pulse'
-          }`}>
-            {isOnline ? <Wifi className="w-3.5 h-3.5" /> : <WifiOff className="w-3.5 h-3.5" />}
-            <span>{isOnline ? 'PWA Online' : 'Offline Mode'}</span>
-          </div>
-
-          {storageStats && (
-            <div 
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-medium bg-white/90 text-slate-600 border border-slate-200 shadow-sm"
-              title={`Offline App Cache: ${storageStats.usedMB} MB ready`}
-            >
-              <HardDrive className="w-3 h-3 text-slate-400" />
-              <span>{storageStats.usedMB} MB</span>
+          {!isOnline && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold shadow-sm backdrop-blur-md border bg-amber-500 text-white border-amber-400 animate-pulse">
+              <WifiOff className="w-3.5 h-3.5" />
+              <span>Offline Mode (Synced locally)</span>
             </div>
           )}
         </div>
       </div>
 
-      {/* ─── MOBILE BOTTOM ACTION PILLS & UPDATE BANNER ─── */}
+      {/* ─── MOBILE BOTTOM ACTION PILLS & UPDATE BANNER (Streamlined, Non-blocking) ─── */}
       <div 
-        className="md:hidden fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] left-3 right-3 z-40 flex flex-col gap-2 pointer-events-auto select-none"
+        className="md:hidden fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))] left-3 right-3 z-40 flex flex-col gap-2 pointer-events-none select-none"
         style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
       >
         {/* Mobile Update Banner */}
         {showUpdate && (
-          <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-emerald-500/30 p-3.5 animate-slide-up flex items-center justify-between gap-3">
+          <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-md rounded-2xl shadow-xl border border-emerald-500/30 p-3 animate-slide-up flex items-center justify-between gap-3 pointer-events-auto">
             <div className="flex items-center gap-2.5 min-w-0">
               <div className="bg-emerald-500 text-white p-2 rounded-xl flex-shrink-0">
                 <RefreshCw className="w-4 h-4 animate-spin" />
               </div>
               <div className="min-w-0">
-                <h4 className="text-xs font-bold text-slate-800">New App Version Ready</h4>
-                <p className="text-[11px] text-slate-500 truncate">Super speed & features available</p>
+                <h4 className="text-xs font-bold text-slate-800 dark:text-slate-100">New App Version Ready</h4>
+                <p className="text-[11px] text-slate-500 truncate">Tap to reload latest update</p>
               </div>
             </div>
             <button
               onClick={handleUpdateClick}
-              className="bg-emerald-600 text-white px-3 py-1.5 rounded-xl text-xs font-semibold flex-shrink-0 shadow-sm active:scale-95"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-xl text-xs font-semibold flex-shrink-0 shadow-sm active:scale-95"
             >
               Reload
             </button>
           </div>
         )}
 
-        {/* Mobile Install Promotion Banner (if not installed) */}
-        {!isInstalled && !dismissed && (
-          <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-emerald-500/20 p-3 animate-slide-up flex items-center justify-between gap-2.5">
+        {/* Mobile Offline Indicator (Only shown when disconnected, never clutters when online) */}
+        {!isOnline && (
+          <div className="flex items-center justify-center pointer-events-auto">
+            <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-bold shadow-lg bg-amber-600 text-white backdrop-blur-md border border-amber-400/40 animate-pulse">
+              <WifiOff className="w-3.5 h-3.5 shrink-0" />
+              <span>Offline Mode • Changes queued</span>
+            </div>
+          </div>
+        )}
+
+        {/* Mobile Screen Awake Badge (Only shown when user actively enabled it) */}
+        {wakeLockEnabled && (
+          <div className="flex items-center justify-end pointer-events-auto">
+            <button
+              onClick={toggleWakeLock}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold shadow-md bg-amber-500 text-white backdrop-blur-md border border-amber-300/50 active:scale-95"
+              title="Screen Wake Lock is active. Tap to turn off."
+            >
+              <Sun className="w-3 h-3 fill-white" />
+              <span>Screen Awake</span>
+            </button>
+          </div>
+        )}
+
+        {/* Mobile Install Promotion Banner (Compact, dismissible with 7-day memory) */}
+        {!isInstalled && !dismissed && isInstallable && (
+          <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-md rounded-2xl shadow-xl border border-emerald-500/30 p-2.5 animate-slide-up flex items-center justify-between gap-2.5 pointer-events-auto">
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white shadow-md flex-shrink-0">
-                <Smartphone className="w-5 h-5" />
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white shadow-sm flex-shrink-0">
+                <Smartphone className="w-4 h-4" />
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-bold text-slate-800">Install Mobile App</span>
-                  <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded-full">0ms Load</span>
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-100">Install Mobile App</span>
+                  <span className="text-[9px] font-extrabold bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded-full">0ms</span>
                 </div>
-                <p className="text-[11px] text-slate-500 truncate">Runs 100% offline in the field</p>
+                <p className="text-[10px] text-slate-500 truncate">Full offline field performance</p>
               </div>
             </div>
             <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={deferredPrompt ? handleNativeInstall : handleOpenInstallSheet}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md active:scale-95 transition"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 shadow-sm active:scale-95 transition"
               >
-                <Download className="w-3.5 h-3.5" />
+                <Download className="w-3 h-3" />
                 Install
               </button>
               <button
-                onClick={() => setDismissed(true)}
-                className="text-slate-400 p-1.5 rounded-xl hover:bg-slate-100 transition"
+                onClick={handleDismissInstall}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-xl transition"
                 aria-label="Dismiss banner"
               >
-                <X className="w-4 h-4" />
+                <X className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
         )}
-
-        {/* Mobile Installed Status Bar (Offline Pill & Field Wake Lock) */}
-        {isInstalled && (
-          <div className="flex items-center justify-between pointer-events-none">
-            <div className="flex items-center gap-1.5 pointer-events-auto">
-              <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold shadow-sm backdrop-blur-md ${
-                isOnline 
-                  ? 'bg-emerald-500/90 text-white' 
-                  : 'bg-amber-500/90 text-white animate-pulse'
-              }`}>
-                {isOnline ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
-                <span>{isOnline ? 'Online' : 'Offline Mode'}</span>
-              </div>
-
-              {storageStats && (
-                <div 
-                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-full text-[10px] font-medium bg-slate-900/80 text-slate-200 backdrop-blur-md shadow-sm"
-                  title="Offline App Cache Storage"
-                >
-                  <HardDrive className="w-2.5 h-2.5 text-emerald-400" />
-                  <span>{storageStats.usedMB} MB</span>
-                </div>
-              )}
-            </div>
-
-            {wakeLockAvailable && (
-              <button
-                onClick={toggleWakeLock}
-                className={`pointer-events-auto flex items-center gap-1 px-2.5 py-1.5 rounded-full text-[11px] font-semibold shadow-sm backdrop-blur-md transition active:scale-95 ${
-                  wakeLockEnabled 
-                    ? 'bg-amber-500 text-white ring-2 ring-amber-300' 
-                    : 'bg-white/85 text-slate-700 border border-slate-200'
-                }`}
-                title="Toggle Keep Screen On during field trial evaluation"
-              >
-                <Sun className={`w-3.5 h-3.5 ${wakeLockEnabled ? 'fill-white' : 'text-slate-500'}`} />
-                <span>{wakeLockEnabled ? 'Screen Awake' : 'Stay Awake'}</span>
-              </button>
-            )}
-          </div>
-        )}
+      </div>
       </div>
 
       {/* ─── NATIVE APP INSTALL INSTRUCTION MODAL (iOS & Android) ─── */}

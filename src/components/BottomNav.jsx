@@ -58,8 +58,8 @@ export default function BottomNav({ onMoreClick }) {
       role="navigation" 
       aria-label="Mobile Navigation"
       style={{ 
-        paddingBottom: 'max(8px, env(safe-area-inset-bottom, 8px))',
-        paddingTop: '6px'
+        paddingBottom: 'max(10px, env(safe-area-inset-bottom, 10px))',
+        paddingTop: '5px'
       }}
     >
       <div className="grid grid-cols-5 items-center h-14 max-w-md mx-auto px-1">
