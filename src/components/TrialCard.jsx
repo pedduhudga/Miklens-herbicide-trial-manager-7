@@ -339,8 +339,11 @@ const TrialCard = memo(function TrialCard({
 
   const latestObs = useMemo(() => {
     if (!efficacyData || efficacyData.length === 0) return null;
-    return efficacyData.slice().sort((a, b) => (parseFloat(b.daa) || 0) - (parseFloat(a.daa) || 0))[0];
-  }, [efficacyData]);
+    const primaryField = getPrimaryObservationField(categoryId);
+    const validObs = efficacyData.filter(o => !o.isInvalid && !o.isPrecluded && o[primaryField] !== null && o[primaryField] !== undefined);
+    if (validObs.length === 0) return null;
+    return validObs.slice().sort((a, b) => (parseFloat(b.daa) || 0) - (parseFloat(a.daa) || 0))[0];
+  }, [efficacyData, categoryId]);
 
   // EWRS Rating and suggested grade based on scientific efficacy
   const efficacyMetrics = useMemo(() => {
@@ -815,7 +818,19 @@ const TrialCard = memo(function TrialCard({
             </div>
           )}
           {/* Scientific Control Days with Breakdown & Linear Interpolation Indicator */}
-          {controlDays !== null && controlDays >= 0 && (
+          {controlDaysInfo?.status === 'baseline_only' && (
+            <div 
+              className="flex items-center gap-1.5 flex-wrap pt-0.5" 
+              onClick={stopPropagation}
+              title={controlDaysInfo?.reason || 'Baseline recorded — awaiting post-application evaluations'}
+            >
+              <Clock className="w-3.5 h-3.5 shrink-0 text-slate-400" />
+              <span className="font-semibold text-slate-500 text-[11px]">
+                Baseline (Awaiting field observations)
+              </span>
+            </div>
+          )}
+          {controlDaysInfo?.status !== 'baseline_only' && controlDays !== null && controlDays >= 0 && (
             <div 
               className="flex items-center gap-1.5 flex-wrap pt-0.5" 
               onClick={stopPropagation}

@@ -38,6 +38,24 @@ export function validateEfficacyData (efficacy, categoryId = 'herbicide', includ
                         const daa = toNum(obs.daa);
                         if (daa === null || daa < 0) return;
                         obs.daa = daa;
+
+                        const isExplicitlyInvalid = rawObs.isInvalid === true || rawObs.isValidPlotPhoto === false || rawObs.isPlotPhoto === false;
+                        const textBlob = `${rawObs.notes || ''} ${rawObs.aiEfficacyAssessment || ''} ${rawObs.validationNotes || ''} ${rawObs.invalidReason || ''}`.toLowerCase();
+                        const isPrecluded = isExplicitlyInvalid || /(?:precluded|packaging|fertilizer advertisement|commercial product|marketing flyer|promotional poster|product label|fertilizer packaging|not (?:a|an) (?:experimental|crop|field|plot|canopy)|cannot be evaluated|non-plot|non-agricultural)/i.test(textBlob);
+
+                        if (isPrecluded) {
+                            obs.isInvalid = true;
+                            obs.invalidReason = rawObs.invalidReason || rawObs.aiEfficacyAssessment || rawObs.notes || 'Evaluation precluded: Media depicts commercial product packaging or non-plot assets.';
+                            const config = getCategoryConfig(categoryId);
+                            config.observationFields?.forEach(f => {
+                                if (f.type === 'number') obs[f.key] = null;
+                            });
+                            obs.weedDetails = [];
+                            obs.targets = [];
+                            obs.status = 'Invalid (Non-plot)';
+                            normalized.push(obs);
+                            return;
+                        }
                         
                         // Validate and clamp category-specific numeric fields
                         const config = getCategoryConfig(categoryId);
@@ -97,6 +115,23 @@ export function validateEfficacyData (efficacy, categoryId = 'herbicide', includ
                     const daa = toNum(obs.daa);
                     if (daa === null || daa < 0) return;
                     obs.daa = daa;
+
+                    // Domain Validity & Preclusion Check (Non-plot image / fertilizer packaging / precluded AI)
+                    const isExplicitlyInvalid = rawObs.isInvalid === true || rawObs.isValidPlotPhoto === false || rawObs.isPlotPhoto === false;
+                    const textBlob = `${rawObs.notes || ''} ${rawObs.aiEfficacyAssessment || ''} ${rawObs.validationNotes || ''} ${rawObs.invalidReason || ''}`.toLowerCase();
+                    const isPrecluded = isExplicitlyInvalid || /(?:precluded|packaging|fertilizer advertisement|commercial product|marketing flyer|promotional poster|product label|fertilizer packaging|not (?:a|an) (?:experimental|crop|field|plot|canopy)|cannot be evaluated|non-plot|non-agricultural)/i.test(textBlob);
+
+                    if (isPrecluded) {
+                        obs.isInvalid = true;
+                        obs.invalidReason = rawObs.invalidReason || rawObs.aiEfficacyAssessment || rawObs.notes || 'Evaluation precluded: Media depicts commercial product packaging or non-plot assets.';
+                        obs.weedCover = null;
+                        obs.weedDetails = [];
+                        obs.wce = null;
+                        obs.status = 'Invalid (Non-plot)';
+                        addWarning(obs, 'Invalid/Non-plot observation: excluded from scientific efficacy metrics.');
+                        normalized.push(obs);
+                        return;
+                    }
 
                     if (obs.phyto !== undefined) delete obs.phyto;
                     if (obs.phi !== undefined) delete obs.phi;
@@ -181,9 +216,10 @@ export function validateEfficacyData (efficacy, categoryId = 'herbicide', includ
                 const ordered = normalized.slice().sort((a, b) => (parseFloat(a.daa) || 0) - (parseFloat(b.daa) || 0));
                 const baselineDaa = ordered.length > 0 ? (parseFloat(ordered[0].daa) || 0) : 0;
 
-                // 1. Gather all unique species observed in any DAA (excluding 'Total')
+                // 1. Gather all unique species observed in any DAA (excluding 'Total' and invalid observations)
                 const allObservedSpecies = new Set();
                 ordered.forEach(obs => {
+                    if (obs.isInvalid) return; // Skip invalid / non-plot observations
                     if (Array.isArray(obs.weedDetails)) {
                         obs.weedDetails.forEach(wd => {
                             const sp = String(wd.species || wd.name || wd.weed || '').trim();
@@ -197,6 +233,7 @@ export function validateEfficacyData (efficacy, categoryId = 'herbicide', includ
                 // 2. Align species list across all observations to ensure they are represented at baseline
                 // and correctly transitioned to 0% [Controlled/Dead] in later stages if missing
                 ordered.forEach(obs => {
+                    if (obs.isInvalid) return; // Skip invalid / non-plot observations - DO NOT auto-inject dead baseline species!
                     const isBaselineObs = (parseFloat(obs.daa) || 0) === baselineDaa;
                     if (!Array.isArray(obs.weedDetails)) {
                         obs.weedDetails = [];
@@ -230,7 +267,7 @@ export function validateEfficacyData (efficacy, categoryId = 'herbicide', includ
                 // Global baseline DAA authority across duplicate baseline observations.
                 let daa0BestRealSpeciesSum = 0;
                 ordered.forEach(obs => {
-                    if ((parseFloat(obs?.daa) || 0) !== baselineDaa) return;
+                    if (obs.isInvalid || (parseFloat(obs?.daa) || 0) !== baselineDaa) return;
                     const realSum = (Array.isArray(obs?.weedDetails) ? obs.weedDetails : []).reduce((sum, w) => {
                         const sp = String(w?.species || '').trim().toLowerCase();
                         if (!sp || sp === 'total') return sum;
@@ -242,6 +279,7 @@ export function validateEfficacyData (efficacy, categoryId = 'herbicide', includ
                 daa0BestRealSpeciesSum = clamp(daa0BestRealSpeciesSum, 0, 100);
 
                 ordered.forEach(obs => {
+                    if (obs.isInvalid) return;
                     if (!Array.isArray(obs.weedDetails) || obs.weedDetails.length === 0) return;
 
                     const merged = new Map();

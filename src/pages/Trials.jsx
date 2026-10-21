@@ -2074,11 +2074,26 @@ export default function Trials({ onMenuClick }) {
   const calculateResultRating = (efficacyData, isControl = false, categoryId = 'herbicide', trial = null) => {
     if (isControl) return 'Control';
     if (!efficacyData || efficacyData.length === 0) return 'Unrated';
-    const sorted = [...efficacyData].sort((a, b) => (parseFloat(a.daa) || 0) - (parseFloat(b.daa) || 0));
-    const latest = sorted[sorted.length - 1];
+    const primaryObsField = getPrimaryObservationField(categoryId);
+
+    // Filter out invalid/precluded observations (e.g. non-plot commercial product photos)
+    const validObs = efficacyData.filter(o => 
+      !o.isInvalid && 
+      !o.isPrecluded && 
+      o[primaryObsField] !== null && 
+      o[primaryObsField] !== undefined && 
+      !isNaN(Number(o[primaryObsField]))
+    );
+    if (validObs.length === 0) return 'Unrated';
+
+    const sorted = [...validObs].sort((a, b) => (parseFloat(a.daa) || 0) - (parseFloat(b.daa) || 0));
+    // Must have at least one post-treatment observation (DAA > 0) to evaluate efficacy
+    const postBaseline = sorted.filter(o => (parseFloat(o.daa) || 0) > 0);
+    if (postBaseline.length === 0) return 'Unrated';
+
+    const latest = postBaseline[postBaseline.length - 1];
     if (!latest) return 'Unrated';
 
-    const primaryObsField = getPrimaryObservationField(categoryId);
     const val = parseFloat(latest[primaryObsField] ?? 0) || 0;
 
     let controlVal = null;
@@ -2098,12 +2113,16 @@ export default function Trials({ onMenuClick }) {
       if (controlTrial && controlTrial.EfficacyDataJSON) {
         const controlEff = validateEfficacyData(safeJsonParse(controlTrial.EfficacyDataJSON, []), categoryId, true);
         const targetDaa = latest.daa;
-        const matchingControlObs = controlEff.find(o => Number(o.daa) === Number(targetDaa));
+        const matchingControlObs = controlEff.find(o => !o.isInvalid && !o.isPrecluded && Number(o.daa) === Number(targetDaa));
         if (matchingControlObs) {
           controlVal = parseFloat(matchingControlObs[primaryObsField] ?? 0) || 0;
         } else if (controlEff.length > 0) {
-          const sortedControl = [...controlEff].sort((a, b) => (parseFloat(a.daa) || 0) - (parseFloat(b.daa) || 0));
-          controlVal = parseFloat(sortedControl[sortedControl.length - 1]?.[primaryObsField] ?? 0) || 0;
+          const sortedControl = [...controlEff]
+            .filter(o => !o.isInvalid && !o.isPrecluded && o[primaryObsField] !== null && !isNaN(Number(o[primaryObsField])))
+            .sort((a, b) => (parseFloat(a.daa) || 0) - (parseFloat(b.daa) || 0));
+          if (sortedControl.length > 0) {
+            controlVal = parseFloat(sortedControl[sortedControl.length - 1]?.[primaryObsField] ?? 0) || 0;
+          }
         }
       }
     }
@@ -3626,11 +3645,18 @@ export default function Trials({ onMenuClick }) {
       };
     });
 
+    // Domain & Validity Verification: detect non-plot images (commercial packaging, flyers, lab bottles)
+    const isInvalidImage = aiData.isValidPlotPhoto === false || 
+      aiData.isPrecluded === true || 
+      /precluded|packaging|commercial product|advertisement|not an experimental plot|flyer/i.test(`${aiData.notes || ''} ${aiData.efficacyAssessment || ''} ${aiData.overallAssessment || ''}`);
+
     // Calculate primary values
     const primaryObsField = getPrimaryObservationField(trialCat);
     let primaryValue = 0;
     
-    if (isHerbicide) {
+    if (isInvalidImage) {
+      primaryValue = null;
+    } else if (isHerbicide) {
       primaryValue = typeof aiData.totalWeedCover === 'number'
         ? aiData.totalWeedCover
         : normalizedWeeds.reduce((sum, w) => sum + (w.cover || 0), 0);
@@ -3697,17 +3723,19 @@ export default function Trials({ onMenuClick }) {
     const newObs = {
       date: obsDate || toDatetimeLocal(new Date()),
       daa: Number(daa),
-      [primaryObsField]: primaryValue,
-      weedCover: isHerbicide ? primaryValue : null,
-      weedDetails: normalizedWeeds.length > 0 ? normalizedWeeds : [{ species: isHerbicide ? 'No weeds detected' : 'No targets detected', cover: 0, status: '', notes: aiData.notes || 'AI-analyzed', confidence: null, detectedCount: 0, incidence: 0.0 }],
+      isInvalid: isInvalidImage ? true : false,
+      invalidReason: isInvalidImage ? (aiData.preclusionReason || cleanNotes || 'Non-plot image (commercial product / flyer / packaging)') : null,
+      [primaryObsField]: isInvalidImage ? null : primaryValue,
+      weedCover: isHerbicide ? (isInvalidImage ? null : primaryValue) : null,
+      weedDetails: isInvalidImage ? [] : (normalizedWeeds.length > 0 ? normalizedWeeds : [{ species: isHerbicide ? 'No weeds detected' : 'No targets detected', cover: 0, status: '', notes: aiData.notes || 'AI-analyzed', confidence: null, detectedCount: 0, incidence: 0.0 }]),
       notes: cleanNotes,
-      aiConfidence: aiData.confidence || 'MEDIUM',
+      aiConfidence: isInvalidImage ? 'LOW' : (aiData.confidence || 'MEDIUM'),
       aiEfficacyAssessment: cleanEfficacy,
-      competitionLevel: aiData.competitionLevel || '',
-      status: 'Analyzed',
+      competitionLevel: isInvalidImage ? '' : (aiData.competitionLevel || ''),
+      status: isInvalidImage ? 'Invalid (Non-plot)' : 'Analyzed',
       source: 'AI',
       photoUrl: photoUrl || '',
-      bbchStage: aiData.bbchStage || '',
+      bbchStage: isInvalidImage ? '' : (aiData.bbchStage || ''),
       weatherTemp: (weatherData?.temp !== undefined && weatherData?.temp !== null) ? weatherData.temp : (obsForm?.weatherTemp || ''),
       weatherHumidity: (weatherData?.humidity !== undefined && weatherData?.humidity !== null) ? weatherData.humidity : (obsForm?.weatherHumidity || ''),
       weatherWind: (weatherData?.wind !== undefined && weatherData?.wind !== null) ? weatherData.wind : (obsForm?.weatherWind || ''),
@@ -3720,8 +3748,17 @@ export default function Trials({ onMenuClick }) {
       weatherSource: weatherData?.provider || (weatherData ? 'Auto-Weather' : null),
     };
 
+    if (isInvalidImage) {
+      window.dispatchEvent(new CustomEvent('app:toast', { 
+        detail: { 
+          msg: '⚠️ Non-plot image detected (commercial product/packaging). Observation precluded from efficacy metrics.', 
+          type: 'warning' 
+        } 
+      }));
+    }
+
     // Save all dynamic metrics fields directly into the observation
-    if (aiData.metrics && typeof aiData.metrics === 'object') {
+    if (aiData.metrics && typeof aiData.metrics === 'object' && !isInvalidImage) {
       Object.entries(aiData.metrics).forEach(([k, v]) => {
         if (v === null || v === undefined || v === '') return;
         const num = parseFloat(v);
@@ -3734,10 +3771,17 @@ export default function Trials({ onMenuClick }) {
     const existingIdx = efficacyData.findIndex(o => Number(o.daa) === Number(daa));
     if (existingIdx >= 0) {
       const existing = efficacyData[existingIdx];
+      
+      // If incoming photo is non-plot/invalid and existing observation is already valid, do not overwrite valid field metrics
+      if (isInvalidImage && !existing.isInvalid && existing[primaryObsField] !== null) {
+        console.warn('Skipping non-plot photo merge into existing valid observation at DAA', daa);
+        return;
+      }
+      
       const count = Number(existing.sampleCount || 1);
       
       const existingPrimaryValue = parseFloat(existing[primaryObsField] ?? 0) || 0;
-      const mergedPrimaryValue = parseFloat(((existingPrimaryValue * count) + primaryValue) / (count + 1));
+      const mergedPrimaryValue = isInvalidImage ? null : parseFloat(((existingPrimaryValue * count) + (primaryValue || 0)) / (count + 1));
       
       const mergedObs = {
         ...existing,
@@ -8299,6 +8343,9 @@ If none are present, write "None".`;
                   } else if (controlDaysDetails.effectiveDays > 0) {
                     controlDays = `${controlDaysDetails.effectiveDays}d control (sustained ≥70%)`;
                     controlDaysBadgeStyle = 'bg-blue-100 text-blue-800 border border-blue-300';
+                  } else if (controlDaysDetails.status === 'baseline_only') {
+                    controlDays = 'Baseline only (awaiting field evaluations)';
+                    controlDaysBadgeStyle = 'bg-slate-100 text-slate-700 border border-slate-300';
                   } else if (detailTrial.Date) {
                     const d = Math.floor((new Date() - new Date(detailTrial.Date)) / 86400000);
                     controlDays = `${Math.max(0, d)} days active (<70% initial)`;
@@ -8396,6 +8443,43 @@ If none are present, write "None".`;
                             efficacyRating === 'Good' ? 'text-blue-700 bg-blue-50' : 
                             efficacyRating === 'Fair' ? 'text-amber-700 bg-amber-50' : 'text-red-700 bg-red-50';
                           const risks = getClimateRisks(obs.weatherTemp, obs.weatherWind, obs.weatherRain);
+                          
+                          if (obs.isInvalid) {
+                            return (
+                              <div key={idx} className="bg-amber-50/90 border border-amber-300 rounded-xl p-4 shadow-sm">
+                                <div className="flex justify-between items-start mb-2">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="bg-amber-600 text-white font-bold px-2 py-1 rounded text-xs">DAA {obs.daa ?? 0}</span>
+                                    <span className="text-xs text-slate-500">{obs.date ? formatPhotoDate(obs.date) : ''}</span>
+                                    <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-amber-200 text-amber-900 border border-amber-300 flex items-center gap-1">
+                                      ⚠️ Non-Plot Image Asset
+                                    </span>
+                                    {obs.source === 'AI' && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 font-semibold">AI Precluded</span>}
+                                  </div>
+                                  {!isViewer && (
+                                    <div className="flex gap-1 shrink-0">
+                                      <button 
+                                        onClick={() => handleDeleteObs(detailEfficacy.indexOf(obs) !== -1 ? detailEfficacy.indexOf(obs) : idx)} 
+                                        className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold bg-red-100 text-red-700 rounded-lg hover:bg-red-200 border border-red-300 transition"
+                                        title="Remove invalid observation from trial"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" /> Remove Invalid Obs
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="bg-white/90 rounded-lg p-3 border border-amber-200 text-xs text-amber-950 space-y-1 mt-2">
+                                  <p className="font-bold flex items-center gap-1.5 text-amber-900">
+                                    <span>🚫 Canopy Efficacy Evaluation Precluded</span>
+                                  </p>
+                                  <p className="text-slate-700 leading-relaxed">
+                                    {obs.notes || obs.aiEfficacyAssessment || obs.invalidReason || 'The submitted image depicts commercial product packaging or advertising rather than experimental crop plot canopies. Efficacy metrics are excluded to maintain scientific accuracy.'}
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                          }
+
                           return (
                             <div key={idx} className="bg-white border rounded-xl p-4 shadow-sm">
                               <div className="flex justify-between items-start mb-3">

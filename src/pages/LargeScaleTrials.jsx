@@ -1457,11 +1457,18 @@ export default function LargeScaleTrials({ onMenuClick }) {
       };
     });
 
+    // Domain & Validity Verification: detect non-plot images (commercial packaging, flyers, lab bottles)
+    const isInvalidImage = aiData.isValidPlotPhoto === false || 
+      aiData.isPrecluded === true || 
+      /precluded|packaging|commercial product|advertisement|not an experimental plot|flyer/i.test(`${aiData.notes || ''} ${aiData.efficacyAssessment || ''} ${aiData.overallAssessment || ''}`);
+
     // Calculate primary values
     const primaryObsField = getPrimaryObservationField(trialCat);
     let primaryValue = 0;
     
-    if (isHerbicide) {
+    if (isInvalidImage) {
+      primaryValue = null;
+    } else if (isHerbicide) {
       primaryValue = typeof aiData.totalWeedCover === 'number'
         ? aiData.totalWeedCover
         : normalizedWeeds.reduce((sum, w) => sum + (w.cover || 0), 0);
@@ -1528,16 +1535,18 @@ export default function LargeScaleTrials({ onMenuClick }) {
     const newObs = {
       date: obsDate || toDatetimeLocal(new Date()),
       daa: Number(daa),
-      weedCover: primaryValue, // mirrored for backwards compatibility
-      weedDetails: normalizedWeeds.length > 0 ? normalizedWeeds : [{ species: isHerbicide ? 'No weeds detected' : `No ${catConfig.targetLabel}s detected`, cover: 0, status: '', notes: aiData.notes || 'AI-analyzed', confidence: null, detectedCount: 0, incidence: 0.0 }],
+      isInvalid: isInvalidImage ? true : false,
+      invalidReason: isInvalidImage ? (aiData.preclusionReason || cleanNotes || 'Non-plot image (commercial product / flyer / packaging)') : null,
+      weedCover: isInvalidImage ? null : primaryValue, // mirrored for backwards compatibility
+      weedDetails: isInvalidImage ? [] : (normalizedWeeds.length > 0 ? normalizedWeeds : [{ species: isHerbicide ? 'No weeds detected' : `No ${catConfig.targetLabel}s detected`, cover: 0, status: '', notes: aiData.notes || 'AI-analyzed', confidence: null, detectedCount: 0, incidence: 0.0 }]),
       notes: cleanNotes,
-      aiConfidence: aiData.confidence || 'MEDIUM',
+      aiConfidence: isInvalidImage ? 'LOW' : (aiData.confidence || 'MEDIUM'),
       aiEfficacyAssessment: cleanEfficacy,
-      competitionLevel: aiData.competitionLevel || '',
-      status: 'Analyzed',
+      competitionLevel: isInvalidImage ? '' : (aiData.competitionLevel || ''),
+      status: isInvalidImage ? 'Invalid (Non-plot)' : 'Analyzed',
       source: 'AI',
       photoUrl: photoUrl || '',
-      bbchStage: aiData.bbchStage || '',
+      bbchStage: isInvalidImage ? '' : (aiData.bbchStage || ''),
       ...(weatherData ? {
         weatherTemp: weatherData.temp ?? null,
         weatherHumidity: weatherData.humidity ?? weatherData.hum ?? null,
@@ -1552,8 +1561,17 @@ export default function LargeScaleTrials({ onMenuClick }) {
       } : {})
     };
 
+    if (isInvalidImage) {
+      window.dispatchEvent(new CustomEvent('app:toast', { 
+        detail: { 
+          msg: '⚠️ Non-plot image detected (commercial product/packaging). Observation precluded from efficacy metrics.', 
+          type: 'warning' 
+        } 
+      }));
+    }
+
     // Save all dynamic metrics fields directly into the observation
-    if (aiData.metrics && typeof aiData.metrics === 'object') {
+    if (aiData.metrics && typeof aiData.metrics === 'object' && !isInvalidImage) {
       Object.entries(aiData.metrics).forEach(([k, v]) => {
         if (v === null || v === undefined || v === '') return;
         const num = parseFloat(v);
@@ -1563,14 +1581,18 @@ export default function LargeScaleTrials({ onMenuClick }) {
       });
     }
     // ensure primary metric field has its value
-    newObs[primaryObsField] = primaryValue;
+    newObs[primaryObsField] = isInvalidImage ? null : primaryValue;
 
     const existingIdx = efficacyData.findIndex(o => o.daa === Number(daa));
     if (existingIdx >= 0) {
       const existing = efficacyData[existingIdx];
+      if (isInvalidImage && !existing.isInvalid && existing[primaryObsField] !== null) {
+        console.warn('Skipping non-plot photo merge into existing valid observation at DAA', daa);
+        return;
+      }
       const count = Number(existing.sampleCount || 1);
       
-      const mergedPrimaryValue = parseFloat(((parseFloat(existing.weedCover || 0) * count) + primaryValue) / (count + 1));
+      const mergedPrimaryValue = isInvalidImage ? null : parseFloat(((parseFloat(existing.weedCover || 0) * count) + (primaryValue || 0)) / (count + 1));
       
       const mergedObs = {
         ...existing,

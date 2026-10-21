@@ -118,12 +118,38 @@ export function getDetailedControlDaysInfo(trial, controlTrial = null) {
     return { effectiveDays: 0, status: 'no_observations', breakdownDaa: null, isInterpolated: false, reason: 'No efficacy observations recorded' };
   }
 
-  // Sort observations chronologically by DAA
-  const sortedObs = [...observations].sort((a, b) => {
+  // Filter out invalid observations (non-plot / packaging / precluded AI data)
+  const validObservations = observations.filter(o => {
+    if (!o || typeof o !== 'object') return false;
+    if (o.isInvalid === true || o.isValidPlotPhoto === false || o.isPlotPhoto === false) return false;
+    const textBlob = `${o.notes || ''} ${o.aiEfficacyAssessment || ''} ${o.validationNotes || ''} ${o.invalidReason || ''}`.toLowerCase();
+    if (/(?:precluded|packaging|fertilizer advertisement|commercial product|marketing flyer|promotional poster|product label|fertilizer packaging|not (?:a|an) (?:experimental|crop|field|plot|canopy)|cannot be evaluated|non-plot|non-agricultural)/i.test(textBlob)) {
+      return false;
+    }
+    return o.weedCover !== null && o.weedCover !== undefined;
+  });
+
+  if (validObservations.length === 0) {
+    return { effectiveDays: 0, status: 'no_valid_observations', breakdownDaa: null, isInterpolated: false, reason: 'No valid plot observations recorded' };
+  }
+
+  // Sort valid observations chronologically by DAA
+  const sortedObs = [...validObservations].sort((a, b) => {
     const daaA = parseFloat(a.daa ?? a.day ?? a.DAA ?? 0);
     const daaB = parseFloat(b.daa ?? b.day ?? b.DAA ?? 0);
     return daaA - daaB;
   });
+
+  // If only baseline exists (DAA 0), treatment efficacy has not been demonstrated yet
+  if (sortedObs.length === 1 || (sortedObs.length > 0 && Number(sortedObs[sortedObs.length - 1].daa) === 0)) {
+    return {
+      effectiveDays: 0,
+      status: 'baseline_only',
+      breakdownDaa: null,
+      isInterpolated: false,
+      reason: 'Baseline recorded — awaiting post-application evaluations'
+    };
+  }
 
   // Untreated Control observations lookup map (by DAA)
   const controlObsMap = {};

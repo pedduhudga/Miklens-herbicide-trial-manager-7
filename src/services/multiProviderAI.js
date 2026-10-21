@@ -279,6 +279,7 @@ ${historyNote}
 ADDITIONAL ANALYSIS FEATURES: ${catConfig.aiFeatures.join(', ')}
 
 RULES FOR SCIENTIFIC ASSESSMENT (CRITICAL - AVOID HALLUCINATION):
+0. IMAGE VALIDITY PRE-CHECK (CANOPY VERIFICATION): If this image depicts commercial fertilizer/chemical packaging, marketing flyers, pamphlets, documents, machinery, people, indoor items, or non-plot assets: you MUST set "isValidPlotPhoto": false, "invalidationReason": "Depicts commercial product packaging / non-plot asset rather than an experimental crop canopy.", "metrics": {}, "targets": [], "confidence": "LOW", "overallAssessment": "Evaluation precluded: Submitted media depicts commercial product packaging or promotional materials rather than an experimental crop canopy.", "notes": "Evaluation precluded: Non-plot image asset."
 1. STAGE & METRIC ACCURACY: Estimate values only for metrics and symptoms that are directly and clearly visible in the crop plot photo. Do NOT invent or assume data.
 2. STAGE-APPROPRIATE METRICS (GROWTH-STAGE FILTERING): If the BBCH Growth Stage is early/vegetative (BBCH stage label starting with BBCH 00 through BBCH 59, i.e., before flowering and fruiting), reproductive and yield metrics (such as "fruitCount", "marketableYield", "unmarketableYield", "marketableYieldEstimateGrams", "unmarketableYieldEstimateGrams") are biologically not applicable. For these metrics in the "metrics" JSON object, you MUST set them to null. Do NOT return 0 or "Not detected". Only return numerical estimations for these if the BBCH stage is BBCH 61 or later (flowering/fruiting/ripening) and fruits are actually visible.
 3. PHYSICAL, SENSOR & LABORATORY LIMITATION: Physical parameters like plant height (e.g., 'plantHeightAvg'), sensor measurements like chlorophyll index (SPAD readings), and laboratory chemical tissue tests CANNOT be measured or determined from a 2D photo. You MUST set these to null in the "metrics" JSON object. Do NOT guess or estimate these values under any circumstances.
@@ -295,6 +296,8 @@ RULES FOR SCIENTIFIC ASSESSMENT (CRITICAL - AVOID HALLUCINATION):
 
 OUTPUT FORMAT - JSON ONLY (no extra text, no markdown wrapper around the JSON):
 {
+  "isValidPlotPhoto": true,
+  "invalidationReason": null,
   "metrics": ${JSON.stringify(metricsPlaceholder, null, 2)},
   "targets": [
     {"name": "Standardized Target Name", "value": 0, "status": "Sufficient/Deficient/Marginal/Healthy/Symptomatic/Stressed/Vigorous", "confidence": 95, "notes": "Brief observation details"}
@@ -333,6 +336,23 @@ PLOT INFORMATION:
 - Replication: ${context.rep || 1}
 ${historyNote}
 ${pixelSensorNote}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 0 — CANOPY VALIDITY & DOMAIN VERIFICATION (CRITICAL)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+First evaluate if this image authentically shows an agricultural field crop plot, trial bed, or living/dead weed canopy.
+If the image depicts:
+  • Commercial product packaging, fertilizer bags, chemical bottles, marketing flyers, advertisements, brochures, product spec posters;
+  • Non-field items (indoor rooms, laboratory tables, machinery, vehicles, people, documents, computer screens, blank frames);
+YOU MUST RETURN:
+  "isValidPlotPhoto": false,
+  "invalidationReason": "Depicts commercial product packaging / fertilizer advertisement rather than an experimental plot canopy.",
+  "totalWeedCover": null,
+  "weeds": [],
+  "confidence": "LOW",
+  "efficacyAssessment": "Evaluation precluded: Submitted media depicts commercial product packaging or promotional materials rather than an experimental crop canopy.",
+  "notes": "Evaluation precluded: Non-plot image asset."
+CRITICAL: Do NOT report 0% weed cover or imply 100% control when an image is non-plot / packaging! Setting weed cover to 0 on an advertisement is strictly prohibited.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 STEP 1 — SYSTEMATIC VISUAL SCAN (3×3 GRID METHOD)
@@ -429,6 +449,8 @@ LANGUAGE RULES:
 
 OUTPUT FORMAT — JSON ONLY (no markdown, no text before or after the JSON):
 {
+  "isValidPlotPhoto": true,
+  "invalidationReason": null,
   "weeds": [
     {"species": "Common Name (Scientific name)", "cover": 8, "status": "Controlled", "growthStage": "Mature", "notes": "Predominantly tan/straw dead thatch with isolated green flecks; no active new shoot emergence observed."}
   ],
@@ -445,6 +467,34 @@ OUTPUT FORMAT — JSON ONLY (no markdown, no text before or after the JSON):
 }
 
 
+export function sanitizeAIPlotResult(parsed) {
+  if (!parsed || typeof parsed !== 'object') return parsed;
+  if (Array.isArray(parsed)) return parsed;
+
+  const explicitlyInvalid = parsed.isValidPlotPhoto === false || parsed.isPlotPhoto === false;
+  const textBlob = `${parsed.efficacyAssessment || ''} ${parsed.overallAssessment || ''} ${parsed.notes || ''} ${parsed.invalidationReason || ''}`.toLowerCase();
+  const preclusionTrigger = /(?:precluded|packaging|fertilizer advertisement|commercial product|marketing flyer|promotional poster|product label|fertilizer packaging|not (?:a|an) (?:experimental|crop|field|plot|canopy)|cannot be evaluated|non-plot|non-agricultural)/i.test(textBlob);
+
+  if (explicitlyInvalid || preclusionTrigger) {
+    const reason = parsed.invalidationReason || parsed.efficacyAssessment || parsed.overallAssessment || 'Image depicts commercial product packaging or non-plot asset rather than an experimental crop canopy.';
+    return {
+      ...parsed,
+      isValidPlotPhoto: false,
+      isPlotPhoto: false,
+      invalidationReason: reason,
+      totalWeedCover: null,
+      weeds: [],
+      targets: [],
+      identifications: [],
+      confidence: 'LOW',
+      notes: parsed.notes ? `[Non-plot image]: ${parsed.notes}` : `Evaluation precluded: ${reason}`,
+      efficacyAssessment: parsed.efficacyAssessment || reason,
+    };
+  }
+
+  return parsed;
+}
+
 function parseAIJson(text) {
   if (!text || typeof text !== 'string') {
     throw new Error('Empty AI response');
@@ -453,14 +503,14 @@ function parseAIJson(text) {
 
   // 1. Direct parse if already valid JSON string
   try {
-    return JSON.parse(clean);
+    return sanitizeAIPlotResult(JSON.parse(clean));
   } catch (_) {}
 
   // 2. Extract from markdown code fence (handles \r?\n and whitespace)
   const fenceMatch = clean.match(/```(?:json)?[\r\n\s]+([\s\S]*?)[\r\n\s]+```/i);
   if (fenceMatch && fenceMatch[1]) {
     try {
-      return JSON.parse(fenceMatch[1].trim());
+      return sanitizeAIPlotResult(JSON.parse(fenceMatch[1].trim()));
     } catch (_) {}
   }
 
@@ -470,7 +520,7 @@ function parseAIJson(text) {
   if (startIdx !== -1 && endIdx > startIdx) {
     const candidate = clean.slice(startIdx, endIdx + 1);
     try {
-      return JSON.parse(candidate);
+      return sanitizeAIPlotResult(JSON.parse(candidate));
     } catch (_) {}
   }
 
@@ -494,7 +544,7 @@ function parseAIJson(text) {
     while (openBrackets > 0) { candidate += ']'; openBrackets--; }
     while (openBraces > 0) { candidate += '}'; openBraces--; }
     try {
-      return JSON.parse(candidate);
+      return sanitizeAIPlotResult(JSON.parse(candidate));
     } catch (_) {}
   }
 
@@ -1125,6 +1175,9 @@ JSON ONLY. Do not write any conversational text or explanation. Only output the 
         if (txt) {
           try {
             const parsed = parseAIJson(txt);
+            if (parsed && (parsed.isValidPlotPhoto === false || parsed.isPlotPhoto === false)) {
+              return [];
+            }
             if (Array.isArray(parsed)) return parsed;
             if (parsed && Array.isArray(parsed.identifications)) return parsed.identifications;
             if (parsed && Array.isArray(parsed.weeds)) return parsed.weeds;
@@ -1138,6 +1191,10 @@ JSON ONLY. Do not write any conversational text or explanation. Only output the 
         }
         
         if (txt.trim()) {
+          const lower = txt.toLowerCase();
+          if (/(?:precluded|packaging|fertilizer advertisement|commercial product|marketing flyer|promotional poster|not (?:a|an) (?:experimental|crop|field|plot))/i.test(lower)) {
+            return [];
+          }
           return [{ name: 'Unknown', commonName: txt.slice(0, 120), cover: 0, growthStage: '', confidence: 0.5 }];
         }
       } catch (err) {
