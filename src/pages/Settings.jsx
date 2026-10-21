@@ -631,9 +631,9 @@ export default function Settings({ onMenuClick }) {
                 </optgroup>
               </select>
               <p className="text-xs text-gray-500 mt-1">
-                Recommended: <b>Gemini 3.5 Flash-Lite</b> (best free-tier throughput, 1000 RPD / 15 RPM),{" "}
-                <b>Gemini 3.6 Flash</b> (newest GA high-throughput), or{" "}
-                <b>Gemini 3.8 Flash</b> (frontier reasoning &amp; vision).
+                Recommended: <b>Gemini 3.5 Flash</b> (most reliable, zero demand spikes),{" "}
+                <b>Gemini Flash (Latest Stable)</b>, or{" "}
+                <b>Gemini 3.5 Flash-Lite</b> (high free throughput, 1000 RPD).
               </p>
             </div>
             <div>

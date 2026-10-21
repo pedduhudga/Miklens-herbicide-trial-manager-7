@@ -7,27 +7,27 @@ import { apiCall } from './db.js';
 // Free tier limits per Google AI Studio / Groq free plan.
 // All Gemini models support: Text + Image + Video + Audio + PDF inputs.
 const PROVIDERS = [
-  // ── Gemini 3 Generation (Current Active Lineup — Google AI Studio Free Tier) ──
+  // ── Gemini Production Lineup (Google AI Studio Free Tier) ──
   {
-    // GA since July 2026 — 15 RPM / 1000 RPD free — best throughput & reliability
+    // Most reliable production model — fast, accurate agronomic vision without demand spikes
+    id: 'gemini-3.5-flash',
+    name: 'Gemini 3.5 Flash',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent',
+    dailyLimit: 500,
+  },
+  {
+    // Canonical alias: always routes to the highest-availability production flash model
+    id: 'gemini-flash-latest',
+    name: 'Gemini Flash (Latest Stable)',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent',
+    dailyLimit: 500,
+  },
+  {
+    // High free-tier throughput — 15 RPM / 1000 RPD free — rock-solid availability
     id: 'gemini-3.5-flash-lite',
     name: 'Gemini 3.5 Flash-Lite',
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent',
     dailyLimit: 1000,
-  },
-  {
-    // GA since Oct 2026 — upgraded successor to gemini-3.5-flash with lower latency & cost
-    id: 'gemini-3.6-flash',
-    name: 'Gemini 3.6 Flash',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent',
-    dailyLimit: 500,
-  },
-  {
-    // Compatibility alias: Automatically redirects deprecated 3.5 requests to 3.6 Flash
-    id: 'gemini-3.5-flash',
-    name: 'Gemini 3.5 Flash (Auto-redirected to 3.6)',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent',
-    dailyLimit: 500,
   },
   {
     // GA since Sept 2, 2026 — 5 RPM / 20 RPD free — frontier reasoning & vision
@@ -36,11 +36,11 @@ const PROVIDERS = [
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent',
     dailyLimit: 20,
   },
-  // ── Gemini 2.5 Generation (Legacy Fallback — retiring Oct 20, 2026) ──────────────
   {
-    id: 'gemini-2.5-flash',
-    name: 'Gemini 2.5 Flash',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+    // Oct 2026 GA — available as option, but not forced over stable models
+    id: 'gemini-3.6-flash',
+    name: 'Gemini 3.6 Flash',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent',
     dailyLimit: 500,
   },
   // ── Groq (Active vision model: qwen3.8-27b) ────
@@ -84,10 +84,7 @@ const providerBlockedUntil = new Proxy({}, {
 
 function getOrderedProviders() {
   const settings = getSettings();
-  let selectedModelId = settings.selectedModel || settings.apiModel || DEFAULT_GEMINI_MODEL;
-  if (selectedModelId === 'gemini-3.5-flash') {
-    selectedModelId = 'gemini-3.6-flash';
-  }
+  const selectedModelId = settings.selectedModel || settings.apiModel || DEFAULT_GEMINI_MODEL;
   
   const providers = [...PROVIDERS];
   const idx = providers.findIndex(p => p.id === selectedModelId);
