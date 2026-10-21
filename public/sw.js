@@ -6,8 +6,16 @@ const STATIC_CACHE = 'static-v3.1.0';
 const DYNAMIC_CACHE = 'dynamic-v3.1.0';
 const IMAGE_CACHE = 'images-v3.1.0';
 
-// IndexedDB setup via Dexie for offline data
-importScripts('https://unpkg.com/dexie@4.4.4/dist/dexie.js');
+// IndexedDB setup via local self-contained Dexie for full offline support (no external CDN dependency)
+try {
+  importScripts('./vendor/dexie.min.js');
+} catch (e) {
+  try {
+    importScripts('https://unpkg.com/dexie@4.4.4/dist/dexie.min.js');
+  } catch (err) {
+    console.warn('[SW] Could not load Dexie:', err);
+  }
+}
 
 const db = new self.Dexie('MiklensTrialManagerDexieDB');
 db.version(1).stores({
@@ -22,6 +30,9 @@ db.version(1).stores({
   conflicts: 'id, entityType, entityId, resolved',
   settings: 'ID'
 });
+db.version(2).stores({
+  sheetMirrorQueue: 'id, action, timestamp'
+});
 
 // Assets injected during build for full offline support and instant loading
 const STATIC_ASSETS = [
@@ -29,6 +40,7 @@ const STATIC_ASSETS = [
   './index.html',
   './manifest.json',
   './favicon.svg',
+  './vendor/dexie.min.js',
   './icons/icon-192x192.png',
   './icons/icon-512x512.png'
 ];

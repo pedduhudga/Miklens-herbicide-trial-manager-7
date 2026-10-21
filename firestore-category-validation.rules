@@ -105,24 +105,36 @@ service cloud.firestore {
     
     match /users/{userId} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow create: if isAuthenticated() && (
+        isAdmin() || 
+        (request.auth.uid == userId && (!('Role' in request.resource.data) || request.resource.data.Role == 'User' || request.resource.data.Role == 'user'))
+      );
+      allow update: if isAuthenticated() && (
+        isAdmin() || 
+        (request.auth.uid == userId && 
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['Role', 'categoryAccess', 'CategoryAccess', 'tabPermissions', 'IsActive', 'disabled'])
+        )
+      );
+      allow delete: if isAdmin();
     }
 
     match /settings/{settingId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
+      // Allow unauthenticated read specifically for globalQR settings required by public field QR scanner
+      allow read: if isAuthenticated() || settingId == 'globalQR';
+      // Only administrators are allowed to modify global settings and API keys
+      allow write: if isAdmin();
     }
     
     // ═══ SHARED COLLECTIONS ═════════════════════════════════════════════════════
     
     match /organisations/{orgId} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
+      allow write: if isAuthenticated() && (isAdmin() || hasCategoryAccess('herbicide'));
     }
     
     match /ingredients/{ingredientId} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
+      allow write: if isAuthenticated() && (isAdmin() || hasCategoryAccess('herbicide'));
     }
     
     match /analysisLog/{logId} {
@@ -148,46 +160,50 @@ service cloud.firestore {
     // ═══ HERBICIDE COLLECTIONS (Standard names) ═════════════════════════════════
     
     match /trials/{trialId} {
-      allow read: if isAuthenticated() && hasCategoryAccess('herbicide');
+      // Allow public read for live trials accessed via physical QR codes in field
+      allow read: if (isAuthenticated() && hasCategoryAccess('herbicide')) || 
+                     (resource != null && ('IsLive' in resource.data && resource.data.IsLive == true));
       allow create: if isAuthenticated() && hasCategoryAccess('herbicide') && enforcesCategoryIsolation(request.resource.data, 'herbicide');
       allow update: if isAuthenticated() && hasCategoryAccess('herbicide') && enforcesCategoryIsolation(request.resource.data, 'herbicide') && canEdit(resource.data);
       allow delete: if isAuthenticated() && hasCategoryAccess('herbicide') && canEdit(resource.data);
     }
     
     match /projects/{projectId} {
-      allow read: if isAuthenticated() && hasCategoryAccess('herbicide');
+      allow read: if (isAuthenticated() && hasCategoryAccess('herbicide')) || request.auth == null;
       allow create: if isAuthenticated() && hasCategoryAccess('herbicide');
       allow update: if isAuthenticated() && hasCategoryAccess('herbicide') && canEdit(resource.data);
       allow delete: if isAuthenticated() && hasCategoryAccess('herbicide') && canEdit(resource.data);
     }
     
     match /formulations/{formulationId} {
-      allow read: if isAuthenticated() && hasCategoryAccess('herbicide');
+      allow read: if (isAuthenticated() && hasCategoryAccess('herbicide')) || request.auth == null;
       allow create: if isAuthenticated() && hasCategoryAccess('herbicide');
       allow update: if isAuthenticated() && hasCategoryAccess('herbicide') && canEdit(resource.data);
       allow delete: if isAuthenticated() && hasCategoryAccess('herbicide') && canEdit(resource.data);
     }
     
     match /blocks/{blockId} {
-      allow read, write: if isAuthenticated() && hasCategoryAccess('herbicide');
+      allow read: if (isAuthenticated() && hasCategoryAccess('herbicide')) || request.auth == null;
+      allow write: if isAuthenticated() && hasCategoryAccess('herbicide');
     }
 
     // ═══ FUNGICIDE COLLECTIONS ══════════════════════════════════════════════════
     
     match /fungicide_trials/{trialId} {
-      allow read: if isAuthenticated() && hasCategoryAccess('fungicide');
+      allow read: if (isAuthenticated() && hasCategoryAccess('fungicide')) || 
+                     (resource != null && ('IsLive' in resource.data && resource.data.IsLive == true));
       allow create: if isAuthenticated() && hasCategoryAccess('fungicide') && enforcesCategoryIsolation(request.resource.data, 'fungicide');
       allow update: if isAuthenticated() && hasCategoryAccess('fungicide') && enforcesCategoryIsolation(request.resource.data, 'fungicide') && canEdit(resource.data);
       allow delete: if isAuthenticated() && hasCategoryAccess('fungicide') && canEdit(resource.data);
     }
     
     match /fungicide_projects/{projectId} {
-      allow read: if isAuthenticated() && hasCategoryAccess('fungicide');
+      allow read: if (isAuthenticated() && hasCategoryAccess('fungicide')) || request.auth == null;
       allow create, update, delete: if isAuthenticated() && hasCategoryAccess('fungicide') && canEdit(resource.data);
     }
     
     match /fungicide_formulations/{formulationId} {
-      allow read: if isAuthenticated() && hasCategoryAccess('fungicide');
+      allow read: if (isAuthenticated() && hasCategoryAccess('fungicide')) || request.auth == null;
       allow create, update, delete: if isAuthenticated() && hasCategoryAccess('fungicide') && canEdit(resource.data);
     }
     
@@ -196,25 +212,27 @@ service cloud.firestore {
     }
     
     match /fungicide_blocks/{id} {
-      allow read, write: if isAuthenticated() && hasCategoryAccess('fungicide');
+      allow read: if (isAuthenticated() && hasCategoryAccess('fungicide')) || request.auth == null;
+      allow write: if isAuthenticated() && hasCategoryAccess('fungicide');
     }
 
     // ═══ PESTICIDE COLLECTIONS ══════════════════════════════════════════════════
     
     match /pesticide_trials/{trialId} {
-      allow read: if isAuthenticated() && hasCategoryAccess('pesticide');
+      allow read: if (isAuthenticated() && hasCategoryAccess('pesticide')) || 
+                     (resource != null && ('IsLive' in resource.data && resource.data.IsLive == true));
       allow create: if isAuthenticated() && hasCategoryAccess('pesticide') && enforcesCategoryIsolation(request.resource.data, 'pesticide');
       allow update: if isAuthenticated() && hasCategoryAccess('pesticide') && enforcesCategoryIsolation(request.resource.data, 'pesticide') && canEdit(resource.data);
       allow delete: if isAuthenticated() && hasCategoryAccess('pesticide') && canEdit(resource.data);
     }
     
     match /pesticide_projects/{projectId} {
-      allow read: if isAuthenticated() && hasCategoryAccess('pesticide');
+      allow read: if (isAuthenticated() && hasCategoryAccess('pesticide')) || request.auth == null;
       allow create, update, delete: if isAuthenticated() && hasCategoryAccess('pesticide') && canEdit(resource.data);
     }
     
     match /pesticide_formulations/{formulationId} {
-      allow read: if isAuthenticated() && hasCategoryAccess('pesticide');
+      allow read: if (isAuthenticated() && hasCategoryAccess('pesticide')) || request.auth == null;
       allow create, update, delete: if isAuthenticated() && hasCategoryAccess('pesticide') && canEdit(resource.data);
     }
     
@@ -223,25 +241,27 @@ service cloud.firestore {
     }
     
     match /pesticide_blocks/{id} {
-      allow read, write: if isAuthenticated() && hasCategoryAccess('pesticide');
+      allow read: if (isAuthenticated() && hasCategoryAccess('pesticide')) || request.auth == null;
+      allow write: if isAuthenticated() && hasCategoryAccess('pesticide');
     }
 
     // ═══ NUTRITION COLLECTIONS ══════════════════════════════════════════════════
     
     match /nutrition_trials/{trialId} {
-      allow read: if isAuthenticated() && hasCategoryAccess('nutrition');
+      allow read: if (isAuthenticated() && hasCategoryAccess('nutrition')) || 
+                     (resource != null && ('IsLive' in resource.data && resource.data.IsLive == true));
       allow create: if isAuthenticated() && hasCategoryAccess('nutrition') && enforcesCategoryIsolation(request.resource.data, 'nutrition');
       allow update: if isAuthenticated() && hasCategoryAccess('nutrition') && enforcesCategoryIsolation(request.resource.data, 'nutrition') && canEdit(resource.data);
       allow delete: if isAuthenticated() && hasCategoryAccess('nutrition') && canEdit(resource.data);
     }
     
     match /nutrition_projects/{projectId} {
-      allow read: if isAuthenticated() && hasCategoryAccess('nutrition');
+      allow read: if (isAuthenticated() && hasCategoryAccess('nutrition')) || request.auth == null;
       allow create, update, delete: if isAuthenticated() && hasCategoryAccess('nutrition') && canEdit(resource.data);
     }
     
     match /nutrition_formulations/{formulationId} {
-      allow read: if isAuthenticated() && hasCategoryAccess('nutrition');
+      allow read: if (isAuthenticated() && hasCategoryAccess('nutrition')) || request.auth == null;
       allow create, update, delete: if isAuthenticated() && hasCategoryAccess('nutrition') && canEdit(resource.data);
     }
     
@@ -250,25 +270,27 @@ service cloud.firestore {
     }
     
     match /nutrition_blocks/{id} {
-      allow read, write: if isAuthenticated() && hasCategoryAccess('nutrition');
+      allow read: if (isAuthenticated() && hasCategoryAccess('nutrition')) || request.auth == null;
+      allow write: if isAuthenticated() && hasCategoryAccess('nutrition');
     }
 
     // ═══ BIOSTIMULANT COLLECTIONS ═══════════════════════════════════════════════
     
     match /biostimulant_trials/{trialId} {
-      allow read: if isAuthenticated() && hasCategoryAccess('biostimulant');
+      allow read: if (isAuthenticated() && hasCategoryAccess('biostimulant')) || 
+                     (resource != null && ('IsLive' in resource.data && resource.data.IsLive == true));
       allow create: if isAuthenticated() && hasCategoryAccess('biostimulant') && enforcesCategoryIsolation(request.resource.data, 'biostimulant');
       allow update: if isAuthenticated() && hasCategoryAccess('biostimulant') && enforcesCategoryIsolation(request.resource.data, 'biostimulant') && canEdit(resource.data);
       allow delete: if isAuthenticated() && hasCategoryAccess('biostimulant') && canEdit(resource.data);
     }
     
     match /biostimulant_projects/{projectId} {
-      allow read: if isAuthenticated() && hasCategoryAccess('biostimulant');
+      allow read: if (isAuthenticated() && hasCategoryAccess('biostimulant')) || request.auth == null;
       allow create, update, delete: if isAuthenticated() && hasCategoryAccess('biostimulant') && canEdit(resource.data);
     }
     
     match /biostimulant_formulations/{formulationId} {
-      allow read: if isAuthenticated() && hasCategoryAccess('biostimulant');
+      allow read: if (isAuthenticated() && hasCategoryAccess('biostimulant')) || request.auth == null;
       allow create, update, delete: if isAuthenticated() && hasCategoryAccess('biostimulant') && canEdit(resource.data);
     }
     
@@ -277,7 +299,8 @@ service cloud.firestore {
     }
     
     match /biostimulant_blocks/{id} {
-      allow read, write: if isAuthenticated() && hasCategoryAccess('biostimulant');
+      allow read: if (isAuthenticated() && hasCategoryAccess('biostimulant')) || request.auth == null;
+      allow write: if isAuthenticated() && hasCategoryAccess('biostimulant');
     }
   }
 }

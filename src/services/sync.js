@@ -218,8 +218,27 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
 
                             if (item.action === 'updateTrialRecord' && item.payload.ID) {
                                 console.log('[HighTechSync] Checking conflict for trial:', item.payload.ID);
-                                const cloudTrials = await apiCall('getTrials', { ID: item.payload.ID }, false, getAppState);
-                                const cloudRecord = Array.isArray(cloudTrials) ? cloudTrials.find(t => String(t.ID) === String(item.payload.ID)) : null;
+                                const curSettings = getAppState()?.settings || {};
+                                let cloudRecord = null;
+                                
+                                if (curSettings.firebaseEnabled) {
+                                    try {
+                                        const { getCategoryCollection } = await import('./firebase.js');
+                                        const { fbGetById } = await import('./firebaseDB.js');
+                                        const cat = item.payload.Category || getAppState()?.activeCategory || 'herbicide';
+                                        const colName = getCategoryCollection(cat, 'trials');
+                                        cloudRecord = await fbGetById(colName, item.payload.ID);
+                                    } catch (fbErr) {
+                                        console.warn('[HighTechSync] Firestore conflict lookup failed:', fbErr.message);
+                                    }
+                                } else if (curSettings.scriptUrl) {
+                                    try {
+                                        const cloudTrials = await apiCall('getTrials', { ID: item.payload.ID }, false, getAppState);
+                                        cloudRecord = Array.isArray(cloudTrials) ? cloudTrials.find(t => String(t.ID) === String(item.payload.ID)) : null;
+                                    } catch (gasErr) {
+                                        console.warn('[HighTechSync] GAS conflict lookup failed:', gasErr.message);
+                                    }
+                                }
                                 
                                 if (cloudRecord) {
                                     const localObs = safeJsonParse(item.payload.EfficacyDataJSON, []);

@@ -388,6 +388,9 @@ export function performANOVA(trials, options = {}) {
     treatments: treatmentNames,
     blocks: design === 'CRD' ? [] : blockIds,
     trtRepCounts,
+    isRBalanced,
+    rHarmonic,
+    isBalanced,
     balanceWarning,
     design,
     cv,
@@ -438,12 +441,13 @@ export function performTukeyHSD(trials, options = {}) {
   // Get critical q value from Studentized Range Distribution
   const qCritical = getStudentizedRangeCritical(alpha, n, dfError);
   
-  // Pairwise comparisons using Tukey-Kramer adjustment
+  // Pairwise comparisons using Tukey-Kramer adjustment for unbalanced sample sizes
   const comparisons = [];
   const trtNames = Object.keys(treatmentMeans);
   
   // Calculate harmonic mean of replication sizes for a representative single HSD value
   const rValues = Object.values(trtRepCounts);
+  const isRBalanced = anova.isRBalanced !== undefined ? anova.isRBalanced : rValues.every(val => val === rValues[0]);
   const sumInvR = rValues.reduce((sum, rVal) => sum + 1 / (rVal || 1), 0);
   const rHarmonic = rValues.length / (sumInvR || 1);
   const globalHsd = qCritical * Math.sqrt(msError / rHarmonic);
@@ -458,8 +462,12 @@ export function performTukeyHSD(trials, options = {}) {
       
       const rA = trtRepCounts[trtA] || 1;
       const rB = trtRepCounts[trtB] || 1;
-      // Tukey-Kramer adjustment for unequal replications
-      const pairHsd = qCritical * Math.sqrt((msError / 2) * (1 / rA + 1 / rB));
+      // Exact Tukey-Kramer adjustment for unequal replications:
+      // pairHsd = q_critical * sqrt( (msError / 2) * (1/rA + 1/rB) )
+      // When rA == rB, this simplifies identically to q_critical * sqrt(msError / r)
+      const pairStdError = Math.sqrt((msError / 2) * (1 / rA + 1 / rB));
+      const pairHsd = qCritical * pairStdError;
+      const qObserved = pairStdError > 0 ? (diff / pairStdError) : 0;
       
       comparisons.push({
         treatmentA: trtA,
@@ -468,7 +476,12 @@ export function performTukeyHSD(trials, options = {}) {
         meanB,
         difference: diff,
         significant: diff > pairHsd,
-        hsd: pairHsd
+        hsd: pairHsd,
+        qObserved,
+        qCritical,
+        standardError: pairStdError,
+        rA,
+        rB
       });
     }
   }
@@ -482,10 +495,14 @@ export function performTukeyHSD(trials, options = {}) {
     qCritical,
     comparisons,
     groups,
-    test: 'Tukey HSD',
+    test: isRBalanced ? 'Tukey HSD' : 'Tukey-Kramer HSD',
+    method: isRBalanced ? 'Tukey HSD (Balanced)' : 'Tukey-Kramer (Harmonic Mean & Unbalanced Pairwise Adjustment)',
+    isUnbalanced: !isRBalanced,
+    rHarmonic,
     alpha
   };
 }
+
 
 /**
  * Dunnett's Test - Compare all treatments vs control (adjusted for unequal sample sizes)

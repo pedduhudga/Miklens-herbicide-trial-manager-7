@@ -8,6 +8,7 @@
 
 import { apiCall } from './db.js';
 import { stripPhotoArrayForMirror } from '../utils/photoUtils.js';
+import { db } from './dexieDB.js';
 
 const MIRROR_QUEUE_KEY = 'sheetMirrorQueue';
 const MAX_CELL_CHARS = 45000; // safety margin below Sheets' 50K limit
@@ -20,32 +21,63 @@ const LARGE_JSON_FIELDS = new Set([
 ]);
 
 let _isFlushing = false;
+let _memQueue = null;
 
-function loadQueue() {
+// Initialize queue from Dexie (primary) and localStorage (legacy fallback)
+if (typeof window !== 'undefined') {
   try {
     const raw = localStorage.getItem(MIRROR_QUEUE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    if (raw) _memQueue = JSON.parse(raw);
   } catch {
-    return [];
+    _memQueue = [];
+  }
+
+  // Load and hydrate from Dexie
+  if (db && db.sheetMirrorQueue) {
+    db.sheetMirrorQueue.toArray().then(items => {
+      if (items && items.length > 0) {
+        _memQueue = items;
+      } else if (_memQueue && _memQueue.length > 0) {
+        // Migrate initial items into Dexie
+        db.sheetMirrorQueue.bulkPut(_memQueue).catch(() => {});
+      }
+    }).catch(err => {
+      console.warn('[SheetMirror] Dexie queue load warning:', err.message);
+    });
   }
 }
 
+function loadQueue() {
+  if (_memQueue !== null) return _memQueue;
+  try {
+    const raw = localStorage.getItem(MIRROR_QUEUE_KEY);
+    _memQueue = raw ? JSON.parse(raw) : [];
+  } catch {
+    _memQueue = [];
+  }
+  return _memQueue;
+}
+
 function saveQueue(q) {
+  _memQueue = q;
+
+  // 1. Primary persistence: Save to Dexie IndexedDB (no 5MB quota restrictions)
+  if (db && db.sheetMirrorQueue) {
+    db.sheetMirrorQueue.clear().then(() => {
+      if (q.length > 0) {
+        return db.sheetMirrorQueue.bulkPut(q);
+      }
+    }).catch(idbErr => {
+      console.error('[SheetMirror] Dexie persistence error:', idbErr.message);
+    });
+  }
+
+  // 2. Secondary persistence: Best-effort localStorage mirror (without destructive pruning)
   try {
     localStorage.setItem(MIRROR_QUEUE_KEY, JSON.stringify(q));
   } catch (e) {
-    if (e?.name === 'QuotaExceededError' || String(e).includes('QuotaExceededError')) {
-      console.warn('[SheetMirror] localStorage quota exceeded — pruning old items');
-      const pruned = q.slice(Math.ceil(q.length / 2));
-      try {
-        localStorage.setItem(MIRROR_QUEUE_KEY, JSON.stringify(pruned));
-      } catch {
-        console.error('[SheetMirror] Cannot save even after pruning — clearing queue');
-        localStorage.removeItem(MIRROR_QUEUE_KEY);
-      }
-    } else {
-      console.error('[SheetMirror] Failed to save queue:', e);
-    }
+    // If localStorage quota is reached, do NOT delete or prune data — data is securely stored in Dexie!
+    console.warn('[SheetMirror] localStorage quota reached; queue is safely preserved in IndexedDB.');
   }
 }
 

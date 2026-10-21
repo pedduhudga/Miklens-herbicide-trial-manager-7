@@ -1,3 +1,93 @@
+import { db } from './dexieDB.js';
+
+/**
+ * Offline Geocache Helpers
+ * Caches ambient weather and soil data indexed by rounded coordinates and date
+ * ensuring uninterrupted operation when agronomists collect field trial data offline.
+ */
+export function getGeoKey(type, lat, lon, date) {
+    const latR = Number(lat).toFixed(2);
+    const lonR = Number(lon).toFixed(2);
+    const dateStr = date || new Date().toISOString().split('T')[0];
+    return `${type}_${latR}_${lonR}_${dateStr}`;
+}
+
+export async function getCachedGeoData(type, lat, lon, date) {
+    const key = getGeoKey(type, lat, lon, date);
+    try {
+        if (db && db.geoCache) {
+            const entry = await db.geoCache.get(key);
+            if (entry && entry.data) {
+                return { ...entry.data, fromCache: true, offline: (typeof navigator !== 'undefined' ? !navigator.onLine : false) };
+            }
+        }
+    } catch (_) {}
+    try {
+        const raw = localStorage.getItem(`geo_${key}`);
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && parsed.data) {
+                return { ...parsed.data, fromCache: true, offline: (typeof navigator !== 'undefined' ? !navigator.onLine : false) };
+            }
+        }
+    } catch (_) {}
+    return null;
+}
+
+export async function setCachedGeoData(type, lat, lon, date, data) {
+    if (!data) return;
+    const key = getGeoKey(type, lat, lon, date);
+    const latR = Number(lat).toFixed(2);
+    const lonR = Number(lon).toFixed(2);
+    const dateStr = date || new Date().toISOString().split('T')[0];
+    const record = {
+        key,
+        type,
+        lat: latR,
+        lon: lonR,
+        date: dateStr,
+        data,
+        timestamp: Date.now()
+    };
+    try {
+        if (db && db.geoCache) {
+            await db.geoCache.put(record);
+        }
+    } catch (_) {}
+    try {
+        localStorage.setItem(`geo_${key}`, JSON.stringify(record));
+    } catch (_) {}
+}
+
+/**
+ * Standard USDA Soil Texture Classification
+ * Calculates texture triangle class from percentage clay and sand
+ */
+export function calculateSoilTexture(clayPct, sandPct) {
+    if (clayPct === null || sandPct === null || isNaN(clayPct) || isNaN(sandPct)) return null;
+    const siltPct = Math.max(0, 100 - clayPct - sandPct);
+    if (clayPct >= 40) {
+        if (sandPct >= 45) return 'Sandy Clay';
+        if (siltPct >= 40) return 'Silty Clay';
+        return 'Clay';
+    } else if (clayPct >= 27 && clayPct < 40) {
+        if (sandPct >= 45) return 'Sandy Clay Loam';
+        if (sandPct <= 20) return 'Silty Clay Loam';
+        return 'Clay Loam';
+    } else if (clayPct >= 20 && clayPct < 27) {
+        if (siltPct >= 50) return 'Silty Clay Loam';
+        if (sandPct <= 20) return 'Clay Loam';
+        return 'Loam';
+    } else {
+        if (siltPct >= 80 && clayPct < 12) return 'Silt';
+        if (siltPct >= 50) return 'Silt Loam';
+        if (sandPct >= 85 && (siltPct + 1.5 * clayPct) < 15) return 'Sand';
+        if (sandPct >= 70 && (siltPct + 2 * clayPct) < 30) return 'Loamy Sand';
+        if (sandPct >= 50) return 'Sandy Loam';
+        return 'Loam';
+    }
+}
+
 async function fetchWithRetry(url, options = {}, retries = 3, backoff = 1000) {
     try {
         const response = await fetch(url, options);
@@ -30,6 +120,17 @@ export async function fetchWeather(lat, lon, date = null, getAppState) {
             return null;
         }
 
+        const dateStr = date; // YYYY-MM-DD
+
+        // Offline Fast-Path: If device is offline, retrieve from persistent geocache
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            const offlineCached = await getCachedGeoData('weather', latNum, lonNum, dateStr);
+            if (offlineCached) {
+                console.info('[Weather] Device offline. Returning geocached weather data for', latNum, lonNum, dateStr);
+                return offlineCached;
+            }
+        }
+
         const targetDate = new Date(date);
         if (isNaN(targetDate.getTime())) {
             console.error("fetchWeather: Invalid Date object:", date);
@@ -43,8 +144,6 @@ export async function fetchWeather(lat, lon, date = null, getAppState) {
         const diffTime = today - targetDate;
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-        const dateStr = date; // YYYY-MM-DD
-
         // 1. TRY PREMIUM: OpenWeatherMap (if key provided)
         const appState = typeof getAppState === 'function' ? getAppState() : null;
         if (appState?.settings?.openWeatherMapKey) {
@@ -56,7 +155,7 @@ export async function fetchWeather(lat, lon, date = null, getAppState) {
                     const data = await response.json();
                     if (data.data && data.data[0]) {
                         const w = data.data[0];
-                        return {
+                        const result = {
                             temp: w.temp,
                             humidity: w.humidity,
                             wind: w.wind_speed,
@@ -65,6 +164,8 @@ export async function fetchWeather(lat, lon, date = null, getAppState) {
                             cloudCover: w.clouds,
                             provider: 'OpenWeatherMap'
                         };
+                        await setCachedGeoData('weather', latNum, lonNum, dateStr, result);
+                        return result;
                     }
                 }
             } catch (e) { console.warn('OpenWeatherMap failed, trying other providers...', e); }
@@ -73,7 +174,6 @@ export async function fetchWeather(lat, lon, date = null, getAppState) {
         // 1.5 TRY Visual Crossing (if key provided or selected)
         if (appState?.settings?.visualCrossingKey || (typeof document !== 'undefined' && document.getElementById('settings-soil-provider')?.value === 'visual-crossing')) {
             try {
-                // If they selected it but no key in state, maybe they typed it in the input recently?
                 const vcKey = appState?.settings?.visualCrossingKey || (typeof document !== 'undefined' ? document.getElementById('settings-vc-key')?.value : null);
                 if (vcKey) {
                     const vcUrl = `https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline/${latNum},${lonNum}/${dateStr}?key=${vcKey}&unitGroup=metric&include=days`;
@@ -82,7 +182,7 @@ export async function fetchWeather(lat, lon, date = null, getAppState) {
                         const data = await response.json();
                         if (data.days && data.days.length > 0) {
                             const w = data.days[0];
-                            return {
+                            const result = {
                                 temp: w.tempmax || w.temp,
                                 humidity: w.humidity,
                                 wind: w.windspeed,
@@ -92,6 +192,8 @@ export async function fetchWeather(lat, lon, date = null, getAppState) {
                                 sunlight: w.solarradiation,
                                 provider: 'Visual Crossing'
                             };
+                            await setCachedGeoData('weather', latNum, lonNum, dateStr, result);
+                            return result;
                         }
                     }
                 }
@@ -109,7 +211,7 @@ export async function fetchWeather(lat, lon, date = null, getAppState) {
                         const data = await response.json();
                         if (data.timelines && data.timelines.daily && data.timelines.daily.length > 0) {
                             const w = data.timelines.daily[0].values;
-                            return {
+                            const result = {
                                 temp: w.temperatureMax,
                                 humidity: w.humidityAvg,
                                 wind: w.windSpeedMax,
@@ -119,6 +221,8 @@ export async function fetchWeather(lat, lon, date = null, getAppState) {
                                 sunlight: w.solarRadiationAvg,
                                 provider: 'Tomorrow.io'
                             };
+                            await setCachedGeoData('weather', latNum, lonNum, dateStr, result);
+                            return result;
                         }
                     }
                 }
@@ -152,16 +256,14 @@ export async function fetchWeather(lat, lon, date = null, getAppState) {
                 console.warn('Weather date mismatch! API returned:', data.daily.time[0], 'Expected:', dateStr);
             }
 
-            // Sanity check: if returned date is not what we asked for, and we are in strict mode
             if (index === -1 && data.daily.time[0] !== dateStr) {
-                // If the mismatch is significant, return null.
                 if (Math.abs(new Date(data.daily.time[0]) - targetDate) > 86400000) {
                     console.error('Weather date mismatch too large. Aborting.');
                     return null;
                 }
             }
 
-            return {
+            const result = {
                 temp: data.daily.temperature_2m_max[safeIndex],
                 humidity: data.daily.relative_humidity_2m_mean[safeIndex],
                 wind: data.daily.wind_speed_10m_max[safeIndex],
@@ -171,11 +273,22 @@ export async function fetchWeather(lat, lon, date = null, getAppState) {
                 sunlight: data.daily.shortwave_radiation_sum ? data.daily.shortwave_radiation_sum[safeIndex] : null,
                 provider: 'Open-Meteo'
             };
+            await setCachedGeoData('weather', latNum, lonNum, dateStr, result);
+            return result;
         }
         return null;
     } catch (e) {
         console.error("Weather fetch failed:", e);
-        console.error("Failed URL:", url);
+        // Offline Fallback: If network failed or device disconnected in field plot, retrieve from persistent geocache
+        const latNum = parseFloat(lat);
+        const lonNum = parseFloat(lon);
+        if (!isNaN(latNum) && !isNaN(lonNum) && date) {
+            const fallbackCached = await getCachedGeoData('weather', latNum, lonNum, date);
+            if (fallbackCached) {
+                console.info('[Weather] Network error. Serving offline geocached weather data for', latNum, lonNum, date);
+                return fallbackCached;
+            }
+        }
         if (typeof showToast === 'function') {
             showToast('Could not fetch weather data.', 'error');
         }
@@ -189,11 +302,20 @@ export async function fetchSoilData(lat, lon, date = null) {
         const lonNum = parseFloat(lon);
         if (isNaN(latNum) || isNaN(lonNum)) return null;
 
-        let temp = null;
-        let moisture = null;
-
         const todayStr = new Date().toISOString().split('T')[0];
         const targetDateStr = date || todayStr;
+
+        // Offline Fast-Path: Check offline geocache first if disconnected in the field
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            const offlineCached = await getCachedGeoData('soil', latNum, lonNum, targetDateStr);
+            if (offlineCached) {
+                console.info('[Soil] Device offline. Returning geocached soil profile for', latNum, lonNum, targetDateStr);
+                return offlineCached;
+            }
+        }
+
+        let temp = null;
+        let moisture = null;
 
         const isPast = targetDateStr < todayStr;
         const baseUrl = isPast 
@@ -229,21 +351,67 @@ export async function fetchSoilData(lat, lon, date = null) {
             console.warn("Open-Meteo soil fetch failed:", e);
         }
 
-        // Return real physical measurements if available; do NOT fabricate hardcoded or pseudo-random soil chemical data
-        return {
+        // SoilGrids (ISRIC Global Soil Information) integration for real pedological data
+        let soilPH = null;
+        let soilClay = null;
+        let soilSand = null;
+        let soilOC = null;
+
+        try {
+            const soilGridsUrl = `https://rest.isric.org/soilgrids/v2.0/properties/query?lon=${lonNum}&lat=${latNum}&property=phh2o&property=clay&property=sand&property=soc&depth=0-5cm`;
+            const sgRes = await fetchWithRetry(soilGridsUrl, {}, 1, 800);
+            if (sgRes.ok) {
+                const sgData = await sgRes.json();
+                const layers = sgData?.properties?.layers || [];
+                layers.forEach(layer => {
+                    const meanVal = layer?.depths?.[0]?.values?.mean;
+                    if (meanVal !== undefined && meanVal !== null) {
+                        if (layer.name === 'phh2o') soilPH = parseFloat((meanVal / 10).toFixed(1));
+                        if (layer.name === 'clay') soilClay = parseFloat((meanVal / 10).toFixed(1));
+                        if (layer.name === 'sand') soilSand = parseFloat((meanVal / 10).toFixed(1));
+                        if (layer.name === 'soc') soilOC = parseFloat((meanVal / 10).toFixed(1));
+                    }
+                });
+            }
+        } catch (sgErr) {
+            console.warn("SoilGrids fetch failed (falling back to cached/ambient):", sgErr);
+        }
+
+        const soilTexture = calculateSoilTexture(soilClay, soilSand);
+
+        const soilResult = {
             soilTemp: temp !== null ? parseFloat(temp.toFixed(1)) : null,
             soilMoisture: moisture !== null ? parseFloat(moisture.toFixed(1)) : null,
-            soilPH: null,
-            soilClay: null,
-            soilSand: null,
-            soilOC: null,
-            soilTexture: null
+            soilPH,
+            soilClay,
+            soilSand,
+            soilOC,
+            soilTexture,
+            provider: soilPH !== null ? 'Open-Meteo + SoilGrids' : 'Open-Meteo'
         };
+
+        // Persist to offline geocache
+        await setCachedGeoData('soil', latNum, lonNum, targetDateStr, soilResult);
+
+        return soilResult;
     } catch (e) {
         console.error("fetchSoilData failed:", e);
+        // Fallback to offline geocache if network exception occurred
+        const latNum = parseFloat(lat);
+        const lonNum = parseFloat(lon);
+        if (!isNaN(latNum) && !isNaN(lonNum)) {
+            const todayStr = new Date().toISOString().split('T')[0];
+            const targetDateStr = date || todayStr;
+            const fallbackSoil = await getCachedGeoData('soil', latNum, lonNum, targetDateStr);
+            if (fallbackSoil) {
+                console.info('[Soil] Network error. Serving offline geocached soil profile for', latNum, lonNum, targetDateStr);
+                return fallbackSoil;
+            }
+        }
         return null;
     }
 }
+
 
 /**
  * Evaluates spray application weather suitability and chemical rainfastness risk.

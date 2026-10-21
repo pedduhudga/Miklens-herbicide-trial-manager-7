@@ -23,8 +23,9 @@ import {
   AlertTriangle, RefreshCw, Satellite, Map as MapIcon
 } from 'lucide-react';
 
-// Leaflet is loaded from CDN in index.html
-const L = window.L;
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+
 
 export default function PlotMap({ projectId, onClose }) {
   const { state } = useAppState();

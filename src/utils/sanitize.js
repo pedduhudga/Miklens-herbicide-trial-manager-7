@@ -45,11 +45,28 @@ export function sanitizeHtml(html) {
 }
 
 import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 
 marked.setOptions({
   gfm: true,
   breaks: true
 });
+
+function purifySafe(rawHtml) {
+  if (typeof window !== 'undefined' && DOMPurify && typeof DOMPurify.sanitize === 'function') {
+    return DOMPurify.sanitize(rawHtml, {
+      ADD_TAGS: ['mark'],
+      ADD_ATTR: ['target', 'rel', 'data-trial-id', 'data-formula-id', 'title', 'class', 'style'],
+      ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|hash):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i
+    });
+  }
+  // Fallback for non-browser / unit test environment without jsdom window
+  return rawHtml
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/\son\w+\s*=\s*(['"]).*?\1/gi, '')
+    .replace(/\son\w+\s*=\s*[^>\s]+/gi, '')
+    .replace(/javascript:/gi, '');
+}
 
 /**
  * Sanitize and format AI chat content — converts markdown tables, headers, lists,
@@ -131,7 +148,7 @@ export function sanitizeAiContent(content, options = {}) {
     return `<a href="${safeUrl}" class="${appliedClass}"${appliedStyle} rel="noopener noreferrer" target="_blank">${text}</a>`;
   });
 
-  return html;
+  return purifySafe(html);
 }
 
 /**

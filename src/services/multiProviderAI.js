@@ -57,7 +57,23 @@ const PROVIDERS = [
 ];
 
 // Track temporary provider/model outages (503 high demand, 404 deprecated)
-const providerBlockedUntil = {};
+// Synchronized seamlessly with ai.js window._geminiBlockedModels
+const providerBlockedUntil = new Proxy({}, {
+  get(target, prop) {
+    if (typeof window !== 'undefined' && window._geminiBlockedModels && window._geminiBlockedModels[prop]) {
+      return Math.max(target[prop] || 0, window._geminiBlockedModels[prop]);
+    }
+    return target[prop] || 0;
+  },
+  set(target, prop, value) {
+    target[prop] = value;
+    if (typeof window !== 'undefined') {
+      window._geminiBlockedModels = window._geminiBlockedModels || {};
+      window._geminiBlockedModels[prop] = value;
+    }
+    return true;
+  }
+});
 
 function getOrderedProviders() {
   const settings = getSettings();
@@ -1255,3 +1271,20 @@ OUTPUT FORMAT - JSON ONLY (no markdown code blocks, no explanation):
 }
 
 export { PROVIDERS, getAPIKeys };
+
+// Reciprocal exports from ai.js to unify both AI services into a single consolidated subsystem
+export {
+  resetGeminiState,
+  getActiveApiModel,
+  getGenAIClient,
+  _callGeminiApiWithRetries,
+  callGeminiApi,
+  callGeminiApiStream,
+  analyzeWithCategoryContext,
+  identifyWeedsFromPhoto,
+  shouldAutoIdentifyGeneralPhotoWeeds,
+  analyzeGeneralPhotoWeeds,
+  analyzePhotoForEfficacy,
+  initAI
+} from './ai.js';
+

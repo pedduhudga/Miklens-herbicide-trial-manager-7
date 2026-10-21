@@ -511,7 +511,7 @@ export default function Dashboard({ onMenuClick }) {
           {/* Subtle Panoramic Field Backdrop on the right */}
           <div className="absolute inset-y-0 right-0 w-full sm:w-2/3 lg:w-1/2 pointer-events-none overflow-hidden select-none">
             <img
-              src="/field_banner.jpg"
+              src="./field_banner.jpg"
               alt="Agronomic Field"
               className="w-full h-full object-cover object-right opacity-30"
             />

@@ -1,5 +1,7 @@
 import { saveAs } from 'file-saver';
 import jsPDF from 'jspdf';
+import pptxgen from 'pptxgenjs';
+import htmlDocx from 'html-docx-js/dist/html-docx.js';
 import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryValue } from './categoryConfig.js';
 
 // Helper utilities for DOCX exports
@@ -229,8 +231,9 @@ export async function exportScientificReportAsDOC(scope, state, options = {}) {
         // Wait a tiny bit to ensure the UI paints the toast before the heavy blocking execution of html-docx-js
         await new Promise(r => setTimeout(r, 100));
 
-        if (window.htmlDocx) {
-            const converted = window.htmlDocx.asBlob(fullHtml, {
+        const docxEngine = window.htmlDocx || htmlDocx;
+        if (docxEngine && typeof docxEngine.asBlob === 'function') {
+            const converted = docxEngine.asBlob(fullHtml, {
                 orientation: 'portrait',
                 margins: { top: 1440, right: 1440, bottom: 1440, left: 1440 }
             });
@@ -448,8 +451,9 @@ export async function exportRegulatoryReportAsDOC(project, state, options = {}) 
 
         await new Promise(r => setTimeout(r, 100));
 
-        if (window.htmlDocx) {
-            const converted = window.htmlDocx.asBlob(fullHtml, {
+        const docxEngineReg = window.htmlDocx || htmlDocx;
+        if (docxEngineReg && typeof docxEngineReg.asBlob === 'function') {
+            const converted = docxEngineReg.asBlob(fullHtml, {
                 orientation: 'portrait',
                 margins: { top: 1440, right: 1440, bottom: 1440, left: 1440 }
             });
@@ -539,9 +543,9 @@ export async function exportTrialCardsPDF(trials, project, category = null) {
 export async function exportTrialToPPTX(trial, options = {}) {
     if (!trial) return;
 
-    // Dynamic import of pptxgenjs (loaded via CDN in index.html)
-    const PptxGenJS = window.PptxGenJS;
-    if (!PptxGenJS) {
+    // pptxgenjs bundled via npm package
+    const PptxGenClass = pptxgen || window.PptxGenJS;
+    if (!PptxGenClass) {
         window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'PPTX library not loaded. Please check your connection.', type: 'error' } }));
         return;
     }
@@ -552,7 +556,7 @@ export async function exportTrialToPPTX(trial, options = {}) {
     const targetField = catConfig.targetField || 'WeedSpecies';
     const targetVal = trial[targetField] || trial.WeedSpecies || trial.DiseaseTarget || trial.PestTarget || trial.NutrientType || trial.BiostimulantType || 'N/A';
 
-    const pptx = new PptxGenJS();
+    const pptx = typeof PptxGenClass === 'function' ? new PptxGenClass() : new PptxGenClass.default();
     pptx.title = `Trial Report: ${trial.FormulationName || 'Unknown'}`;
     pptx.subject = `${catConfig.name} Trial Analysis`;
     pptx.author = trial.InvestigatorName || 'Trial Manager';

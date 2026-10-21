@@ -847,7 +847,16 @@ if (typeof window !== 'undefined') {
   window.resetGeminiState = resetGeminiState;
   window._callGeminiApiWithRetries = _callGeminiApiWithRetries;
   window.callGeminiApi = callGeminiApi;
-}
+// ── Consolidated AI Unified Gateway ──────────────────────────────────────────
+export {
+  analyzePhoto,
+  analyzePhotosBatch,
+  identifyWeedFromPhoto,
+  generateTextWithAI,
+  parseHarvestTextLog,
+  getAPIKeys,
+  PROVIDERS
+} from './multiProviderAI.js';
 
 export class MultiProviderAI {
   async analyzePhoto(imageData, context, onProgress) {

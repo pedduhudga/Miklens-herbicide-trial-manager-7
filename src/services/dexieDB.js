@@ -17,6 +17,14 @@ db.version(1).stores({
   settings: 'ID'
 });
 
+db.version(2).stores({
+  sheetMirrorQueue: 'id, action, timestamp'
+});
+
+db.version(3).stores({
+  geoCache: 'key, type, lat, lon, date, timestamp'
+});
+
 /**
  * Migration helper to copy data from a raw legacy IndexedDB store into a Dexie table.
  */

@@ -55,23 +55,18 @@ export default defineConfig({
             }
 
             // Charts & Graphs
-            if (id.includes('chart.js') || id.includes('vis-network')) {
+            if (id.includes('chart.js')) {
               return 'vendor-charts';
             }
 
             // Maps
-            if (id.includes('leaflet') || id.includes('react-leaflet')) {
+            if (id.includes('leaflet')) {
               return 'vendor-maps';
             }
 
             // AI libraries
             if (id.includes('@google') || id.includes('genai')) {
               return 'vendor-ai';
-            }
-
-            // Image processing
-            if (id.includes('cropperjs') || id.includes('react-cropper')) {
-              return 'vendor-image';
             }
 
             // QR codes

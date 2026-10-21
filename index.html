@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://apis.google.com https://*.googleapis.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://unpkg.com https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://* https://*.tile.openstreetmap.org https://unpkg.com https://lh3.googleusercontent.com https://*.googleusercontent.com https://drive.google.com https://*.google.com; connect-src 'self' https://*.firebaseio.com https://*.googleapis.com https://generativelanguage.googleapis.com https://script.google.com https://script.googleusercontent.com https://lh3.googleusercontent.com https://*.googleusercontent.com https://drive.google.com https://images.weserv.nl https://api.openweathermap.org https://api.gemini.google.com https://*.open-meteo.com https://api.tomorrow.io https://weather.visualcrossing.com https://cdn.jsdelivr.net https://unpkg.com https://api.groq.com https://api.mistral.ai; frame-src 'self' https://*.firebaseapp.com https://*.googleapis.com;" />
     
-    <!-- Viewport - Locked for native-feeling professional PWA (prevents viewport zoom & wobble) -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, shrink-to-fit=no" />
+    <!-- Viewport - Accessible and responsive with safe area support (WCAG 2.1 AA compliant) -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -18,56 +18,15 @@
     <meta name="color-scheme" content="light dark" />
     <meta name="format-detection" content="telephone=no" />
     <meta name="robots" content="noindex, nofollow" />
-    <script>
-      // Lock mobile viewport zoom & prevent accidental double-tap or pinch-to-zoom on PWA shell
-      (function() {
-        if (typeof window !== 'undefined') {
-          // Disable Safari gesture zoom on main document
-          document.addEventListener('gesturestart', function(e) {
-            if (!e.target.closest('.allow-pinch-zoom')) {
-              e.preventDefault();
-            }
-          }, { passive: false });
-          document.addEventListener('gesturechange', function(e) {
-            if (!e.target.closest('.allow-pinch-zoom')) {
-              e.preventDefault();
-            }
-          }, { passive: false });
-          // Disable double-tap-to-zoom jumping
-          var lastTouch = 0;
-          document.addEventListener('touchend', function(e) {
-            var now = Date.now();
-            if (now - lastTouch <= 300) {
-              if (!e.target.closest('input, textarea, select, .allow-double-tap')) {
-                e.preventDefault();
-              }
-            }
-            lastTouch = now;
-          }, { passive: false });
-        }
-      })();
-    </script>
 
     <!-- Preconnect & DNS-Prefetch for lightning-fast network resolution -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="dns-prefetch" href="https://fonts.googleapis.com">
     <link rel="dns-prefetch" href="https://fonts.gstatic.com">
-    <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com">
-    <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-    <link rel="dns-prefetch" href="https://unpkg.com">
 
-    <!-- External Typography & Lightweight Stylesheets -->
+    <!-- External Typography -->
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.css" rel="stylesheet" media="print" onload="this.media='all'">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" media="print" onload="this.media='all'">
-
-    <!-- Non-blocking External Utility Libraries (deferred to unlock instant FCP/TTI) -->
-    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/html-docx-js@0.3.1/dist/html-docx.min.js"></script>
-    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.min.js"></script>
-    <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <!-- PWA Manifest & Multi-Resolution Icons -->
     <link rel="manifest" href="./manifest.json">
