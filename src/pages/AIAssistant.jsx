@@ -1574,6 +1574,7 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
       window.speechSynthesis.cancel();
     }
     setSpeakingMsgIdx(null);
+    setExpandedSourcesIdx(null);
     setInput('');
     if (inputRef.current) {
       inputRef.current.style.height = 'auto';
@@ -1686,6 +1687,7 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                         window.speechSynthesis.cancel();
                       }
                       setSpeakingMsgIdx(null);
+                      setExpandedSourcesIdx(null);
                       setStreamingMessage('');
                       setIsLoading(false);
                       setSearchQuery('');
@@ -2144,11 +2146,12 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                   </div>
                 ) : (
                   /* ─── Render Conversation Turn by Turn ─── */
-                  filteredHistory.map((msg) => {
-                    const originalIndex = history.indexOf(msg);
+                  filteredHistory.map((msg, idx) => {
+                    const originalIndex = history.indexOf(msg) !== -1 ? history.indexOf(msg) : idx;
                     const parsedParts = msg.role === 'assistant' 
                       ? parseMessageContent(msg.content) 
                       : [{ type: 'text', text: msg.content }];
+                    const isSourcesExpanded = expandedSourcesIdx === originalIndex;
 
                     return (
                       <div key={originalIndex} className="group/msg w-full">
@@ -2286,13 +2289,13 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                                     <>
                                       <button
                                         type="button"
-                                        onClick={() => setExpandedSourcesIdx(expandedSourcesIdx === idx ? null : idx)}
+                                        onClick={() => setExpandedSourcesIdx(isSourcesExpanded ? null : originalIndex)}
                                         className="flex items-center gap-1 text-emerald-700 bg-emerald-50 hover:bg-emerald-100/80 border border-emerald-200/70 px-2 py-0.5 rounded-md font-semibold cursor-pointer transition active:scale-95"
                                         title="Click to inspect verified ground-truth sources retrieved for this answer"
                                       >
                                         <Sparkles className="w-2.5 h-2.5 text-emerald-500" />
                                         <span>Hybrid RAG ({msg.meta.rag.chunkCount} docs • {msg.meta.rag.retrievalDuration}ms)</span>
-                                        <ChevronDown className={`w-3 h-3 text-emerald-600 transition-transform ${expandedSourcesIdx === idx ? 'rotate-180' : ''}`} />
+                                        <ChevronDown className={`w-3 h-3 text-emerald-600 transition-transform ${isSourcesExpanded ? 'rotate-180' : ''}`} />
                                       </button>
                                       {msg.meta.rag.faithfulness && (
                                         <span 
@@ -2318,7 +2321,7 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                               )}
 
                               {/* Interactive Ground-Truth Sources Drawer */}
-                              {expandedSourcesIdx === idx && msg.meta?.rag?.sources?.length > 0 && (
+                              {isSourcesExpanded && msg.meta?.rag?.sources?.length > 0 && (
                                 <div className="mt-3 p-3.5 rounded-xl bg-slate-950 text-slate-200 border border-emerald-500/30 shadow-lg text-xs not-prose space-y-2.5">
                                   <div className="flex items-center justify-between pb-2 border-b border-slate-800">
                                     <div className="flex items-center gap-1.5 font-bold text-emerald-400 text-[11px] uppercase tracking-wider">
