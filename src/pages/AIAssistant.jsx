@@ -30,12 +30,22 @@ import { initRAGIndex, retrieveRAGContext, invalidateRAGCache } from '../service
 import { auditResponseFaithfulness } from '../services/rag/ragFaithfulness.js';
 import { DEFAULT_GEMINI_MODEL } from '../utils/aiConstants.js';
 import { findDuplicateFormulation } from '../utils/formulationDuplicateUtils.js';
-import { detectAndExecuteAgronomicTool, toolAuditTrialDoctor, toolCheckSprayWindow, toolRunAnova, toolEvaluateColbyAndCost, toolParseVoiceScout } from '../services/aiTools.js';
+import { 
+  detectAndExecuteAgronomicTool, 
+  toolAuditTrialDoctor, 
+  toolCheckSprayWindow, 
+  toolRunAnova, 
+  toolEvaluateColbyAndCost, 
+  toolParseVoiceScout,
+  toolHeadToHeadBenchmark,
+  toolQueryDatabaseAggregator,
+  toolDoseResponseSimulator
+} from '../services/aiTools.js';
 import { analyzeWeedCover } from '../utils/imageAnalysis.js';
 import ChatArtifactRenderer from '../components/ChatArtifactRenderer.jsx';
 
 const THINKING_PHASES = [
-  { icon: '⚡', label: 'Executing Next-Gen Hybrid RAG retrieval (BM25 + 256D Vector)...' },
+  { icon: '⚡', label: 'Executing Next-Gen Hybrid RAG 2.0 retrieval (BM25 + 512D Dense Vector)...' },
   { icon: '🧬', label: 'Analyzing retrieved formulation chemistry & synergy...' },
   { icon: '📊', label: 'Synthesizing ground-truth field plot benchmarks...' },
   { icon: '✨', label: 'Finalizing context-aware agronomic synthesis...' }
@@ -1164,6 +1174,42 @@ export default function AIAssistant({ onMenuClick }) {
       );
       logCategoryIsolationMetrics('AI Assistant Chat', activeCategory, aiContext.isolationMetrics);
 
+      // === LIVE REAL-TIME DATABASE TELEMETRY & SYNOPSIS ===
+      const liveCatTrials = (state.trials || []).filter(t => (t.Category || 'herbicide').toLowerCase() === activeCategory.toLowerCase());
+      const liveCatForms = (state.formulations || []).filter(f => (f.Category || 'herbicide').toLowerCase() === activeCategory.toLowerCase());
+      const liveActiveTrials = liveCatTrials.filter(t => (t.Status || t.status || '').toLowerCase() === 'active').length;
+      const liveFinalizedTrials = liveCatTrials.filter(t => (t.Status || t.status || '').toLowerCase() === 'completed' || (t.Status || t.status || '').toLowerCase() === 'finalized').length;
+      const liveTargets = [...new Set(liveCatTrials.map(t => t.WeedTarget || t.Target || t.target || t.TargetPest || t.Crop).filter(Boolean))];
+      
+      const formStats = {};
+      for (const t of liveCatTrials) {
+        const name = t.Formulation || t.formulation || t.FormulationName || 'Unknown';
+        if (!formStats[name]) formStats[name] = { count: 0, maxEff: 0 };
+        formStats[name].count++;
+        const effs = safeJsonParse(t.EfficacyDataJSON, []);
+        let maxE = 0;
+        if (Array.isArray(effs)) {
+          for (const obs of effs) {
+            const val = Number(obs.controlPct ?? obs.Efficacy ?? obs.efficacy ?? 0);
+            if (val > maxE) maxE = val;
+          }
+        }
+        if (maxE > formStats[name].maxEff) formStats[name].maxEff = maxE;
+      }
+      const topRankedForms = Object.entries(formStats)
+        .sort((a, b) => b[1].maxEff - a[1].maxEff || b[1].count - a[1].count)
+        .slice(0, 6)
+        .map(([name, s]) => `${name} (${s.count} plots, peak ${s.maxEff}%)`);
+
+      const liveDbTelemetry = `
+CURRENT LIVE DATABASE TELEMETRY FOR ${activeCategory.toUpperCase()}:
+- Total Field Plot Trials: ${liveCatTrials.length} plots (${liveActiveTrials} active, ${liveFinalizedTrials} finalized)
+- Registered Formulations in Organization: ${liveCatForms.length} distinct formulations
+- Top Benchmarked Formulations in Trials: ${topRankedForms.join(', ') || 'None recorded yet'}
+- Target Species Tested: ${liveTargets.slice(0, 8).join(', ') || 'General target species'}
+- Available Raw Materials Inventory: ${(state.ingredients || []).length} registered chemical/organic raw materials
+Directly leverage these verified numbers and trial metrics whenever answering.`;
+
       const toolGrounding = executedTool && executedTool.result?.success
         ? `\n\nREAL-TIME VERIFIED AGRONOMIC TOOL EXECUTION RESULT:
 Tool Name: ${executedTool.toolName}
@@ -1176,6 +1222,8 @@ Directly cite and synthesize these verified calculations in your scientific expl
         : '';
 
       const systemCtx = `You are the Chief Scientific Officer & Senior Principal ${config.name} Agronomist at Miklens Bio, serving as the organization's definitive expert AI research and trial intelligence engine with direct access to this organization's complete verified ${config.name} database.
+
+${liveDbTelemetry}
 
 YOUR MISSION: Deliver authoritative, PhD-level agronomic evaluations of field plot trials, formulation chemistry, target weed efficacy, weather interactions, control duration longevity, and trial histories using ONLY the verified database provided below.
 ZERO HALLUCINATION POLICY: Every fact, number, trial ID, dosage, and efficacy percentage MUST come directly from the real database. Never invent data or assume trials that do not exist.
@@ -1395,6 +1443,9 @@ Anchor your weed species diagnosis, burn rate, and living cover estimates strict
               const title = art.artifactType === 'anova' ? '📊 One-Way ANOVA Statistical Analysis'
                 : art.artifactType === 'spray_window' ? '🌦️ Spray Weather Window Advisor'
                 : art.artifactType === 'trial_doctor' ? '🩺 Trial Doctor Diagnostic Audit'
+                : art.artifactType === 'comparison' ? '⚔️ Head-to-Head Benchmark Battle'
+                : art.artifactType === 'database_query' ? '🔍 Database Agronomic Query Results'
+                : art.artifactType === 'dose_response' ? '📈 4-Parameter Dose-Response Simulation'
                 : '🧪 Colby Synergy & Recipe Feasibility';
               reply = `### ${title}\n\nAnalysis executed directly against current verified database records:\n\n\`\`\`artifact\n${JSON.stringify(art)}\n\`\`\``;
             } else {
@@ -2277,6 +2328,14 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                           </button>
                           <button
                             type="button"
+                            onClick={() => sendMessage(`Compare top 2 ${config.name.toLowerCase()} formulations head-to-head in our field trials. Provide statistical win rates, peak efficacy, control duration, and cost per liter.`)}
+                            className="w-full text-left text-[11px] font-semibold text-amber-800 hover:text-amber-950 p-2 rounded-lg bg-amber-50/70 hover:bg-amber-100/70 transition flex items-center justify-between"
+                          >
+                            <span>⚔️ Head-to-Head Battle</span>
+                            <ArrowRight className="w-3 h-3 shrink-0" />
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => sendMessage(`Based on historical ${config.name.toLowerCase()} trial results and ingredient synergy from our inventory, suggest 2 novel high-potential candidate formulations to test with exact recipe quantities.`)}
                             className="w-full text-left text-[11px] font-semibold text-emerald-800 hover:text-emerald-950 p-2 rounded-lg bg-emerald-50/70 hover:bg-emerald-100/70 transition flex items-center justify-between"
                           >
@@ -2316,6 +2375,14 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                             <span>ANOVA Statistical Test</span>
                             <ArrowRight className="w-3 h-3 shrink-0" />
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => sendMessage(`Simulate 4-parameter dose-response curve and calculate ED50 for our top formulation across trial dosages.`)}
+                            className="w-full text-left text-[11px] font-semibold text-purple-800 hover:text-purple-950 p-2 rounded-lg bg-purple-50/70 hover:bg-purple-100/70 transition flex items-center justify-between"
+                          >
+                            <span>📈 Dose-Response &amp; ED50</span>
+                            <ArrowRight className="w-3 h-3 shrink-0" />
+                          </button>
                         </div>
                       </div>
 
@@ -2347,6 +2414,14 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                             className="w-full text-left text-[11px] font-semibold text-purple-800 hover:text-purple-950 p-2 rounded-lg bg-purple-50/70 hover:bg-purple-100/70 transition flex items-center justify-between"
                           >
                             <span>Colby 2-Way Synergy</span>
+                            <ArrowRight className="w-3 h-3 shrink-0" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => sendMessage(`Query database: show all plot trials with efficacy > 85%, listing formulation, target weed, dosage, and control days.`)}
+                            className="w-full text-left text-[11px] font-semibold text-blue-800 hover:text-blue-950 p-2 rounded-lg bg-blue-50/70 hover:bg-blue-100/70 transition flex items-center justify-between"
+                          >
+                            <span>🔍 Query Trials (&gt;85%)</span>
                             <ArrowRight className="w-3 h-3 shrink-0" />
                           </button>
                         </div>
@@ -2652,7 +2727,33 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                       </button>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsToolsDrawerOpen(false);
+                          sendMessage(`Compare top 2 ${config.name.toLowerCase()} formulations head-to-head in our field trials. Provide statistical win rates, peak efficacy, control duration, and cost per liter.`);
+                        }}
+                        className="p-2.5 rounded-xl border border-slate-200 hover:border-amber-300 bg-slate-50 hover:bg-amber-50/50 text-left transition cursor-pointer active:scale-95 group"
+                      >
+                        <span className="text-base block mb-0.5">⚔️</span>
+                        <span className="font-bold text-xs text-slate-800 group-hover:text-amber-900 block">Head-to-Head</span>
+                        <span className="text-[10px] text-slate-500 block truncate">Compare 2 formulas</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsToolsDrawerOpen(false);
+                          sendMessage(`Query database: show all plot trials with efficacy > 85%, listing formulation, target weed, dosage, and control days.`);
+                        }}
+                        className="p-2.5 rounded-xl border border-slate-200 hover:border-blue-300 bg-slate-50 hover:bg-blue-50/50 text-left transition cursor-pointer active:scale-95 group"
+                      >
+                        <span className="text-base block mb-0.5">🔍</span>
+                        <span className="font-bold text-xs text-slate-800 group-hover:text-blue-900 block">Query Trials</span>
+                        <span className="text-[10px] text-slate-500 block truncate">Filter trials &gt;85%</span>
+                      </button>
+
                       <button
                         type="button"
                         onClick={() => {
@@ -2792,6 +2893,93 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                       </button>
                     </div>
                   )}
+
+                  {/* ─── Superpowers Fast-Action Ribbon ─── */}
+                  <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar pb-2 pt-0.5 select-none scroll-smooth">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1 pl-1 pr-0.5">
+                      <Zap className="w-3 h-3 text-amber-500 animate-pulse" /> Powers:
+                    </span>
+                    <button
+                      type="button"
+                      disabled={isLoading}
+                      onClick={() => sendMessage(`Compare top 2 ${config.name.toLowerCase()} formulations head-to-head in our field trials. Provide statistical win rates, peak efficacy, control duration, and cost per liter.`)}
+                      className="shrink-0 text-xs px-2.5 py-1 rounded-xl bg-amber-50/90 hover:bg-amber-100 text-amber-900 border border-amber-200/80 font-semibold transition active:scale-95 flex items-center gap-1 shadow-2xs hover:shadow-xs cursor-pointer disabled:opacity-50"
+                      title="Run statistical head-to-head comparison between top formulations"
+                    >
+                      <span>⚔️</span>
+                      <span>Head-to-Head</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isLoading}
+                      onClick={() => sendMessage(`Query database: show all plot trials with efficacy > 85%, listing formulation, target weed, dosage, and control days.`)}
+                      className="shrink-0 text-xs px-2.5 py-1 rounded-xl bg-blue-50/90 hover:bg-blue-100 text-blue-900 border border-blue-200/80 font-semibold transition active:scale-95 flex items-center gap-1 shadow-2xs hover:shadow-xs cursor-pointer disabled:opacity-50"
+                      title="Filter and aggregate trials matching specific efficacy thresholds"
+                    >
+                      <span>🔍</span>
+                      <span>Query Trials (&gt;85%)</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isLoading}
+                      onClick={() => sendMessage(`Simulate 4-parameter dose-response curve and calculate ED50 for our top formulation across trial dosages.`)}
+                      className="shrink-0 text-xs px-2.5 py-1 rounded-xl bg-purple-50/90 hover:bg-purple-100 text-purple-900 border border-purple-200/80 font-semibold transition active:scale-95 flex items-center gap-1 shadow-2xs hover:shadow-xs cursor-pointer disabled:opacity-50"
+                      title="Simulate 4PL log-logistic dose-response curve and ED50"
+                    >
+                      <span>📈</span>
+                      <span>Dose Response &amp; ED50</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isLoading}
+                      onClick={() => sendMessage(`Run a one-way ANOVA statistical variance test comparing our top formulations for ${uniqueTargets[0] || 'dominant target'}. Calculate F-statistic and p-value.`)}
+                      className="shrink-0 text-xs px-2.5 py-1 rounded-xl bg-indigo-50/90 hover:bg-indigo-100 text-indigo-900 border border-indigo-200/80 font-semibold transition active:scale-95 flex items-center gap-1 shadow-2xs hover:shadow-xs cursor-pointer disabled:opacity-50"
+                      title="Calculate ANOVA variance and p-value across treatments"
+                    >
+                      <span>📊</span>
+                      <span>ANOVA Stats</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isLoading}
+                      onClick={() => sendMessage(`Run a comprehensive Trial Doctor diagnostic audit across all ${config.name.toLowerCase()} trials in the database. Identify data inconsistencies, abnormal efficacy spikes, and herbicide resistance risks.`)}
+                      className="shrink-0 text-xs px-2.5 py-1 rounded-xl bg-rose-50/90 hover:bg-rose-100 text-rose-900 border border-rose-200/80 font-semibold transition active:scale-95 flex items-center gap-1 shadow-2xs hover:shadow-xs cursor-pointer disabled:opacity-50"
+                      title="Audit trial anomalies and resistance risks"
+                    >
+                      <span>🩺</span>
+                      <span>Trial Doctor</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isLoading}
+                      onClick={() => sendMessage(`Check live spray weather window and Delta-T conditions for our field trial location today and tomorrow. What are the optimal application hours?`)}
+                      className="shrink-0 text-xs px-2.5 py-1 rounded-xl bg-teal-50/90 hover:bg-teal-100 text-teal-900 border border-teal-200/80 font-semibold transition active:scale-95 flex items-center gap-1 shadow-2xs hover:shadow-xs cursor-pointer disabled:opacity-50"
+                      title="Assess weather window, Delta-T, and drift safety"
+                    >
+                      <span>🌦️</span>
+                      <span>Spray Window</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isLoading}
+                      onClick={() => sendMessage(`Evaluate Colby synergy and ingredient batch cost (₹/L) for combining our top systemic formulation with a bio-penetrant adjuvant.`)}
+                      className="shrink-0 text-xs px-2.5 py-1 rounded-xl bg-emerald-50/90 hover:bg-emerald-100 text-emerald-900 border border-emerald-200/80 font-semibold transition active:scale-95 flex items-center gap-1 shadow-2xs hover:shadow-xs cursor-pointer disabled:opacity-50"
+                      title="Calculate 2-way tank mix synergy and batch recipe cost"
+                    >
+                      <span>🧪</span>
+                      <span>Colby Synergy</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isLoading}
+                      onClick={() => sendMessage(`Based on historical ${config.name.toLowerCase()} trial results and ingredient synergy from our inventory, suggest 2 novel high-potential candidate formulations to test with exact recipe quantities.`)}
+                      className="shrink-0 text-xs px-2.5 py-1 rounded-xl bg-cyan-50/90 hover:bg-cyan-100 text-cyan-900 border border-cyan-200/80 font-semibold transition active:scale-95 flex items-center gap-1 shadow-2xs hover:shadow-xs cursor-pointer disabled:opacity-50"
+                      title="Synthesize novel candidate recipes from inventory"
+                    >
+                      <span>🔬</span>
+                      <span>Novel Recipes</span>
+                    </button>
+                  </div>
 
                   {/* Input Card */}
                   <form 

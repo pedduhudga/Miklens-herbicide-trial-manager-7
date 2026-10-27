@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Rocket, Sliders, TrendingUp, BarChart2, Download, FlaskConical, Check, 
   Activity, AlertTriangle, CloudSun, Stethoscope, Mic, CheckCircle2, 
-  ShieldAlert, Sparkles, ArrowRight, Thermometer, Wind, Droplets
+  ShieldAlert, Sparkles, ArrowRight, Thermometer, Wind, Droplets, Award
 } from 'lucide-react';
 
 /**
@@ -818,6 +818,198 @@ function InChatVoiceScoutWidget({ data, onSaveObservation }) {
 }
 
 /**
+ * Superpower Widget 5: Head-to-Head Formulation vs Formulation Comparator
+ */
+function InChatComparisonWidget({ data, onPromptClick }) {
+  const fA = data.formulaA || {};
+  const fB = data.formulaB || {};
+  const winner = data.winner || (fA.meanEfficacy >= fB.meanEfficacy ? fA.name : fB.name);
+
+  return (
+    <div className="my-3 p-4 bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 text-white rounded-2xl border border-emerald-500/30 shadow-xl text-xs not-prose max-w-full space-y-3">
+      {/* Header */}
+      <div className="flex items-center justify-between pb-2.5 border-b border-white/10">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center font-bold">
+            <Award className="w-4 h-4" />
+          </div>
+          <div>
+            <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block">
+              Head-to-Head Performance Benchmark
+            </span>
+            <h4 className="font-extrabold text-sm text-white">
+              {fA.name || 'Formula A'} vs {fB.name || 'Formula B'}
+            </h4>
+          </div>
+        </div>
+        {winner && (
+          <span className="text-[10px] font-black px-2.5 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-full flex items-center gap-1">
+            🏆 Winner: {winner}
+          </span>
+        )}
+      </div>
+
+      {/* Side by side metric grid */}
+      <div className="grid grid-cols-2 gap-3">
+        {/* Candidate A */}
+        <div className={`p-3 rounded-xl border ${winner === fA.name ? 'bg-emerald-950/40 border-emerald-500/50' : 'bg-slate-800/80 border-slate-700'}`}>
+          <div className="flex items-center justify-between mb-2">
+            <span className="font-extrabold text-white text-xs truncate">{fA.name}</span>
+            {winner === fA.name && <span className="text-[10px] font-bold text-emerald-400">Top Pick</span>}
+          </div>
+          <div className="space-y-1.5 text-[11px]">
+            <div className="flex justify-between text-slate-300">
+              <span>Mean Efficacy:</span>
+              <strong className="text-emerald-400 font-mono text-xs">{fA.meanEfficacy || '0'}%</strong>
+            </div>
+            <div className="flex justify-between text-slate-300">
+              <span>Peak Control:</span>
+              <strong className="text-white font-mono">{fA.peakEfficacy || '0'}%</strong>
+            </div>
+            <div className="flex justify-between text-slate-300">
+              <span>Control Duration:</span>
+              <strong className="text-indigo-300 font-mono">{fA.controlDuration || 'N/A'}d</strong>
+            </div>
+            <div className="flex justify-between text-slate-300">
+              <span>Batch Cost:</span>
+              <strong className="text-amber-300 font-mono">{fA.costPerLiter || 'N/A'}</strong>
+            </div>
+            <div className="flex justify-between text-slate-300">
+              <span>Verified Trials:</span>
+              <span className="text-slate-400 font-mono">{fA.trialCount || 0}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Candidate B */}
+        <div className={`p-3 rounded-xl border ${winner === fB.name ? 'bg-emerald-950/40 border-emerald-500/50' : 'bg-slate-800/80 border-slate-700'}`}>
+          <div className="flex items-center justify-between mb-2">
+            <span className="font-extrabold text-white text-xs truncate">{fB.name}</span>
+            {winner === fB.name && <span className="text-[10px] font-bold text-emerald-400">Top Pick</span>}
+          </div>
+          <div className="space-y-1.5 text-[11px]">
+            <div className="flex justify-between text-slate-300">
+              <span>Mean Efficacy:</span>
+              <strong className="text-emerald-400 font-mono text-xs">{fB.meanEfficacy || '0'}%</strong>
+            </div>
+            <div className="flex justify-between text-slate-300">
+              <span>Peak Control:</span>
+              <strong className="text-white font-mono">{fB.peakEfficacy || '0'}%</strong>
+            </div>
+            <div className="flex justify-between text-slate-300">
+              <span>Control Duration:</span>
+              <strong className="text-indigo-300 font-mono">{fB.controlDuration || 'N/A'}d</strong>
+            </div>
+            <div className="flex justify-between text-slate-300">
+              <span>Batch Cost:</span>
+              <strong className="text-amber-300 font-mono">{fB.costPerLiter || 'N/A'}</strong>
+            </div>
+            <div className="flex justify-between text-slate-300">
+              <span>Verified Trials:</span>
+              <span className="text-slate-400 font-mono">{fB.trialCount || 0}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Agronomic Verdict */}
+      {data.verdict && (
+        <div className="p-2.5 bg-white/5 rounded-xl border border-white/10 text-slate-300 text-[11px] leading-relaxed">
+          <strong className="text-emerald-400">Agronomic Synthesis: </strong>{data.verdict}
+        </div>
+      )}
+
+      {/* Action Footer */}
+      <div className="flex items-center justify-between pt-1 border-t border-white/10 text-[11px]">
+        <button
+          type="button"
+          onClick={() => onPromptClick && onPromptClick(`Show me trial breakdown and observations for ${winner || fA.name}`)}
+          className="text-emerald-400 hover:text-emerald-300 underline font-semibold cursor-pointer"
+        >
+          View Trial Breakdown ↗
+        </button>
+        <span className="text-slate-400 text-[10px] font-mono">Statistical Head-to-Head</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Superpower Widget 6: Interactive Queried Data Table Widget
+ */
+function InChatDataTableWidget({ data }) {
+  const navigate = useNavigate();
+  const [search, setSearch] = useState('');
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+
+  const filtered = rows.filter(r => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return Object.values(r).some(v => String(v).toLowerCase().includes(q));
+  });
+
+  return (
+    <div className="my-3 p-4 bg-white rounded-2xl border border-slate-200/90 shadow-sm text-xs not-prose max-w-full space-y-2.5">
+      <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-100">
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+            <BarChart2 className="w-3.5 h-3.5" />
+          </div>
+          <div>
+            <h4 className="font-extrabold text-xs text-slate-900">{data.title || 'Database Query Result'}</h4>
+            <span className="text-[10px] text-slate-500 font-mono">{rows.length} verified record(s) matching criteria</span>
+          </div>
+        </div>
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Filter rows..."
+          className="text-[10px] bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 outline-none focus:border-emerald-500 font-mono"
+        />
+      </div>
+
+      <div className="overflow-x-auto max-h-56">
+        <table className="w-full text-left text-[11px]">
+          <thead className="bg-slate-50 text-slate-600 font-bold sticky top-0 border-b border-slate-200">
+            <tr>
+              <th className="p-1.5">Trial / Treatment</th>
+              <th className="p-1.5">Target</th>
+              <th className="p-1.5">Dosage</th>
+              <th className="p-1.5 text-right">Efficacy</th>
+              <th className="p-1.5 text-right">Duration</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {filtered.map((r, i) => (
+              <tr key={i} className="hover:bg-slate-50/80 transition">
+                <td className="p-1.5 font-bold text-slate-800">
+                  {r.trialId ? (
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/trials?focus=${r.trialId}`)}
+                      className="text-emerald-700 hover:underline cursor-pointer text-left"
+                    >
+                      {r.treatment || r.name}
+                    </button>
+                  ) : (
+                    r.treatment || r.name
+                  )}
+                </td>
+                <td className="p-1.5 text-slate-600">{r.target || '—'}</td>
+                <td className="p-1.5 font-mono text-slate-500">{r.dosage || 'Std'}</td>
+                <td className="p-1.5 text-right font-black font-mono text-emerald-600">{r.efficacy}%</td>
+                <td className="p-1.5 text-right font-mono text-slate-600">{r.duration || '—'}d</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/**
  * Main Artifact Dispatcher: Parses and renders specialized interactive in-chat widgets
  */
 export default function ChatArtifactRenderer({ artifactType, data, onPromptClick, onSaveObservation }) {
@@ -843,6 +1035,12 @@ export default function ChatArtifactRenderer({ artifactType, data, onPromptClick
       return <InChatTrialDoctorWidget data={data} onPromptClick={onPromptClick} />;
     case 'voice_scout':
       return <InChatVoiceScoutWidget data={data} onSaveObservation={onSaveObservation} />;
+    case 'comparison':
+    case 'head_to_head':
+      return <InChatComparisonWidget data={data} onPromptClick={onPromptClick} />;
+    case 'data_table':
+    case 'database_query':
+      return <InChatDataTableWidget data={data} />;
     default:
       return null;
   }
