@@ -7,10 +7,11 @@ import { performANOVA } from '../utils/statsUtils.js';
 import { analyzeSprayWindow } from './sprayAdvisor.js';
 import { predictFormulaFeasibility } from '../utils/feasibilityEngine.js';
 import { calculateFormulationCost, getFormulationCostDetails } from '../utils/costUtils.js';
-import { findDuplicateFormulation } from '../utils/formulationDuplicateUtils.js';
 import { parseVoiceObservation } from '../utils/voiceParser.js';
 import { safeJsonParse } from '../utils/helpers.js';
 import { identifyMoA, identifyHrac, analyzeFormulationSynergy } from '../utils/hracSynergy.js';
+import { getTrialCalculatedEfficacy } from '../utils/formulationTrialUtils.js';
+import { getObservationPrimaryValue, calculateEfficacy } from '../utils/categoryConfig.js';
 
 /**
  * 1. RUN ANOVA STATISTICAL ANALYSIS TOOL
@@ -266,11 +267,60 @@ export async function toolEvaluateColbyAndCost({ ingredients, targetSpecies = ''
 }
 
 /**
+ * Safely extracts or calculates efficacy % from an individual observation.
+ * Handles explicit fields (controlPct, wce, efficacy, Efficacy), as well as
+ * dynamic derivation from weedCover/weedCoverage against baseline.
+ */
+function extractObservationEfficacy(obs, baseObs = null, category = 'herbicide') {
+  if (!obs || typeof obs !== 'object') return null;
+
+  // 1. Direct percentage fields
+  if (obs.controlPct !== undefined && obs.controlPct !== null && !isNaN(Number(obs.controlPct))) {
+    return Number(obs.controlPct);
+  }
+  if (obs.wce !== undefined && obs.wce !== null && !isNaN(Number(obs.wce))) {
+    return Number(obs.wce);
+  }
+  if (obs.efficacy !== undefined && obs.efficacy !== null && !isNaN(Number(obs.efficacy))) {
+    return Number(obs.efficacy);
+  }
+  if (obs.Efficacy !== undefined && obs.Efficacy !== null && !isNaN(Number(obs.Efficacy))) {
+    return Number(obs.Efficacy);
+  }
+
+  // 2. Relative calculation from primary observation field or weed cover
+  const primVal = getObservationPrimaryValue(category, obs);
+  const basePrimVal = baseObs ? getObservationPrimaryValue(category, baseObs) : null;
+  if (primVal !== null && !isNaN(Number(primVal)) && basePrimVal !== null && !isNaN(Number(basePrimVal)) && Number(basePrimVal) > 0) {
+    const calc = calculateEfficacy(category, Number(primVal), Number(basePrimVal));
+    if (calc !== null && !isNaN(calc)) {
+      return Math.round(Math.max(0, Math.min(100, calc)));
+    }
+  }
+
+  // 3. Fallback weedCover percentage
+  const cover = obs.weedCover !== undefined && obs.weedCover !== null ? Number(obs.weedCover)
+    : obs.weedCoverage !== undefined && obs.weedCoverage !== null ? Number(obs.weedCoverage)
+    : null;
+
+  if (cover !== null && !isNaN(cover)) {
+    const baseCover = baseObs && (baseObs.weedCover !== undefined || baseObs.weedCoverage !== undefined)
+      ? Number(baseObs.weedCover ?? baseObs.weedCoverage)
+      : 100;
+    if (baseCover > 0) {
+      return Math.round(Math.max(0, Math.min(100, (1 - (cover / baseCover)) * 100)));
+    }
+  }
+
+  return null;
+}
+
+/**
  * 4. PROACTIVE "TRIAL DOCTOR" & ANOMALY WATCHDOG TOOL
  * Audits all trial records in the active category for:
- * - Data Entry Inconsistencies (sudden jump in efficacy, missing baseline, etc.)
- * - Weather Failure Correlations (high temp / low humidity links to poor control)
- * - Herbicide Resistance Watchdog (repeated HRAC mode of action warnings)
+ * - Data Entry Inconsistencies (missing baseline, unusual post-baseline spikes)
+ * - Weather Failure Correlations (high temp / low humidity links to genuinely poor control)
+ * - Herbicide Resistance Watchdog (repeated MoA usage in identical plot blocks)
  */
 export async function toolAuditTrialDoctor(options = {}, context = {}) {
   const ctx = context.trials ? context : options;
@@ -296,70 +346,87 @@ export async function toolAuditTrialDoctor(options = {}, context = {}) {
   const metricNoun = isYieldMetric ? 'yield/growth response' : 'weed control';
   const metricLabel = isYieldMetric ? 'Yield Response' : 'Efficacy';
 
-  // --- CHECK 1: DATA INCONSISTENCIES ---
+  // --- CHECK 1: DATA INCONSISTENCIES & REAL INTEGRITY ---
   for (const trial of catTrials) {
-    const rawEff = safeJsonParse(trial.EfficacyDataJSON, []);
+    const parsedEff = safeJsonParse(trial.EfficacyDataJSON, []);
+    const rawEff = Array.isArray(parsedEff) ? parsedEff : (parsedEff?.observations || []);
     const sorted = [...rawEff].sort((a, b) => Number(a.daa ?? 0) - Number(b.daa ?? 0));
-    
+    const baseObs = sorted.find(o => o.isBaseline || Number(o.daa ?? 0) === 0) || sorted[0];
+
     // Missing baseline DAA 0
-    const hasBaseline = sorted.some(o => Number(o.daa ?? 0) === 0);
-    if (sorted.length > 1 && !hasBaseline) {
+    const hasBaseline = sorted.some(o => Number(o.daa ?? 0) === 0 || o.isBaseline);
+    if (sorted.length > 2 && !hasBaseline) {
       issues.push({
         id: `missing-baseline-${trial.ID}`,
         trialId: trial.ID,
         trialName: trial.FormulationName || trial.ID,
         severity: 'warning',
         title: 'Missing DAA 0 Baseline Assessment',
-        description: `Trial has ${sorted.length} observations but lacks an initial DAA 0 baseline. ${metricLabel} calculations may be skewed.`,
+        description: `Trial has ${sorted.length} observations but lacks an initial DAA 0 baseline. Add baseline cover to ensure accurate EWRS comparisons.`,
         actionPrompt: `Add DAA 0 baseline for trial ${trial.ID}`
       });
       warningCount++;
     }
 
-    // Sudden abnormal efficacy spike (>50% jump in 1 day without repeat spray)
+    // Abnormal efficacy jump (>60% in <=1 day post-baseline without re-application)
+    // Note: Fast-acting contact herbicides (Pelargonic acid, BPD, Glufosinate) routinely jump from 0% at DAA 0 to 80-95% at DAA 1.
+    // That is normal foliar knockdown, NOT an error! We only inspect post-baseline observations (prevDaa > 0).
     for (let i = 1; i < sorted.length; i++) {
       const prev = sorted[i - 1];
       const curr = sorted[i];
-      const prevEff = Number(prev.controlPct ?? prev.efficacy ?? 0);
-      const currEff = Number(curr.controlPct ?? curr.efficacy ?? 0);
-      const dayDiff = Number(curr.daa ?? 0) - Number(prev.daa ?? 0);
+      const prevDaa = Number(prev.daa ?? 0);
+      const currDaa = Number(curr.daa ?? 0);
 
-      if (dayDiff <= 1 && currEff - prevEff > 55) {
-        issues.push({
-          id: `spike-${trial.ID}-${curr.daa}`,
-          trialId: trial.ID,
-          trialName: trial.FormulationName || trial.ID,
-          severity: 'critical',
-          title: `Suspicious Efficacy Jump (+${currEff - prevEff}%) at DAA ${curr.daa}`,
-          description: `Control jumped from ${prevEff}% to ${currEff}% within ${dayDiff} day(s). Verify if this was a typo or a second spray application.`,
-          actionPrompt: `Review observation timeline for trial ${trial.ID}`
-        });
-        criticalCount++;
+      if (prevDaa > 0) {
+        const prevEff = extractObservationEfficacy(prev, baseObs, activeCategory);
+        const currEff = extractObservationEfficacy(curr, baseObs, activeCategory);
+
+        if (prevEff !== null && currEff !== null) {
+          const dayDiff = currDaa - prevDaa;
+          if (dayDiff <= 1 && (currEff - prevEff) > 60) {
+            issues.push({
+              id: `spike-${trial.ID}-${currDaa}`,
+              trialId: trial.ID,
+              trialName: trial.FormulationName || trial.ID,
+              severity: 'warning',
+              title: `Unusual Efficacy Jump (+${Math.round(currEff - prevEff)}%) at DAA ${currDaa}`,
+              description: `Control jumped from ${Math.round(prevEff)}% to ${Math.round(currEff)}% within ${dayDiff} day(s). Verify if a second spray application was performed.`,
+              actionPrompt: `Review observation timeline for trial ${trial.ID}`
+            });
+            warningCount++;
+          }
+        }
       }
     }
 
-    // Contradictory result (Rating is Excellent but final efficacy is below threshold)
-    const finalEff = sorted.length > 0 ? Number(sorted[sorted.length - 1].controlPct ?? sorted[sorted.length - 1].efficacy ?? 0) : null;
-    const rating = String(trial.Result || '').toLowerCase();
-    if (finalEff !== null && finalEff < ratingMismatchThreshold && rating === 'excellent') {
+    // Contradictory result (Rating is Excellent but final efficacy and control duration are low)
+    const trueEff = getTrialCalculatedEfficacy(trial, activeCategory);
+    const controlDuration = Number(trial.FinalControlDuration ?? trial.EffectiveControlDays ?? trial.ControlDays ?? 0);
+    const rating = String(trial.Result || '').trim().toLowerCase();
+    const isFinalized = String(trial.Status || '').trim().toLowerCase() === 'finalized' || String(trial.Status || '').trim().toLowerCase() === 'completed';
+
+    // A trial with demonstrated control duration (e.g. 17 days for Ssakttuk) or high calculated efficacy is a proven success!
+    // Never flag Ssakttuk or successful trials as "0% final control"!
+    if (rating === 'excellent' && trueEff !== null && trueEff < ratingMismatchThreshold && controlDuration < 5 && !isFinalized) {
       issues.push({
         id: `rating-mismatch-${trial.ID}`,
         trialId: trial.ID,
         trialName: trial.FormulationName || trial.ID,
-        severity: 'critical',
-        title: `Rating & ${metricLabel} Metric Conflict`,
-        description: `Trial is labeled "Excellent" but recorded final ${metricNoun} is only ${finalEff}%. Rating should be updated to "Poor".`,
-        actionPrompt: `Update rating for trial ${trial.ID} to Poor`
+        severity: 'warning',
+        title: `Rating & ${metricLabel} Review Recommended`,
+        description: `Trial is labeled "Excellent" with recorded ${metricNoun} at ${trueEff}%. Review whether observations align with EWRS thresholds.`,
+        actionPrompt: `Review observation timeline for trial ${trial.ID}`
       });
-      criticalCount++;
+      warningCount++;
     }
   }
 
   // --- CHECK 2: WEATHER FAILURE CORRELATIONS ---
+  // Only evaluate genuine failures (efficacy < 60% AND control duration < 7 days)
   const failedTrials = catTrials.filter(t => {
-    const rawEff = safeJsonParse(t.EfficacyDataJSON, []);
-    const last = rawEff[rawEff.length - 1];
-    const eff = last ? Number(last.controlPct ?? last.efficacy ?? 0) : null;
+    const eff = getTrialCalculatedEfficacy(t, activeCategory);
+    const duration = Number(t.FinalControlDuration ?? t.EffectiveControlDays ?? t.ControlDays ?? 0);
+    if (duration >= 7) return false; // Sustained control >= 7d is not a weather failure!
     return eff !== null && eff < failThreshold;
   });
 
@@ -368,7 +435,7 @@ export async function toolAuditTrialDoctor(options = {}, context = {}) {
   const rainwashFailures = failedTrials.filter(t => String(t.Rain || '').toLowerCase().includes('yes') || parseFloat(t.Rain) > 0);
 
   if (highTempFailures.length >= 2) {
-    const formulas = [...new Set(highTempFailures.map(t => t.FormulationName))].join(', ');
+    const formulas = [...new Set(highTempFailures.map(t => t.FormulationName).filter(Boolean))].join(', ');
     issues.push({
       id: 'weather-heat-stress',
       severity: 'insight',
@@ -402,12 +469,14 @@ export async function toolAuditTrialDoctor(options = {}, context = {}) {
   }
 
   // --- CHECK 3: RESISTANCE ROTATION WATCHDOG ---
-  // Group by Location/Block
+  // Only evaluate trials that have an explicit, distinct BlockId or Block name (never group all trials into one dummy block)
   const blockMap = {};
   for (const trial of catTrials) {
-    const blockKey = trial.BlockId || trial.Location || 'Default Block';
-    if (!blockMap[blockKey]) blockMap[blockKey] = [];
-    blockMap[blockKey].push(trial);
+    const blockKey = trial.BlockId || trial.Block || trial.PlotLocation;
+    if (blockKey && blockKey !== 'Default Block' && blockKey !== 'default' && blockKey !== 'Unknown' && blockKey !== 'none') {
+      if (!blockMap[blockKey]) blockMap[blockKey] = [];
+      blockMap[blockKey].push(trial);
+    }
   }
 
   const isFungicide = activeCategory.toLowerCase() === 'fungicide';
@@ -420,28 +489,40 @@ export async function toolAuditTrialDoctor(options = {}, context = {}) {
     : 'resistant weed biotypes';
 
   for (const [block, blockTrials] of Object.entries(blockMap)) {
-    if (blockTrials.length >= 2) {
+    if (blockTrials.length >= 3) {
       const moaUsage = blockTrials.map(t => {
         const h = identifyMoA(t.FormulationName, activeCategory);
         return h && h.code && h.code !== 'Adjuvant' ? h.code : null;
       }).filter(Boolean);
 
-      // Check if same MoA group used 2+ consecutive times
+      // Check if same MoA group used 3+ consecutive times in the same explicit block
+      let repeatCount = 1;
       for (let i = 1; i < moaUsage.length; i++) {
         if (moaUsage[i] === moaUsage[i - 1]) {
-          issues.push({
-            id: `resistance-${block}-${moaUsage[i]}`,
-            severity: 'critical',
-            title: `Repeated ${moaUsage[i]} at ${block}`,
-            description: `Consecutive treatments of the same Mode of Action (${moaUsage[i]}) applied at ${block}. High risk of selecting ${targetNoun}!`,
-            actionPrompt: `Suggest rotational ${committeeName} MoA partners for ${block}`
-          });
-          criticalCount++;
-          break;
+          repeatCount++;
+          if (repeatCount >= 3) {
+            issues.push({
+              id: `resistance-${block}-${moaUsage[i]}`,
+              severity: 'warning',
+              title: `Repeated ${moaUsage[i]} at ${block}`,
+              description: `Consecutive treatments of the same Mode of Action (${moaUsage[i]}) applied 3+ times at ${block}. Rotate with diverse ${committeeName} MoA groups to protect efficacy.`,
+              actionPrompt: `Suggest rotational ${committeeName} MoA partners for ${block}`
+            });
+            warningCount++;
+            break;
+          }
+        } else {
+          repeatCount = 1;
         }
       }
     }
   }
+
+  // Health score calculation scaled proportionally to dataset size
+  const totalAudited = catTrials.length || 1;
+  const criticalRate = criticalCount / totalAudited;
+  const warningRate = warningCount / totalAudited;
+  const healthScore = Math.max(25, Math.min(100, Math.round(100 - (criticalRate * 60 + warningRate * 20))));
 
   return {
     success: true,
@@ -451,12 +532,12 @@ export async function toolAuditTrialDoctor(options = {}, context = {}) {
       warningCount,
       insightCount,
       issues: issues.slice(0, 8),
-      healthScore: Math.max(0, 100 - (criticalCount * 15 + warningCount * 5))
+      healthScore
     },
     artifact: {
       artifactType: 'trial_doctor',
       auditedTrialsCount: catTrials.length,
-      healthScore: Math.max(0, 100 - (criticalCount * 15 + warningCount * 5)),
+      healthScore,
       criticalCount,
       warningCount,
       insightCount,

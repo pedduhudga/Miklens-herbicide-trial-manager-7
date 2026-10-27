@@ -1232,16 +1232,10 @@ ADVANCED SCIENTIFIC & AGRONOMIC SYNTHESIS STANDARD:
 1. DECISIVE EXECUTIVE VERDICT (OPENING SENTENCE):
    - Always lead with a clear, definitive scientific conclusion in the very first sentence. Never begin with robotic introductions ("Hello!", "As your Senior Principal...").
    - Explicitly identify the top-performing treatment, its demonstrated longevity (e.g. 38d sustained control), and target weed spectrum.
-2. BIOCHEMICAL MODE OF ACTION (MoA) & PHYSIOLOGY:
-   - Provide deep physiological rationale: cite HRAC Groups (e.g., HRAC 9 EPSP synthase inhibitor, HRAC 14 PPO cell-membrane disruptor, HRAC 1/2 ACCase/ALS).
-   - Explain translocation kinetics: phloem/xylem systemic movement into underground rhizomes and tubers (Cynodon dactylon, Cyperus rotundus) vs rapid contact foliar desiccation.
-   - Explain adjuvant synergy: how organosilicone surfactants or bio-penetrants lower surface tension (<22 mN/m) to dissolve epicuticular waxes and facilitate rapid stomatal infiltration.
-3. PRACTICAL COMMERCIAL FIELD APPLICATION PROTOCOL:
-   - Always specify calibrated field application parameters:
-     * Water carrier volume: 350–500 L/ha for uniform canopy penetration.
-     * Droplet spectrum: Medium to Coarse (250–400 μm) to minimize drift while ensuring thorough foliar coverage.
-     * Meteorological Spray Window: Delta-T 2–8°C, relative humidity > 50%, wind speed < 12 km/h, rainfast window.
-     * Resistance Management (GEP/GAP): Alternating modes of action and tank-mix synergy.
+2. DIRECT RELEVANCE & CONCISENESS (DO NOT DUMP UNREQUESTED BOILERPLATE):
+   - Answer STRICTLY what the user asks. If the user asks about trial data, diagnostics, audits, or trial performance, focus 100% on the factual data, numbers, observations, and links.
+   - DO NOT output unrequested textbook lectures on Biochemical Mode of Action (MoA), HRAC groups, carrier volume (350–500 L/ha), droplet spectrum (250–400 μm), Delta-T windows, or adjuvant surface tension UNLESS the user explicitly asks for spraying instructions or biochemical mode of action.
+   - When a Trial Doctor audit or data inquiry is processed: provide a clean, concise audit summary explaining data consistency and real trial facts without repeating generic spraying protocols.
 4. COMPACT & CLEAN BENCHMARK TABLES (WHEN COMPARING OR RANKING):
    - Avoid oversized, wide spreadsheets. Keep comparison tables compact and sleek (max 4 columns) so they fit comfortably on mobile and desktop:
      | Formulation | Target Weed | Max Efficacy & Control | Field Plot Trial Link |
@@ -1267,6 +1261,7 @@ CRITICAL RULES:
 
 CONTROL DURATION & TRIAL STATUS — SCIENTIFIC LOGIC:
 - SCIENTIFIC BASIS: Control duration is calculated based on EFFICACY and WEED REGROWTH (the standard EWRS threshold of sustained >= 70% control before regrowth breakdown occurs).
+- VERIFIED TRIAL CONTROL DAYS (E.G. SSAKTTUK 17d CONTROL): If a trial records a finalized or demonstrated control duration (such as Ssakttuk with 17 days of finalized control), it achieved proven commercial control! NEVER claim or imply a trial with recorded control days has "0% final control" or is "Poor" when it delivered sustained weed suppression!
 - DO NOT rely on photo dates to determine control duration. Control duration is determined by recorded efficacy and regrowth observations.
 - ACTIVE TRIALS: Active trials are ongoing field experiments. Report their demonstrated control duration achieved to date (labeled as "Xd-DEMONSTRATED(active)"). NEVER claim they have "no data" or "0 days control" when their observation timeline records sustained weed control!
 - COMPLETED / FINALIZED TRIALS: Report their finalized control duration (labeled as "Xd-FINALIZED").
@@ -2361,7 +2356,7 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                         <div className="space-y-1.5 pt-2 border-t border-slate-100">
                           <button
                             type="button"
-                            onClick={() => sendMessage(`Run a comprehensive Trial Doctor diagnostic audit across all ${config.name.toLowerCase()} trials. Identify data inconsistencies, abnormal efficacy spikes, and herbicide resistance risks.`)}
+                            onClick={() => sendMessage(`Run a comprehensive Trial Doctor diagnostic audit across all ${config.name.toLowerCase()} trials in the database. Identify data inconsistencies, abnormal efficacy spikes, and evaluate dataset integrity.`)}
                             className="w-full text-left text-[11px] font-semibold text-blue-800 hover:text-blue-950 p-2 rounded-lg bg-blue-50/70 hover:bg-blue-100/70 transition flex items-center justify-between"
                           >
                             <span>Run Trial Doctor Audit</span>
@@ -2758,7 +2753,7 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                         type="button"
                         onClick={() => {
                           setIsToolsDrawerOpen(false);
-                          sendMessage(`Run a comprehensive Trial Doctor diagnostic audit across all ${config.name.toLowerCase()} trials in the database. Identify data inconsistencies, abnormal efficacy spikes, weather failure correlations, and herbicide resistance risks.`);
+                          sendMessage(`Run a comprehensive Trial Doctor diagnostic audit across all ${config.name.toLowerCase()} trials in the database. Identify data inconsistencies, abnormal efficacy spikes, and evaluate dataset integrity.`);
                         }}
                         className="p-2.5 rounded-xl border border-slate-200 hover:border-emerald-300 bg-slate-50 hover:bg-emerald-50/50 text-left transition cursor-pointer active:scale-95 group"
                       >
@@ -2942,7 +2937,7 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                     <button
                       type="button"
                       disabled={isLoading}
-                      onClick={() => sendMessage(`Run a comprehensive Trial Doctor diagnostic audit across all ${config.name.toLowerCase()} trials in the database. Identify data inconsistencies, abnormal efficacy spikes, and herbicide resistance risks.`)}
+                      onClick={() => sendMessage(`Run a comprehensive Trial Doctor diagnostic audit across all ${config.name.toLowerCase()} trials in the database. Identify data inconsistencies, abnormal efficacy spikes, and evaluate dataset integrity.`)}
                       className="shrink-0 text-xs px-2.5 py-1 rounded-xl bg-rose-50/90 hover:bg-rose-100 text-rose-900 border border-rose-200/80 font-semibold transition active:scale-95 flex items-center gap-1 shadow-2xs hover:shadow-xs cursor-pointer disabled:opacity-50"
                       title="Audit trial anomalies and resistance risks"
                     >
