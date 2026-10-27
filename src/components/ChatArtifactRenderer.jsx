@@ -219,8 +219,10 @@ function InChatLaunchTrialWidget({ data }) {
   const notes = data.notes || 'Recommended by AI Agronomic Engine';
 
   const handleLaunch = () => {
-    navigate('/trials', {
+    sessionStorage.setItem('return_to_ai_assistant', 'true');
+    navigate('/trials?from=ai-assistant', {
       state: {
+        from: 'ai-assistant',
         newTrialWithFormulation: {
           name: formula,
           dosage,
@@ -283,8 +285,10 @@ function InChatFeasibilityWidget({ data }) {
   const tolerant = Array.isArray(data.tolerantWeeds) ? data.tolerantWeeds : [];
 
   const handleLaunchTrial = () => {
-    navigate('/trials', {
+    sessionStorage.setItem('return_to_ai_assistant', 'true');
+    navigate('/trials?from=ai-assistant', {
       state: {
+        from: 'ai-assistant',
         newTrialWithFormulation: {
           name: formulaName,
           dosage: data.dosage || 'Standard Rate',
@@ -987,7 +991,12 @@ function InChatDataTableWidget({ data }) {
                   {r.trialId ? (
                     <button
                       type="button"
-                      onClick={() => navigate(`/trials?focus=${r.trialId}`)}
+                      onClick={() => {
+                        sessionStorage.setItem('return_to_ai_assistant', 'true');
+                        navigate(`/trials?focus=${encodeURIComponent(r.trialId)}&from=ai-assistant`, {
+                          state: { focusTrial: r.trialId, from: 'ai-assistant' }
+                        });
+                      }}
                       className="text-emerald-700 hover:underline cursor-pointer text-left"
                     >
                       {r.treatment || r.name}

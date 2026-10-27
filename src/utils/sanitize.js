@@ -125,26 +125,44 @@ export function sanitizeAiContent(content, options = {}) {
     const safeUrl = isSafe ? href : '#';
 
     // Extract focus ID for direct click handling
-    const focusMatch = safeUrl.match(/[?&]focus=([^&#\s]+)/i);
-    const focusId = focusMatch ? focusMatch[1] : '';
+    let focusMatch = safeUrl.match(/[?&]focus=([^&#\s]+)/i);
+    let focusId = focusMatch ? focusMatch[1] : '';
 
-    const isFormulationLink = safeUrl.includes('/formulations') || safeUrl.startsWith('formula:');
-    const isTrialLink = safeUrl.includes('/trials') || safeUrl.startsWith('trial:');
+    // If focusId is missing in URL but link text contains an ID in parentheses like (12c1dd22...) or (TR-01)
+    if (!focusId) {
+      const textIdMatch = text.match(/\(([a-zA-Z0-9_\-\.]+)\)/);
+      if (textIdMatch) {
+        focusId = textIdMatch[1];
+      }
+    }
+
+    const isFormulationLink = safeUrl.includes('/formulations') || safeUrl.startsWith('formula:') || text.toLowerCase().includes('formula:');
+    const isTrialLink = safeUrl.includes('/trials') || safeUrl.startsWith('trial:') || text.toLowerCase().includes('trial:');
 
     if (isFormulationLink && focusId) {
-      return `<a href="${safeUrl}" data-formula-id="${focusId}" class="formula-redirect-link inline-flex items-center gap-1.5 font-bold px-2 py-0.5 rounded-md border border-purple-200/90 bg-purple-50/80 hover:bg-purple-100 hover:border-purple-300 text-purple-800 hover:text-purple-950 transition text-xs cursor-pointer align-baseline shadow-2xs" rel="noopener noreferrer" title="View formulation recipe & details">${text}</a>`;
+      const targetHref = safeUrl.startsWith('#') ? safeUrl : `#/formulations?focus=${encodeURIComponent(focusId)}`;
+      return `<a href="${targetHref}" data-formula-id="${focusId}" class="formula-redirect-link inline-flex items-center gap-1.5 font-bold px-2 py-0.5 rounded-md border border-purple-200/90 bg-purple-50/80 hover:bg-purple-100 hover:border-purple-300 text-purple-800 hover:text-purple-950 transition text-xs cursor-pointer align-baseline shadow-2xs" rel="noopener noreferrer" title="View formulation recipe & details">${text}</a>`;
     }
 
     if (isTrialLink && focusId) {
-      return `<a href="${safeUrl}" data-trial-id="${focusId}" class="trial-redirect-link inline-flex items-center gap-1.5 font-bold px-2 py-0.5 rounded-md border border-emerald-200/90 bg-emerald-50/80 hover:bg-emerald-100 hover:border-emerald-300 text-emerald-800 hover:text-emerald-950 transition text-xs cursor-pointer align-baseline shadow-2xs" rel="noopener noreferrer" title="Open field plot trial details">${text}</a>`;
+      const targetHref = safeUrl.startsWith('#') ? safeUrl : `#/trials?focus=${encodeURIComponent(focusId)}`;
+      return `<a href="${targetHref}" data-trial-id="${focusId}" class="trial-redirect-link inline-flex items-center gap-1.5 font-bold px-2 py-0.5 rounded-md border border-emerald-200/90 bg-emerald-50/80 hover:bg-emerald-100 hover:border-emerald-300 text-emerald-800 hover:text-emerald-950 transition text-xs cursor-pointer align-baseline shadow-2xs" rel="noopener noreferrer" title="Open field plot trial details">${text}</a>`;
     }
 
     if (focusId && !isFormulationLink) {
-      return `<a href="${safeUrl}" data-trial-id="${focusId}" class="trial-redirect-link inline-flex items-center gap-1.5 font-bold px-2 py-0.5 rounded-md border border-emerald-200/90 bg-emerald-50/80 hover:bg-emerald-100 hover:border-emerald-300 text-emerald-800 hover:text-emerald-950 transition text-xs cursor-pointer align-baseline shadow-2xs" rel="noopener noreferrer" title="Open field plot trial details">${text}</a>`;
+      const targetHref = safeUrl.startsWith('#') ? safeUrl : `#/trials?focus=${encodeURIComponent(focusId)}`;
+      return `<a href="${targetHref}" data-trial-id="${focusId}" class="trial-redirect-link inline-flex items-center gap-1.5 font-bold px-2 py-0.5 rounded-md border border-emerald-200/90 bg-emerald-50/80 hover:bg-emerald-100 hover:border-emerald-300 text-emerald-800 hover:text-emerald-950 transition text-xs cursor-pointer align-baseline shadow-2xs" rel="noopener noreferrer" title="Open field plot trial details">${text}</a>`;
     }
 
     const appliedClass = linkClass ? linkClass : 'font-semibold text-emerald-700 hover:text-emerald-900 underline transition';
     const appliedStyle = linkStyle ? ` style="${linkStyle}"` : '';
+
+    // Prevent full-page reloads and new-tab spawns for internal single-page-app routes
+    const isInternalApp = safeUrl.startsWith('#') || safeUrl.startsWith('/') || safeUrl.includes('vercel.app/#');
+    if (isInternalApp) {
+      return `<a href="${safeUrl}" class="${appliedClass}"${appliedStyle} rel="noopener noreferrer">${text}</a>`;
+    }
+
     return `<a href="${safeUrl}" class="${appliedClass}"${appliedStyle} rel="noopener noreferrer" target="_blank">${text}</a>`;
   });
 

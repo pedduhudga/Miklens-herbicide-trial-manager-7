@@ -43,6 +43,7 @@ import {
 } from '../services/aiTools.js';
 import { analyzeWeedCover } from '../utils/imageAnalysis.js';
 import ChatArtifactRenderer from '../components/ChatArtifactRenderer.jsx';
+import TrialQuickPeekModal from '../components/TrialQuickPeekModal.jsx';
 
 const THINKING_PHASES = [
   { icon: '⚡', label: 'Executing Next-Gen Hybrid RAG 2.0 retrieval (BM25 + 512D Dense Vector)...' },
@@ -653,6 +654,7 @@ export default function AIAssistant({ onMenuClick }) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isToolsDrawerOpen, setIsToolsDrawerOpen] = useState(false);
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
+  const [quickPeekTrial, setQuickPeekTrial] = useState(null);
   const [expandedSourcesIdx, setExpandedSourcesIdx] = useState(null);
   const [simFormId, setSimFormId] = useState('');
   const [simCustomForm, setSimCustomForm] = useState('');
@@ -2232,7 +2234,7 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                     return;
                   }
 
-                  // 2. Direct Trial Link Redirection
+                  // 2. Direct Trial Link Redirection & Instant In-Chat Quick-Peek
                   const isTrialLink = !!dataTrialId || href.includes('/trials') || href.startsWith('trial:') || link.classList.contains('trial-redirect-link');
                   if (isTrialLink) {
                     e.preventDefault();
@@ -2240,14 +2242,35 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                     const rawId = dataTrialId || href.match(/focus=([^&#\s]+)/i)?.[1] || '';
                     const cleanId = decodeURIComponent(rawId).trim();
                     if (cleanId) {
-                      navigate(`/trials?focus=${encodeURIComponent(cleanId)}`, {
-                        state: { focusTrial: cleanId }
+                      const cleanBase = cleanId.replace(/\.+$/, '').trim().toLowerCase();
+                      const foundTrial = (state.trials || []).find(t => {
+                        const tid = String(t.ID || t.id || '').trim().toLowerCase();
+                        const tCode = String(t.TrialID || '').trim().toLowerCase();
+                        const tForm = String(t.FormulationName || '').trim().toLowerCase();
+                        if (tid === cleanBase || tCode === cleanBase) return true;
+                        if (cleanBase.length >= 6 && (tid.startsWith(cleanBase) || tid.includes(cleanBase))) return true;
+                        if (cleanBase.length >= 4 && tForm === cleanBase) return true;
+                        return false;
+                      });
+
+                      if (foundTrial) {
+                        // Instant 0ms Preview without unloading chat session
+                        setQuickPeekTrial(foundTrial);
+                        return;
+                      }
+
+                      // If not in memory yet, navigate quickly to full workspace with session tracking
+                      sessionStorage.setItem('return_to_ai_assistant', 'true');
+                      if (currentSessionId) sessionStorage.setItem('last_ai_session_id', currentSessionId);
+                      navigate(`/trials?focus=${encodeURIComponent(cleanId)}&from=ai-assistant`, {
+                        state: { focusTrial: cleanId, from: 'ai-assistant', returnSessionId: currentSessionId }
                       });
                       window.dispatchEvent(new CustomEvent('app:navigate_to_trial', {
                         detail: { trialId: cleanId }
                       }));
                     } else {
-                      navigate('/trials');
+                      sessionStorage.setItem('return_to_ai_assistant', 'true');
+                      navigate('/trials?from=ai-assistant', { state: { from: 'ai-assistant' } });
                     }
                     return;
                   }
@@ -2259,13 +2282,19 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                     const matched = href.match(/focus=([^&#\s]+)/i)?.[1];
                     if (matched) {
                       const clean = decodeURIComponent(matched).trim();
-                      const isTrial = (state.trials || []).some(t => 
-                        String(t.ID || t.id || '').toLowerCase() === clean.toLowerCase() ||
-                        String(t.TrialID || '').toLowerCase() === clean.toLowerCase()
-                      );
-                      if (isTrial) {
-                        navigate(`/trials?focus=${encodeURIComponent(clean)}`, { state: { focusTrial: clean } });
-                        window.dispatchEvent(new CustomEvent('app:navigate_to_trial', { detail: { trialId: clean } }));
+                      const cleanBase = clean.replace(/\.+$/, '').trim().toLowerCase();
+                      const foundTrial = (state.trials || []).find(t => {
+                        const tid = String(t.ID || t.id || '').trim().toLowerCase();
+                        const tCode = String(t.TrialID || '').trim().toLowerCase();
+                        const tForm = String(t.FormulationName || '').trim().toLowerCase();
+                        if (tid === cleanBase || tCode === cleanBase) return true;
+                        if (cleanBase.length >= 6 && (tid.startsWith(cleanBase) || tid.includes(cleanBase))) return true;
+                        if (cleanBase.length >= 4 && tForm === cleanBase) return true;
+                        return false;
+                      });
+                      if (foundTrial) {
+                        setQuickPeekTrial(foundTrial);
+                        return;
                       } else {
                         navigate(`/formulations?focus=${encodeURIComponent(clean)}`, { state: { focusFormula: clean } });
                         window.dispatchEvent(new CustomEvent('app:navigate_to_formulation', { detail: { formulaId: clean } }));
@@ -3401,6 +3430,29 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
 
         </div>
       </div>
+
+      {/* Instant In-Chat Trial Quick-Peek Modal */}
+      {quickPeekTrial && (
+        <TrialQuickPeekModal
+          isOpen={!!quickPeekTrial}
+          onClose={() => setQuickPeekTrial(null)}
+          trial={quickPeekTrial}
+          activeCategory={activeCategory}
+          onOpenFullTrial={(trialId) => {
+            const targetId = trialId || quickPeekTrial.ID || quickPeekTrial.id;
+            setQuickPeekTrial(null);
+            sessionStorage.setItem('return_to_ai_assistant', 'true');
+            if (currentSessionId) sessionStorage.setItem('last_ai_session_id', currentSessionId);
+            navigate(`/trials?focus=${encodeURIComponent(targetId)}&from=ai-assistant`, {
+              state: { 
+                focusTrial: targetId, 
+                from: 'ai-assistant', 
+                returnSessionId: currentSessionId 
+              }
+            });
+          }}
+        />
+      )}
     </div>
   );
 }

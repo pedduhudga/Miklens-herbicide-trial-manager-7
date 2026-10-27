@@ -185,6 +185,9 @@ export default function Trials({ onMenuClick }) {
   const navigate = useNavigate();
   const activeCategory = state.activeCategory || 'herbicide';
   const catConfig = getCategoryConfig(activeCategory);
+  const isFromAi = location.state?.from === 'ai-assistant' ||
+    new URLSearchParams(location.search).get('from') === 'ai-assistant' ||
+    (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('return_to_ai_assistant') === 'true');
 
   // ── DERIVED DATA ───────────────────────────────────────────────────
   const trials = (state.trials || []).filter(t => t.Category === activeCategory || (!t.Category && activeCategory === 'herbicide'));
@@ -467,33 +470,43 @@ export default function Trials({ onMenuClick }) {
       setFilterResult('');
       setFilterProject('');
 
-      const cleanTarget = String(targetId).trim().toLowerCase();
-      const foundTrial = (state.trials || []).find(t => 
-        String(t.ID || t.id || '').trim().toLowerCase() === cleanTarget
-      );
+      const cleanTarget = decodeURIComponent(String(targetId)).trim();
+      const cleanBase = cleanTarget.replace(/\.+$/, '').trim().toLowerCase();
+      const foundTrial = (state.trials || []).find(t => {
+        const tid = String(t.ID || t.id || '').trim().toLowerCase();
+        const tCode = String(t.TrialID || '').trim().toLowerCase();
+        const tForm = String(t.FormulationName || '').trim().toLowerCase();
+        if (tid === cleanBase || tCode === cleanBase) return true;
+        if (cleanBase.length >= 6 && (tid.startsWith(cleanBase) || tid.includes(cleanBase))) return true;
+        if (cleanBase.length >= 4 && tForm === cleanBase) return true;
+        return false;
+      });
+
       if (foundTrial) {
         setActiveTrial(foundTrial);
         setDetailTab('info');
+        updateState({ highlightTrialId: foundTrial.ID || foundTrial.id });
+        const fIdx = (state.trials || []).findIndex(t => t.ID === (foundTrial.ID || foundTrial.id));
+        if (fIdx >= 36) setDisplayLimit(fIdx + 20);
       }
-
-      updateState({ highlightTrialId: targetId });
 
       // Retry scrolling to handle async rendering
       let attempts = 0;
       const scrollInterval = setInterval(() => {
         attempts++;
-        const el = document.getElementById(`trial-card-${targetId}`);
+        const targetElementId = foundTrial ? (foundTrial.ID || foundTrial.id) : targetId;
+        const el = document.getElementById(`trial-card-${targetElementId}`);
         if (el) {
           el.scrollIntoView({ behavior: 'smooth', block: 'center' });
           clearInterval(scrollInterval);
-        } else if (attempts >= 10) {
+        } else if (attempts >= 8) {
           clearInterval(scrollInterval);
         }
-      }, 150);
+      }, 120);
 
       setTimeout(() => {
         updateState({ highlightTrialId: null });
-      }, 4000);
+      }, 3000);
     };
 
     window.addEventListener('app:navigate_to_trial', handleNavigateToTrial);
@@ -514,11 +527,18 @@ export default function Trials({ onMenuClick }) {
       }
     }
     if (targetId && state.trials?.length) {
-      const cleanTarget = decodeURIComponent(String(targetId)).trim().toLowerCase();
-      const foundTrial = state.trials.find(t => 
-        String(t.ID || t.id || '').trim().toLowerCase() === cleanTarget ||
-        String(t.TrialID || '').trim().toLowerCase() === cleanTarget
-      );
+      const cleanTarget = decodeURIComponent(String(targetId)).trim();
+      const cleanBase = cleanTarget.replace(/\.+$/, '').trim().toLowerCase();
+      const foundTrial = state.trials.find(t => {
+        const tid = String(t.ID || t.id || '').trim().toLowerCase();
+        const tCode = String(t.TrialID || '').trim().toLowerCase();
+        const tForm = String(t.FormulationName || '').trim().toLowerCase();
+        if (tid === cleanBase || tCode === cleanBase) return true;
+        if (cleanBase.length >= 6 && (tid.startsWith(cleanBase) || tid.includes(cleanBase))) return true;
+        if (cleanBase.length >= 4 && tForm === cleanBase) return true;
+        return false;
+      });
+
       if (foundTrial) {
         setActiveTab('all');
         setSearch('');
@@ -528,6 +548,9 @@ export default function Trials({ onMenuClick }) {
         setActiveTrial(foundTrial);
         setDetailTab('info');
         updateState({ highlightTrialId: foundTrial.ID || foundTrial.id });
+        const fIdx = (state.trials || []).findIndex(t => t.ID === (foundTrial.ID || foundTrial.id));
+        if (fIdx >= 36) setDisplayLimit(fIdx + 20);
+
         let attempts = 0;
         const scrollInterval = setInterval(() => {
           attempts++;
@@ -535,10 +558,14 @@ export default function Trials({ onMenuClick }) {
           if (el) {
             el.scrollIntoView({ behavior: 'smooth', block: 'center' });
             clearInterval(scrollInterval);
-          } else if (attempts >= 10) {
+          } else if (attempts >= 8) {
             clearInterval(scrollInterval);
           }
-        }, 150);
+        }, 120);
+
+        setTimeout(() => {
+          updateState({ highlightTrialId: null });
+        }, 3000);
       }
     }
   }, [location.search, location.hash, location.state, state.trials, updateState]);
@@ -839,41 +866,6 @@ export default function Trials({ onMenuClick }) {
   // ── ROUTING EFFECT ─────────────────────────────────────────────────
   useEffect(() => {
     const searchParams = new URLSearchParams(location.search);
-    const focusId = searchParams.get('focus');
-    if (focusId) {
-      const cleanFocusId = String(focusId).trim().toLowerCase();
-      const trialToFocus = (state.trials || []).find(t => 
-        String(t.ID || t.id || '').trim().toLowerCase() === cleanFocusId
-      );
-      if (trialToFocus) {
-        // Reset filters so targeted trial is guaranteed to be visible
-        setActiveTab('all');
-        setSearch('');
-        setFilterFormulation('');
-        setFilterResult('');
-        setFilterProject('');
-        setActiveTrial(trialToFocus);
-        setDetailTab('info');
-        updateState({ highlightTrialId: trialToFocus.ID });
-
-        let attempts = 0;
-        const scrollInterval = setInterval(() => {
-          attempts++;
-          const el = document.getElementById(`trial-card-${trialToFocus.ID}`);
-          if (el) {
-            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            clearInterval(scrollInterval);
-          } else if (attempts >= 10) {
-            clearInterval(scrollInterval);
-          }
-        }, 150);
-
-        setTimeout(() => {
-          updateState({ highlightTrialId: null });
-        }, 4000);
-      }
-    }
-
     const formFilter = searchParams.get('formulation');
     if (formFilter) {
       setFilterFormulation(formFilter);
@@ -6645,6 +6637,35 @@ If none are present, write "None".`;
     <div className="flex-1 flex flex-col h-full overflow-hidden w-full max-w-full min-w-0">
       <TopBar title="Trials" onMenuClick={onMenuClick} />
 
+      {/* Return to AI Assistant Sticky Top Banner */}
+      {isFromAi && (
+        <div className="bg-gradient-to-r from-emerald-900 via-slate-900 to-emerald-950 text-white px-4 py-2.5 flex items-center justify-between shadow-md border-b border-emerald-500/30 z-30 shrink-0 animate-fade-in">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-6 h-6 rounded-lg bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-emerald-400 shrink-0">
+              <Sparkles className="w-3.5 h-3.5" />
+            </div>
+            <div className="truncate">
+              <span className="text-xs font-bold text-emerald-300">Viewing from AI Assistant: </span>
+              <span className="text-xs text-white font-bold truncate">
+                {activeTrial ? `${activeTrial.FormulationName} (${activeTrial.TrialID || activeTrial.ID})` : 'Field Trial Plot'}
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                sessionStorage.removeItem('return_to_ai_assistant');
+                navigate('/ai-assistant');
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl text-xs font-black transition shadow-sm active:scale-95 cursor-pointer"
+            >
+              <span>⬅ Return to AI Chat</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {recoveryDraft && (
         <div className="bg-amber-50 border-b border-amber-200/60 px-4 py-3 flex items-center justify-between gap-4">
           <div className="flex items-center gap-2.5">
@@ -8097,6 +8118,19 @@ If none are present, write "None".`;
                     <button onClick={() => { setActiveTrial(null); handleOpenModal(detailTrial); }} title="Edit" className="p-2 rounded-lg hover:bg-white/60 text-slate-600"><Edit className="w-4 h-4" /></button>
                   </>
                 )}
+                {/* Back to AI Assistant Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    sessionStorage.removeItem('return_to_ai_assistant');
+                    navigate('/ai-assistant');
+                  }}
+                  title="Return directly to AI Assistant chat session"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition shadow-xs cursor-pointer shrink-0"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Back to AI</span>
+                </button>
                 <button onClick={() => setActiveTrial(null)} className="p-2 rounded-lg hover:bg-white/60 text-slate-600"><X className="w-5 h-5" /></button>
               </div>
             </div>
