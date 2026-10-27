@@ -208,6 +208,244 @@ function parseMessageContent(content) {
 }
 
 /**
+ * Interactive Ground-Truth Sources Drawer & Self-RAG Faithfulness Inspector (RAG 2.0)
+ */
+function GroundTruthSourcesView({ sources = [], faithfulness = null, onAskPrompt, navigate }) {
+  const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState('');
+  const [copiedId, setCopiedId] = useState(null);
+  const [showClaims, setShowClaims] = useState(false);
+
+  const handleCopyCitation = (src) => {
+    const citation = `[Ground-Truth Source: ${src.title}] ${src.preview}`;
+    if (navigator?.clipboard) {
+      navigator.clipboard.writeText(citation).then(() => {
+        setCopiedId(src.id);
+        setTimeout(() => setCopiedId(null), 2000);
+      });
+    }
+  };
+
+  const filteredSources = sources.filter(s => {
+    if (filter === 'trials' && !['trial_summary', 'trial_observations'].includes(s.chunkType)) return false;
+    if (filter === 'formulas' && !['formulation_recipe', 'formulation_synergy', 'formulation_aggregate'].includes(s.chunkType)) return false;
+    if (filter === 'matrices' && !['weed_efficacy_matrix', 'benchmark_leaderboard', 'crop_safety_matrix', 'weather_resilience_matrix'].includes(s.chunkType)) return false;
+    if (filter === 'ingredients' && !['ingredient_profile', 'ingredient_inventory'].includes(s.chunkType)) return false;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      return (s.title || '').toLowerCase().includes(q) || (s.preview || '').toLowerCase().includes(q);
+    }
+    return true;
+  });
+
+  const getBadgeInfo = (chunkType) => {
+    switch (chunkType) {
+      case 'weed_efficacy_matrix': return { label: '📊 Target Matrix', color: 'bg-emerald-900/60 text-emerald-300 border-emerald-500/30' };
+      case 'formulation_aggregate': return { label: '📈 Meta-Analysis', color: 'bg-indigo-900/60 text-indigo-300 border-indigo-500/30' };
+      case 'crop_safety_matrix': return { label: '🌾 Crop Safety', color: 'bg-amber-900/60 text-amber-300 border-amber-500/30' };
+      case 'weather_resilience_matrix': return { label: '🌦️ Microclimate', color: 'bg-sky-900/60 text-sky-300 border-sky-500/30' };
+      case 'trial_summary': return { label: '🔬 Plot Trial', color: 'bg-emerald-900/60 text-emerald-300 border-emerald-500/30' };
+      case 'trial_observations': return { label: '📅 Timeline', color: 'bg-blue-900/60 text-blue-300 border-blue-500/30' };
+      case 'formulation_recipe': return { label: '🧪 Recipe', color: 'bg-purple-900/60 text-purple-300 border-purple-500/30' };
+      case 'formulation_synergy': return { label: '⚡ Synergy', color: 'bg-yellow-900/60 text-yellow-300 border-yellow-500/30' };
+      case 'ingredient_profile': return { label: '🌿 Ingredient', color: 'bg-teal-900/60 text-teal-300 border-teal-500/30' };
+      case 'benchmark_leaderboard': return { label: '🏆 Leaderboard', color: 'bg-amber-900/60 text-amber-300 border-amber-500/30' };
+      default: return { label: '📄 Ground Truth', color: 'bg-slate-800 text-slate-300 border-slate-700' };
+    }
+  };
+
+  return (
+    <div className="mt-3 p-3.5 sm:p-4 rounded-2xl bg-slate-950 text-slate-200 border border-emerald-500/30 shadow-xl text-xs not-prose space-y-3">
+      {/* Top Header */}
+      <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-800">
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold">
+            <Sparkles className="w-3.5 h-3.5" />
+          </div>
+          <div>
+            <span className="font-extrabold text-white text-xs tracking-wide">
+              Verified Ground-Truth Sources
+            </span>
+            <span className="ml-2 text-[10px] text-emerald-400 font-mono bg-emerald-950/80 px-2 py-0.5 rounded-full border border-emerald-500/30">
+              {sources.length} Records Retrieved
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {faithfulness && (
+            <button
+              type="button"
+              onClick={() => setShowClaims(prev => !prev)}
+              className="text-[10px] font-bold text-emerald-300 font-mono bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/40 px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition cursor-pointer"
+              title="Click to view verified factual claims directly audited against database records"
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{faithfulness.faithfulnessScore}% Faithfulness</span>
+              <ChevronDown className={`w-3 h-3 transition-transform ${showClaims ? 'rotate-180' : ''}`} />
+            </button>
+          )}
+          <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">0-Quota IndexedDB RAG</span>
+        </div>
+      </div>
+
+      {/* Self-RAG Verified Claims Inspector (Collapsible) */}
+      {showClaims && faithfulness?.claims && (
+        <div className="p-3 bg-slate-900/90 rounded-xl border border-emerald-500/30 space-y-2">
+          <div className="flex items-center justify-between text-[11px] font-bold text-emerald-400">
+            <span>Audited Claims & Provenance Grounding:</span>
+            <span>{faithfulness.verifiedClaimsCount || 0} / {faithfulness.totalClaims || faithfulness.claims.length} Claims Verified</span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {faithfulness.claims.map((claim, cIdx) => (
+              <span
+                key={cIdx}
+                className={`text-[10px] px-2 py-0.5 rounded-md font-mono flex items-center gap-1 border ${
+                  claim.verified 
+                    ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/30' 
+                    : 'bg-amber-950/80 text-amber-300 border-amber-500/30'
+                }`}
+                title={claim.groundTruthSource ? `Verified in: ${claim.groundTruthSource}` : 'Unverified claim'}
+              >
+                {claim.verified ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Info className="w-2.5 h-2.5 text-amber-400" />}
+                <span>{claim.label || claim.rawText}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Filter Tabs & Quick Search */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-1">
+          {[
+            { id: 'all', label: `All (${sources.length})` },
+            { id: 'trials', label: '🔬 Trials' },
+            { id: 'formulas', label: '🧪 Formulas & Recipes' },
+            { id: 'matrices', label: '📊 Matrices & Benchmarks' },
+            { id: 'ingredients', label: '🌿 Ingredients' }
+          ].map(tab => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setFilter(tab.id)}
+              className={`text-[10px] px-2.5 py-1 rounded-lg font-medium transition cursor-pointer ${
+                filter === tab.id
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-900 border border-transparent'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="relative min-w-[140px] flex-1 sm:flex-initial">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search retrieved sources..."
+            className="w-full text-[11px] bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1 text-slate-200 placeholder-slate-500 outline-none focus:border-emerald-500/50"
+          />
+        </div>
+      </div>
+
+      {/* Sources List */}
+      <div className="space-y-2 max-h-72 overflow-y-auto pr-1 custom-scrollbar">
+        {filteredSources.map((src, sIdx) => {
+          const badge = getBadgeInfo(src.chunkType);
+
+          return (
+            <div 
+              key={sIdx} 
+              className="p-3 rounded-xl bg-slate-900 border border-slate-800 hover:border-emerald-500/40 transition group space-y-2"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="font-bold text-white text-[11px] truncate">
+                    {src.title}
+                  </span>
+                </div>
+                <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border shrink-0 ${badge.color}`}>
+                  {badge.label}
+                </span>
+              </div>
+
+              <p className="text-[11px] text-slate-300 leading-relaxed font-sans line-clamp-3">
+                {src.preview}
+              </p>
+
+              {/* Action Toolbar */}
+              <div className="flex items-center justify-between pt-1 border-t border-slate-800/80 text-[10px]">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => onAskPrompt && onAskPrompt(`Explain scientific details for: ${src.title}`)}
+                    className="flex items-center gap-1 text-emerald-400 hover:text-emerald-300 bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-500/30 px-2 py-0.5 rounded-md font-semibold cursor-pointer transition active:scale-95"
+                    title="Ask AI to analyze this source"
+                  >
+                    <ArrowRight className="w-2.5 h-2.5" />
+                    <span>Inquire About This</span>
+                  </button>
+
+                  {src.entityType === 'trial' && src.entityId && (
+                    <button
+                      type="button"
+                      onClick={() => navigate && navigate(`/trials?focus=${src.entityId}`)}
+                      className="text-slate-400 hover:text-white hover:bg-slate-800 px-2 py-0.5 rounded-md transition cursor-pointer"
+                      title="Inspect full plot trial record"
+                    >
+                      View Trial ↗
+                    </button>
+                  )}
+
+                  {src.entityType === 'formulation' && (
+                    <button
+                      type="button"
+                      onClick={() => navigate && navigate(`/formulations?focus=${encodeURIComponent(src.entityId || src.title)}`)}
+                      className="text-slate-400 hover:text-white hover:bg-slate-800 px-2 py-0.5 rounded-md transition cursor-pointer"
+                      title="Inspect formulation dossier"
+                    >
+                      View Formula ↗
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleCopyCitation(src)}
+                  className="flex items-center gap-1 text-slate-400 hover:text-slate-200 transition cursor-pointer"
+                  title="Copy citation to clipboard"
+                >
+                  {copiedId === src.id ? (
+                    <>
+                      <Check className="w-3 h-3 text-emerald-400" />
+                      <span className="text-emerald-400 font-bold">Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3 h-3" />
+                      <span>Cite</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          );
+        })}
+
+        {filteredSources.length === 0 && (
+          <div className="text-center py-6 text-slate-500 text-xs">
+            No ground-truth sources match "{search}"
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
  * Interactive Candidate Formula Card with 1-click Save to Formulations
  */
 function CandidateFormulaCard({ formula, config, onSave, isSaved, isViewer, onRefinePrompt }) {
@@ -877,8 +1115,8 @@ export default function AIAssistant({ onMenuClick }) {
       const isFollowUp = rawPast.length > 0;
       const turnCount = Math.floor(rawPast.length / 2) + 1;
 
-      // === NEXT-GENERATION HYBRID RAG RETRIEVAL (BM25 + 256D DENSE VECTOR) ===
-      // 100% Client-side, 0 Firebase read/write quota, <30ms latency, context & follow-up aware
+      // === NEXT-GENERATION HYBRID RAG 2.0 RETRIEVAL (BM25 + 512D DENSE VECTOR) ===
+      // 100% Client-side, 0 Firebase read/write quota, <30ms latency, botanical synonyms & multi-intent aware
       let ragResult = null;
       let ragContextText = '';
       try {
@@ -1795,8 +2033,8 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                     <span className="font-bold text-xs sm:text-sm text-slate-800 truncate">
                       {config.name} AI Intelligence Studio
                     </span>
-                    <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200/80 flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> 0-Quota RAG
+                    <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200/80 flex items-center gap-1 shadow-2xs">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Hybrid RAG 2.0 (512D Vector)
                     </span>
                   </div>
                 </div>
@@ -2294,7 +2532,7 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                                         title="Click to inspect verified ground-truth sources retrieved for this answer"
                                       >
                                         <Sparkles className="w-2.5 h-2.5 text-emerald-500" />
-                                        <span>Hybrid RAG ({msg.meta.rag.chunkCount} docs • {msg.meta.rag.retrievalDuration}ms)</span>
+                                        <span>Hybrid RAG 2.0 ({msg.meta.rag.chunkCount} docs • {msg.meta.rag.retrievalDuration}ms)</span>
                                         <ChevronDown className={`w-3 h-3 text-emerald-600 transition-transform ${isSourcesExpanded ? 'rotate-180' : ''}`} />
                                       </button>
                                       {msg.meta.rag.faithfulness && (
@@ -2320,49 +2558,14 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                                 </div>
                               )}
 
-                              {/* Interactive Ground-Truth Sources Drawer */}
+                              {/* Interactive Ground-Truth Sources Drawer 2.0 */}
                               {isSourcesExpanded && msg.meta?.rag?.sources?.length > 0 && (
-                                <div className="mt-3 p-3.5 rounded-xl bg-slate-950 text-slate-200 border border-emerald-500/30 shadow-lg text-xs not-prose space-y-2.5">
-                                  <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                                    <div className="flex items-center gap-1.5 font-bold text-emerald-400 text-[11px] uppercase tracking-wider">
-                                      <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                                      <span>Verified Ground-Truth Sources ({msg.meta.rag.sources.length})</span>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                      {msg.meta.rag.faithfulness && (
-                                        <span className="text-[10px] font-bold text-emerald-400 font-mono bg-emerald-950/80 border border-emerald-500/30 px-2 py-0.5 rounded-md">
-                                          Score: {msg.meta.rag.faithfulness.faithfulnessScore}%
-                                        </span>
-                                      )}
-                                      <span className="text-[10px] text-slate-400 font-mono">0-Quota IndexedDB RAG</span>
-                                    </div>
-                                  </div>
-                                  <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                                    {msg.meta.rag.sources.map((src, sIdx) => {
-                                      const typeBadge = src.chunkType === 'trial_summary' ? '🔬 Trial'
-                                        : src.chunkType === 'trial_observations' ? '📅 Timeline'
-                                        : src.chunkType === 'formulation_recipe' ? '🧪 Recipe'
-                                        : src.chunkType === 'formulation_synergy' ? '⚡ Synergy'
-                                        : src.chunkType === 'ingredient_profile' ? '🌿 Ingredient'
-                                        : src.chunkType === 'benchmark_leaderboard' ? '🏆 Leaderboard'
-                                        : '📄 Record';
-
-                                      return (
-                                        <div key={sIdx} className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-emerald-500/50 transition">
-                                          <div className="flex items-center justify-between gap-2 mb-1">
-                                            <span className="font-semibold text-white truncate text-[11px]">{src.title}</span>
-                                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-slate-800 text-emerald-300 border border-emerald-500/20 shrink-0">
-                                              {typeBadge}
-                                            </span>
-                                          </div>
-                                          <p className="text-[10px] text-slate-300 leading-relaxed font-sans line-clamp-2">
-                                            {src.preview}
-                                          </p>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
+                                <GroundTruthSourcesView
+                                  sources={msg.meta.rag.sources}
+                                  faithfulness={msg.meta.rag.faithfulness}
+                                  onAskPrompt={(p) => sendMessage(p)}
+                                  navigate={navigate}
+                                />
                               )}
                             </div>
                           </div>

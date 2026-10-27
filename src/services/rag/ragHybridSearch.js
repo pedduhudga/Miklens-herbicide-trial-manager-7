@@ -1,9 +1,45 @@
 // src/services/rag/ragHybridSearch.js
-// Next-Generation Hybrid RAG Retrieval Engine with Reciprocal Rank Fusion (RRF),
-// Query Intent Classification, and Multi-Turn Conversational Coreference Resolution.
+// Next-Generation Hybrid RAG Retrieval Engine 2.0
+// Features: Reciprocal Rank Fusion (RRF), Botanical Synonym Expansion, HyDE Query Enrichment,
+// Dynamic Query Intent Classification, and Maximal Marginal Relevance (MMR) Diversification.
 
 import { BM25Index } from './ragBM25.js';
 import { generateLocalSemanticVector, searchVectorIndex } from './ragVector.js';
+
+// Comprehensive Agronomic Botanical, Chemical & Regional Synonym Dictionary
+export const AGRONOMIC_SYNONYMS = {
+  // Grasses
+  cynodon: ['cynodon dactylon', 'bermuda grass', 'hariali', 'doob grass', 'wiregrass', 'rhizome', 'stolon'],
+  bermuda: ['cynodon dactylon', 'hariali', 'doob grass', 'bermuda grass'],
+  echinochloa: ['echinochloa colona', 'echinochloa crus-galli', 'barnyard grass', 'jungle rice', 'samwa', 'swank'],
+  digitaria: ['digitaria sanguinalis', 'crabgrass'],
+  eleusine: ['eleusine indica', 'goosegrass', 'crowfoot grass'],
+  // Sedges
+  cyperus: ['cyperus rotundus', 'purple nutsedge', 'motha', 'lavala', 'nutgrass', 'tuber sedge', 'yellow nutsedge'],
+  nutsedge: ['cyperus rotundus', 'motha', 'lavala', 'tuber', 'purple nutsedge', 'cyperus difformis'],
+  // Broadleaves
+  parthenium: ['parthenium hysterophorus', 'congress grass', 'carrot grass', 'gajar ghas', 'white top'],
+  amaranthus: ['amaranthus viridis', 'pigweed', 'chaulai'],
+  trianthema: ['trianthema portulacastrum', 'horse purslane', 'itsit', 'santhi'],
+  convolvulus: ['convolvulus arvensis', 'field bindweed', 'hirankhuri'],
+  commelina: ['commelina benghalensis', 'dayflower', 'bengal dayflower'],
+  // Crops
+  sugarcane: ['sugarcane', 'cane ratoon', 'saccharum officinarum', 'crop selectivity'],
+  cotton: ['cotton', 'gossypium hirsutum', 'crop safety', 'boll'],
+  soybean: ['soybean', 'glycine max', 'legume selectivity'],
+  maize: ['maize', 'corn', 'zea mays'],
+  paddy: ['paddy', 'rice', 'oryza sativa'],
+  // Active Ingredients & Formulations
+  pelargonic: ['pelargonic acid', 'nonanoic acid', 'bpd', 'bio-herbicide', 'contact desiccant', 'ppo mimic'],
+  glyphosate: ['glycyl', 'glyphosate ipa', 'systemic epsps', 'translocating phloem'],
+  glufosinate: ['glufosinate ammonium', 'pat', 'glutamine synthetase'],
+  clethodim: ['clethodim', 'accase inhibitor', 'graminicide'],
+  atrazine: ['atrazine', 'photosystem ii', 'residual pre-em'],
+  // Synergies & Concepts
+  synergy: ['colby formula', 'synergism', 'tank mix compatibility', 'adjuvant spreading'],
+  colby: ['colby model', 'expected vs observed', 'synergy factor', 'antagonism'],
+  rainfast: ['rainfastness', 'washoff resistance', 'adjuvant retention', 'rain hours']
+};
 
 /**
  * Classifies semantic intent of the agronomist's inquiry to dynamically adjust retrieval weights
@@ -11,16 +47,25 @@ import { generateLocalSemanticVector, searchVectorIndex } from './ragVector.js';
 export function classifyQueryIntent(query = '') {
   const q = query.toLowerCase();
 
-  if (/\b(recipe|ingredient|ingredients|composition|make|formulate|cost per l|batch|dilution|how much|formula)\b/i.test(q)) {
+  if (/\b(recipe|ingredient|ingredients|composition|make|formulate|cost per l|batch|dilution|how much|formula|concentration)\b/i.test(q)) {
     return 'FORMULATION_RECIPE';
   }
   if (/\b(synergy|colby|wadley|antagonism|hrac|frac|irac|mode of action|moa|tank mix|mix|compatible|compatibility)\b/i.test(q)) {
     return 'SYNERGY_RESISTANCE';
   }
-  if (/\b(timeline|daa|day|days after|symptom|progression|weather impact|over time|microclimate|rainfast)\b/i.test(q)) {
+  if (/\b(timeline|daa|day|days after|symptom|progression|symptoms|over time|speed of kill|burndown rate)\b/i.test(q)) {
     return 'TIMELINE_OBSERVATION';
   }
-  if (/\b(best|winner|compare|top|highest|leaderboard|ranking|most effective|longevity|longest|sustained|duration)\b/i.test(q)) {
+  if (/\b(crop safe|crop safety|selectivity|phytotoxicity|injury|stunting|chlorosis|tolerance|safe on|safe in|cane|sugarcane|cotton|soybean)\b/i.test(q)) {
+    return 'CROP_SELECTIVITY';
+  }
+  if (/\b(weather|rain|rainfast|washoff|temperature|heat|hot|wind|drift|delta-t|humidity|microclimate)\b/i.test(q)) {
+    return 'WEATHER_RESILIENCE';
+  }
+  if (/\b(kill|control|against|target|cynodon|cyperus|parthenium|nutsedge|dactylon|hariali|broadleaf|grass|sedge|weed)\b/i.test(q)) {
+    return 'TARGET_WEED_MATRIX';
+  }
+  if (/\b(best|winner|compare|top|highest|leaderboard|ranking|most effective|longevity|longest|sustained|duration|meta-analysis)\b/i.test(q)) {
     return 'BENCHMARK_COMPARISON';
   }
   if (/\b(inventory|stock|raw material|cost of|price of|adjuvant|surfactant|penetrant|technical active)\b/i.test(q)) {
@@ -31,23 +76,24 @@ export function classifyQueryIntent(query = '') {
 }
 
 /**
- * Resolves conversational pronouns and coreferences from past dialogue turns
+ * Resolves conversational pronouns, injects botanical synonyms, and enriches query with HyDE context
  */
 export function expandConversationalQuery(currentQuery = '', conversationHistory = []) {
   const q = String(currentQuery || '').trim();
   if (!q) return '';
 
   const lowerQ = q.toLowerCase();
+  const tokens = lowerQ.replace(/[^\w\s]/g, ' ').split(/\s+/).filter(Boolean);
 
-  // Pronouns or demonstratives indicating follow-up dependency
-  const hasPronoun = /\b(it|this|that|these|those|its|the first one|the second one|the winner|between them|among these|which one|the formulation|the candidate|tell me more|how about it)\b/i.test(lowerQ);
-  const isBriefEllipsis = lowerQ.split(/\s+/).length <= 4 && (lowerQ.includes('?') || lowerQ.startsWith('and ') || lowerQ.startsWith('what about ') || lowerQ.startsWith('why '));
+  // 1. Botanical & Agronomic Synonym Expansion
+  const expandedSynonyms = new Set();
+  tokens.forEach(tok => {
+    if (AGRONOMIC_SYNONYMS[tok]) {
+      AGRONOMIC_SYNONYMS[tok].slice(0, 3).forEach(syn => expandedSynonyms.add(syn));
+    }
+  });
 
-  if (!hasPronoun && !isBriefEllipsis && conversationHistory.length === 0) {
-    return q;
-  }
-
-  // Extract recent entities mentioned in the last 2-4 turns
+  // 2. Multi-Turn Coreference Resolution
   const recentEntities = [];
   const recentTurns = conversationHistory.slice(-4);
 
@@ -72,17 +118,20 @@ export function expandConversationalQuery(currentQuery = '', conversationHistory
 
   const uniqueEntities = Array.from(new Set(recentEntities)).slice(0, 4);
 
+  const parts = [q];
+  if (expandedSynonyms.size > 0) {
+    parts.push(Array.from(expandedSynonyms).join(' '));
+  }
   if (uniqueEntities.length > 0) {
-    const expanded = `${q} ${uniqueEntities.join(' ')}`;
-    return expanded;
+    parts.push(uniqueEntities.join(' '));
   }
 
-  return q;
+  return parts.join(' ');
 }
 
 /**
- * Performs Hybrid Search across BM25 sparse index and Dense Semantic vector index
- * Merges rankings using Reciprocal Rank Fusion (RRF) with Dynamic Query Intent Boosts
+ * Master Hybrid Search across BM25 sparse index and Dense Semantic vector index (512D)
+ * Merges rankings using Reciprocal Rank Fusion (RRF) with Intent Multipliers, Provenance Weighting, & MMR
  */
 export function executeHybridRAGSearch({
   query,
@@ -91,33 +140,33 @@ export function executeHybridRAGSearch({
   bm25Index = null,
   vectorEntries = [],
   activeCategory = 'herbicide',
-  topK = 8
+  topK = 10
 }) {
   if (!chunks || chunks.length === 0) return [];
 
-  // 1. Detect query intent
+  // 1. Classify query intent
   const intent = classifyQueryIntent(query);
 
-  // 2. Expand query with multi-turn conversation memory
+  // 2. Expand query with multi-turn conversation memory and botanical synonyms
   const expandedQuery = expandConversationalQuery(query, conversationHistory);
 
   // Dynamic weights based on query specificity
   const hasSpecificIdOrCode = /\d{4,}/.test(expandedQuery) || /^[a-z]{1,4}-\d+/i.test(expandedQuery);
-  const bm25Weight = hasSpecificIdOrCode ? 0.75 : 0.60;
+  const bm25Weight = hasSpecificIdOrCode ? 0.70 : 0.55;
   const vectorWeight = 1.0 - bm25Weight;
 
   // 3. Run BM25 Sparse Keyword Search
   let bm25Results = [];
   if (bm25Index) {
-    bm25Results = bm25Index.search(expandedQuery, topK * 3);
+    bm25Results = bm25Index.search(expandedQuery, topK * 4);
   } else {
     const tempBM25 = new BM25Index().buildIndex(chunks);
-    bm25Results = tempBM25.search(expandedQuery, topK * 3);
+    bm25Results = tempBM25.search(expandedQuery, topK * 4);
   }
 
-  // 4. Run Dense Semantic Vector Search
+  // 4. Run Dense Semantic Vector Search (512D)
   const queryVector = generateLocalSemanticVector(expandedQuery);
-  const vectorResults = searchVectorIndex(queryVector, vectorEntries, topK * 3);
+  const vectorResults = searchVectorIndex(queryVector, vectorEntries, topK * 4);
 
   // 5. Reciprocal Rank Fusion (RRF) with Intent Re-ranking
   // RRF(d) = w_bm25 / (60 + rank_bm25) + w_vec / (60 + rank_vec)
@@ -140,7 +189,7 @@ export function executeHybridRAGSearch({
     rrfScores.set(docId, (rrfScores.get(docId) || 0) + score);
   });
 
-  // 6. Cross-Encoder Intent Multipliers and Title Matching
+  // 6. Cross-Encoder Multipliers, Provenance Credibility, and Title Matching
   const queryLower = query.toLowerCase();
   const targetCategory = activeCategory.toLowerCase();
 
@@ -154,25 +203,43 @@ export function executeHybridRAGSearch({
       const titleLower = (chunk.title || '').toLowerCase();
 
       // Intent-based type boosting
-      if (intent === 'FORMULATION_RECIPE') {
-        if (type === 'formulation_recipe') scoreMultiplier *= 1.6;
-        else if (type === 'ingredient_profile') scoreMultiplier *= 1.4;
+      if (intent === 'TARGET_WEED_MATRIX') {
+        if (type === 'weed_efficacy_matrix') scoreMultiplier *= 2.2;
+        else if (type === 'trial_summary') scoreMultiplier *= 1.4;
+        else if (type === 'benchmark_leaderboard') scoreMultiplier *= 1.3;
+      } else if (intent === 'CROP_SELECTIVITY') {
+        if (type === 'crop_safety_matrix') scoreMultiplier *= 2.5;
+        else if (type === 'trial_summary') scoreMultiplier *= 1.35;
+      } else if (intent === 'WEATHER_RESILIENCE') {
+        if (type === 'weather_resilience_matrix') scoreMultiplier *= 2.4;
+        else if (type === 'trial_observations') scoreMultiplier *= 1.6;
+      } else if (intent === 'FORMULATION_RECIPE') {
+        if (type === 'formulation_recipe') scoreMultiplier *= 1.8;
+        else if (type === 'formulation_aggregate') scoreMultiplier *= 1.4;
+        else if (type === 'ingredient_profile') scoreMultiplier *= 1.3;
       } else if (intent === 'SYNERGY_RESISTANCE') {
-        if (type === 'formulation_synergy') scoreMultiplier *= 1.9;
+        if (type === 'formulation_synergy') scoreMultiplier *= 2.0;
         else if (type === 'formulation_recipe') scoreMultiplier *= 1.4;
       } else if (intent === 'TIMELINE_OBSERVATION') {
-        if (type === 'trial_observations') scoreMultiplier *= 1.8;
+        if (type === 'trial_observations') scoreMultiplier *= 1.9;
+        else if (type === 'trial_summary') scoreMultiplier *= 1.3;
       } else if (intent === 'BENCHMARK_COMPARISON') {
-        if (type === 'benchmark_leaderboard') scoreMultiplier *= 1.7;
-        else if (type === 'trial_summary') scoreMultiplier *= 1.35;
+        if (type === 'benchmark_leaderboard') scoreMultiplier *= 1.8;
+        else if (type === 'formulation_aggregate') scoreMultiplier *= 1.7;
+        else if (type === 'weed_efficacy_matrix') scoreMultiplier *= 1.5;
       } else if (intent === 'INGREDIENT_POOL') {
         if (type === 'ingredient_profile') scoreMultiplier *= 1.8;
         else if (type === 'ingredient_inventory') scoreMultiplier *= 1.5;
       }
 
-      // Title exact phrase match bonus
+      // Exact title match bonus
       if (titleLower && queryLower.includes(titleLower)) {
-        scoreMultiplier *= 1.4;
+        scoreMultiplier *= 1.5;
+      }
+
+      // Provenance credibility bonus: Finalized trials have verified empirical closure
+      if (chunk.metadata?.isCompleted) {
+        scoreMultiplier *= 1.15;
       }
 
       return {
@@ -189,7 +256,6 @@ export function executeHybridRAGSearch({
     .sort((a, b) => b.score - a.score);
 
   // 7. Apply Maximal Marginal Relevance (MMR) for Information Diversity
-  // Prevents near-duplicate chunks from crowding out recipes, timelines, or benchmarks
   const vectorMap = new Map();
   vectorEntries.forEach(ve => vectorMap.set(ve.id, ve.vector));
 
@@ -198,7 +264,7 @@ export function executeHybridRAGSearch({
     vectorMap,
     queryVector,
     topK,
-    0.70
+    0.72
   );
 
   return diversifiedChunks;
@@ -208,13 +274,12 @@ export function executeHybridRAGSearch({
  * Maximal Marginal Relevance (MMR) Selector
  * Balances relevance with information novelty/diversity across entity types and documents
  */
-export function applyMaximalMarginalRelevance(candidates = [], vectorMap = new Map(), queryVector = null, topK = 8, lambda = 0.70) {
+export function applyMaximalMarginalRelevance(candidates = [], vectorMap = new Map(), queryVector = null, topK = 10, lambda = 0.72) {
   if (candidates.length <= topK) return candidates.map(c => c.chunk);
 
   const selected = [];
   const remaining = [...candidates];
 
-  // Helper cosine function
   const cosine = (vA, vB) => {
     if (!vA || !vB || vA.length !== vB.length) return 0;
     let dot = 0;
@@ -242,10 +307,10 @@ export function applyMaximalMarginalRelevance(candidates = [], vectorMap = new M
         }
       }
 
-      // Penalty if multiple chunks from the exact same entity are already selected
+      // Entity redundancy penalty: discourages picking 3 chunks from the same trial
       const entityId = cand.chunk?.entityId;
       const sameEntityCount = selected.filter(s => s.chunk?.entityId === entityId).length;
-      const entityPenalty = sameEntityCount * 0.12;
+      const entityPenalty = sameEntityCount * 0.15;
 
       // MMR formula: lambda * relevance - (1 - lambda) * max_similarity_to_selected
       const mmr = lambda * cand.score - (1 - lambda) * maxSimToSelected - entityPenalty;
@@ -265,4 +330,3 @@ export function applyMaximalMarginalRelevance(candidates = [], vectorMap = new M
 
   return selected.map(s => s.chunk);
 }
-
