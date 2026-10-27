@@ -9,6 +9,7 @@ import { getTrialCalculatedEfficacy } from '../../utils/formulationTrialUtils.js
 import { calculateEffectiveControlDays } from '../../utils/trialLifecycle.js';
 import { calculateFormulationCost } from '../../utils/costUtils.js';
 import { analyzeFormulationSynergy } from '../../utils/hracSynergy.js';
+import { extractCleanDosage } from '../../utils/trialDoctorFixer.js';
 
 /**
  * Fast deterministic hash string for incremental change detection
@@ -55,7 +56,7 @@ export function generateCategoryChunks({
   catTrials.forEach(t => {
     const trialId = String(t.ID || t.id);
     const formName = t.FormulationName || 'Unknown Treatment';
-    const dosage = t.Dosage || 'Standard Field Rate';
+    const dosage = extractCleanDosage(t);
     const target = t.WeedSpecies || t.WeedTarget || t.Target || t.DiseaseTarget || t.PestTarget || 'Mixed Field Targets';
     const crop = t.Crop || 'Non-Crop / Bare Soil';
     const location = t.Location || 'Field Experimental Station';
@@ -377,7 +378,7 @@ Technical Properties / Role: ${ing.Description || ing.Notes || 'Certified techni
     const topTrials = trialsWithEfficacy.slice(0, 5).map(({ trial, eff }, idx) => {
       const tId = String(trial.ID || trial.id);
       const days = trial.FinalControlDuration || calculateEffectiveControlDays(trial) || 'Ongoing';
-      return `${idx + 1}. [🔬 Trial: ${trial.FormulationName} @ ${trial.Dosage || 'Std'} (${tId})](#/trials?focus=${tId}): ${Math.round(eff)}% Control, Target: ${trial.WeedSpecies || trial.Target || 'All'}, Control Duration: ${days}d`;
+      return `${idx + 1}. [🔬 Trial: ${trial.FormulationName} @ ${extractCleanDosage(trial)} (${tId})](#/trials?focus=${tId}): ${Math.round(eff)}% Control, Target: ${trial.WeedSpecies || trial.Target || 'All'}, Control Duration: ${days}d`;
     }).join('\n');
 
     const benchmarkText = `HISTORICAL PERFORMANCE BENCHMARKS & LEADERBOARD (${cat.toUpperCase()}):

@@ -19,6 +19,7 @@ import {
   getFormulationTrialStats
 } from './formulationTrialUtils.js';
 import { identifyMoA, identifyHrac } from './agrochemicalMoaDatabase.js';
+import { extractCleanDosage } from './trialDoctorFixer.js';
 
 function avg(arr) {
   if (!arr || arr.length === 0) return null;
@@ -132,7 +133,7 @@ function parseTrial(trial, primaryObsField, categoryId) {
   return {
     id: trial.ID,
     formulation: fmt(trial.FormulationName),
-    dosage: fmt(trial.Dosage),
+    dosage: extractCleanDosage(trial),
     result: deducedResult,
     target: '',
     location: fmt(trial.Location),
@@ -363,7 +364,8 @@ function buildExcellentTrialsList(parsedTrials, catFormulations = []) {
     const formId = matchedF ? (matchedF.ID || matchedF.Code || t.formulation) : t.formulation;
     const formLink = `[🧪 Formula: ${t.formulation}](#/formulations?focus=${encodeURIComponent(formId)})`;
 
-    return `* [🔬 Trial: ${t.formulation} @ ${t.dosage} (${t.id})](#/trials?focus=${t.id}) | Formulation: ${formLink} | Target: ${t.target} | Kill Rate: ${effVal} (${t.result}) | Control Longevity: ${ctrlVal} | Status: ${t.status} | Location: ${t.location} | Date: ${t.dateISO || t.date} | Inv: ${t.investigator}`;
+    const doseStr = (t.dosage && t.dosage !== '—' && t.dosage !== 'N/A') ? t.dosage : 'Standard Dose';
+    return `* [🔬 Trial: ${t.formulation} @ ${doseStr} (${t.id})](#/trials?focus=${t.id}) | Formulation: ${formLink} | Target: ${t.target} | Kill Rate: ${effVal} (${t.result}) | Control Longevity: ${ctrlVal} | Status: ${t.status} | Location: ${t.location} | Date: ${t.dateISO || t.date} | Inv: ${t.investigator}`;
   }).join('\n');
 }
 
@@ -390,7 +392,8 @@ function buildTrialIndex(parsedTrials, projectMap) {
 
     const notes = t.notes ? ' | notes:' + t.notes.slice(0, 80) : '';
     const obs = t.obsTimeline ? ' | obs:[' + t.obsTimeline + ']' : '';
-    return '* [🔬 Trial: ' + t.formulation + ' @ ' + t.dosage + ' (' + t.id + ')](#/trials?focus=' + t.id + ') | target:' + t.target + ' | ' + (t.dateISO || t.date) + ' | ' + t.location + ' | inv:' + t.investigator + ' | ' + eff + ' | ' + ctrlStr + ' | ' + t.status + ' | result:' + t.result + proj + ' | wx:' + wx + obs + notes;
+    const doseStr = (t.dosage && t.dosage !== '—' && t.dosage !== 'N/A') ? t.dosage : 'Standard Dose';
+    return '* [🔬 Trial: ' + t.formulation + ' @ ' + doseStr + ' (' + t.id + ')](#/trials?focus=' + t.id + ') | target:' + t.target + ' | ' + (t.dateISO || t.date) + ' | ' + t.location + ' | inv:' + t.investigator + ' | ' + eff + ' | ' + ctrlStr + ' | ' + t.status + ' | result:' + t.result + proj + ' | wx:' + wx + obs + notes;
   }).join('\n');
 }
 

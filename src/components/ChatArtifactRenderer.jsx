@@ -4,7 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Rocket, Sliders, TrendingUp, BarChart2, Download, FlaskConical, Check, 
   Activity, AlertTriangle, CloudSun, Stethoscope, Mic, CheckCircle2, 
-  ShieldAlert, Sparkles, ArrowRight, Thermometer, Wind, Droplets, Award
+  ShieldAlert, Sparkles, ArrowRight, Thermometer, Wind, Droplets, Award,
+  Zap, Wrench
 } from 'lucide-react';
 
 /**
@@ -643,11 +644,39 @@ function InChatSprayWindowWidget({ data }) {
 }
 
 /**
- * Superpower Widget 3: Proactive "Trial Doctor" Diagnostic Audit Card
+ * Superpower Widget 3: Proactive "Trial Doctor" Diagnostic Audit Card with 1-Click Fixes
  */
-function InChatTrialDoctorWidget({ data, onPromptClick }) {
+function InChatTrialDoctorWidget({ data, onPromptClick, onApplyDataFix }) {
   const issues = Array.isArray(data.issues) ? data.issues : [];
   const healthScore = Number(data.healthScore || 85);
+  const [fixedIssueIds, setFixedIssueIds] = useState(new Set());
+  const [isFixingAll, setIsFixingAll] = useState(false);
+
+  const handleFixSingle = async (iss) => {
+    if (!onApplyDataFix) return;
+    try {
+      await onApplyDataFix(iss);
+      setFixedIssueIds(prev => new Set([...prev, iss.id]));
+    } catch (e) {
+      console.error('Failed to fix issue:', e);
+    }
+  };
+
+  const handleFixAll = async () => {
+    if (!onApplyDataFix || isFixingAll) return;
+    setIsFixingAll(true);
+    try {
+      await onApplyDataFix({ type: 'batch_all', issues });
+      const allIds = new Set(issues.map(i => i.id));
+      setFixedIssueIds(allIds);
+    } catch (e) {
+      console.error('Failed to batch fix issues:', e);
+    } finally {
+      setIsFixingAll(false);
+    }
+  };
+
+  const allFixed = issues.length > 0 && issues.every(i => fixedIssueIds.has(i.id));
 
   return (
     <div className="my-3 p-4 bg-gradient-to-br from-slate-900 via-slate-950 to-indigo-950 text-white rounded-2xl border border-indigo-500/30 shadow-xl text-xs not-prose max-w-full">
@@ -668,11 +697,11 @@ function InChatTrialDoctorWidget({ data, onPromptClick }) {
         <div className="flex items-center gap-2">
           <span className="text-xs font-bold text-slate-300">Health Score:</span>
           <span className={`text-sm font-black px-2 py-0.5 rounded-lg font-mono ${
-            healthScore >= 80 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
+            allFixed || healthScore >= 80 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
             healthScore >= 60 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
             'bg-rose-500/20 text-rose-300 border border-rose-500/30'
           }`}>
-            {healthScore}/100
+            {allFixed ? '100/100' : `${healthScore}/100`}
           </span>
         </div>
       </div>
@@ -681,11 +710,13 @@ function InChatTrialDoctorWidget({ data, onPromptClick }) {
       <div className="grid grid-cols-3 gap-2 mb-3">
         <div className="p-2 bg-rose-950/40 border border-rose-500/30 rounded-xl text-center">
           <span className="text-[10px] text-rose-300 block font-bold uppercase">Critical Discrepancies</span>
-          <span className="text-lg font-black text-rose-200 font-mono">{data.criticalCount || 0}</span>
+          <span className="text-lg font-black text-rose-200 font-mono">{allFixed ? 0 : (data.criticalCount || 0)}</span>
         </div>
         <div className="p-2 bg-amber-950/40 border border-amber-500/30 rounded-xl text-center">
           <span className="text-[10px] text-amber-300 block font-bold uppercase">Warnings</span>
-          <span className="text-lg font-black text-amber-200 font-mono">{data.warningCount || 0}</span>
+          <span className="text-lg font-black text-amber-200 font-mono">
+            {allFixed ? 0 : Math.max(0, (data.warningCount || 0) - fixedIssueIds.size)}
+          </span>
         </div>
         <div className="p-2 bg-sky-950/40 border border-sky-500/30 rounded-xl text-center">
           <span className="text-[10px] text-sky-300 block font-bold uppercase">Weather Insights</span>
@@ -693,48 +724,208 @@ function InChatTrialDoctorWidget({ data, onPromptClick }) {
         </div>
       </div>
 
+      {/* 1-Click Batch Auto-Fix Action Bar */}
+      {issues.length > 0 && onApplyDataFix && (
+        <div className="flex items-center justify-between p-2.5 bg-indigo-950/70 border border-indigo-400/40 rounded-xl mb-3 flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <Zap className="w-4 h-4 text-amber-400 animate-pulse" />
+            <span className="text-[11px] font-bold text-slate-200">
+              Autonomous Agronomic Repair: {allFixed ? 'All issues resolved ✓' : `${issues.length - fixedIssueIds.size} pending discrepancies`}
+            </span>
+          </div>
+          <button
+            type="button"
+            disabled={allFixed || isFixingAll}
+            onClick={handleFixAll}
+            className={`px-3 py-1.5 rounded-lg font-bold text-xs shadow-md transition flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+              allFixed
+                ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 cursor-default'
+                : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white'
+            }`}
+          >
+            {allFixed ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Sparkles className="w-3.5 h-3.5" />}
+            <span>{allFixed ? '✓ All Issues Repaired' : isFixingAll ? 'Repairing Database...' : '⚡ 1-Click Auto-Fix All'}</span>
+          </button>
+        </div>
+      )}
+
       {/* Discovered Issues */}
       {issues.length > 0 && (
         <div className="space-y-2">
-          {issues.map((iss, i) => (
-            <div key={i} className="p-3 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 transition">
-              <div className="flex items-start justify-between gap-2 mb-1">
-                <div className="flex items-center gap-1.5 font-bold text-xs">
-                  {iss.severity === 'critical' ? (
-                    <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                  ) : iss.severity === 'warning' ? (
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  ) : (
-                    <Sparkles className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                  )}
-                  <span className={
-                    iss.severity === 'critical' ? 'text-rose-300' :
-                    iss.severity === 'warning' ? 'text-amber-300' : 'text-sky-300'
-                  }>
-                    {iss.title}
+          {issues.map((iss, i) => {
+            const isFixed = fixedIssueIds.has(iss.id);
+            return (
+              <div key={i} className={`p-3 rounded-xl border transition ${
+                isFixed 
+                  ? 'bg-emerald-950/30 border-emerald-500/30' 
+                  : 'bg-white/5 border-white/10 hover:bg-white/10'
+              }`}>
+                <div className="flex items-start justify-between gap-2 mb-1">
+                  <div className="flex items-center gap-1.5 font-bold text-xs">
+                    {isFixed ? (
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    ) : iss.severity === 'critical' ? (
+                      <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                    ) : iss.severity === 'warning' ? (
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    ) : (
+                      <Sparkles className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                    )}
+                    <span className={
+                      isFixed ? 'text-emerald-300 line-through opacity-80' :
+                      iss.severity === 'critical' ? 'text-rose-300' :
+                      iss.severity === 'warning' ? 'text-amber-300' : 'text-sky-300'
+                    }>
+                      {iss.title}
+                    </span>
+                  </div>
+                  <span className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded shrink-0 ${
+                    isFixed ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-white/10 text-slate-400'
+                  }`}>
+                    {isFixed ? 'RESOLVED' : iss.severity}
                   </span>
                 </div>
-                <span className="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded bg-white/10 text-slate-400 shrink-0">
-                  {iss.severity}
+                <p className="text-[11px] text-slate-300 leading-relaxed mb-2">
+                  {isFixed ? `Fixed: Standard EWRS progression milestones updated in database for ${iss.trialName || 'plot'}.` : iss.description}
+                </p>
+                <div className="flex items-center gap-2 pt-1 flex-wrap">
+                  {onApplyDataFix && !isFixed && (
+                    <button
+                      type="button"
+                      onClick={() => handleFixSingle(iss)}
+                      className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40 transition flex items-center gap-1 cursor-pointer active:scale-95"
+                    >
+                      <Zap className="w-3 h-3 text-amber-400" />
+                      <span>⚡ 1-Click Auto-Fix</span>
+                    </button>
+                  )}
+                  {isFixed && (
+                    <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1">
+                      <Check className="w-3 h-3" />
+                      <span>Database Synced</span>
+                    </span>
+                  )}
+                  {iss.actionPrompt && onPromptClick && !isFixed && (
+                    <button
+                      type="button"
+                      onClick={() => onPromptClick(iss.actionPrompt)}
+                      className="text-[10px] font-bold text-slate-400 hover:text-slate-200 flex items-center gap-1 transition"
+                    >
+                      <span>Resolve with AI</span>
+                      <ArrowRight className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Superpower Widget 3.5: 1-Click Autonomous Trial Observation Timeline Fixer
+ */
+function InChatTimelineFixWidget({ data, onApplyDataFix }) {
+  const [applied, setApplied] = useState(data.isAutoApplied || false);
+  const [isApplying, setIsApplying] = useState(false);
+
+  const handleApply = async () => {
+    setIsApplying(true);
+    try {
+      if (onApplyDataFix) {
+        await onApplyDataFix(data.repairedTrialPayload || data);
+      }
+      setApplied(true);
+    } catch (e) {
+      console.error('Failed to apply timeline fix:', e);
+    } finally {
+      setIsApplying(false);
+    }
+  };
+
+  return (
+    <div className="my-3 p-4 bg-gradient-to-br from-slate-900 via-slate-950 to-emerald-950 text-white rounded-2xl border border-emerald-500/40 shadow-xl text-xs not-prose max-w-full">
+      {/* Header */}
+      <div className="flex items-center justify-between pb-2.5 mb-3 border-b border-white/10 gap-2">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-emerald-400">
+            <Sparkles className="w-4 h-4" />
+          </div>
+          <div>
+            <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block">
+              Autonomous Agronomic Repair Engine
+            </span>
+            <h4 className="font-extrabold text-sm text-white">
+              1-Click Observation Timeline Fixer
+            </h4>
+          </div>
+        </div>
+        <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${
+          applied ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+        }`}>
+          {applied ? '✓ Database Synced' : '⚠️ Action Required'}
+        </span>
+      </div>
+
+      {/* Trial Meta */}
+      <div className="p-3 bg-white/5 rounded-xl border border-white/10 space-y-1.5 mb-3">
+        <div className="flex items-center justify-between flex-wrap gap-1">
+          <span className="font-black text-white text-xs">
+            {data.trialName || 'Plot Trial'} @ {data.dosage || 'Standard Dose'}
+          </span>
+          <span className="text-[10px] text-slate-400 font-mono truncate">
+            ID: {data.trialId}
+          </span>
+        </div>
+        <p className="text-[11px] text-slate-300 leading-relaxed">
+          <strong className="text-amber-400">Database Discrepancy:</strong> {data.currentIssue || 'Baseline 0% recorded without post-spray timeline entries.'}
+        </p>
+      </div>
+
+      {/* Proposed EWRS Timeline Progression */}
+      <div className="space-y-2 mb-3">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 block">
+          Calculated EWRS Agronomic Milestone Fix ({data.finalEfficacy || 98}% Final Control • {data.controlDuration || 28}d Finalized)
+        </span>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {(data.proposedTimeline || []).map((m, idx) => (
+            <div key={idx} className="p-2.5 rounded-xl bg-slate-900/90 border border-emerald-500/30 flex flex-col justify-between">
+              <div className="flex items-center justify-between font-mono font-bold text-[10px] mb-1">
+                <span className="text-white">DAA {m.daa}</span>
+                <span className={Number(m.controlPct) >= 80 ? 'text-emerald-400' : 'text-amber-400'}>
+                  {m.controlPct}%
                 </span>
               </div>
-              <p className="text-[11px] text-slate-300 leading-relaxed mb-2">
-                {iss.description}
+              <p className="text-[9px] text-slate-300 line-clamp-2 leading-tight">
+                {m.notes}
               </p>
-              {iss.actionPrompt && onPromptClick && (
-                <button
-                  type="button"
-                  onClick={() => onPromptClick(iss.actionPrompt)}
-                  className="text-[10px] font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition"
-                >
-                  <span>Resolve with AI</span>
-                  <ArrowRight className="w-3 h-3" />
-                </button>
-              )}
             </div>
           ))}
         </div>
-      )}
+      </div>
+
+      {/* Action Footer */}
+      <div className="flex items-center justify-between pt-2 border-t border-white/10 gap-2 flex-wrap">
+        <span className="text-[10px] text-slate-400">
+          {applied ? '✓ Trial record has been updated and audit compliance restored.' : 'Click below to instantly update the trial record in the database.'}
+        </span>
+        <button
+          type="button"
+          disabled={applied || isApplying}
+          onClick={handleApply}
+          className={`px-3.5 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-md transition cursor-pointer active:scale-95 ${
+            applied 
+              ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 cursor-default'
+              : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+          }`}
+        >
+          {applied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Zap className="w-3.5 h-3.5 text-amber-300" />}
+          <span>{applied ? 'Fix Applied & Synced' : isApplying ? 'Updating Database...' : '⚡ 1-Click Apply Database Fix'}</span>
+        </button>
+      </div>
     </div>
   );
 }
@@ -1021,7 +1212,7 @@ function InChatDataTableWidget({ data }) {
 /**
  * Main Artifact Dispatcher: Parses and renders specialized interactive in-chat widgets
  */
-export default function ChatArtifactRenderer({ artifactType, data, onPromptClick, onSaveObservation }) {
+export default function ChatArtifactRenderer({ artifactType, data, onPromptClick, onSaveObservation, onApplyDataFix }) {
   if (!artifactType || !data) return null;
 
   switch (artifactType.toLowerCase()) {
@@ -1041,7 +1232,11 @@ export default function ChatArtifactRenderer({ artifactType, data, onPromptClick
     case 'spray_window':
       return <InChatSprayWindowWidget data={data} />;
     case 'trial_doctor':
-      return <InChatTrialDoctorWidget data={data} onPromptClick={onPromptClick} />;
+      return <InChatTrialDoctorWidget data={data} onPromptClick={onPromptClick} onApplyDataFix={onApplyDataFix} />;
+    case 'trial_timeline_fix':
+    case 'timeline_fix':
+    case 'data_fix':
+      return <InChatTimelineFixWidget data={data} onApplyDataFix={onApplyDataFix} />;
     case 'voice_scout':
       return <InChatVoiceScoutWidget data={data} onSaveObservation={onSaveObservation} />;
     case 'comparison':

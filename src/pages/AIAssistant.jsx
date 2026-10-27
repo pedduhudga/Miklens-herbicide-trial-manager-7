@@ -33,6 +33,7 @@ import { findDuplicateFormulation } from '../utils/formulationDuplicateUtils.js'
 import { 
   detectAndExecuteAgronomicTool, 
   toolAuditTrialDoctor, 
+  toolReviewAndFixTrialTimeline,
   toolCheckSprayWindow, 
   toolRunAnova, 
   toolEvaluateColbyAndCost, 
@@ -42,6 +43,7 @@ import {
   toolDoseResponseSimulator
 } from '../services/aiTools.js';
 import { analyzeWeedCover } from '../utils/imageAnalysis.js';
+import { repairSingleTrial, repairAllFlaggedTrials } from '../utils/trialDoctorFixer.js';
 import ChatArtifactRenderer from '../components/ChatArtifactRenderer.jsx';
 import TrialQuickPeekModal from '../components/TrialQuickPeekModal.jsx';
 
@@ -138,7 +140,7 @@ function parseMessageContent(content) {
   // Clean away any suggestions code block so it doesn't show up in text
   const cleanText = content.replace(/```(?:suggestions?|followups?)\s*\[[\s\S]*?\]\s*```/gi, '').trim();
 
-  const blockRegex = /```(?:formula|json|artifact(?::\w+)?|chart|doseresponse|launch_trial|anova|spray_window|trial_doctor|voice_scout)?\s*(\{[\s\S]*?\})\s*```/gi;
+  const blockRegex = /```(?:formula|json|artifact(?::\w+)?|chart|doseresponse|launch_trial|anova|spray_window|trial_doctor|trial_timeline_fix|timeline_fix|voice_scout)?\s*(\{[\s\S]*?\})\s*```/gi;
   const parts = [];
   let lastIndex = 0;
   let match;
@@ -162,12 +164,13 @@ function parseMessageContent(content) {
     const isAnovaArtifact = parsed.artifactType === 'anova' || (parsed.fStatistic !== undefined && Array.isArray(parsed.treatments));
     const isSprayWindowArtifact = parsed.artifactType === 'spray_window' || (parsed.currentScore !== undefined && Array.isArray(parsed.topWindows));
     const isTrialDoctorArtifact = parsed.artifactType === 'trial_doctor' || (parsed.healthScore !== undefined && Array.isArray(parsed.issues));
+    const isTimelineFixArtifact = parsed.artifactType === 'trial_timeline_fix' || parsed.artifactType === 'timeline_fix' || parsed.artifactType === 'data_fix' || (parsed.proposedTimeline && parsed.trialId);
     const isVoiceScoutArtifact = parsed.artifactType === 'voice_scout' || (parsed.plot && parsed.efficacy !== undefined && parsed.formulation);
 
     const isComparisonArtifact = parsed.artifactType === 'comparison' || parsed.artifactType === 'head_to_head' || (parsed.formulaA && parsed.formulaB);
     const isDataTableArtifact = parsed.artifactType === 'data_table' || parsed.artifactType === 'database_query' || (Array.isArray(parsed.rows) && (parsed.title || parsed.totalCount !== undefined));
 
-    if (isChartArtifact || isDoseResponseArtifact || isLaunchTrialArtifact || isFeasibilityArtifact || isAnovaArtifact || isSprayWindowArtifact || isTrialDoctorArtifact || isVoiceScoutArtifact || isComparisonArtifact || isDataTableArtifact) {
+    if (isChartArtifact || isDoseResponseArtifact || isLaunchTrialArtifact || isFeasibilityArtifact || isAnovaArtifact || isSprayWindowArtifact || isTrialDoctorArtifact || isTimelineFixArtifact || isVoiceScoutArtifact || isComparisonArtifact || isDataTableArtifact) {
       const textBefore = cleanText.substring(lastIndex, match.index);
       if (textBefore.trim()) {
         parts.push({ type: 'text', text: textBefore });
@@ -178,6 +181,7 @@ function parseMessageContent(content) {
         isAnovaArtifact ? 'anova' :
         isSprayWindowArtifact ? 'spray_window' :
         isTrialDoctorArtifact ? 'trial_doctor' :
+        isTimelineFixArtifact ? 'trial_timeline_fix' :
         isVoiceScoutArtifact ? 'voice_scout' :
         isComparisonArtifact ? 'comparison' :
         isDataTableArtifact ? 'data_table' :
@@ -1083,6 +1087,69 @@ export default function AIAssistant({ onMenuClick }) {
     }
   };
 
+  /**
+   * 1-Click Autonomous Trial Doctor Database Repair Handler
+   * Applies validated EWRS milestones and baseline updates directly to trials and Firestore.
+   */
+  const handleApplyDataFix = async (fixTarget) => {
+    if (isViewer) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Viewer role cannot modify trial database records.', type: 'error' } }));
+      return;
+    }
+
+    try {
+      // 1. Batch Fix All Discrepancies
+      if (fixTarget?.type === 'batch_all') {
+        const { updatedTrials, fixedCount, fixedIds } = repairAllFlaggedTrials(state.trials || [], fixTarget.issues || []);
+        if (fixedCount > 0) {
+          for (const t of updatedTrials) {
+            if (fixedIds.has(String(t.ID || t.id))) {
+              await updateTrial(t, getAppState);
+            }
+          }
+          updateState({ trials: updatedTrials });
+          window.dispatchEvent(new CustomEvent('app:toast', {
+            detail: {
+              msg: `✓ 1-Click Auto-Repair Complete: Successfully repaired ${fixedCount} trial database discrepancies! 100% audit compliant.`,
+              type: 'success'
+            }
+          }));
+        }
+        return;
+      }
+
+      // 2. Single Trial Fix
+      const targetId = fixTarget.ID || fixTarget.id || fixTarget.trialId;
+      const existingTrial = (state.trials || []).find(t => String(t.ID || t.id).toLowerCase() === String(targetId).toLowerCase());
+      
+      let repairedTrial = fixTarget.repairedTrialPayload || fixTarget;
+      if (existingTrial && (!repairedTrial.EfficacyDataJSON || !repairedTrial.AuditRepairedAt)) {
+        repairedTrial = repairSingleTrial(existingTrial, fixTarget);
+      }
+
+      if (repairedTrial && (repairedTrial.ID || repairedTrial.id)) {
+        const payload = {
+          ...repairedTrial,
+          ID: repairedTrial.ID || repairedTrial.id
+        };
+        await updateTrial(payload, getAppState);
+        const updatedTrials = (state.trials || []).map(t => String(t.ID || t.id) === String(payload.ID) ? payload : t);
+        updateState({ trials: updatedTrials });
+        window.dispatchEvent(new CustomEvent('app:toast', {
+          detail: {
+            msg: `✓ 1-Click Fix Applied: Trial ${payload.FormulationName || payload.ID} observation timeline & EWRS compliance successfully updated in database!`,
+            type: 'success'
+          }
+        }));
+      }
+    } catch (err) {
+      console.error('[AI Assistant] Failed to apply data fix:', err);
+      window.dispatchEvent(new CustomEvent('app:toast', {
+        detail: { msg: `Failed to apply fix: ${err.message}`, type: 'error' }
+      }));
+    }
+  };
+
   const sendMessage = useCallback(async (text) => {
     const userMsg = text.trim();
     if (!userMsg || isLoading) return;
@@ -1159,6 +1226,10 @@ export default function AIAssistant({ onMenuClick }) {
       let executedTool = null;
       try {
         executedTool = await detectAndExecuteAgronomicTool(userMsg, toolContext);
+        if (executedTool?.result?.artifact?.isAutoApplied && executedTool?.result?.artifact?.repairedTrialPayload) {
+          // Autonomous 1-click execution without user intervention requested
+          handleApplyDataFix(executedTool.result.artifact.repairedTrialPayload);
+        }
       } catch (toolErr) {
         console.warn('[AI Assistant] Tool intent execution error:', toolErr);
       }
@@ -1294,7 +1365,8 @@ CRITICAL RULES:
 3. FOR EVERY TRIAL YOU MENTION: You MUST wrap it in a clickable markdown link using this EXACT format:
    [🔬 Trial: {Formulation} @ {Dosage} ({ID})](#/trials?focus={ID})
    Example: [🔬 Trial: CL-5 @ 2.5 ml/L (TR-2024-001)](#/trials?focus=TR-2024-001)
-   When the user clicks this link, the app will instantly open that exact trial with its full observation timeline, photos, and ratings.
+   CRITICAL: NEVER output "@ N/A" in a trial link. If dosage is unspecified or missing, write "@ Standard Dose" or extract it from trial notes/details.
+   When clicked, the app will instantly open that exact trial with its full observation timeline, photos, and ratings.
 4. FOR EVERY FORMULATION YOU MENTION: You MUST wrap its name in a clickable markdown link using this EXACT format:
    [🧪 Formula: {Name}](#/formulations?focus={FORM_ID_OR_NAME})
    Example: [🧪 Formula: Glycyl](#/formulations?focus=1783319817942) or [🧪 Formula: BPD](#/formulations?focus=BPD)
@@ -2633,6 +2705,7 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                                         data={part.data}
                                         onPromptClick={(p) => sendMessage(p)}
                                         onSaveObservation={handleSaveVoiceObservation}
+                                        onApplyDataFix={handleApplyDataFix}
                                       />
                                     );
                                   }

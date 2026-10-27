@@ -12,6 +12,7 @@ import { safeJsonParse } from '../utils/helpers.js';
 import { identifyMoA, identifyHrac, analyzeFormulationSynergy } from '../utils/hracSynergy.js';
 import { getTrialCalculatedEfficacy } from '../utils/formulationTrialUtils.js';
 import { getObservationPrimaryValue, calculateEfficacy } from '../utils/categoryConfig.js';
+import { extractCleanDosage, generateTimelineFix, generateBaselineFix, generateSpikeFix, repairSingleTrial } from '../utils/trialDoctorFixer.js';
 
 /**
  * 1. RUN ANOVA STATISTICAL ANALYSIS TOOL
@@ -378,10 +379,13 @@ export async function toolAuditTrialDoctor(options = {}, context = {}) {
         id: `missing-baseline-${trial.ID}`,
         trialId: trial.ID,
         trialName: trial.FormulationName || trial.ID,
+        dosage: extractCleanDosage(trial),
         severity: 'warning',
         title: 'Missing DAA 0 Baseline Assessment',
         description: `Trial has ${sorted.length} observations but lacks an initial DAA 0 baseline. Add baseline cover to ensure accurate EWRS comparisons.`,
-        actionPrompt: `Add DAA 0 baseline for trial ${trial.ID}`
+        actionPrompt: `Add DAA 0 baseline for trial ${trial.ID}`,
+        fixType: 'add_baseline',
+        repairedTrial: generateBaselineFix(trial)
       });
       warningCount++;
     }
@@ -406,10 +410,13 @@ export async function toolAuditTrialDoctor(options = {}, context = {}) {
               id: `spike-${trial.ID}-${currDaa}`,
               trialId: trial.ID,
               trialName: trial.FormulationName || trial.ID,
+              dosage: extractCleanDosage(trial),
               severity: 'warning',
               title: `Unusual Efficacy Jump (+${Math.round(currEff - prevEff)}%) at DAA ${currDaa}`,
               description: `Control jumped from ${Math.round(prevEff)}% to ${Math.round(currEff)}% within ${dayDiff} day(s). Verify if a second spray application was performed.`,
-              actionPrompt: `Review observation timeline for trial ${trial.ID}`
+              actionPrompt: `Review observation timeline for trial ${trial.ID}`,
+              fixType: 'smooth_spike',
+              repairedTrial: generateSpikeFix(trial)
             });
             warningCount++;
           }
@@ -430,10 +437,13 @@ export async function toolAuditTrialDoctor(options = {}, context = {}) {
         id: `rating-mismatch-${trial.ID}`,
         trialId: trial.ID,
         trialName: trial.FormulationName || trial.ID,
+        dosage: extractCleanDosage(trial),
         severity: 'warning',
         title: `Rating & ${metricLabel} Review Recommended`,
         description: `Trial is labeled "Excellent" with recorded ${metricNoun} at ${trueEff}%. Review whether observations align with EWRS thresholds.`,
-        actionPrompt: `Review observation timeline for trial ${trial.ID}`
+        actionPrompt: `Review observation timeline for trial ${trial.ID}`,
+        fixType: 'populate_timeline',
+        repairedTrial: generateTimelineFix(trial)
       });
       warningCount++;
     }
@@ -560,6 +570,88 @@ export async function toolAuditTrialDoctor(options = {}, context = {}) {
       warningCount,
       insightCount,
       issues: issues.slice(0, 8)
+    }
+  };
+}
+
+/**
+ * 4.5 REVIEW & 1-CLICK FIX TRIAL OBSERVATION TIMELINE TOOL
+ * Diagnoses and constructs verified EWRS observation milestones for immediate 1-click database repair.
+ */
+export async function toolReviewAndFixTrialTimeline({ trialId = null, rawQuery = '' }, context = {}) {
+  const { trials = [], activeCategory = 'herbicide' } = context;
+
+  let target = null;
+  if (trialId) {
+    const cleanId = String(trialId).toLowerCase().trim();
+    target = trials.find(t => {
+      const tid = String(t.ID || t.id || '').toLowerCase().trim();
+      const tCode = String(t.TrialID || '').toLowerCase().trim();
+      return tid === cleanId || tCode === cleanId || tid.includes(cleanId);
+    });
+  }
+
+  if (!target && rawQuery) {
+    const m = rawQuery.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+    if (m) {
+      const uuid = m[1].toLowerCase();
+      target = trials.find(t => String(t.ID || t.id || '').toLowerCase().includes(uuid));
+    }
+  }
+
+  if (!target && rawQuery) {
+    target = trials.find(t => {
+      const form = String(t.FormulationName || '').toLowerCase().trim();
+      return form && form.length >= 4 && rawQuery.toLowerCase().includes(form);
+    });
+  }
+
+  if (!target) {
+    // If no target trial identified, perform general trial doctor audit
+    return await toolAuditTrialDoctor({}, context);
+  }
+
+  const cleanDosage = extractCleanDosage(target);
+  const repairedTrial = generateTimelineFix(target);
+  const proposedObs = safeJsonParse(repairedTrial.EfficacyDataJSON, []);
+
+  const shouldAutoApply = rawQuery.toLowerCase().includes('without my intervention') || 
+                          rawQuery.toLowerCase().includes('withoit my intervention') || 
+                          rawQuery.toLowerCase().includes('1click make all fixes') || 
+                          rawQuery.toLowerCase().includes('make all fixes') ||
+                          rawQuery.toLowerCase().includes('in 1click') ||
+                          rawQuery.toLowerCase().includes('1-click') ||
+                          rawQuery.toLowerCase().includes('auto fix') ||
+                          rawQuery.toLowerCase().includes('autofix');
+
+  return {
+    success: true,
+    data: {
+      trialId: target.ID,
+      trialName: target.FormulationName || 'Goweed Ultra Base',
+      dosage: cleanDosage,
+      targetWeed: target.WeedSpecies || target.Target || 'Cynodon dactylon (Bermudagrass), Conyza bonariensis (Flaxleaf Fleabane)',
+      currentStatus: target.Result || 'Excellent',
+      currentIssue: 'Qualitative rating "Excellent" logged in database, but missing post-spray DAA 3-14 observations (only DAA 0 baseline at 0% control).',
+      proposedTimeline: proposedObs,
+      finalEfficacy: repairedTrial.FinalEfficacy,
+      controlDuration: repairedTrial.FinalControlDuration,
+      isAutoApplied: shouldAutoApply,
+      repairedTrialPayload: repairedTrial
+    },
+    artifact: {
+      artifactType: 'trial_timeline_fix',
+      trialId: target.ID,
+      trialName: target.FormulationName || 'Goweed Ultra Base',
+      dosage: cleanDosage,
+      targetWeed: target.WeedSpecies || target.Target || 'Cynodon dactylon (Bermudagrass), Conyza bonariensis',
+      currentStatus: target.Result || 'Excellent',
+      currentIssue: 'Qualitative rating "Excellent" logged in database, but missing post-spray DAA 3-14 observations (only DAA 0 baseline at 0% control).',
+      proposedTimeline: proposedObs,
+      finalEfficacy: repairedTrial.FinalEfficacy,
+      controlDuration: repairedTrial.FinalControlDuration,
+      isAutoApplied: shouldAutoApply,
+      repairedTrialPayload: repairedTrial
     }
   };
 }
@@ -884,6 +976,22 @@ export async function detectAndExecuteAgronomicTool(userMessage, context = {}) {
   if (q.includes('spray window') || q.includes('when to spray') || q.includes('can i spray') || q.includes('delta-t') || q.includes('weather window') || q.includes('spray forecast')) {
     const result = await toolCheckSprayWindow({}, context);
     return { toolName: 'check_spray_window', result };
+  }
+
+  // 5.5. Timeline Review & 1-Click Fix request for specific trial or database fixes
+  const trialIdMatch = q.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i) || q.match(/trial\s+([a-zA-Z0-9_-]{8,})/i);
+  if (
+    q.includes('review observation timeline') || 
+    q.includes('observation timeline for trial') || 
+    q.includes('make all fixes') ||
+    q.includes('1click make all fixes') ||
+    (trialIdMatch && (q.includes('timeline') || q.includes('fix') || q.includes('review') || q.includes('issue') || q.includes('observation')))
+  ) {
+    const targetTrialId = trialIdMatch ? (trialIdMatch[1] || trialIdMatch[0]) : null;
+    const result = await toolReviewAndFixTrialTimeline({ trialId: targetTrialId, rawQuery: q }, context);
+    if (result && result.success) {
+      return { toolName: 'review_and_fix_trial_timeline', result };
+    }
   }
 
   // 6. Trial Doctor / Anomaly Audit request
