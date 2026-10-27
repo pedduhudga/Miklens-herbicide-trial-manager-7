@@ -164,7 +164,10 @@ function parseMessageContent(content) {
     const isTrialDoctorArtifact = parsed.artifactType === 'trial_doctor' || (parsed.healthScore !== undefined && Array.isArray(parsed.issues));
     const isVoiceScoutArtifact = parsed.artifactType === 'voice_scout' || (parsed.plot && parsed.efficacy !== undefined && parsed.formulation);
 
-    if (isChartArtifact || isDoseResponseArtifact || isLaunchTrialArtifact || isFeasibilityArtifact || isAnovaArtifact || isSprayWindowArtifact || isTrialDoctorArtifact || isVoiceScoutArtifact) {
+    const isComparisonArtifact = parsed.artifactType === 'comparison' || parsed.artifactType === 'head_to_head' || (parsed.formulaA && parsed.formulaB);
+    const isDataTableArtifact = parsed.artifactType === 'data_table' || parsed.artifactType === 'database_query' || (Array.isArray(parsed.rows) && (parsed.title || parsed.totalCount !== undefined));
+
+    if (isChartArtifact || isDoseResponseArtifact || isLaunchTrialArtifact || isFeasibilityArtifact || isAnovaArtifact || isSprayWindowArtifact || isTrialDoctorArtifact || isVoiceScoutArtifact || isComparisonArtifact || isDataTableArtifact) {
       const textBefore = cleanText.substring(lastIndex, match.index);
       if (textBefore.trim()) {
         parts.push({ type: 'text', text: textBefore });
@@ -176,6 +179,8 @@ function parseMessageContent(content) {
         isSprayWindowArtifact ? 'spray_window' :
         isTrialDoctorArtifact ? 'trial_doctor' :
         isVoiceScoutArtifact ? 'voice_scout' :
+        isComparisonArtifact ? 'comparison' :
+        isDataTableArtifact ? 'data_table' :
         'launch_trial';
       parts.push({
         type: 'artifact',
@@ -720,9 +725,31 @@ export default function AIAssistant({ onMenuClick }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Force new chat on mount
+  // Seamless session preservation: restore previous active session on mount
   useEffect(() => {
-    updateState({ currentAiChatSessionId: null });
+    const returnToAi = sessionStorage.getItem('return_to_ai_assistant');
+    const lastSessionId = sessionStorage.getItem('last_ai_session_id');
+    sessionStorage.removeItem('return_to_ai_assistant');
+
+    if (returnToAi && lastSessionId) {
+      const match = (state.aiChatSessions || []).find(s => s.id === lastSessionId);
+      if (match) {
+        updateState({ currentAiChatSessionId: lastSessionId });
+        return;
+      }
+    }
+
+    // If state.currentAiChatSessionId is already valid in active category sessions, keep it!
+    if (state.currentAiChatSessionId) {
+      const exists = (state.aiChatSessions || []).some(s => s.id === state.currentAiChatSessionId);
+      if (exists) return;
+    }
+
+    // If no active session is selected, load the most recent session in this category if available
+    const categorySessions = (state.aiChatSessions || []).filter(s => (s.category || 'herbicide') === activeCategory);
+    if (categorySessions.length > 0 && !state.currentAiChatSessionId) {
+      updateState({ currentAiChatSessionId: categorySessions[0].id });
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -831,8 +858,13 @@ export default function AIAssistant({ onMenuClick }) {
     };
   }, [isLoading]);
 
+  // High-performance smooth scroll on new messages, instant stick scroll on stream chunks
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (streamingMessage) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    } else {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [history.length, isLoading, streamingMessage]);
 
   const handleAttachImage = (e) => {
@@ -1103,6 +1135,9 @@ export default function AIAssistant({ onMenuClick }) {
     }
 
     updateState({ aiChatSessions: newSessions, currentAiChatSessionId: activeSessionId });
+    try {
+      sessionStorage.setItem('last_ai_session_id', activeSessionId);
+    } catch (e) {}
 
     const startTime = Date.now();
     try {
@@ -1874,6 +1909,9 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
     setIsToolsDrawerOpen(false);
     setActiveTab('chat');
     updateState({ currentAiChatSessionId: null });
+    try {
+      sessionStorage.removeItem('last_ai_session_id');
+    } catch (e) {}
     setTimeout(() => {
       inputRef.current?.focus();
     }, 50);
@@ -1980,6 +2018,9 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                       setIsSearchOpen(false);
                       setActiveTab('chat');
                       updateState({ currentAiChatSessionId: session.id }); 
+                      try {
+                        sessionStorage.setItem('last_ai_session_id', session.id);
+                      } catch (e) {}
                       setIsSidebarOpen(false); 
                     }}
                     className="flex-1 flex items-center gap-2.5 text-left px-3 py-2.5 text-xs min-w-0 cursor-pointer"
@@ -2222,14 +2263,20 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                     const rawId = dataFormulaId || href.match(/focus=([^&#\s]+)/i)?.[1] || '';
                     const cleanId = decodeURIComponent(rawId).trim();
                     if (cleanId) {
-                      navigate(`/formulations?focus=${encodeURIComponent(cleanId)}`, {
-                        state: { focusFormula: cleanId }
+                      sessionStorage.setItem('return_to_ai_assistant', 'true');
+                      if (currentSessionId) sessionStorage.setItem('last_ai_session_id', currentSessionId);
+                      navigate(`/formulations?focus=${encodeURIComponent(cleanId)}&from=ai-assistant`, {
+                        state: { focusFormula: cleanId, from: 'ai-assistant', returnSessionId: currentSessionId }
                       });
                       window.dispatchEvent(new CustomEvent('app:navigate_to_formulation', {
                         detail: { formulaId: cleanId }
                       }));
                     } else {
-                      navigate('/formulations');
+                      sessionStorage.setItem('return_to_ai_assistant', 'true');
+                      if (currentSessionId) sessionStorage.setItem('last_ai_session_id', currentSessionId);
+                      navigate('/formulations?from=ai-assistant', {
+                        state: { from: 'ai-assistant', returnSessionId: currentSessionId }
+                      });
                     }
                     return;
                   }
@@ -2296,7 +2343,11 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                         setQuickPeekTrial(foundTrial);
                         return;
                       } else {
-                        navigate(`/formulations?focus=${encodeURIComponent(clean)}`, { state: { focusFormula: clean } });
+                        sessionStorage.setItem('return_to_ai_assistant', 'true');
+                        if (currentSessionId) sessionStorage.setItem('last_ai_session_id', currentSessionId);
+                        navigate(`/formulations?focus=${encodeURIComponent(clean)}&from=ai-assistant`, { 
+                          state: { focusFormula: clean, from: 'ai-assistant', returnSessionId: currentSessionId } 
+                        });
                         window.dispatchEvent(new CustomEvent('app:navigate_to_formulation', { detail: { formulaId: clean } }));
                       }
                     }

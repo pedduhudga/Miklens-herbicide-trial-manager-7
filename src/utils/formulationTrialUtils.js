@@ -59,11 +59,32 @@ export function getTrialCalculatedEfficacy(trial, category = 'herbicide') {
       if (o.controlPct !== undefined && o.controlPct !== null && !isNaN(Number(o.controlPct))) {
         return Math.round(Number(o.controlPct));
       }
+      if (o.control !== undefined && o.control !== null && !isNaN(Number(o.control))) {
+        return Math.round(Number(o.control));
+      }
+      if (o.Control !== undefined && o.Control !== null && !isNaN(Number(o.Control))) {
+        return Math.round(Number(o.Control));
+      }
       if (o.wce !== undefined && o.wce !== null && !isNaN(Number(o.wce))) {
         return Math.round(Number(o.wce));
       }
       if (o.efficacy !== undefined && o.efficacy !== null && !isNaN(Number(o.efficacy))) {
         return Math.round(Number(o.efficacy));
+      }
+      if (o.Efficacy !== undefined && o.Efficacy !== null && !isNaN(Number(o.Efficacy))) {
+        return Math.round(Number(o.Efficacy));
+      }
+      if (o.percentControl !== undefined && o.percentControl !== null && !isNaN(Number(o.percentControl))) {
+        return Math.round(Number(o.percentControl));
+      }
+      if (o.PercentControl !== undefined && o.PercentControl !== null && !isNaN(Number(o.PercentControl))) {
+        return Math.round(Number(o.PercentControl));
+      }
+      if (o.mortality !== undefined && o.mortality !== null && !isNaN(Number(o.mortality))) {
+        return Math.round(Number(o.mortality));
+      }
+      if (o.Mortality !== undefined && o.Mortality !== null && !isNaN(Number(o.Mortality))) {
+        return Math.round(Number(o.Mortality));
       }
     }
   }

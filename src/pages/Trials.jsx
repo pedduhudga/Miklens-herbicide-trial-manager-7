@@ -6655,7 +6655,9 @@ If none are present, write "None".`;
             <button
               type="button"
               onClick={() => {
-                sessionStorage.removeItem('return_to_ai_assistant');
+                const retId = location.state?.returnSessionId || sessionStorage.getItem('last_ai_session_id');
+                if (retId) updateState({ currentAiChatSessionId: retId });
+                sessionStorage.setItem('return_to_ai_assistant', 'true');
                 navigate('/ai-assistant');
               }}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl text-xs font-black transition shadow-sm active:scale-95 cursor-pointer"
@@ -8122,7 +8124,9 @@ If none are present, write "None".`;
                 <button
                   type="button"
                   onClick={() => {
-                    sessionStorage.removeItem('return_to_ai_assistant');
+                    const retId = location.state?.returnSessionId || sessionStorage.getItem('last_ai_session_id');
+                    if (retId) updateState({ currentAiChatSessionId: retId });
+                    sessionStorage.setItem('return_to_ai_assistant', 'true');
                     navigate('/ai-assistant');
                   }}
                   title="Return directly to AI Assistant chat session"

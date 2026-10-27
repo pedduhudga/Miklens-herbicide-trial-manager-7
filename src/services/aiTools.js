@@ -278,6 +278,12 @@ function extractObservationEfficacy(obs, baseObs = null, category = 'herbicide')
   if (obs.controlPct !== undefined && obs.controlPct !== null && !isNaN(Number(obs.controlPct))) {
     return Number(obs.controlPct);
   }
+  if (obs.control !== undefined && obs.control !== null && !isNaN(Number(obs.control))) {
+    return Number(obs.control);
+  }
+  if (obs.Control !== undefined && obs.Control !== null && !isNaN(Number(obs.Control))) {
+    return Number(obs.Control);
+  }
   if (obs.wce !== undefined && obs.wce !== null && !isNaN(Number(obs.wce))) {
     return Number(obs.wce);
   }
@@ -286,6 +292,18 @@ function extractObservationEfficacy(obs, baseObs = null, category = 'herbicide')
   }
   if (obs.Efficacy !== undefined && obs.Efficacy !== null && !isNaN(Number(obs.Efficacy))) {
     return Number(obs.Efficacy);
+  }
+  if (obs.percentControl !== undefined && obs.percentControl !== null && !isNaN(Number(obs.percentControl))) {
+    return Number(obs.percentControl);
+  }
+  if (obs.PercentControl !== undefined && obs.PercentControl !== null && !isNaN(Number(obs.PercentControl))) {
+    return Number(obs.PercentControl);
+  }
+  if (obs.mortality !== undefined && obs.mortality !== null && !isNaN(Number(obs.mortality))) {
+    return Number(obs.mortality);
+  }
+  if (obs.Mortality !== undefined && obs.Mortality !== null && !isNaN(Number(obs.Mortality))) {
+    return Number(obs.Mortality);
   }
 
   // 2. Relative calculation from primary observation field or weed cover
@@ -610,8 +628,17 @@ export async function toolHeadToHeadBenchmark({ formulaA, formulaB, target = '' 
       if (fn) counts[fn] = (counts[fn] || 0) + 1;
     });
     const sorted = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
-    nameA = nameA || sorted[0] || 'Glycyl';
-    nameB = nameB || sorted[1] || (sorted[0] !== 'Goweed Ultra' ? 'Goweed Ultra' : 'CL-5');
+    const fallbackForms = catFormulations.map(f => f.Name).filter(Boolean);
+    const pool = [...new Set([...sorted, ...fallbackForms])];
+
+    if (!nameA) {
+      nameA = pool[0] || (cat === 'fungicide' ? 'Azoxystrobin Mix' : cat === 'pesticide' ? 'Thiamethoxam Mix' : 'Glycyl');
+    }
+    if (!nameB) {
+      nameB = pool.find(n => n.toLowerCase() !== (nameA || '').toLowerCase())
+        || pool[1]
+        || (cat === 'fungicide' ? 'Difenoconazole Mix' : cat === 'pesticide' ? 'Chlorantraniliprole Mix' : 'CL-5');
+    }
   }
 
   const getStats = (name) => {
@@ -746,8 +773,10 @@ export async function toolQueryDatabaseAggregator(params = {}, context = {}) {
 export async function toolDoseResponseSimulator({ formulaName = '', target = '' }, context = {}) {
   const { trials = [], formulations = [] } = context;
 
-  const matched = formulations.find(f => (f.Name || '').toLowerCase().includes(formulaName.toLowerCase())) || formulations[0];
-  const fName = matched?.Name || formulaName || 'Glycyl';
+  const cat = (context.activeCategory || 'herbicide').toLowerCase();
+  const catFormulations = formulations.filter(f => (f.Category || 'herbicide').toLowerCase() === cat);
+  const matched = catFormulations.find(f => (f.Name || '').toLowerCase().includes(formulaName.toLowerCase())) || catFormulations[0] || formulations[0];
+  const fName = matched?.Name || formulaName || (cat === 'fungicide' ? 'Azoxystrobin SC' : cat === 'pesticide' ? 'Thiamethoxam WG' : 'Glycyl');
 
   // Find trials to extract realistic dosage rates
   const fTrials = trials.filter(t => (t.FormulationName || '').toLowerCase().includes(fName.toLowerCase()));

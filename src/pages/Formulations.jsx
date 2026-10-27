@@ -857,6 +857,9 @@ export default function Formulations({ onMenuClick }) {
   const [quickPeekForm, setQuickPeekForm] = useState(null);
 
   const location = useLocation();
+  const isFromAi = location.state?.from === 'ai-assistant' ||
+    new URLSearchParams(location.search).get('from') === 'ai-assistant' ||
+    (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('return_to_ai_assistant') === 'true');
 
   // ── ROUTING & FOCUS EFFECT ──────────────────────────────────────────
   useEffect(() => {
@@ -1334,6 +1337,37 @@ export default function Formulations({ onMenuClick }) {
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
       <TopBar title="Formulations" onMenuClick={onMenuClick} />
+
+      {/* Return to AI Assistant Sticky Top Banner */}
+      {isFromAi && (
+        <div className="bg-gradient-to-r from-purple-900 via-slate-900 to-indigo-950 text-white px-4 py-2.5 flex items-center justify-between shadow-md border-b border-purple-500/30 z-30 shrink-0 animate-fade-in">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-6 h-6 rounded-lg bg-purple-500/20 border border-purple-400/40 flex items-center justify-center text-purple-400 shrink-0">
+              <Sparkles className="w-3.5 h-3.5" />
+            </div>
+            <div className="truncate">
+              <span className="text-xs font-bold text-purple-300">Viewing from AI Assistant: </span>
+              <span className="text-xs text-white font-bold truncate">
+                {quickPeekForm ? `${quickPeekForm.Name} (${quickPeekForm.Code || quickPeekForm.ID})` : 'Formulation Dossier'}
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                const retId = location.state?.returnSessionId || sessionStorage.getItem('last_ai_session_id');
+                if (retId) updateState({ currentAiChatSessionId: retId });
+                sessionStorage.setItem('return_to_ai_assistant', 'true');
+                navigate('/ai-assistant');
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl text-xs font-black transition shadow-sm active:scale-95 cursor-pointer"
+            >
+              <span>⬅ Return to AI Chat</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
         {/* Compact Mobile Formulations Header */}
