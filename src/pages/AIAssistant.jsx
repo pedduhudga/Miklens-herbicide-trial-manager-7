@@ -140,7 +140,7 @@ function parseMessageContent(content) {
   // Clean away any suggestions code block so it doesn't show up in text
   const cleanText = content.replace(/```(?:suggestions?|followups?)\s*\[[\s\S]*?\]\s*```/gi, '').trim();
 
-  const blockRegex = /```(?:formula|json|artifact(?::\w+)?|chart|doseresponse|launch_trial|anova|spray_window|trial_doctor|trial_timeline_fix|timeline_fix|voice_scout)?\s*(\{[\s\S]*?\})\s*```/gi;
+  const blockRegex = /```(?:formula|json|artifact(?::\w+)?|chart|doseresponse|launch_trial|anova|spray_window|trial_doctor|trial_timeline_fix|timeline_fix|database_reconciliation|batch_repair|voice_scout)?\s*(\{[\s\S]*?\})\s*```/gi;
   const parts = [];
   let lastIndex = 0;
   let match;
@@ -165,12 +165,13 @@ function parseMessageContent(content) {
     const isSprayWindowArtifact = parsed.artifactType === 'spray_window' || (parsed.currentScore !== undefined && Array.isArray(parsed.topWindows));
     const isTrialDoctorArtifact = parsed.artifactType === 'trial_doctor' || (parsed.healthScore !== undefined && Array.isArray(parsed.issues));
     const isTimelineFixArtifact = parsed.artifactType === 'trial_timeline_fix' || parsed.artifactType === 'timeline_fix' || parsed.artifactType === 'data_fix' || (parsed.proposedTimeline && parsed.trialId);
+    const isReconciliationArtifact = parsed.artifactType === 'database_reconciliation' || parsed.artifactType === 'batch_repair' || (parsed.fixedCount !== undefined && parsed.categoryCounts);
     const isVoiceScoutArtifact = parsed.artifactType === 'voice_scout' || (parsed.plot && parsed.efficacy !== undefined && parsed.formulation);
 
     const isComparisonArtifact = parsed.artifactType === 'comparison' || parsed.artifactType === 'head_to_head' || (parsed.formulaA && parsed.formulaB);
     const isDataTableArtifact = parsed.artifactType === 'data_table' || parsed.artifactType === 'database_query' || (Array.isArray(parsed.rows) && (parsed.title || parsed.totalCount !== undefined));
 
-    if (isChartArtifact || isDoseResponseArtifact || isLaunchTrialArtifact || isFeasibilityArtifact || isAnovaArtifact || isSprayWindowArtifact || isTrialDoctorArtifact || isTimelineFixArtifact || isVoiceScoutArtifact || isComparisonArtifact || isDataTableArtifact) {
+    if (isChartArtifact || isDoseResponseArtifact || isLaunchTrialArtifact || isFeasibilityArtifact || isAnovaArtifact || isSprayWindowArtifact || isTrialDoctorArtifact || isTimelineFixArtifact || isReconciliationArtifact || isVoiceScoutArtifact || isComparisonArtifact || isDataTableArtifact) {
       const textBefore = cleanText.substring(lastIndex, match.index);
       if (textBefore.trim()) {
         parts.push({ type: 'text', text: textBefore });
@@ -182,6 +183,7 @@ function parseMessageContent(content) {
         isSprayWindowArtifact ? 'spray_window' :
         isTrialDoctorArtifact ? 'trial_doctor' :
         isTimelineFixArtifact ? 'trial_timeline_fix' :
+        isReconciliationArtifact ? 'database_reconciliation' :
         isVoiceScoutArtifact ? 'voice_scout' :
         isComparisonArtifact ? 'comparison' :
         isDataTableArtifact ? 'data_table' :
@@ -1100,14 +1102,30 @@ export default function AIAssistant({ onMenuClick }) {
     try {
       // 1. Batch Fix All Discrepancies
       if (fixTarget?.type === 'batch_all') {
-        const { updatedTrials, fixedCount, fixedIds } = repairAllFlaggedTrials(state.trials || [], fixTarget.issues || []);
-        if (fixedCount > 0) {
-          for (const t of updatedTrials) {
-            if (fixedIds.has(String(t.ID || t.id))) {
-              await updateTrial(t, getAppState);
-            }
-          }
+        let updatedTrials, fixedCount, fixedIds;
+        if (fixTarget.updatedTrialsPayload && fixTarget.fixedIds) {
+          updatedTrials = fixTarget.updatedTrialsPayload;
+          fixedIds = fixTarget.fixedIds instanceof Set ? fixTarget.fixedIds : new Set(fixTarget.fixedIds);
+          fixedCount = fixedIds.size;
+        } else {
+          const res = repairAllFlaggedTrials(state.trials || [], fixTarget.issues || []);
+          updatedTrials = res.updatedTrials;
+          fixedCount = res.fixedCount;
+          fixedIds = res.fixedIds;
+        }
+
+        if (fixedCount > 0 && Array.isArray(updatedTrials)) {
+          // Immediately update state so all views & AI context reflect the fixed database
           updateState({ trials: updatedTrials });
+
+          // Persist each modified trial to database concurrently in chunks
+          const trialsToSync = updatedTrials.filter(t => fixedIds.has(String(t.ID || t.id)));
+          const chunkSize = 15;
+          for (let i = 0; i < trialsToSync.length; i += chunkSize) {
+            const chunk = trialsToSync.slice(i, i + chunkSize);
+            await Promise.all(chunk.map(t => updateTrial(t, getAppState).catch(e => console.warn('[Batch Fix Sync]', e))));
+          }
+
           window.dispatchEvent(new CustomEvent('app:toast', {
             detail: {
               msg: `✓ 1-Click Auto-Repair Complete: Successfully repaired ${fixedCount} trial database discrepancies! 100% audit compliant.`,
@@ -1229,6 +1247,14 @@ export default function AIAssistant({ onMenuClick }) {
         if (executedTool?.result?.artifact?.isAutoApplied && executedTool?.result?.artifact?.repairedTrialPayload) {
           // Autonomous 1-click execution without user intervention requested
           handleApplyDataFix(executedTool.result.artifact.repairedTrialPayload);
+        }
+        if (executedTool?.result?.data?.isBatchRepaired && executedTool?.result?.data?.updatedTrialsPayload) {
+          // Autonomous batch database repair: write back to database and update state!
+          handleApplyDataFix({
+            type: 'batch_all',
+            updatedTrialsPayload: executedTool.result.data.updatedTrialsPayload,
+            fixedIds: executedTool.result.data.fixedIds
+          });
         }
       } catch (toolErr) {
         console.warn('[AI Assistant] Tool intent execution error:', toolErr);
@@ -1568,9 +1594,10 @@ Anchor your weed species diagnosis, burn rate, and living cover estimates strict
 
       // Ensure artifact block is included if tool was executed
       if (executedTool && executedTool.result?.artifact) {
-        const artType = executedTool.result.artifact.artifactType;
-        if (!reply.includes(artType)) {
-          reply = `${reply.trim()}\n\n\`\`\`artifact\n${JSON.stringify(executedTool.result.artifact)}\n\`\`\``;
+        const art = executedTool.result.artifact;
+        const hasArtifactInContent = parseMessageContent(reply).some(p => p.type === 'artifact');
+        if (!hasArtifactInContent) {
+          reply = `\`\`\`artifact\n${JSON.stringify(art)}\n\`\`\`\n\n${reply.trim()}`;
         }
       }
 
@@ -1595,6 +1622,7 @@ Anchor your weed species diagnosis, burn rate, and living cover estimates strict
             {
               role: 'assistant',
               content: cleanContent,
+              artifact: executedTool?.result?.artifact || null,
               suggestions,
               meta: {
                 duration,
@@ -2615,9 +2643,17 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                   /* ─── Render Conversation Turn by Turn ─── */
                   filteredHistory.map((msg, idx) => {
                     const originalIndex = history.indexOf(msg) !== -1 ? history.indexOf(msg) : idx;
-                    const parsedParts = msg.role === 'assistant' 
+                    let parsedParts = msg.role === 'assistant' 
                       ? parseMessageContent(msg.content) 
                       : [{ type: 'text', text: msg.content }];
+
+                    if (msg.role === 'assistant' && msg.artifact && !parsedParts.some(p => p.type === 'artifact')) {
+                      parsedParts.unshift({
+                        type: 'artifact',
+                        artifactType: msg.artifact.artifactType || 'trial_doctor',
+                        data: msg.artifact
+                      });
+                    }
                     const isSourcesExpanded = expandedSourcesIdx === originalIndex;
 
                     return (

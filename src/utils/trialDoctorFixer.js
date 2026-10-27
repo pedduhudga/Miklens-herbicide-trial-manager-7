@@ -328,52 +328,103 @@ export function repairSingleTrial(trial, issue = {}) {
  */
 export function repairAllFlaggedTrials(allTrials = [], issues = []) {
   if (!Array.isArray(allTrials) || allTrials.length === 0) {
-    return { updatedTrials: allTrials, fixedCount: 0, fixedIds: new Set() };
+    return { updatedTrials: allTrials, fixedCount: 0, fixedIds: new Set(), categoryCounts: {}, repairLog: [] };
   }
 
   const trialMap = new Map(allTrials.map(t => [String(t.ID || t.id), { ...t }]));
   const fixedIds = new Set();
   const repairLog = [];
+  const categoryCounts = {
+    ratingMismatches: 0,
+    spikes: 0,
+    missingBaselines: 0,
+    untreatedChecks: 0
+  };
 
-  for (const iss of issues) {
-    if (!iss.trialId) continue;
-    const tid = String(iss.trialId);
-    const trial = trialMap.get(tid);
-    if (!trial) continue;
+  // 1. First, process any explicitly passed issues
+  if (Array.isArray(issues)) {
+    for (const iss of issues) {
+      if (!iss.trialId) continue;
+      const tid = String(iss.trialId);
+      const trial = trialMap.get(tid);
+      if (!trial) continue;
 
-    const repaired = repairSingleTrial(trial, iss);
-    if (repaired) {
-      trialMap.set(tid, repaired);
-      fixedIds.add(tid);
-      repairLog.push({
-        trialId: tid,
-        trialName: trial.FormulationName,
-        issueTitle: iss.title,
-        fixSummary: 'EWRS timeline milestones & control metrics calibrated'
-      });
-    }
-  }
-
-  // Also check for any obvious orphaned rating mismatches
-  for (const [tid, trial] of trialMap.entries()) {
-    if (fixedIds.has(tid)) continue;
-    const result = String(trial.Result || '').toLowerCase();
-    const rawEff = safeJsonParse(trial.EfficacyDataJSON, []);
-    const list = Array.isArray(rawEff) ? rawEff : [];
-    
-    // If rated Excellent but only has DAA 0 (0% control) or no observations
-    if ((result === 'excellent' || result === 'good') && (list.length <= 1)) {
-      const repaired = generateTimelineFix(trial);
+      const repaired = repairSingleTrial(trial, iss);
       if (repaired) {
         trialMap.set(tid, repaired);
         fixedIds.add(tid);
         repairLog.push({
           trialId: tid,
           trialName: trial.FormulationName,
-          issueTitle: 'Unpopulated observation timeline with qualitative status',
-          fixSummary: 'Complete DAA 0-14 timeline and finalized control duration applied'
+          issueTitle: iss.title,
+          fixSummary: 'Calibrated EWRS timeline milestones and metrics'
         });
       }
+    }
+  }
+
+  // 2. Comprehensive deep scan across ALL trials to catch and resolve all database warnings
+  for (const [tid, trial] of trialMap.entries()) {
+    let repaired = null;
+    const formName = String(trial.FormulationName || '').toLowerCase();
+    const result = String(trial.Result || '').toLowerCase();
+    const parsedEff = safeJsonParse(trial.EfficacyDataJSON, []);
+    const rawEff = Array.isArray(parsedEff) ? parsedEff : (parsedEff?.observations || []);
+    const sorted = [...rawEff].sort((a, b) => Number(a.daa ?? 0) - Number(b.daa ?? 0));
+    const hasBaseline = sorted.some(o => Number(o.daa ?? 0) === 0 || o.isBaseline);
+
+    // Check A: Untreated control check with anomalous control reading
+    if (formName.includes('untreated') || formName.includes('check plot')) {
+      const hasControlAboveZero = sorted.some(o => Number(o.controlPct || o.wce || 0) > 0);
+      if (hasControlAboveZero || Number(trial.FinalEfficacy || 0) > 0) {
+        repaired = generateUntreatedControlFix(trial);
+        categoryCounts.untreatedChecks++;
+      }
+    }
+
+    // Check B: Missing DAA 0 Baseline Assessment (multiple observations without DAA 0)
+    if (!repaired && sorted.length > 2 && !hasBaseline) {
+      repaired = generateBaselineFix(trial);
+      categoryCounts.missingBaselines++;
+    }
+
+    // Check C: Single-day efficacy spike > 60%
+    if (!repaired && sorted.length >= 2) {
+      for (let i = 1; i < sorted.length; i++) {
+        const prev = sorted[i - 1];
+        const curr = sorted[i];
+        const prevDaa = Number(prev.daa ?? 0);
+        const currDaa = Number(curr.daa ?? 0);
+        const prevEff = Number(prev.controlPct ?? prev.wce ?? prev.efficacy ?? 0);
+        const currEff = Number(curr.controlPct ?? curr.wce ?? curr.efficacy ?? 0);
+        if (prevDaa > 0 && (currDaa - prevDaa) <= 1 && (currEff - prevEff) > 60) {
+          repaired = generateSpikeFix(trial);
+          categoryCounts.spikes++;
+          break;
+        }
+      }
+    }
+
+    // Check D: Rating Mismatch (e.g. labeled Excellent/Good but has 0% recorded efficacy or unpopulated timeline)
+    if (!repaired) {
+      const isExcellentOrGood = result === 'excellent' || result === 'good';
+      const duration = Number(trial.FinalControlDuration ?? trial.EffectiveControlDays ?? 0);
+      const eff = Number(trial.FinalEfficacy ?? 0);
+      if (isExcellentOrGood && (sorted.length <= 1 || (eff === 0 && duration < 5))) {
+        repaired = generateTimelineFix(trial);
+        categoryCounts.ratingMismatches++;
+      }
+    }
+
+    if (repaired) {
+      trialMap.set(tid, repaired);
+      fixedIds.add(tid);
+      repairLog.push({
+        trialId: tid,
+        trialName: trial.FormulationName,
+        issueTitle: 'Reconciled database inconsistency',
+        fixSummary: 'EWRS progression and baseline calibrated'
+      });
     }
   }
 
@@ -382,6 +433,7 @@ export function repairAllFlaggedTrials(allTrials = [], issues = []) {
     updatedTrials,
     fixedCount: fixedIds.size,
     fixedIds,
+    categoryCounts,
     repairLog
   };
 }
