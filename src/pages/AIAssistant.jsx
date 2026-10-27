@@ -226,7 +226,7 @@ function parseMessageContent(content) {
 /**
  * Interactive Ground-Truth Sources Drawer & Self-RAG Faithfulness Inspector (RAG 2.0)
  */
-function GroundTruthSourcesView({ sources = [], faithfulness = null, onAskPrompt, navigate }) {
+function GroundTruthSourcesView({ sources = [], faithfulness = null, onAskPrompt, navigate, onOpenTrialQuickPeek }) {
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [copiedId, setCopiedId] = useState(null);
@@ -408,11 +408,18 @@ function GroundTruthSourcesView({ sources = [], faithfulness = null, onAskPrompt
                   {src.entityType === 'trial' && src.entityId && (
                     <button
                       type="button"
-                      onClick={() => navigate && navigate(`/trials?focus=${src.entityId}`)}
-                      className="text-slate-400 hover:text-white hover:bg-slate-800 px-2 py-0.5 rounded-md transition cursor-pointer"
-                      title="Inspect full plot trial record"
+                      onClick={() => {
+                        if (onOpenTrialQuickPeek) {
+                          onOpenTrialQuickPeek(src.entityId);
+                        } else if (navigate) {
+                          navigate(`/trials?focus=${src.entityId}`);
+                        }
+                      }}
+                      className="text-emerald-400 hover:text-emerald-300 hover:bg-slate-800 px-2 py-0.5 rounded-md transition cursor-pointer font-semibold flex items-center gap-1"
+                      title="Inspect trial quick preview with photos"
                     >
-                      View Trial ↗
+                      <span>Quick Peek</span>
+                      <Eye className="w-2.5 h-2.5" />
                     </button>
                   )}
 
@@ -2715,6 +2722,21 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                                   faithfulness={msg.meta.rag.faithfulness}
                                   onAskPrompt={(p) => sendMessage(p)}
                                   navigate={navigate}
+                                  onOpenTrialQuickPeek={(trialId) => {
+                                    const cleanId = String(trialId).trim().toLowerCase();
+                                    const foundTrial = (state.trials || []).find(t => {
+                                      const tid = String(t.ID || t.id || '').trim().toLowerCase();
+                                      const tCode = String(t.TrialID || '').trim().toLowerCase();
+                                      return tid === cleanId || tCode === cleanId || tid.includes(cleanId);
+                                    });
+                                    if (foundTrial) {
+                                      setQuickPeekTrial(foundTrial);
+                                    } else if (navigate) {
+                                      navigate(`/trials?focus=${encodeURIComponent(trialId)}&from=ai-assistant`, {
+                                        state: { focusTrial: trialId, from: 'ai-assistant', returnSessionId: currentSessionId }
+                                      });
+                                    }
+                                  }}
                                 />
                               )}
                             </div>
