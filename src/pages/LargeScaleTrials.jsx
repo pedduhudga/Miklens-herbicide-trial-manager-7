@@ -39,6 +39,20 @@ import { exportToARM, importARMCSV } from '../services/armExporter.js';
 import { fetchWeather as fetchWeatherService, fetchSoilData, fetchObservationWeather } from '../services/weather.js';
 import { fbGetLargeScaleData } from '../services/largeScaleService.js';
 import { GEMINI_FALLBACK_MODELS } from '../utils/aiConstants.js';
+import {
+  INPUT_CATEGORIES,
+  DOSAGE_UNITS,
+  APPLICATION_METHODS,
+  CATEGORY_INPUT_PRESETS,
+  getInputCategoryBadge,
+  normalizeApplicationItem,
+  parseAgronomicInputLog
+} from '../utils/agronomicInputs.js';
+import {
+  HARVEST_YIELD_UNITS,
+  CULL_REASONS,
+  normalizePickingItem
+} from '../utils/harvestUtils.js';
 
 function computeSummaryStats(values) {
   const n = values.length;
@@ -916,11 +930,18 @@ export default function LargeScaleTrials({ onMenuClick }) {
       setEditingAppIdx(idx);
       setAppForm({
         code: app.code || `App ${String.fromCharCode(65 + idx)}`,
+        inputType: app.inputType || 'fertilizer',
+        productName: app.productName || activeSubTrial?.FormulationName || '',
+        activeIngredient: app.activeIngredient || activeSubTrial?.ActiveIngredient || '',
         date: app.date || toDatetimeLocal(new Date()),
         dosage: app.dosage || activeSubTrial?.Dosage || '',
+        dosageUnit: app.dosageUnit || 'L/ha',
         cropStage: app.cropStage || '',
         targetStage: app.targetStage || '',
         method: app.method || 'Foliar Spray',
+        targetPurpose: app.targetPurpose || '',
+        appliedScope: app.appliedScope || 'Strip / Block',
+        operator: app.operator || '',
         temp: app.temp || '',
         humidity: app.humidity || '',
         windspeed: app.windspeed || '',
@@ -935,11 +956,18 @@ export default function LargeScaleTrials({ onMenuClick }) {
       const nextLetter = String.fromCharCode(65 + currentApps.length);
       setAppForm({
         code: `App ${nextLetter}`,
+        inputType: activeCategory === 'nutrition' ? 'fertilizer' : activeCategory === 'fungicide' ? 'fungicide' : activeCategory === 'pesticide' ? 'pesticide' : activeCategory === 'biostimulant' ? 'biostimulant' : 'fertilizer',
+        productName: activeSubTrial?.FormulationName || '',
+        activeIngredient: activeSubTrial?.ActiveIngredient || '',
         date: toDatetimeLocal(new Date()),
         dosage: activeSubTrial?.Dosage || '',
+        dosageUnit: 'L/ha',
         cropStage: '',
         targetStage: '',
         method: 'Foliar Spray',
+        targetPurpose: '',
+        appliedScope: 'Strip / Block',
+        operator: '',
         temp: '',
         humidity: '',
         windspeed: '',
@@ -957,7 +985,7 @@ export default function LargeScaleTrials({ onMenuClick }) {
     if (!activeSubTrial) return;
 
     const currentApps = safeJsonParse(activeSubTrial.ApplicationLogJSON, []);
-    const newApp = { ...appForm };
+    const newApp = normalizeApplicationItem({ ...appForm });
 
     if (editingAppIdx !== null) {
       currentApps[editingAppIdx] = newApp;
@@ -968,14 +996,15 @@ export default function LargeScaleTrials({ onMenuClick }) {
 
     const updated = {
       ...activeSubTrial,
-      ApplicationLogJSON: JSON.stringify(currentApps)
+      ApplicationLogJSON: JSON.stringify(currentApps),
+      AgronomicInputsJSON: JSON.stringify(currentApps),
     };
 
     updateState({ trials: state.trials.map(t => t.ID === updated.ID ? updated : t) });
     setIsAppModalOpen(false);
 
     try {
-      await updateTrial({ ID: updated.ID, ApplicationLogJSON: updated.ApplicationLogJSON }, getAppState);
+      await updateTrial({ ID: updated.ID, ApplicationLogJSON: updated.ApplicationLogJSON, AgronomicInputsJSON: updated.AgronomicInputsJSON }, getAppState);
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Application saved successfully', type: 'success' } }));
     } catch (err) {
       console.error(err);
@@ -1046,6 +1075,10 @@ export default function LargeScaleTrials({ onMenuClick }) {
         actualMarketableWeight: picking.actualMarketableWeight ?? picking.marketableWeight ?? '',
         actualUnmarketableWeight: picking.actualUnmarketableWeight ?? picking.unmarketableWeight ?? '',
         actualFruitCount: picking.actualFruitCount ?? picking.fruitCount ?? '',
+        yieldUnit: picking.yieldUnit || activeSubTrial?.YieldUnit || 'g/plant',
+        moisturePct: picking.moisturePct ?? '',
+        brixScore: picking.brixScore ?? '',
+        cullReason: picking.cullReason || 'None / Normal',
         notes: picking.notes ?? '',
         photos: picking.photos ?? []
       });
@@ -1058,6 +1091,10 @@ export default function LargeScaleTrials({ onMenuClick }) {
         actualMarketableWeight: '',
         actualUnmarketableWeight: '',
         actualFruitCount: '',
+        yieldUnit: activeSubTrial?.YieldUnit || 'g/plant',
+        moisturePct: '',
+        brixScore: '',
+        cullReason: 'None / Normal',
         notes: '',
         photos: []
       });
@@ -1070,14 +1107,18 @@ export default function LargeScaleTrials({ onMenuClick }) {
     if (!activeSubTrial) return;
 
     const currentPickings = [...(harvestForm.pickings || [])];
-    const newPicking = {
+    const newPicking = normalizePickingItem({
       ...pickingForm,
       id: editingPickingIdx !== null ? currentPickings[editingPickingIdx]?.id || `p_${Date.now()}` : `p_${Date.now()}`,
       pickingNumber: Number(pickingForm.pickingNumber) || (editingPickingIdx !== null ? editingPickingIdx + 1 : currentPickings.length + 1),
       actualMarketableWeight: pickingForm.actualMarketableWeight !== '' ? Number(pickingForm.actualMarketableWeight) : '',
       actualUnmarketableWeight: pickingForm.actualUnmarketableWeight !== '' ? Number(pickingForm.actualUnmarketableWeight) : '',
       actualFruitCount: pickingForm.actualFruitCount !== '' ? Number(pickingForm.actualFruitCount) : '',
-    };
+      yieldUnit: pickingForm.yieldUnit || activeSubTrial?.YieldUnit || 'g/plant',
+      moisturePct: pickingForm.moisturePct ?? '',
+      brixScore: pickingForm.brixScore ?? '',
+      cullReason: pickingForm.cullReason || 'None / Normal',
+    });
 
     if (editingPickingIdx !== null) {
       currentPickings[editingPickingIdx] = newPicking;
@@ -1098,13 +1139,22 @@ export default function LargeScaleTrials({ onMenuClick }) {
 
     const updatedTrial = {
       ...activeSubTrial,
-      HarvestDataJSON: JSON.stringify(updatedForm)
+      HarvestDataJSON: JSON.stringify(updatedForm),
+      Yield: totals.actualMarketableWeight || activeSubTrial.Yield,
+      YieldValue: totals.actualMarketableWeight || activeSubTrial.YieldValue,
+      YieldUnit: pickingForm.yieldUnit || activeSubTrial.YieldUnit || 'g/plant',
     };
 
     updateState({ trials: state.trials.map(t => t.ID === updatedTrial.ID ? updatedTrial : t) });
 
     try {
-      await updateTrial({ ID: updatedTrial.ID, HarvestDataJSON: updatedTrial.HarvestDataJSON }, getAppState);
+      await updateTrial({
+        ID: updatedTrial.ID,
+        HarvestDataJSON: updatedTrial.HarvestDataJSON,
+        Yield: updatedTrial.Yield,
+        YieldValue: updatedTrial.YieldValue,
+        YieldUnit: updatedTrial.YieldUnit,
+      }, getAppState);
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Harvest Picking #${newPicking.pickingNumber} saved!`, type: 'success' } }));
     } catch (err) {
       console.error(err);
@@ -6486,7 +6536,54 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
         title={editingAppIdx !== null ? 'Edit Application Entry' : 'Log Treatment Application'}
       >
         <form onSubmit={handleSaveApp} className="space-y-4 max-h-[80vh] overflow-y-auto pr-1">
+          {/* Quick Presets */}
+          {editingAppIdx === null && (
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+              <div className="text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                Quick Field Presets ({activeCategory.toUpperCase()})
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {(CATEGORY_INPUT_PRESETS[activeCategory] || CATEGORY_INPUT_PRESETS['nutrition']).map((preset, pIdx) => (
+                  <button
+                    key={pIdx}
+                    type="button"
+                    onClick={() => {
+                      setAppForm(prev => ({
+                        ...prev,
+                        inputType: preset.inputType || prev.inputType,
+                        productName: preset.productName || prev.productName,
+                        activeIngredient: preset.activeIngredient || prev.activeIngredient,
+                        dosage: preset.dosage || prev.dosage,
+                        dosageUnit: preset.dosageUnit || prev.dosageUnit,
+                        method: preset.method || prev.method,
+                        targetPurpose: preset.targetPurpose || prev.targetPurpose,
+                        cropStage: preset.cropStage || prev.cropStage,
+                        notes: preset.notes ? (prev.notes ? `${prev.notes} | ${preset.notes}` : preset.notes) : prev.notes
+                      }));
+                    }}
+                    className="text-[11px] px-2 py-1 rounded-md bg-white border border-slate-200 hover:border-emerald-500 hover:bg-emerald-50 text-slate-700 font-medium transition"
+                  >
+                    {preset.productName} ({preset.dosage} {preset.dosageUnit})
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Input Category *</label>
+              <select
+                value={appForm.inputType || 'fertilizer'}
+                onChange={e => setAppForm({ ...appForm, inputType: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+              >
+                {INPUT_CATEGORIES.map(cat => (
+                  <option key={cat.value} value={cat.value}>{cat.label}</option>
+                ))}
+              </select>
+            </div>
             <div>
               <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Application Code/Name *</label>
               <input
@@ -6498,6 +6595,33 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
                 placeholder="e.g. App A"
               />
             </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Product / Chemical Name *</label>
+              <input
+                type="text"
+                required
+                value={appForm.productName || ''}
+                onChange={e => setAppForm({ ...appForm, productName: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+                placeholder="e.g. NPK 10-26-26 or Azoxystrobin"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Active Ingredient / Composition</label>
+              <input
+                type="text"
+                value={appForm.activeIngredient || ''}
+                onChange={e => setAppForm({ ...appForm, activeIngredient: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+                placeholder="e.g. 10% N, 26% P2O5, 26% K2O"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Date & Time *</label>
               <input
@@ -6508,19 +6632,32 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
                 className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
               />
             </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Dosage / Rate</label>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Dosage / Rate *</label>
               <input
                 type="text"
+                required
                 value={appForm.dosage}
                 onChange={e => setAppForm({ ...appForm, dosage: e.target.value })}
                 className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
-                placeholder="e.g. 100 mL/ha"
+                placeholder="e.g. 100"
               />
             </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Dosage Unit *</label>
+              <select
+                value={appForm.dosageUnit || 'L/ha'}
+                onChange={e => setAppForm({ ...appForm, dosageUnit: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+              >
+                {DOSAGE_UNITS.map(u => (
+                  <option key={u.value} value={u.value}>{u.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Application Method</label>
               <select
@@ -6528,13 +6665,20 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
                 onChange={e => setAppForm({ ...appForm, method: e.target.value })}
                 className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
               >
-                <option value="Foliar Spray">Foliar Spray</option>
-                <option value="Soil Drench">Soil Drench</option>
-                <option value="Broadcast">Broadcast</option>
-                <option value="Seed Treatment">Seed Treatment</option>
-                <option value="Direct Injection">Direct Injection</option>
-                <option value="Other">Other</option>
+                {APPLICATION_METHODS.map(m => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
               </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Target Purpose / Disease</label>
+              <input
+                type="text"
+                value={appForm.targetPurpose || ''}
+                onChange={e => setAppForm({ ...appForm, targetPurpose: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+                placeholder="e.g. Downy mildew prophylactic, Basal nutrition"
+              />
             </div>
           </div>
 
@@ -6701,7 +6845,7 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
         title={editingPickingIdx !== null ? `Edit Harvest Picking #${pickingForm.pickingNumber || (editingPickingIdx + 1)}` : `Record Harvest Picking #${pickingForm.pickingNumber || ((harvestForm.pickings || []).length + 1)}`}
       >
         <form onSubmit={handleSavePicking} className="space-y-4 max-h-[80vh] overflow-y-auto pr-1">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Picking Number *</label>
               <input
@@ -6724,11 +6868,23 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
                 className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
               />
             </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Yield Unit</label>
+              <select
+                value={pickingForm.yieldUnit || 'g/plant'}
+                onChange={e => setPickingForm({ ...pickingForm, yieldUnit: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+              >
+                {HARVEST_YIELD_UNITS.map(u => (
+                  <option key={u.value} value={u.value}>{u.label}</option>
+                ))}
+              </select>
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Marketable Yield (g/plant)</label>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Marketable Yield *</label>
               <input
                 type="number"
                 step="any"
@@ -6736,11 +6892,11 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
                 placeholder="e.g. 850"
                 value={pickingForm.actualMarketableWeight}
                 onChange={e => setPickingForm({ ...pickingForm, actualMarketableWeight: e.target.value })}
-                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white font-semibold"
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Unmarketable Yield (g/plant)</label>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Unmarketable / Culls</label>
               <input
                 type="number"
                 step="any"
@@ -6751,18 +6907,57 @@ const primaryObsField = getPrimaryObservationField(activeCategory);
                 className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
               />
             </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Cull Reason</label>
+              <select
+                value={pickingForm.cullReason || 'None / Normal'}
+                onChange={e => setPickingForm({ ...pickingForm, cullReason: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+              >
+                {CULL_REASONS.map(r => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
+            </div>
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Fruit / Pod Count (per plant)</label>
-            <input
-              type="number"
-              min="0"
-              placeholder="e.g. 35"
-              value={pickingForm.actualFruitCount}
-              onChange={e => setPickingForm({ ...pickingForm, actualFruitCount: e.target.value })}
-              className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
-            />
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Fruit / Pod Count</label>
+              <input
+                type="number"
+                min="0"
+                placeholder="e.g. 35"
+                value={pickingForm.actualFruitCount}
+                onChange={e => setPickingForm({ ...pickingForm, actualFruitCount: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Moisture %</label>
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                max="100"
+                placeholder="e.g. 14.5"
+                value={pickingForm.moisturePct || ''}
+                onChange={e => setPickingForm({ ...pickingForm, moisturePct: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Brix Score (°Bx)</label>
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                placeholder="e.g. 12.0"
+                value={pickingForm.brixScore || ''}
+                onChange={e => setPickingForm({ ...pickingForm, brixScore: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+              />
+            </div>
           </div>
 
           <div>

@@ -342,6 +342,50 @@ async function renderStandard(reportData, options = {}) {
   });
   y = doc.lastAutoTable.finalY + 10;
 
+  // ─── SECTION 3B: Agronomic Inputs & Crop Management Log ──────────────────
+  const appLog = Array.isArray(reportData.applicationLog) ? reportData.applicationLog : [];
+  if (appLog.length > 0) {
+    y = checkPageBreak(doc, y, ph, 35);
+    y = addSectionHeading(doc, 'Agronomic Inputs & Crop Management Operations', y, ph, color);
+
+    const appHead = [['Date', 'Type', 'Product / Active Ingredient', 'Dosage & Unit', 'Method', 'Crop Stage', 'Target / Purpose', 'Scope']];
+    const appBody = appLog.map(app => {
+      const typeLabel = (app.inputType || 'Input').toUpperCase();
+      const prodAi = [app.productName, app.activeIngredient ? `(${app.activeIngredient})` : ''].filter(Boolean).join(' ') || app.code || '—';
+      const doseUnit = [app.dosage, app.dosageUnit].filter(Boolean).join(' ') || '—';
+      return [
+        app.date ? String(app.date).split('T')[0] : '—',
+        typeLabel,
+        prodAi,
+        doseUnit,
+        app.method || 'Foliar Spray',
+        app.cropStage || '—',
+        app.targetPurpose || '—',
+        app.appliedScope || 'All Plots',
+      ];
+    });
+
+    autoTable(doc, {
+      startY: y,
+      head: appHead,
+      body: appBody,
+      theme: 'striped',
+      headStyles: { fillColor: [44, 62, 80], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
+      bodyStyles: { fontSize: 7.5 },
+      columnStyles: {
+        0: { cellWidth: 20 },
+        1: { cellWidth: 20, fontStyle: 'bold' },
+        2: { cellWidth: 38 },
+        3: { cellWidth: 22 },
+        4: { cellWidth: 22 },
+        5: { cellWidth: 20 },
+        6: { cellWidth: 34 },
+      },
+      margin: { left: 14, right: 14 },
+    });
+    y = doc.lastAutoTable.finalY + 10;
+  }
+
   // ─── SECTION 4: Raw Observation Data Matrix ──────────────────────────────
 
   const rawMatrix  = reportData.rawMatrix  || {};
@@ -844,6 +888,60 @@ async function renderStandard(reportData, options = {}) {
       });
       y = doc.lastAutoTable.finalY + 10;
     }
+  }
+
+  // Multi-Harvest Pickings & Yield Distribution
+  const pickings = Array.isArray(reportData.harvestPickings) ? reportData.harvestPickings : [];
+  if (pickings.length > 0) {
+    y = checkPageBreak(doc, y, ph, 35);
+    if (!yieldMeans) {
+      y = addSectionHeading(doc, 'Yield & Harvest Analysis', y, ph, color);
+    } else {
+      doc.setFont(undefined, 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor(30, 41, 59);
+      doc.text('Sequential Harvest Pickings & Quality Breakdown', 14, y);
+      y += 5;
+      doc.setFont(undefined, 'normal');
+    }
+
+    const pickHead = [['Pick #', 'Harvest Date', 'Treatment', 'Plot #', 'Marketable Yield', 'Unmarketable Yield', 'Total Yield', 'Marketable %', 'Fruit Count', 'Quality / Notes']];
+    const pickBody = pickings.map(p => {
+      const m = p.actualMarketableWeight ?? p.marketableYield ?? '—';
+      const u = p.actualUnmarketableWeight ?? p.unmarketableYield ?? '—';
+      const tot = p.totalWeight ?? p.totalYield ?? '—';
+      const unit = p.yieldUnit || 'kg/plot';
+      const mStr = m !== '—' && m !== '' ? `${m} ${unit}` : '—';
+      const uStr = u !== '—' && u !== '' ? `${u} ${unit}` : '—';
+      const totStr = tot !== '—' && tot !== '' ? `${tot} ${unit}` : '—';
+      const mRatio = p.marketableRatio || p.marketablePct || '—';
+      const fc = p.actualFruitCount ?? p.fruitCount ?? '—';
+      const notes = [p.cullReason, p.notes].filter(Boolean).join(' | ') || '—';
+
+      return [
+        String(p.pickingNumber ?? 1),
+        p.harvestDate ? String(p.harvestDate).split('T')[0] : '—',
+        p.treatmentName || '—',
+        p.plotNumber || '—',
+        mStr,
+        uStr,
+        totStr,
+        mRatio,
+        String(fc),
+        notes,
+      ];
+    });
+
+    autoTable(doc, {
+      startY: y,
+      head: pickHead,
+      body: pickBody,
+      theme: 'striped',
+      headStyles: { fillColor: color, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
+      bodyStyles: { fontSize: 7.5 },
+      margin: { left: 14, right: 14 },
+    });
+    y = doc.lastAutoTable.finalY + 10;
   }
 
   // ─── SECTION 9: Weather Conditions ───────────────────────────────────────

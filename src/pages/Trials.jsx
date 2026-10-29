@@ -62,6 +62,22 @@ import { exportToARM, importARMCSV } from '../services/armExporter.js';
 import { detectOutliers } from '../utils/statsUtils.js';
 import { buildInstitutionalReportData } from '../services/institutionalReportBridge.js';
 import { generateInstitutionalPDF, generateInstitutionalDocx } from '../services/institutionalReportRenderer.js';
+import {
+  INPUT_CATEGORIES,
+  DOSAGE_UNITS,
+  APPLICATION_METHODS,
+  CATEGORY_INPUT_PRESETS,
+  normalizeApplicationItem,
+  parseAgronomicInputLog,
+  getInputCategoryBadge
+} from '../utils/agronomicInputs.js';
+import {
+  HARVEST_YIELD_UNITS,
+  CULL_REASONS,
+  normalizePickingItem,
+  calculateHarvestTotals as calcHarvestTotalsScientific,
+  exportHarvestCSV
+} from '../utils/harvestUtils.js';
 
 const getAutomaticPotPrefix = (targetTrial, allTrials) => {
   if (!targetTrial || !allTrials) return '';
@@ -373,11 +389,18 @@ export default function Trials({ onMenuClick }) {
   const [editingAppIdx, setEditingAppIdx] = useState(null);
   const [appForm, setAppForm] = useState({
     code: '',
+    inputType: 'fertilizer',
+    productName: '',
+    activeIngredient: '',
     date: toDatetimeLocal(new Date()),
     dosage: '',
+    dosageUnit: 'L/ha',
     cropStage: '',
     targetStage: '',
     method: 'Foliar Spray',
+    targetPurpose: '',
+    operator: '',
+    appliedScope: 'Plot-level',
     temp: '',
     humidity: '',
     windspeed: '',
@@ -726,6 +749,8 @@ export default function Trials({ onMenuClick }) {
     actualFruitCount: '',
     actualMarketableWeight: '',
     actualUnmarketableWeight: '',
+    yieldUnit: 'g/plant',
+    plotAreaM2: '',
     harvestDate: '',
     notes: '',
     photos: []
@@ -738,6 +763,12 @@ export default function Trials({ onMenuClick }) {
     actualMarketableWeight: '',
     actualUnmarketableWeight: '',
     actualFruitCount: '',
+    yieldUnit: 'g/plant',
+    plotAreaM2: '',
+    moisturePct: '',
+    brixScore: '',
+    cullReason: '',
+    cropStage: '',
     notes: '',
     photos: []
   });
@@ -2471,15 +2502,29 @@ export default function Trials({ onMenuClick }) {
   // --- Applications Log Logic ---
   const handleOpenAppModal = (app = null, idx = null) => {
     const currentTrial = detailTrial || activeTrial;
+    const cat = currentTrial?.Category || activeCategory;
+    const defaultType = cat === 'nutrition' ? 'fertilizer'
+      : cat === 'fungicide' ? 'fungicide'
+      : cat === 'pesticide' ? 'pesticide'
+      : cat === 'biostimulant' ? 'biostimulant'
+      : 'fertilizer';
+
     if (app) {
       setEditingAppIdx(idx);
       setAppForm({
         code: app.code || '',
+        inputType: app.inputType || defaultType,
+        productName: app.productName || currentTrial?.FormulationName || '',
+        activeIngredient: app.activeIngredient || '',
         date: app.date || toDatetimeLocal(new Date()),
         dosage: app.dosage || currentTrial?.Dosage || '',
+        dosageUnit: app.dosageUnit || 'L/ha',
         cropStage: app.cropStage || '',
         targetStage: app.targetStage || '',
         method: app.method || 'Foliar Spray',
+        targetPurpose: app.targetPurpose || '',
+        operator: app.operator || '',
+        appliedScope: app.appliedScope || 'Plot-level',
         temp: app.temp || '',
         humidity: app.humidity || '',
         windspeed: app.windspeed || '',
@@ -2495,11 +2540,18 @@ export default function Trials({ onMenuClick }) {
       const nextLetter = String.fromCharCode(65 + currentApps.length); // A, B, C...
       setAppForm({
         code: `App ${nextLetter}`,
+        inputType: defaultType,
+        productName: currentTrial?.FormulationName || '',
+        activeIngredient: '',
         date: toDatetimeLocal(new Date()),
         dosage: currentTrial?.Dosage || '',
+        dosageUnit: 'L/ha',
         cropStage: '',
         targetStage: '',
         method: 'Foliar Spray',
+        targetPurpose: '',
+        operator: '',
+        appliedScope: 'Plot-level',
         temp: '',
         humidity: '',
         windspeed: '',
@@ -2518,7 +2570,7 @@ export default function Trials({ onMenuClick }) {
     if (!currentTrial) return;
 
     const currentApps = safeJsonParse(currentTrial.ApplicationLogJSON, []);
-    const newApp = { ...appForm };
+    const newApp = normalizeApplicationItem({ ...appForm });
 
     if (editingAppIdx !== null) {
       currentApps[editingAppIdx] = newApp;
@@ -2691,25 +2743,7 @@ export default function Trials({ onMenuClick }) {
 
   // Calculate cumulative harvest totals from an array of pickings
   const calculateHarvestTotals = useCallback((pickingsList = []) => {
-    let totMark = 0;
-    let totUnmark = 0;
-    let totFruits = 0;
-    let latestDate = '';
-    (pickingsList || []).forEach(p => {
-      const m = parseFloat(p.actualMarketableWeight ?? p.marketableWeight ?? 0);
-      const u = parseFloat(p.actualUnmarketableWeight ?? p.unmarketableWeight ?? 0);
-      const f = parseFloat(p.actualFruitCount ?? p.fruitCount ?? 0);
-      if (!isNaN(m)) totMark += m;
-      if (!isNaN(u)) totUnmark += u;
-      if (!isNaN(f)) totFruits += f;
-      if (p.harvestDate && p.harvestDate > latestDate) latestDate = p.harvestDate;
-    });
-    return {
-      actualMarketableWeight: totMark > 0 ? totMark : '',
-      actualUnmarketableWeight: totUnmark > 0 ? totUnmark : '',
-      actualFruitCount: totFruits > 0 ? totFruits : '',
-      harvestDate: latestDate || (pickingsList[pickingsList.length - 1]?.harvestDate || '')
-    };
+    return calcHarvestTotalsScientific(pickingsList);
   }, []);
 
   useEffect(() => {
@@ -2725,25 +2759,34 @@ export default function Trials({ onMenuClick }) {
           actualMarketableWeight: data.actualMarketableWeight ?? '',
           actualUnmarketableWeight: data.actualUnmarketableWeight ?? '',
           actualFruitCount: data.actualFruitCount ?? '',
+          yieldUnit: data.yieldUnit || 'g/plant',
+          plotAreaM2: data.plotAreaM2 || (detailTrial.PlotSize ? parseFloat(detailTrial.PlotSize) : ''),
+          moisturePct: data.moisturePct ?? '',
+          brixScore: data.brixScore ?? '',
+          cullReason: data.cullReason || '',
           notes: data.notes ?? '',
           photos: data.photos ?? []
         }];
       }
-      const totals = calculateHarvestTotals(pickings);
+      const totals = calcHarvestTotalsScientific(pickings);
       setHarvestForm({
         pickings,
         actualFruitCount: totals.actualFruitCount !== '' ? totals.actualFruitCount : (data.actualFruitCount ?? ''),
         actualMarketableWeight: totals.actualMarketableWeight !== '' ? totals.actualMarketableWeight : (data.actualMarketableWeight ?? ''),
         actualUnmarketableWeight: totals.actualUnmarketableWeight !== '' ? totals.actualUnmarketableWeight : (data.actualUnmarketableWeight ?? ''),
+        yieldUnit: data.yieldUnit || totals.yieldUnit || 'g/plant',
+        plotAreaM2: data.plotAreaM2 || totals.plotAreaM2 || (detailTrial.PlotSize ? parseFloat(detailTrial.PlotSize) : ''),
         harvestDate: totals.harvestDate || (data.harvestDate ?? ''),
         notes: data.notes ?? '',
         photos: data.photos ?? []
       });
     }
-  }, [detailTrial, calculateHarvestTotals]);
+  }, [detailTrial]);
 
   // Picking CRUD Handlers
   const handleOpenPickingModal = (picking = null, idx = null) => {
+    const defaultUnit = harvestForm.yieldUnit || 'g/plant';
+    const defaultArea = harvestForm.plotAreaM2 || (detailTrial?.PlotSize ? parseFloat(detailTrial.PlotSize) : '');
     if (picking && idx !== null) {
       setEditingPickingIdx(idx);
       setPickingForm({
@@ -2752,6 +2795,12 @@ export default function Trials({ onMenuClick }) {
         actualMarketableWeight: picking.actualMarketableWeight ?? picking.marketableWeight ?? '',
         actualUnmarketableWeight: picking.actualUnmarketableWeight ?? picking.unmarketableWeight ?? '',
         actualFruitCount: picking.actualFruitCount ?? picking.fruitCount ?? '',
+        yieldUnit: picking.yieldUnit || defaultUnit,
+        plotAreaM2: picking.plotAreaM2 ?? defaultArea,
+        moisturePct: picking.moisturePct ?? '',
+        brixScore: picking.brixScore ?? '',
+        cullReason: picking.cullReason || '',
+        cropStage: picking.cropStage || '',
         notes: picking.notes ?? '',
         photos: picking.photos ?? []
       });
@@ -2764,6 +2813,12 @@ export default function Trials({ onMenuClick }) {
         actualMarketableWeight: '',
         actualUnmarketableWeight: '',
         actualFruitCount: '',
+        yieldUnit: defaultUnit,
+        plotAreaM2: defaultArea,
+        moisturePct: '',
+        brixScore: '',
+        cullReason: '',
+        cropStage: '',
         notes: '',
         photos: []
       });
@@ -2777,14 +2832,11 @@ export default function Trials({ onMenuClick }) {
     if (!currentTrial) return;
 
     const currentPickings = [...(harvestForm.pickings || [])];
-    const newPicking = {
+    const newPicking = normalizePickingItem({
       ...pickingForm,
       id: editingPickingIdx !== null ? currentPickings[editingPickingIdx]?.id || `p_${Date.now()}` : `p_${Date.now()}`,
       pickingNumber: Number(pickingForm.pickingNumber) || (editingPickingIdx !== null ? editingPickingIdx + 1 : currentPickings.length + 1),
-      actualMarketableWeight: pickingForm.actualMarketableWeight !== '' ? Number(pickingForm.actualMarketableWeight) : '',
-      actualUnmarketableWeight: pickingForm.actualUnmarketableWeight !== '' ? Number(pickingForm.actualUnmarketableWeight) : '',
-      actualFruitCount: pickingForm.actualFruitCount !== '' ? Number(pickingForm.actualFruitCount) : '',
-    };
+    });
 
     if (editingPickingIdx !== null) {
       currentPickings[editingPickingIdx] = newPicking;
@@ -2793,10 +2845,12 @@ export default function Trials({ onMenuClick }) {
     }
     currentPickings.sort((a, b) => (a.pickingNumber - b.pickingNumber) || (new Date(a.harvestDate) - new Date(b.harvestDate)));
 
-    const totals = calculateHarvestTotals(currentPickings);
+    const totals = calcHarvestTotalsScientific(currentPickings);
     const updatedForm = {
       ...harvestForm,
       ...totals,
+      yieldUnit: newPicking.yieldUnit || harvestForm.yieldUnit || 'g/plant',
+      plotAreaM2: newPicking.plotAreaM2 || harvestForm.plotAreaM2 || '',
       pickings: currentPickings
     };
 
@@ -2805,14 +2859,21 @@ export default function Trials({ onMenuClick }) {
 
     const updatedTrial = {
       ...currentTrial,
-      HarvestDataJSON: JSON.stringify(updatedForm)
+      HarvestDataJSON: JSON.stringify(updatedForm),
+      YieldValue: totals.actualMarketableWeight !== '' ? totals.actualMarketableWeight : totals.totalWeight,
+      YieldUnit: updatedForm.yieldUnit
     };
 
     updateState({ trials: getAppState().trials.map(t => t.ID === updatedTrial.ID ? updatedTrial : t) });
     setActiveTrial(updatedTrial);
 
     try {
-      await updateTrial({ ID: updatedTrial.ID, HarvestDataJSON: updatedTrial.HarvestDataJSON }, getAppState);
+      await updateTrial({
+        ID: updatedTrial.ID,
+        HarvestDataJSON: updatedTrial.HarvestDataJSON,
+        YieldValue: updatedTrial.YieldValue,
+        YieldUnit: updatedTrial.YieldUnit
+      }, getAppState);
       window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Harvest Picking #${newPicking.pickingNumber} saved!`, type: 'success' } }));
     } catch (err) {
       console.error(err);
@@ -8164,19 +8225,71 @@ If none are present, write "None".`;
                 {/* Applications Log Tab */}
                 {detailTab === 'applications' && (
                 <div className="space-y-4">
-                  <div className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-100">
+                  <div className="flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 p-3.5 rounded-xl border border-emerald-100 shadow-sm">
                     <div>
-                      <h4 className="font-bold text-slate-800 text-sm">Treatment Applications Log</h4>
-                      <p className="text-xs text-slate-500">Record sequential treatment applications made to this plot.</p>
+                      <h4 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-emerald-600" /> Agronomic Inputs & Crop Management Log
+                      </h4>
+                      <p className="text-xs text-slate-500">Record fertilizers, protection sprays, fungicides, biostimulants & sequential crop inputs.</p>
                     </div>
-                    {!isViewer && (
-                      <button 
-                        onClick={() => handleOpenAppModal(null)}
-                        className="flex items-center gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg font-bold transition shadow-sm"
-                      >
-                        <Plus className="w-3.5 h-3.5" /> Add Application
-                      </button>
-                    )}
+                    <div className="flex flex-wrap items-center gap-2">
+                      {!isViewer && (
+                        <select
+                          defaultValue=""
+                          onChange={(e) => {
+                            const pIdx = e.target.value;
+                            if (pIdx === '') return;
+                            const catPresets = CATEGORY_INPUT_PRESETS[detailTrial?.Category || activeCategory] || CATEGORY_INPUT_PRESETS.nutrition;
+                            const selected = catPresets[parseInt(pIdx, 10)];
+                            if (selected) {
+                              const currentApps = safeJsonParse(detailTrial.ApplicationLogJSON, []);
+                              const nextLetter = String.fromCharCode(65 + currentApps.length);
+                              setAppForm({
+                                code: `App ${nextLetter}`,
+                                inputType: selected.inputType || 'fertilizer',
+                                productName: selected.productName || '',
+                                activeIngredient: selected.activeIngredient || '',
+                                date: toDatetimeLocal(new Date()),
+                                dosage: selected.dosage || '',
+                                dosageUnit: selected.dosageUnit || 'L/ha',
+                                cropStage: selected.cropStage || '',
+                                targetStage: '',
+                                method: selected.method || 'Foliar Spray',
+                                targetPurpose: selected.targetPurpose || '',
+                                operator: '',
+                                appliedScope: 'Plot-level',
+                                temp: '',
+                                humidity: '',
+                                windspeed: '',
+                                rain: 'No',
+                                notes: selected.notes || '',
+                                adjuvant: '',
+                                tankMix: '',
+                              });
+                              setEditingAppIdx(null);
+                              setIsAppModalOpen(true);
+                            }
+                            e.target.value = '';
+                          }}
+                          className="text-xs bg-white border border-emerald-200 text-emerald-800 font-semibold rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                        >
+                          <option value="">⚡ Quick Input Presets...</option>
+                          {(CATEGORY_INPUT_PRESETS[detailTrial?.Category || activeCategory] || CATEGORY_INPUT_PRESETS.nutrition).map((preset, pIdx) => (
+                            <option key={pIdx} value={pIdx}>
+                              {preset.label || `${preset.productName} (${preset.dosage} ${preset.dosageUnit})`}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      {!isViewer && (
+                        <button 
+                          onClick={() => handleOpenAppModal(null)}
+                          className="flex items-center gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg font-bold transition shadow-sm"
+                        >
+                          <Plus className="w-3.5 h-3.5" /> Add Application
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {(() => {
@@ -8185,7 +8298,8 @@ If none are present, write "None".`;
                       return (
                         <div className="text-center py-12 bg-white rounded-xl border border-dashed border-slate-200">
                           <Clock className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                          <p className="text-sm font-semibold text-slate-400">No sequential applications recorded yet</p>
+                          <p className="text-sm font-semibold text-slate-400">No agronomic inputs or applications recorded yet</p>
+                          <p className="text-xs text-slate-400 mt-0.5">Log fertilizers, fungicides, pesticides, micronutrients, or trial treatments.</p>
                           {!isViewer && (
                             <button 
                               onClick={() => handleOpenAppModal(null)}
@@ -8200,97 +8314,129 @@ If none are present, write "None".`;
 
                     return (
                       <div className="space-y-3">
-                        {apps.map((app, idx) => (
-                          <div key={idx} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                            <div className="bg-slate-50 px-4 py-3 border-b flex justify-between items-center">
-                              <div className="flex items-center gap-2.5">
-                                <span className="bg-amber-100 text-amber-800 font-bold text-xs px-2 py-0.5 rounded">
-                                  {app.code || `App ${String.fromCharCode(65 + idx)}`}
-                                </span>
-                                <span className="text-xs font-semibold text-slate-500">
-                                  {app.date ? formatDateTime(app.date) : 'No date'}
-                                </span>
-                              </div>
-                              {!isViewer && (
-                                <div className="flex items-center gap-1">
-                                  <button 
-                                    onClick={() => handleOpenAppModal(app, idx)} 
-                                    className="p-1 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition" 
-                                    title="Edit Application"
-                                  >
-                                    <Pencil className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button 
-                                    onClick={() => handleDeleteApp(idx)} 
-                                    className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition" 
-                                    title="Delete Application"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                            <div className="p-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 text-xs">
-                              {app.dosage && (
-                                <div className="bg-slate-50 p-2 rounded-lg">
-                                  <span className="block text-[10px] font-bold text-slate-400 uppercase">Dosage Rate</span>
-                                  <span className="font-semibold text-slate-700">{app.dosage}</span>
-                                </div>
-                              )}
-                              {app.method && (
-                                <div className="bg-slate-50 p-2 rounded-lg">
-                                  <span className="block text-[10px] font-bold text-slate-400 uppercase">Method</span>
-                                  <span className="font-semibold text-slate-700">{app.method}</span>
-                                </div>
-                              )}
-                              {app.cropStage && (
-                                <div className="bg-slate-50 p-2 rounded-lg">
-                                  <span className="block text-[10px] font-bold text-slate-400 uppercase">Crop Stage (BBCH)</span>
-                                  <span className="font-semibold text-slate-700">{app.cropStage}</span>
-                                </div>
-                              )}
-                              {app.targetStage && (
-                                <div className="bg-slate-50 p-2 rounded-lg">
-                                  <span className="block text-[10px] font-bold text-slate-400 uppercase">Target Stage</span>
-                                  <span className="font-semibold text-slate-700">{app.targetStage}</span>
-                                </div>
-                              )}
-                              {(app.temp || app.humidity || app.windspeed) && (
-                                <div className="bg-slate-50 p-2 rounded-lg col-span-2">
-                                  <span className="block text-[10px] font-bold text-slate-400 uppercase">Weather at Application</span>
-                                  <span className="font-semibold text-slate-700 flex flex-wrap gap-x-3 gap-y-1 mt-0.5">
-                                    {app.temp && <span>Temp: {app.temp}°C</span>}
-                                    {app.humidity && <span>RH: {app.humidity}%</span>}
-                                    {app.windspeed && <span>Wind: {app.windspeed} km/h</span>}
-                                    <span>Rain within 2h: {app.rain || 'No'}</span>
+                        {apps.map((app, idx) => {
+                          const badge = getInputCategoryBadge(app.inputType || 'fertilizer');
+                          return (
+                            <div key={idx} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden hover:border-emerald-200 transition">
+                              <div className="bg-slate-50 px-4 py-3 border-b flex flex-wrap justify-between items-center gap-2">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className={`font-bold text-xs px-2.5 py-0.5 rounded-md border ${badge.badgeClass}`}>
+                                    {badge.label}
+                                  </span>
+                                  <span className="bg-slate-200 text-slate-800 font-bold text-xs px-2 py-0.5 rounded">
+                                    {app.code || `App ${String.fromCharCode(65 + idx)}`}
+                                  </span>
+                                  <span className="font-bold text-slate-800 text-sm">
+                                    {app.productName || 'Agronomic Input'}
+                                  </span>
+                                  {app.activeIngredient && (
+                                    <span className="text-xs text-slate-500 font-medium">
+                                      ({app.activeIngredient})
+                                    </span>
+                                  )}
+                                  <span className="text-xs font-semibold text-slate-400 ml-1">
+                                    · {app.date ? formatDateTime(app.date) : 'No date'}
                                   </span>
                                 </div>
-                              )}
-                              {app.notes && (
-                                <div className="col-span-full border-t pt-2 mt-1">
-                                  <span className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5">Application Notes</span>
-                                  <p className="text-slate-600 whitespace-pre-wrap leading-relaxed">{app.notes}</p>
-                                </div>
-                              )}
-                              {(app.adjuvant || app.tankMix) && (
-                                <div className="col-span-full border-t pt-2 mt-1 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                  {app.adjuvant && (
-                                    <div className="bg-blue-50 p-2 rounded-lg">
-                                      <span className="block text-[10px] font-bold text-blue-400 uppercase">Adjuvant</span>
-                                      <span className="font-semibold text-slate-700 text-xs">{app.adjuvant}</span>
-                                    </div>
-                                  )}
-                                  {app.tankMix && (
-                                    <div className="bg-purple-50 p-2 rounded-lg">
-                                      <span className="block text-[10px] font-bold text-purple-400 uppercase">Tank Mix</span>
-                                      <span className="font-semibold text-slate-700 text-xs">{app.tankMix}</span>
-                                    </div>
-                                  )}
-                                </div>
-                              )}
+                                {!isViewer && (
+                                  <div className="flex items-center gap-1">
+                                    <button 
+                                      onClick={() => handleOpenAppModal(app, idx)} 
+                                      className="p-1 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition" 
+                                      title="Edit Application"
+                                    >
+                                      <Pencil className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button 
+                                      onClick={() => handleDeleteApp(idx)} 
+                                      className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition" 
+                                      title="Delete Application"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                              <div className="p-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 text-xs">
+                                {(app.dosage || app.dosageUnit) && (
+                                  <div className="bg-slate-50 p-2 rounded-lg">
+                                    <span className="block text-[10px] font-bold text-slate-400 uppercase">Dosage Rate</span>
+                                    <span className="font-bold text-emerald-800">{app.dosage} {app.dosageUnit || ''}</span>
+                                  </div>
+                                )}
+                                {app.method && (
+                                  <div className="bg-slate-50 p-2 rounded-lg">
+                                    <span className="block text-[10px] font-bold text-slate-400 uppercase">Method</span>
+                                    <span className="font-semibold text-slate-700">{app.method}</span>
+                                  </div>
+                                )}
+                                {app.appliedScope && (
+                                  <div className="bg-slate-50 p-2 rounded-lg">
+                                    <span className="block text-[10px] font-bold text-slate-400 uppercase">Applied Scope</span>
+                                    <span className="font-semibold text-slate-700">{app.appliedScope}</span>
+                                  </div>
+                                )}
+                                {app.targetPurpose && (
+                                  <div className="bg-slate-50 p-2 rounded-lg">
+                                    <span className="block text-[10px] font-bold text-slate-400 uppercase">Target Purpose / Pest</span>
+                                    <span className="font-semibold text-indigo-700">{app.targetPurpose}</span>
+                                  </div>
+                                )}
+                                {app.cropStage && (
+                                  <div className="bg-slate-50 p-2 rounded-lg">
+                                    <span className="block text-[10px] font-bold text-slate-400 uppercase">Crop Stage (BBCH)</span>
+                                    <span className="font-semibold text-slate-700">{app.cropStage}</span>
+                                  </div>
+                                )}
+                                {app.targetStage && (
+                                  <div className="bg-slate-50 p-2 rounded-lg">
+                                    <span className="block text-[10px] font-bold text-slate-400 uppercase">Target Stage</span>
+                                    <span className="font-semibold text-slate-700">{app.targetStage}</span>
+                                  </div>
+                                )}
+                                {app.operator && (
+                                  <div className="bg-slate-50 p-2 rounded-lg">
+                                    <span className="block text-[10px] font-bold text-slate-400 uppercase">Operator / Tech</span>
+                                    <span className="font-semibold text-slate-700">{app.operator}</span>
+                                  </div>
+                                )}
+                                {(app.temp || app.humidity || app.windspeed) && (
+                                  <div className="bg-slate-50 p-2 rounded-lg col-span-2">
+                                    <span className="block text-[10px] font-bold text-slate-400 uppercase">Weather at Application</span>
+                                    <span className="font-semibold text-slate-700 flex flex-wrap gap-x-3 gap-y-1 mt-0.5">
+                                      {app.temp && <span>Temp: {app.temp}°C</span>}
+                                      {app.humidity && <span>RH: {app.humidity}%</span>}
+                                      {app.windspeed && <span>Wind: {app.windspeed} km/h</span>}
+                                      <span>Rain within 2h: {app.rain || 'No'}</span>
+                                    </span>
+                                  </div>
+                                )}
+                                {app.notes && (
+                                  <div className="col-span-full border-t pt-2 mt-1">
+                                    <span className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5">Application Notes</span>
+                                    <p className="text-slate-600 whitespace-pre-wrap leading-relaxed">{app.notes}</p>
+                                  </div>
+                                )}
+                                {(app.adjuvant || app.tankMix) && (
+                                  <div className="col-span-full border-t pt-2 mt-1 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    {app.adjuvant && (
+                                      <div className="bg-blue-50 p-2 rounded-lg">
+                                        <span className="block text-[10px] font-bold text-blue-400 uppercase">Adjuvant</span>
+                                        <span className="font-semibold text-slate-700 text-xs">{app.adjuvant}</span>
+                                      </div>
+                                    )}
+                                    {app.tankMix && (
+                                      <div className="bg-purple-50 p-2 rounded-lg">
+                                        <span className="block text-[10px] font-bold text-purple-400 uppercase">Tank Mix</span>
+                                        <span className="font-semibold text-slate-700 text-xs">{app.tankMix}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     );
                   })()}
@@ -9891,19 +10037,32 @@ If none are present, write "None".`;
               {/* Harvest & Yield Tab */}
               {detailTab === 'harvest' && (
                 <div className="space-y-6">
-                  <div className="flex justify-between items-center bg-slate-50 p-4 rounded-xl border border-slate-100">
+                  <div className="flex flex-wrap justify-between items-center bg-slate-50 p-4 rounded-xl border border-slate-100 gap-3">
                     <div>
-                      <h4 className="font-bold text-slate-800 text-sm">Harvest & Multi-Picking Yield Log</h4>
-                      <p className="text-xs text-slate-500">Record sequential harvest pickings, fruit counts, physical yields, and photos.</p>
+                      <h4 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                        <Leaf className="w-4 h-4 text-emerald-600" /> Multi-Harvest & Sequential Yield Log
+                      </h4>
+                      <p className="text-xs text-slate-500">Record sequential harvest pickings, fruit counts, marketable/cull weights, moisture %, Brix & photos.</p>
                     </div>
-                    {!isViewer && (
-                      <button
-                        onClick={() => handleOpenPickingModal(null)}
-                        className="flex items-center gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg font-bold transition shadow-sm"
-                      >
-                        <Plus className="w-3.5 h-3.5" /> Add Harvest / Picking
-                      </button>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {(harvestForm.pickings || []).length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => exportHarvestCSV(harvestForm.pickings, detailTrial?.TrialID || detailTrial?.TrialName || 'trial')}
+                          className="flex items-center gap-1.5 text-xs bg-white hover:bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg font-bold transition border border-slate-200 shadow-sm"
+                        >
+                          <Download className="w-3.5 h-3.5 text-slate-500" /> Export CSV
+                        </button>
+                      )}
+                      {!isViewer && (
+                        <button
+                          onClick={() => handleOpenPickingModal(null)}
+                          className="flex items-center gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg font-bold transition shadow-sm"
+                        >
+                          <Plus className="w-3.5 h-3.5" /> Add Harvest / Picking
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {/* Calculations card */}
@@ -9912,23 +10071,39 @@ If none are present, write "None".`;
                     const avgFruitWeight = harvestForm.actualFruitCount > 0 ? (totalWeight / harvestForm.actualFruitCount).toFixed(1) : '—';
                     const marketableRatio = totalWeight > 0 ? ((parseFloat(harvestForm.actualMarketableWeight || 0) / totalWeight) * 100).toFixed(1) : '—';
                     const pickingsCount = (harvestForm.pickings || []).length;
+                    const unit = harvestForm.yieldUnit || 'g/plant';
+                    const plotArea = parseFloat(harvestForm.plotAreaM2 || detailTrial?.PlotSize || 0);
+                    let extrapolatedYield = null;
+                    if (plotArea > 0 && totalWeight > 0) {
+                      if (unit === 'kg/plot') {
+                        extrapolatedYield = ((totalWeight / plotArea) * 10).toFixed(2) + ' t/ha';
+                      } else if (unit === 'g/plant') {
+                        // Assume ~40,000 plants/ha standard estimate
+                        extrapolatedYield = ((totalWeight * 40000) / 1000000).toFixed(2) + ' t/ha (est.)';
+                      }
+                    }
+
                     return (
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 bg-emerald-50/50 p-4 rounded-xl border border-emerald-100">
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 bg-emerald-50/50 p-4 rounded-xl border border-emerald-100">
                         <div className="text-center">
                           <p className="text-[10px] font-bold text-slate-500 uppercase">Pickings Recorded</p>
                           <p className="text-lg font-black text-emerald-800">{pickingsCount > 0 ? `${pickingsCount} ${pickingsCount === 1 ? 'Picking' : 'Pickings'}` : '—'}</p>
                         </div>
                         <div className="text-center md:border-l border-slate-200">
                           <p className="text-[10px] font-bold text-slate-500 uppercase">Cumul. Marketable</p>
-                          <p className="text-lg font-black text-emerald-700">{harvestForm.actualMarketableWeight ? `${harvestForm.actualMarketableWeight} g` : '—'}</p>
+                          <p className="text-lg font-black text-emerald-700">{harvestForm.actualMarketableWeight ? `${harvestForm.actualMarketableWeight} ${unit}` : '—'}</p>
                         </div>
                         <div className="text-center md:border-l border-slate-200">
                           <p className="text-[10px] font-bold text-slate-500 uppercase">Total Yield</p>
-                          <p className="text-lg font-black text-slate-900">{totalWeight ? `${totalWeight} g` : '—'}</p>
+                          <p className="text-lg font-black text-slate-900">{totalWeight ? `${totalWeight} ${unit}` : '—'}</p>
                         </div>
                         <div className="text-center md:border-l border-slate-200">
                           <p className="text-[10px] font-bold text-slate-500 uppercase">Marketable %</p>
                           <p className="text-lg font-black text-emerald-700">{marketableRatio !== '—' ? `${marketableRatio}%` : '—'}</p>
+                        </div>
+                        <div className="text-center md:border-l border-slate-200 col-span-2 md:col-span-1">
+                          <p className="text-[10px] font-bold text-slate-500 uppercase">Extrapolated Yield</p>
+                          <p className="text-lg font-black text-indigo-700">{extrapolatedYield || (unit.includes('/ha') ? `${totalWeight} ${unit}` : '—')}</p>
                         </div>
                       </div>
                     );
@@ -9961,18 +10136,34 @@ If none are present, write "None".`;
                     ) : (
                       <div className="space-y-2.5">
                         {harvestForm.pickings.map((p, pIdx) => {
+                          const pUnit = p.yieldUnit || harvestForm.yieldUnit || 'g/plant';
                           const pTotal = (parseFloat(p.actualMarketableWeight || 0) + parseFloat(p.actualUnmarketableWeight || 0));
                           const pRatio = pTotal > 0 ? ((parseFloat(p.actualMarketableWeight || 0) / pTotal) * 100).toFixed(1) : null;
                           return (
                             <div key={p.id || pIdx} className="bg-white rounded-xl border border-slate-200 p-3.5 shadow-sm hover:border-emerald-200 transition">
-                              <div className="flex justify-between items-start mb-2">
-                                <div className="flex items-center gap-2">
+                              <div className="flex flex-wrap justify-between items-start gap-2 mb-2">
+                                <div className="flex flex-wrap items-center gap-2">
                                   <span className="bg-emerald-100 text-emerald-800 text-xs font-black px-2.5 py-0.5 rounded-md">
                                     Picking #{p.pickingNumber || (pIdx + 1)}
                                   </span>
                                   <span className="text-xs font-semibold text-slate-500">
                                     {p.harvestDate ? formatDateTime(p.harvestDate) : 'No date'}
                                   </span>
+                                  {p.cropStage && (
+                                    <span className="text-[11px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-medium">
+                                      Stage: {p.cropStage}
+                                    </span>
+                                  )}
+                                  {p.moisturePct !== undefined && p.moisturePct !== '' && p.moisturePct !== null && (
+                                    <span className="text-[11px] bg-sky-50 text-sky-700 border border-sky-200 px-2 py-0.5 rounded font-semibold">
+                                      💧 Moisture: {p.moisturePct}%
+                                    </span>
+                                  )}
+                                  {p.brixScore !== undefined && p.brixScore !== '' && p.brixScore !== null && (
+                                    <span className="text-[11px] bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded font-semibold">
+                                      🍯 Brix: {p.brixScore}°Bx
+                                    </span>
+                                  )}
                                 </div>
                                 {!isViewer && (
                                   <div className="flex items-center gap-1">
@@ -9998,11 +10189,16 @@ If none are present, write "None".`;
                               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs bg-slate-50 p-2.5 rounded-lg border border-slate-100">
                                 <div>
                                   <span className="text-slate-400 block text-[10px] font-semibold uppercase">Marketable</span>
-                                  <span className="font-bold text-emerald-700">{p.actualMarketableWeight ? `${p.actualMarketableWeight} g` : '—'}</span>
+                                  <span className="font-bold text-emerald-700">{p.actualMarketableWeight ? `${p.actualMarketableWeight} ${pUnit}` : '—'}</span>
                                 </div>
                                 <div>
                                   <span className="text-slate-400 block text-[10px] font-semibold uppercase">Unmarketable</span>
-                                  <span className="font-bold text-rose-600">{p.actualUnmarketableWeight ? `${p.actualUnmarketableWeight} g` : '—'}</span>
+                                  <span className="font-bold text-rose-600">{p.actualUnmarketableWeight ? `${p.actualUnmarketableWeight} ${pUnit}` : '—'}</span>
+                                  {p.cullReason && (
+                                    <span className="block text-[10px] text-rose-700 italic font-medium mt-0.5 truncate">
+                                      Reason: {p.cullReason}
+                                    </span>
+                                  )}
                                 </div>
                                 <div>
                                   <span className="text-slate-400 block text-[10px] font-semibold uppercase">Fruit Count</span>
@@ -10014,7 +10210,7 @@ If none are present, write "None".`;
                                 </div>
                               </div>
                               {p.notes && (
-                                <p className="text-xs text-slate-600 mt-2 italic bg-white px-1">“{p.notes}”</p>
+                                <p className="text-xs text-slate-600 mt-2 italic bg-white px-2 py-1 rounded border border-slate-100">“{p.notes}”</p>
                               )}
                             </div>
                           );
@@ -10030,13 +10226,38 @@ If none are present, write "None".`;
                       <span className="text-[10px] text-slate-400 font-medium">Aggregated totals</span>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div>
                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Final Harvest Date</label>
                         <input
                           type="date"
                           value={harvestForm.harvestDate || ''}
                           onChange={e => setHarvestForm(prev => ({ ...prev, harvestDate: e.target.value }))}
+                          disabled={isViewer}
+                          className="w-full border rounded-xl px-3.5 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Standard Yield Unit</label>
+                        <select
+                          value={harvestForm.yieldUnit || 'g/plant'}
+                          onChange={e => setHarvestForm(prev => ({ ...prev, yieldUnit: e.target.value }))}
+                          disabled={isViewer}
+                          className="w-full border rounded-xl px-3.5 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                        >
+                          {HARVEST_YIELD_UNITS.map(u => (
+                            <option key={u.value} value={u.value}>{u.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Plot Area (m²)</label>
+                        <input
+                          type="number"
+                          step="any"
+                          placeholder="e.g. 15.0"
+                          value={harvestForm.plotAreaM2 || ''}
+                          onChange={e => setHarvestForm(prev => ({ ...prev, plotAreaM2: e.target.value }))}
                           disabled={isViewer}
                           className="w-full border rounded-xl px-3.5 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
                         />
@@ -10053,9 +10274,10 @@ If none are present, write "None".`;
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Marketable Yield (g/plant)</label>
+                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Marketable Yield ({harvestForm.yieldUnit || 'g/plant'})</label>
                         <input
                           type="number"
+                          step="any"
                           placeholder="Pristine fruits > 20g"
                           value={harvestForm.actualMarketableWeight || ''}
                           onChange={e => setHarvestForm(prev => ({ ...prev, actualMarketableWeight: e.target.value }))}
@@ -10064,9 +10286,10 @@ If none are present, write "None".`;
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Unmarketable Yield (g/plant)</label>
+                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Unmarketable Yield ({harvestForm.yieldUnit || 'g/plant'})</label>
                         <input
                           type="number"
+                          step="any"
                           placeholder="Cracked/sunburnt/damaged"
                           value={harvestForm.actualUnmarketableWeight || ''}
                           onChange={e => setHarvestForm(prev => ({ ...prev, actualUnmarketableWeight: e.target.value }))}
@@ -10342,9 +10565,49 @@ If none are present, write "None".`;
       )}
 
       {/* ── APPLICATION LOG MODAL ── */}
-      <Modal isOpen={isAppModalOpen} onClose={() => setIsAppModalOpen(false)} title={editingAppIdx !== null ? 'Edit Application Entry' : 'Log Application'}>
+      <Modal isOpen={isAppModalOpen} onClose={() => setIsAppModalOpen(false)} title={editingAppIdx !== null ? 'Edit Application Entry' : 'Log Agronomic Input / Application'}>
         <form onSubmit={handleSaveApp} className="space-y-4 max-h-[80vh] overflow-y-auto pr-1">
-          <div className="grid grid-cols-2 gap-4">
+          {/* Quick Category Preset selector */}
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <span className="text-xs font-bold text-emerald-900 block">⚡ Quick Agronomic Preset</span>
+              <span className="text-[11px] text-emerald-700">Pre-fill scientific formulation, active ingredient, dosage & purpose:</span>
+            </div>
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                const pIdx = e.target.value;
+                if (pIdx === '') return;
+                const catPresets = CATEGORY_INPUT_PRESETS[detailTrial?.Category || activeCategory] || CATEGORY_INPUT_PRESETS.nutrition;
+                const selected = catPresets[parseInt(pIdx, 10)];
+                if (selected) {
+                  setAppForm(prev => ({
+                    ...prev,
+                    inputType: selected.inputType || prev.inputType,
+                    productName: selected.productName || prev.productName,
+                    activeIngredient: selected.activeIngredient || prev.activeIngredient,
+                    dosage: selected.dosage || prev.dosage,
+                    dosageUnit: selected.dosageUnit || prev.dosageUnit,
+                    method: selected.method || prev.method,
+                    targetPurpose: selected.targetPurpose || prev.targetPurpose,
+                    cropStage: selected.cropStage || prev.cropStage,
+                    notes: selected.notes || prev.notes
+                  }));
+                }
+                e.target.value = '';
+              }}
+              className="text-xs bg-white border border-emerald-300 text-emerald-900 font-semibold rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+            >
+              <option value="">Select preset...</option>
+              {(CATEGORY_INPUT_PRESETS[detailTrial?.Category || activeCategory] || CATEGORY_INPUT_PRESETS.nutrition).map((preset, pIdx) => (
+                <option key={pIdx} value={pIdx}>
+                  {preset.label || `${preset.productName} (${preset.dosage} ${preset.dosageUnit})`}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Application Code/Name *</label>
               <input
@@ -10355,6 +10618,18 @@ If none are present, write "None".`;
                 className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
                 placeholder="e.g. App A"
               />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Input Category *</label>
+              <select
+                value={appForm.inputType || 'fertilizer'}
+                onChange={e => setAppForm({ ...appForm, inputType: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white font-semibold"
+              >
+                {INPUT_CATEGORIES.map(cat => (
+                  <option key={cat.value} value={cat.value}>{cat.label}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Date & Time *</label>
@@ -10368,30 +10643,102 @@ If none are present, write "None".`;
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          {/* Product & Active Ingredient */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Dosage / Rate</label>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Product / Brand Name *</label>
               <input
                 type="text"
+                required
+                value={appForm.productName || ''}
+                onChange={e => setAppForm({ ...appForm, productName: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+                placeholder="e.g. Urea 46% N / Mancozeb 75 WP / Coragen"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Active Ingredient / Composition</label>
+              <input
+                type="text"
+                value={appForm.activeIngredient || ''}
+                onChange={e => setAppForm({ ...appForm, activeIngredient: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+                placeholder="e.g. Nitrogen 46% / Mancozeb 75% / Chlorantraniliprole 18.5%"
+              />
+            </div>
+          </div>
+
+          {/* Dosage & Dosage Unit */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Dosage / Rate *</label>
+              <input
+                type="text"
+                required
                 value={appForm.dosage}
                 onChange={e => setAppForm({ ...appForm, dosage: e.target.value })}
                 className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
-                placeholder="e.g. 100 mL/ha"
+                placeholder="e.g. 2.5 or 150"
               />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Dosage Unit</label>
+              <select
+                value={appForm.dosageUnit || 'L/ha'}
+                onChange={e => setAppForm({ ...appForm, dosageUnit: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+              >
+                {DOSAGE_UNITS.map(u => (
+                  <option key={u.value} value={u.value}>{u.label}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Application Method</label>
               <select
-                value={appForm.method}
+                value={appForm.method || 'Foliar Spray'}
                 onChange={e => setAppForm({ ...appForm, method: e.target.value })}
                 className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
               >
-                <option value="Foliar Spray">Foliar Spray</option>
-                <option value="Soil Drench">Soil Drench</option>
-                <option value="Broadcast">Broadcast</option>
-                <option value="Seed Treatment">Seed Treatment</option>
-                <option value="Direct Injection">Direct Injection</option>
-                <option value="Other">Other</option>
+                {APPLICATION_METHODS.map(m => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Target Purpose & Operator */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Target Purpose / Pest / Deficiency</label>
+              <input
+                type="text"
+                value={appForm.targetPurpose || ''}
+                onChange={e => setAppForm({ ...appForm, targetPurpose: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+                placeholder="e.g. Early Blight control, Vegetative N boost"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Operator / Technician</label>
+              <input
+                type="text"
+                value={appForm.operator || ''}
+                onChange={e => setAppForm({ ...appForm, operator: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+                placeholder="e.g. Field Officer Name"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Applied Scope</label>
+              <select
+                value={appForm.appliedScope || 'Plot-level'}
+                onChange={e => setAppForm({ ...appForm, appliedScope: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+              >
+                <option value="Plot-level">Plot-level (This plot only)</option>
+                <option value="Blanket / Trial-wide">Blanket / Trial-wide (Across all plots)</option>
+                <option value="Buffer / Border">Buffer / Border Strip</option>
               </select>
             </div>
           </div>
@@ -10558,7 +10905,7 @@ If none are present, write "None".`;
         title={editingPickingIdx !== null ? `Edit Harvest Picking #${pickingForm.pickingNumber || (editingPickingIdx + 1)}` : `Record Harvest Picking #${pickingForm.pickingNumber || ((harvestForm.pickings || []).length + 1)}`}
       >
         <form onSubmit={handleSavePicking} className="space-y-4 max-h-[80vh] overflow-y-auto pr-1">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Picking Number *</label>
               <input
@@ -10581,23 +10928,65 @@ If none are present, write "None".`;
                 className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
               />
             </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Crop Stage (BBCH)</label>
+              <input
+                type="text"
+                value={pickingForm.cropStage || ''}
+                onChange={e => setPickingForm({ ...pickingForm, cropStage: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+                placeholder="e.g. BBCH 89 (Full Maturity)"
+              />
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Marketable Yield (g/plant)</label>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Yield Unit</label>
+              <select
+                value={pickingForm.yieldUnit || harvestForm.yieldUnit || 'g/plant'}
+                onChange={e => setPickingForm({ ...pickingForm, yieldUnit: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white font-medium"
+              >
+                {HARVEST_YIELD_UNITS.map(u => (
+                  <option key={u.value} value={u.value}>{u.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Plot Area (m² - for ha extrapolation)</label>
               <input
                 type="number"
                 step="any"
                 min="0"
-                placeholder="e.g. 850"
-                value={pickingForm.actualMarketableWeight}
-                onChange={e => setPickingForm({ ...pickingForm, actualMarketableWeight: e.target.value })}
+                placeholder="e.g. 15.0"
+                value={pickingForm.plotAreaM2 || ''}
+                onChange={e => setPickingForm({ ...pickingForm, plotAreaM2: e.target.value })}
                 className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
               />
             </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Unmarketable Yield (g/plant)</label>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">
+                Marketable Yield ({pickingForm.yieldUnit || harvestForm.yieldUnit || 'g/plant'}) *
+              </label>
+              <input
+                type="number"
+                step="any"
+                min="0"
+                required
+                placeholder="e.g. 850"
+                value={pickingForm.actualMarketableWeight}
+                onChange={e => setPickingForm({ ...pickingForm, actualMarketableWeight: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white font-bold text-emerald-800"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">
+                Unmarketable Yield ({pickingForm.yieldUnit || harvestForm.yieldUnit || 'g/plant'})
+              </label>
               <input
                 type="number"
                 step="any"
@@ -10605,19 +10994,60 @@ If none are present, write "None".`;
                 placeholder="e.g. 90"
                 value={pickingForm.actualUnmarketableWeight}
                 onChange={e => setPickingForm({ ...pickingForm, actualUnmarketableWeight: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white text-rose-700"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Cull / Damage Reason</label>
+              <select
+                value={pickingForm.cullReason || ''}
+                onChange={e => setPickingForm({ ...pickingForm, cullReason: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+              >
+                <option value="">None / Not applicable</option>
+                {CULL_REASONS.map(r => (
+                  <option key={r.value} value={r.value}>{r.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Fruit / Pod Count (per plant/plot)</label>
+              <input
+                type="number"
+                min="0"
+                placeholder="e.g. 35"
+                value={pickingForm.actualFruitCount}
+                onChange={e => setPickingForm({ ...pickingForm, actualFruitCount: e.target.value })}
+                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Moisture Content (%)</label>
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                max="100"
+                placeholder="e.g. 14.5"
+                value={pickingForm.moisturePct ?? ''}
+                onChange={e => setPickingForm({ ...pickingForm, moisturePct: e.target.value })}
                 className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Fruit / Pod Count (per plant)</label>
+            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Brix / Quality Score (°Bx - for fruits/vegetables/cane)</label>
             <input
               type="number"
+              step="0.1"
               min="0"
-              placeholder="e.g. 35"
-              value={pickingForm.actualFruitCount}
-              onChange={e => setPickingForm({ ...pickingForm, actualFruitCount: e.target.value })}
+              placeholder="e.g. 12.8"
+              value={pickingForm.brixScore ?? ''}
+              onChange={e => setPickingForm({ ...pickingForm, brixScore: e.target.value })}
               className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
             />
           </div>

@@ -197,17 +197,61 @@ function buildSheet2TrialInfo(wb, reportData) {
     }
   });
 
-  // Application Log — adjuvant & tankMix table
+  // Application Log — full agronomic inputs & crop management operations table
   const appLog = reportData.applicationLog || [];
   if (appLog.length > 0) {
     ws.addRow([]);
-    const appLogLabel = ws.addRow(['Application Log (Adjuvant & Tank Mix)']);
+    const appLogLabel = ws.addRow(['Agronomic Management & Trial Inputs Log (Fertilizers, Pesticides, Fungicides, Biostimulants)']);
     appLogLabel.getCell(1).font = { bold: true, size: 11, color: { argb: 'FF2C3E50' } };
-    ws.mergeCells(`A${appLogLabel.number}:G${appLogLabel.number}`);
-    const appHead = ws.addRow(['Application', 'Date', 'Dosage', 'Method', 'Crop Stage', 'Adjuvant', 'Tank Mix Partners']);
+    ws.mergeCells(`A${appLogLabel.number}:K${appLogLabel.number}`);
+    const appHead = ws.addRow(['Application #', 'Date', 'Type', 'Product / Formulation', 'Active Ingredient', 'Dosage & Unit', 'Method', 'Crop Stage', 'Target / Purpose', 'Scope / Plot', 'Notes']);
     appHead.eachCell({ includeEmpty: true }, cell => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4A6FA5' } }; cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
     appLog.forEach((app, idx) => {
-      const row = ws.addRow([app.code || `App ${idx + 1}`, app.date || '', app.dosage || '', app.method || '', app.cropStage || '', app.adjuvant || '—', app.tankMix || '—']);
+      const doseUnit = [app.dosage, app.dosageUnit].filter(Boolean).join(' ') || '—';
+      const row = ws.addRow([
+        app.code || `App ${idx + 1}`,
+        app.date || '',
+        (app.inputType || 'Input').toUpperCase(),
+        app.productName || '—',
+        app.activeIngredient || '—',
+        doseUnit,
+        app.method || 'Foliar Spray',
+        app.cropStage || '—',
+        app.targetPurpose || '—',
+        app.appliedScope || 'All Plots',
+        app.notes || '—'
+      ]);
+      if (idx % 2 === 0) row.eachCell({ includeEmpty: true }, cell => { cell.fill = ALT_FILL; });
+    });
+  }
+
+  // Multi-Harvest Pickings Table
+  const pickings = reportData.harvestPickings || [];
+  if (pickings.length > 0) {
+    ws.addRow([]);
+    const harvestLabel = ws.addRow(['Sequential Harvest Pickings & Yield Log']);
+    harvestLabel.getCell(1).font = { bold: true, size: 11, color: { argb: 'FF2C3E50' } };
+    ws.mergeCells(`A${harvestLabel.number}:J${harvestLabel.number}`);
+    const hHead = ws.addRow(['Pick #', 'Harvest Date', 'Treatment Name', 'Plot #', 'Marketable Yield', 'Unmarketable Yield', 'Total Yield', 'Marketable %', 'Fruit Count', 'Quality Notes']);
+    hHead.eachCell({ includeEmpty: true }, cell => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF27AE60' } }; cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
+    pickings.forEach((p, idx) => {
+      const unit = p.yieldUnit || 'kg/plot';
+      const mStr = p.actualMarketableWeight ? `${p.actualMarketableWeight} ${unit}` : '—';
+      const uStr = p.actualUnmarketableWeight ? `${p.actualUnmarketableWeight} ${unit}` : '—';
+      const totStr = p.totalWeight ? `${p.totalWeight} ${unit}` : '—';
+      const notes = [p.cullReason, p.notes].filter(Boolean).join(' | ') || '—';
+      const row = ws.addRow([
+        p.pickingNumber ?? (idx + 1),
+        p.harvestDate || '',
+        p.treatmentName || '—',
+        p.plotNumber || '—',
+        mStr,
+        uStr,
+        totStr,
+        p.marketableRatio || p.marketablePct || '—',
+        p.actualFruitCount ?? '—',
+        notes
+      ]);
       if (idx % 2 === 0) row.eachCell({ includeEmpty: true }, cell => { cell.fill = ALT_FILL; });
     });
   }

@@ -859,35 +859,71 @@ export function buildInstitutionalReportData(targetData, globalState = {}, userO
 
   const hasBiomassData = treatmentMetrics.some(t => t.biomass && t.biomass.hasBiomass && t.biomass.fresh !== null);
 
-  // 11. Application Log
-  const applicationTimeline = subTrials.flatMap(trial => {
-    const apps = safeJsonParse(trial.ApplicationLogJSON, []);
-    return apps.map((app, aIdx) => ({
-      appNo: app.code || `App ${aIdx + 1}`,
-      date: app.date || trial.Date || '',
-      treatmentName: trial.FormulationName || 'Treated',
-      plotNumber: trial.PlotNumber || '',
-      dosage: app.dosage || trial.Dosage || 'As recommended',
-      method: app.method || trial.ApplicationMethod || 'Foliar Spray',
-      cropStage: app.cropStage || trial.CropStage || '—',
-      weather: [app.temp ? `${app.temp}°C` : '', app.humidity ? `${app.humidity}% RH` : '', app.windspeed ? `${app.windspeed} km/h` : '', app.rain === 'Yes' ? 'Rain' : ''].filter(Boolean).join(', ') || 'Normal',
-      tankMix: [app.adjuvant, app.tankMix].filter(Boolean).join(' + ') || '—',
-      notes: app.notes || '—',
-    }));
-  });
+  // 11. Application Log — full agronomic operations (fertilizers, pesticides, fungicides, biostimulants)
+  const applicationTimeline = (() => {
+    const list = [];
+    // Project-wide inputs
+    const projApps = safeJsonParse(project?.ApplicationLogJSON || project?.AgronomicInputsJSON, []);
+    if (Array.isArray(projApps)) {
+      projApps.forEach((app, aIdx) => {
+        list.push({
+          appNo: app.code || `App ${aIdx + 1}`,
+          date: app.date || project?.StartDate || '',
+          inputType: (app.inputType || 'Input').toUpperCase(),
+          productName: app.productName || '—',
+          activeIngredient: app.activeIngredient || '—',
+          treatmentName: app.appliedScope || 'Project Wide',
+          plotNumber: 'All Plots',
+          dosage: [app.dosage, app.dosageUnit].filter(Boolean).join(' ') || 'As recommended',
+          method: app.method || 'Foliar Spray',
+          cropStage: app.cropStage || '—',
+          targetPurpose: app.targetPurpose || '—',
+          weather: [app.temp ? `${app.temp}°C` : '', app.humidity ? `${app.humidity}% RH` : '', app.windspeed ? `${app.windspeed} km/h` : '', app.rain === 'Yes' ? 'Rain' : ''].filter(Boolean).join(', ') || 'Normal',
+          tankMix: [app.adjuvant, app.tankMix].filter(Boolean).join(' + ') || '—',
+          notes: app.notes || '—',
+        });
+      });
+    }
+
+    // Sub-trial plot inputs
+    subTrials.forEach(trial => {
+      const apps = safeJsonParse(trial.ApplicationLogJSON || trial.agronomicInputsJSON, []);
+      apps.forEach((app, aIdx) => {
+        list.push({
+          appNo: app.code || `App ${aIdx + 1}`,
+          date: app.date || trial.Date || '',
+          inputType: (app.inputType || 'Input').toUpperCase(),
+          productName: app.productName || '—',
+          activeIngredient: app.activeIngredient || '—',
+          treatmentName: trial.FormulationName || 'Treated',
+          plotNumber: trial.PlotNumber || '',
+          dosage: [app.dosage, app.dosageUnit].filter(Boolean).join(' ') || trial.Dosage || 'As recommended',
+          method: app.method || trial.ApplicationMethod || 'Foliar Spray',
+          cropStage: app.cropStage || trial.CropStage || '—',
+          targetPurpose: app.targetPurpose || '—',
+          weather: [app.temp ? `${app.temp}°C` : '', app.humidity ? `${app.humidity}% RH` : '', app.windspeed ? `${app.windspeed} km/h` : '', app.rain === 'Yes' ? 'Rain' : ''].filter(Boolean).join(', ') || 'Normal',
+          tankMix: [app.adjuvant, app.tankMix].filter(Boolean).join(' + ') || '—',
+          notes: app.notes || '—',
+        });
+      });
+    });
+
+    return list;
+  })();
 
   // 12. Harvest Pickings & Yield Summary
   const harvestPickings = subTrials.flatMap(trial => {
     const hData = safeJsonParse(trial.HarvestDataJSON, {});
     let pList = Array.isArray(hData.pickings) ? [...hData.pickings] : [];
-    if (pList.length === 0 && (hData.harvestDate || hData.actualMarketableWeight || hData.actualFruitCount)) {
+    if (pList.length === 0 && (hData.harvestDate || hData.actualMarketableWeight || hData.actualFruitCount || trial.YieldValue)) {
       pList = [{
         id: 'p_1',
         pickingNumber: 1,
         harvestDate: hData.harvestDate || trial.Date || '',
-        actualMarketableWeight: hData.actualMarketableWeight,
-        actualUnmarketableWeight: hData.actualUnmarketableWeight,
-        actualFruitCount: hData.actualFruitCount,
+        actualMarketableWeight: hData.actualMarketableWeight || trial.YieldValue || '',
+        actualUnmarketableWeight: hData.actualUnmarketableWeight || '',
+        actualFruitCount: hData.actualFruitCount || '',
+        yieldUnit: trial.YieldUnit || 'kg/plot',
         notes: hData.notes || '',
       }];
     }
@@ -896,17 +932,22 @@ export function buildInstitutionalReportData(targetData, globalState = {}, userO
       const uVal = parseFloat(p.actualUnmarketableWeight ?? p.unmarketableWeight ?? 0) || 0;
       const tot = mVal + uVal;
       const mPct = tot > 0 ? ((mVal / tot) * 100).toFixed(1) + '%' : (mVal > 0 ? '100%' : '—');
+      const unit = p.yieldUnit || trial.YieldUnit || 'kg/plot';
       return {
         pickingNumber: p.pickingNumber || (pIdx + 1),
         harvestDate: p.harvestDate || '—',
         treatmentName: trial.FormulationName || 'Treated',
         plotNumber: trial.PlotNumber || '',
-        marketableYield: mVal > 0 ? parseFloat(mVal.toFixed(2)) : (p.actualMarketableWeight ?? '—'),
-        unmarketableYield: uVal > 0 ? parseFloat(uVal.toFixed(2)) : (p.actualUnmarketableWeight ?? '—'),
-        totalYield: tot > 0 ? parseFloat(tot.toFixed(2)) : '—',
+        marketableYield: mVal > 0 ? `${parseFloat(mVal.toFixed(2))} ${unit}` : (p.actualMarketableWeight ? `${p.actualMarketableWeight} ${unit}` : '—'),
+        unmarketableYield: uVal > 0 ? `${parseFloat(uVal.toFixed(2))} ${unit}` : (p.actualUnmarketableWeight ? `${p.actualUnmarketableWeight} ${unit}` : '—'),
+        totalYield: tot > 0 ? `${parseFloat(tot.toFixed(2))} ${unit}` : '—',
         marketablePct: mPct,
         fruitCount: p.actualFruitCount ?? p.fruitCount ?? '—',
-        notes: p.notes || '—',
+        yieldUnit: unit,
+        moisturePct: p.moisturePct ? `${p.moisturePct}%` : '—',
+        brixScore: p.brixScore ? `${p.brixScore}°Bx` : '—',
+        cullReason: p.cullReason || '—',
+        notes: [p.cullReason, p.notes].filter(Boolean).join(' | ') || '—',
       };
     });
   });

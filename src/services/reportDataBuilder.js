@@ -1708,37 +1708,83 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
     photos,
     warnings,
     dataCompleteness,
-    // Application log — adjuvant and tankMix per application
-    applicationLog: subTrials.flatMap(trial => {
-      const apps = safeJsonParse(trial.ApplicationLogJSON, []);
-      return apps.map(app => ({
-        trialID: trial.ID,
-        treatmentName: trial.FormulationName || '',
-        code: app.code || '',
-        date: app.date || '',
-        dosage: app.dosage || '',
-        method: app.method || '',
-        cropStage: app.cropStage || '',
-        adjuvant: app.adjuvant || '',
-        tankMix: app.tankMix || '',
-        temp: app.temp || '',
-        humidity: app.humidity || '',
-        windspeed: app.windspeed || '',
-        rain: app.rain || '',
-        notes: app.notes || '',
-      }));
-    }),
+    // Application log — full agronomic input management history (fertilizers, pesticides, fungicides, biostimulants)
+    applicationLog: (() => {
+      const allApps = [];
+      // Include project-level inputs if recorded
+      const projApps = safeJsonParse(project?.ApplicationLogJSON || project?.AgronomicInputsJSON, []);
+      if (Array.isArray(projApps) && projApps.length > 0) {
+        projApps.forEach((app, aIdx) => {
+          allApps.push({
+            trialID: 'PROJECT_WIDE',
+            treatmentName: app.appliedScope || 'Project Wide (All Plots)',
+            code: app.code || `App ${aIdx + 1}`,
+            date: app.date || project?.StartDate || '',
+            inputType: app.inputType || app.type || 'other',
+            productName: app.productName || app.product || '',
+            activeIngredient: app.activeIngredient || app.ai || '',
+            dosage: app.dosage || '',
+            dosageUnit: app.dosageUnit || 'kg/ha',
+            method: app.method || '',
+            cropStage: app.cropStage || '',
+            targetPurpose: app.targetPurpose || app.purpose || '',
+            operator: app.operator || app.appliedBy || '',
+            appliedScope: app.appliedScope || 'All Plots / Whole Trial',
+            adjuvant: app.adjuvant || '',
+            tankMix: app.tankMix || '',
+            temp: app.temp || '',
+            humidity: app.humidity || '',
+            windspeed: app.windspeed || '',
+            rain: app.rain || '',
+            notes: app.notes || '',
+          });
+        });
+      }
+
+      // Include sub-trial plot inputs
+      subTrials.forEach(trial => {
+        const apps = safeJsonParse(trial.ApplicationLogJSON || trial.agronomicInputsJSON, []);
+        apps.forEach((app, aIdx) => {
+          allApps.push({
+            trialID: trial.ID,
+            treatmentName: trial.FormulationName || '',
+            code: app.code || `App ${aIdx + 1}`,
+            date: app.date || trial.Date || '',
+            inputType: app.inputType || app.type || 'other',
+            productName: app.productName || app.product || '',
+            activeIngredient: app.activeIngredient || app.ai || '',
+            dosage: app.dosage || '',
+            dosageUnit: app.dosageUnit || 'kg/ha',
+            method: app.method || '',
+            cropStage: app.cropStage || '',
+            targetPurpose: app.targetPurpose || app.purpose || '',
+            operator: app.operator || app.appliedBy || '',
+            appliedScope: app.appliedScope || (trial.PlotNumber ? `Plot ${trial.PlotNumber}` : 'Plot'),
+            adjuvant: app.adjuvant || '',
+            tankMix: app.tankMix || '',
+            temp: app.temp || '',
+            humidity: app.humidity || '',
+            windspeed: app.windspeed || '',
+            rain: app.rain || '',
+            notes: app.notes || '',
+          });
+        });
+      });
+
+      return allApps;
+    })(),
     harvestPickings: subTrials.flatMap(trial => {
       const hData = safeJsonParse(trial.HarvestDataJSON, {});
       let pList = Array.isArray(hData.pickings) ? [...hData.pickings] : [];
-      if (pList.length === 0 && (hData.harvestDate || hData.actualMarketableWeight || hData.actualFruitCount)) {
+      if (pList.length === 0 && (hData.harvestDate || hData.actualMarketableWeight || hData.actualFruitCount || trial.YieldValue)) {
         pList = [{
           id: 'p_1',
           pickingNumber: 1,
           harvestDate: hData.harvestDate || trial.Date || '',
-          actualMarketableWeight: hData.actualMarketableWeight,
-          actualUnmarketableWeight: hData.actualUnmarketableWeight,
-          actualFruitCount: hData.actualFruitCount,
+          actualMarketableWeight: hData.actualMarketableWeight || trial.YieldValue || '',
+          actualUnmarketableWeight: hData.actualUnmarketableWeight || '',
+          actualFruitCount: hData.actualFruitCount || '',
+          yieldUnit: trial.YieldUnit || 'kg/plot',
           notes: hData.notes || '',
         }];
       }
@@ -1748,6 +1794,11 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
         treatmentName: trial.FormulationName || '',
         plotNumber: trial.PlotNumber || '',
         replication: trial.Replication || '',
+        yieldUnit: p.yieldUnit || trial.YieldUnit || 'kg/plot',
+        moisturePct: p.moisturePct ?? '',
+        brixScore: p.brixScore ?? '',
+        cullReason: p.cullReason || '',
+        extrapolatedYieldKgHa: p.extrapolatedYieldKgHa || '',
       }));
     }),
     harvestSummary: (() => {

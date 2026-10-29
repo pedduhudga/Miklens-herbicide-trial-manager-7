@@ -1122,23 +1122,28 @@ export async function generateInstitutionalPDF(reportData) {
   doc.text(appDeliveryLines, 14, curY);
   curY += appDeliveryLines.length * 3.8 + 2;
 
-  if (reportData.applicationTimeline && reportData.applicationTimeline.length > 0 && curY < 225) {
-    curY += 2;
+  if (reportData.applicationTimeline && reportData.applicationTimeline.length > 0) {
+    if (curY >= 235) {
+      doc.addPage();
+      curY = 25;
+    } else {
+      curY += 2;
+    }
     autoTable(doc, {
       startY: curY,
       margin: { left: 14, right: 14 },
       tableWidth: 182,
-      head: [['App #', 'Date', 'Treatment Name', 'Plot #', 'Dosage', 'Method', 'Crop Stage', 'Weather Conditions', 'Notes']],
+      head: [['App #', 'Date', 'Type', 'Product / Formulation', 'Plot #', 'Dosage', 'Method', 'Crop Stage', 'Target / Purpose']],
       body: reportData.applicationTimeline.map(a => [
         a.appNo,
-        a.date,
-        a.treatmentName,
+        a.date ? String(a.date).split('T')[0] : '—',
+        a.inputType || 'INPUT',
+        a.productName || a.treatmentName || '—',
         a.plotNumber || '—',
         a.dosage,
         a.method,
         a.cropStage,
-        a.weather,
-        a.notes
+        a.targetPurpose || a.notes || '—'
       ]),
       theme: 'grid',
       headStyles: { fillColor: MIKLENS_FOREST, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 6.8, halign: 'center', cellPadding: 1.6 },
@@ -1147,13 +1152,13 @@ export async function generateInstitutionalPDF(reportData) {
       columnStyles: {
         0: { cellWidth: 12, halign: 'center', fontStyle: 'bold' },
         1: { cellWidth: 18, halign: 'center' },
-        2: { cellWidth: 28 },
-        3: { cellWidth: 14, halign: 'center' },
-        4: { cellWidth: 20, halign: 'center' },
+        2: { cellWidth: 18, halign: 'center', fontStyle: 'bold' },
+        3: { cellWidth: 32 },
+        4: { cellWidth: 14, halign: 'center' },
         5: { cellWidth: 20, halign: 'center' },
-        6: { cellWidth: 22 },
-        7: { cellWidth: 22 },
-        8: { cellWidth: 26 }
+        6: { cellWidth: 20, halign: 'center' },
+        7: { cellWidth: 20 },
+        8: { cellWidth: 28 }
       }
     });
     curY = doc.lastAutoTable.finalY;

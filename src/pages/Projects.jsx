@@ -4,13 +4,14 @@ import { useAppState } from '../hooks/useAppState.jsx';
 import { useAuth } from '../hooks/useAuth.js';
 import TopBar from '../components/TopBar.jsx';
 import Modal from '../components/Modal.jsx';
-import { addProject, deleteProject, addBlock, deleteBlock, updateProject, addBatchTrials, deleteTrial, validateCategoryDataOperation } from '../services/dataLayer.js';
+import { addProject, deleteProject, addBlock, deleteBlock, updateProject, addBatchTrials, deleteTrial, updateTrial, validateCategoryDataOperation } from '../services/dataLayer.js';
 import {
   Plus, Trash2, Edit, Layers, Beaker, Activity, ChevronRight, ArrowLeft,
   Lock, Unlock, Download, FileText, RefreshCw, BarChart2, Shuffle,
   ClipboardList, Package, Sparkles, Save, Loader2, CheckCircle2,
   AlertTriangle, AlertCircle, ShieldAlert, LayoutGrid, TrendingUp,
-  Sigma, Printer, MapPin, Thermometer, Droplets, CloudRain, Image, Share2
+  Sigma, Printer, MapPin, Thermometer, Droplets, CloudRain, Image, Share2,
+  Pencil, Clock, Leaf, Table
 } from 'lucide-react';
 import Chart from 'chart.js/auto';
 import html2canvas from 'html2canvas';
@@ -30,6 +31,23 @@ import {
   exportMasterDocx,
   generateMasterPpt
 } from '../services/trialReports.js';
+import {
+  INPUT_CATEGORIES,
+  DOSAGE_UNITS,
+  APPLICATION_METHODS,
+  CATEGORY_INPUT_PRESETS,
+  normalizeApplicationItem,
+  parseAgronomicInputLog,
+  getInputCategoryBadge
+} from '../utils/agronomicInputs.js';
+import {
+  HARVEST_YIELD_UNITS,
+  CULL_REASONS,
+  normalizePickingItem,
+  calculateHarvestTotals as calcHarvestTotalsScientific,
+  aggregateProjectHarvest,
+  exportHarvestCSV
+} from '../utils/harvestUtils.js';
 
 // ── helpers ────────────────────────────────────────────────────────────────
 export function getThemeClasses(accentColor = 'emerald') {
@@ -680,8 +698,38 @@ export default function Projects({ onMenuClick }) {
   const [isAddingBlock, setIsAddingBlock] = useState(false);
   const [blockForm, setBlockForm] = useState({ Name: '', ReplicationNum: '' });
   const [showMap, setShowMap] = useState(false);
-  const [viewMode, setViewMode] = useState('dashboard'); // 'dashboard' | 'report' | 'split-viewer'
+  const [viewMode, setViewMode] = useState('dashboard'); // 'dashboard' | 'agronomic-inputs' | 'harvest-yield' | 'report' | 'split-viewer'
   const [blocksViewMode, setBlocksViewMode] = useState('list'); // 'list' | 'grid'
+
+  // Project Agronomic Inputs state
+  const [isProjAppModalOpen, setIsProjAppModalOpen] = useState(false);
+  const [editingProjAppIdx, setEditingProjAppIdx] = useState(null);
+  const [projAppForm, setProjAppForm] = useState({
+    code: '',
+    inputType: 'fertilizer',
+    productName: '',
+    activeIngredient: '',
+    date: toDatetimeLocal(new Date()),
+    dosage: '',
+    dosageUnit: 'L/ha',
+    cropStage: '',
+    targetStage: '',
+    method: 'Foliar Spray',
+    targetPurpose: '',
+    operator: '',
+    appliedScope: 'Blanket / Entire Project',
+    notes: '',
+    syncToSubTrials: true,
+  });
+
+  // Project Batch Harvest Entry state
+  const [isBatchHarvestModalOpen, setIsBatchHarvestModalOpen] = useState(false);
+  const [batchHarvestPickingNum, setBatchHarvestPickingNum] = useState(1);
+  const [batchHarvestDate, setBatchHarvestDate] = useState(new Date().toISOString().split('T')[0]);
+  const [batchHarvestUnit, setBatchHarvestUnit] = useState('g/plant');
+  const [batchHarvestPlotArea, setBatchHarvestPlotArea] = useState('');
+  const [batchHarvestGrid, setBatchHarvestGrid] = useState({});
+  const [isSavingBatchHarvest, setIsSavingBatchHarvest] = useState(false);
   const [selectedControlTrialId, setSelectedControlTrialId] = useState('');
   const [selectedTreatedTrialId, setSelectedTreatedTrialId] = useState('');
   const [selectedDaa, setSelectedDaa] = useState(0);
@@ -1368,6 +1416,301 @@ export default function Projects({ onMenuClick }) {
       await addBlock(payload, getAppState);
       toast('Block added');
     } catch { toast('Failed to save block', 'error'); }
+  };
+
+  // ── Project Agronomic Management & Trial Inputs Handlers ─────────────────
+  const handleOpenProjAppModal = (app = null, idx = null) => {
+    if (app && idx !== null) {
+      setEditingProjAppIdx(idx);
+      setProjAppForm({
+        code: app.code || '',
+        inputType: app.inputType || 'fertilizer',
+        productName: app.productName || '',
+        activeIngredient: app.activeIngredient || '',
+        date: app.date ? toDatetimeLocal(app.date) : toDatetimeLocal(new Date()),
+        dosage: app.dosage || '',
+        dosageUnit: app.dosageUnit || 'L/ha',
+        cropStage: app.cropStage || '',
+        targetStage: app.targetStage || '',
+        method: app.method || 'Foliar Spray',
+        targetPurpose: app.targetPurpose || '',
+        operator: app.operator || '',
+        appliedScope: app.appliedScope || 'Blanket / Entire Project',
+        notes: app.notes || '',
+        syncToSubTrials: true,
+      });
+    } else {
+      setEditingProjAppIdx(null);
+      setProjAppForm({
+        code: `INP-${Date.now().toString().slice(-4)}`,
+        inputType: projectCategory === 'nutrition' ? 'fertilizer' : projectCategory === 'fungicide' ? 'fungicide' : projectCategory === 'pesticide' ? 'pesticide' : projectCategory === 'biostimulant' ? 'biostimulant' : 'fertilizer',
+        productName: '',
+        activeIngredient: '',
+        date: toDatetimeLocal(new Date()),
+        dosage: '',
+        dosageUnit: 'L/ha',
+        cropStage: '',
+        targetStage: '',
+        method: 'Foliar Spray',
+        targetPurpose: '',
+        operator: user?.displayName || user?.name || '',
+        appliedScope: 'Blanket / Entire Project',
+        notes: '',
+        syncToSubTrials: true,
+      });
+    }
+    setIsProjAppModalOpen(true);
+  };
+
+  const applyPresetToProjAppForm = (preset) => {
+    setProjAppForm(prev => ({
+      ...prev,
+      inputType: preset.inputType || prev.inputType,
+      productName: preset.productName || prev.productName,
+      activeIngredient: preset.activeIngredient || prev.activeIngredient,
+      dosage: preset.dosage || prev.dosage,
+      dosageUnit: preset.dosageUnit || prev.dosageUnit,
+      method: preset.method || prev.method,
+      targetPurpose: preset.targetPurpose || prev.targetPurpose,
+      cropStage: preset.cropStage || prev.cropStage,
+      notes: preset.notes ? (prev.notes ? `${prev.notes} | ${preset.notes}` : preset.notes) : prev.notes,
+    }));
+  };
+
+  const handleSaveProjApp = async (e) => {
+    e.preventDefault();
+    if (!activeProject) return;
+    if (isEffectiveLocked) {
+      toast('Project is locked.', 'error');
+      return;
+    }
+
+    const currentApps = parseAgronomicInputLog(activeProject.ApplicationLogJSON || activeProject.AgronomicInputsJSON);
+    const normalized = normalizeApplicationItem({
+      code: projAppForm.code || `INP-${Date.now().toString().slice(-4)}`,
+      inputType: projAppForm.inputType,
+      productName: projAppForm.productName,
+      activeIngredient: projAppForm.activeIngredient,
+      date: projAppForm.date,
+      dosage: projAppForm.dosage,
+      dosageUnit: projAppForm.dosageUnit,
+      cropStage: projAppForm.cropStage,
+      targetStage: projAppForm.targetStage,
+      method: projAppForm.method,
+      targetPurpose: projAppForm.targetPurpose,
+      operator: projAppForm.operator,
+      appliedScope: projAppForm.appliedScope,
+      notes: projAppForm.notes,
+    });
+
+    let updatedApps;
+    if (editingProjAppIdx !== null && editingProjAppIdx >= 0 && editingProjAppIdx < currentApps.length) {
+      updatedApps = [...currentApps];
+      updatedApps[editingProjAppIdx] = normalized;
+    } else {
+      updatedApps = [...currentApps, normalized];
+    }
+
+    const jsonStr = JSON.stringify(updatedApps);
+    const updatedProj = {
+      ...activeProject,
+      ApplicationLogJSON: jsonStr,
+      AgronomicInputsJSON: jsonStr,
+    };
+
+    const newProjects = (state.projects || []).map(p => p.ID === activeProject.ID ? updatedProj : p);
+    updateState({ projects: newProjects });
+    setIsProjAppModalOpen(false);
+
+    try {
+      await updateProject(updatedProj, getAppState);
+
+      if (projAppForm.syncToSubTrials && projectTrials.length > 0) {
+        let updatedTrialList = [...(state.trials || [])];
+        for (const t of projectTrials) {
+          const tApps = parseAgronomicInputLog(t.ApplicationLogJSON || t.AgronomicInputsJSON);
+          const existingIdx = tApps.findIndex(x => (x.code && x.code === normalized.code) || (x.productName === normalized.productName && x.date === normalized.date));
+          let newTApps;
+          if (existingIdx >= 0) {
+            newTApps = [...tApps];
+            newTApps[existingIdx] = normalized;
+          } else {
+            newTApps = [...tApps, normalized];
+          }
+          const tJson = JSON.stringify(newTApps);
+          const updatedT = { ...t, ApplicationLogJSON: tJson, AgronomicInputsJSON: tJson };
+          updatedTrialList = updatedTrialList.map(item => item.ID === t.ID ? updatedT : item);
+          await updateTrial(updatedT, getAppState);
+        }
+        updateState({ trials: updatedTrialList });
+      }
+
+      toast('Agronomic input saved successfully');
+    } catch (err) {
+      console.error(err);
+      toast('Failed to save agronomic input: ' + err.message, 'error');
+    }
+  };
+
+  const handleDeleteProjApp = async (idx) => {
+    if (!activeProject || isEffectiveLocked) return;
+    if (!window.confirm('Are you sure you want to delete this agronomic input record?')) return;
+
+    const currentApps = parseAgronomicInputLog(activeProject.ApplicationLogJSON || activeProject.AgronomicInputsJSON);
+    const deletedItem = currentApps[idx];
+    const updatedApps = currentApps.filter((_, i) => i !== idx);
+    const jsonStr = JSON.stringify(updatedApps);
+    const updatedProj = {
+      ...activeProject,
+      ApplicationLogJSON: jsonStr,
+      AgronomicInputsJSON: jsonStr,
+    };
+
+    const newProjects = (state.projects || []).map(p => p.ID === activeProject.ID ? updatedProj : p);
+    updateState({ projects: newProjects });
+
+    try {
+      await updateProject(updatedProj, getAppState);
+
+      if (deletedItem?.code && projectTrials.length > 0) {
+        let updatedTrialList = [...(state.trials || [])];
+        for (const t of projectTrials) {
+          const tApps = parseAgronomicInputLog(t.ApplicationLogJSON || t.AgronomicInputsJSON);
+          const filtered = tApps.filter(x => x.code !== deletedItem.code);
+          if (filtered.length !== tApps.length) {
+            const tJson = JSON.stringify(filtered);
+            const updatedT = { ...t, ApplicationLogJSON: tJson, AgronomicInputsJSON: tJson };
+            updatedTrialList = updatedTrialList.map(item => item.ID === t.ID ? updatedT : item);
+            await updateTrial(updatedT, getAppState);
+          }
+        }
+        updateState({ trials: updatedTrialList });
+      }
+
+      toast('Agronomic input deleted');
+    } catch (err) {
+      toast('Failed to delete: ' + err.message, 'error');
+    }
+  };
+
+  // ── Project Multi-Picking Batch Harvest Handlers ───────────────────────────
+  const handleOpenBatchHarvest = () => {
+    if (projectTrials.length === 0) {
+      toast('No plots available in this project to record harvest.', 'error');
+      return;
+    }
+
+    let maxPicking = 0;
+    projectTrials.forEach(t => {
+      const hData = safeJsonParse(t.HarvestDataJSON, {});
+      const pickings = Array.isArray(hData.pickings) ? hData.pickings : [];
+      pickings.forEach(p => {
+        const num = parseInt(p.pickingNumber) || 0;
+        if (num > maxPicking) maxPicking = num;
+      });
+    });
+    const nextPickingNum = maxPicking + 1;
+    setBatchHarvestPickingNum(nextPickingNum);
+
+    const defaultUnit = projectTrials[0]?.YieldUnit || 'kg/plot';
+    setBatchHarvestUnit(defaultUnit);
+
+    const defaultPlotArea = projectTrials[0]?.PlotArea || '';
+    setBatchHarvestPlotArea(defaultPlotArea);
+
+    const today = new Date().toISOString().split('T')[0];
+    setBatchHarvestDate(today);
+
+    const initialGrid = {};
+    projectTrials.forEach(t => {
+      initialGrid[t.ID] = {
+        marketableWeight: '',
+        unmarketableWeight: '0',
+        cullReason: 'None / Normal',
+        fruitCount: '',
+        moisturePct: '',
+        brixScore: '',
+        notes: '',
+      };
+    });
+    setBatchHarvestGrid(initialGrid);
+    setIsBatchHarvestModalOpen(true);
+  };
+
+  const handleSaveBatchHarvest = async (e) => {
+    e.preventDefault();
+    if (!activeProject || isEffectiveLocked) return;
+    setIsSavingBatchHarvest(true);
+
+    try {
+      let updatedTrialsList = [...(state.trials || [])];
+      let updatedCount = 0;
+
+      for (const t of projectTrials) {
+        const plotEntry = batchHarvestGrid[t.ID];
+        if (!plotEntry || (plotEntry.marketableWeight === '' && plotEntry.fruitCount === '')) {
+          continue;
+        }
+
+        const hData = safeJsonParse(t.HarvestDataJSON, {});
+        const existingPickings = Array.isArray(hData.pickings) ? [...hData.pickings] : [];
+
+        const newPicking = normalizePickingItem({
+          pickingNumber: batchHarvestPickingNum,
+          harvestDate: batchHarvestDate,
+          cropStage: '',
+          actualMarketableWeight: plotEntry.marketableWeight,
+          actualUnmarketableWeight: plotEntry.unmarketableWeight,
+          totalWeight: '',
+          yieldUnit: batchHarvestUnit,
+          plotAreaM2: batchHarvestPlotArea || t.PlotArea || '',
+          actualFruitCount: plotEntry.fruitCount,
+          moisturePct: plotEntry.moisturePct,
+          brixScore: plotEntry.brixScore,
+          cullReason: plotEntry.cullReason,
+          notes: plotEntry.notes,
+        });
+
+        const existIdx = existingPickings.findIndex(p => parseInt(p.pickingNumber) === parseInt(batchHarvestPickingNum));
+        if (existIdx >= 0) {
+          existingPickings[existIdx] = newPicking;
+        } else {
+          existingPickings.push(newPicking);
+        }
+
+        const calculatedTotals = calcHarvestTotalsScientific(existingPickings);
+        const updatedHarvestData = {
+          ...hData,
+          pickings: existingPickings,
+          totals: calculatedTotals,
+        };
+
+        const updatedTrial = {
+          ...t,
+          HarvestDataJSON: JSON.stringify(updatedHarvestData),
+          Yield: calculatedTotals.totalMarketableWeight,
+          YieldValue: calculatedTotals.totalMarketableWeight,
+          YieldUnit: batchHarvestUnit,
+        };
+
+        updatedTrialsList = updatedTrialsList.map(item => item.ID === t.ID ? updatedTrial : item);
+        await updateTrial(updatedTrial, getAppState);
+        updatedCount++;
+      }
+
+      updateState({ trials: updatedTrialsList });
+      setIsBatchHarvestModalOpen(false);
+      toast(`Harvest data recorded for ${updatedCount} plots successfully!`);
+
+      if (updatedCount > 0) {
+        runAnalysis(postHocMethod);
+      }
+    } catch (err) {
+      console.error(err);
+      toast('Failed to save batch harvest: ' + err.message, 'error');
+    } finally {
+      setIsSavingBatchHarvest(false);
+    }
   };
 
   const renderLayoutPreview = () => {
@@ -5159,6 +5502,553 @@ ${photosHtml}
       );
     }
 
+    if (viewMode === 'agronomic-inputs') {
+      const agronomicInputs = parseAgronomicInputLog(activeProject.ApplicationLogJSON || activeProject.AgronomicInputsJSON);
+      const fertCount = agronomicInputs.filter(a => ['fertilizer', 'micronutrient', 'soil_amendment'].includes(a.inputType)).length;
+      const protCount = agronomicInputs.filter(a => ['fungicide', 'pesticide', 'herbicide'].includes(a.inputType)).length;
+      const bioCount = agronomicInputs.filter(a => ['biostimulant', 'growth_regulator'].includes(a.inputType)).length;
+      const presets = CATEGORY_INPUT_PRESETS[projectCategory] || CATEGORY_INPUT_PRESETS['nutrition'] || [];
+
+      return (
+        <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50">
+          <TopBar title={`Agronomic Operations — ${activeProject.Name}`} onMenuClick={onMenuClick} />
+          <div className="flex-1 overflow-y-auto">
+            {/* Header */}
+            <div className="bg-white border-b px-4 py-4">
+              <div className="max-w-7xl mx-auto">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <button onClick={() => setViewMode('dashboard')} className="p-2 rounded-lg border hover:bg-slate-50 transition shrink-0">
+                      <ArrowLeft className="w-4 h-4 text-slate-600" />
+                    </button>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h2 className="text-xl font-bold text-slate-800">{activeProject.Name}</h2>
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-bold uppercase ${isLocked ? 'bg-slate-800 text-white' : 'bg-emerald-100 text-emerald-800'}`}>
+                          Agronomic Program
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5">Category: {projectCategory.toUpperCase()} · {agronomicInputs.length} operations logged · {projectTrials.length} plots covered</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleOpenProjAppModal()}
+                    disabled={isEffectiveLocked}
+                    className={`flex items-center gap-2 ${theme.bg} text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm transition disabled:opacity-50`}
+                  >
+                    <Plus className="w-4 h-4" />
+                    Log Agronomic Input
+                  </button>
+                </div>
+
+                {/* Navigation Tabs */}
+                <div className="flex items-center gap-2 mt-4 border-t border-slate-100 pt-3 overflow-x-auto">
+                  <button
+                    onClick={() => setViewMode('dashboard')}
+                    className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-100 transition shrink-0"
+                  >
+                    <LayoutGrid className="w-3.5 h-3.5" />
+                    Overview & Layout
+                  </button>
+                  <button
+                    onClick={() => setViewMode('agronomic-inputs')}
+                    className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition shrink-0 ${theme.bg} text-white shadow-sm`}
+                  >
+                    <Leaf className="w-3.5 h-3.5" />
+                    Agronomic Inputs & Operations
+                    {agronomicInputs.length > 0 && (
+                      <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-white/25 text-white">{agronomicInputs.length}</span>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setViewMode('harvest-yield')}
+                    className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-100 transition shrink-0"
+                  >
+                    <Table className="w-3.5 h-3.5" />
+                    Multi-Harvest & Yield Matrix
+                    {(() => {
+                      const agg = aggregateProjectHarvest(projectTrials);
+                      return agg.totalPickingsCount > 0 ? (
+                        <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-slate-200 text-slate-700">{agg.totalPickingsCount}</span>
+                      ) : null;
+                    })()}
+                  </button>
+                  <button
+                    onClick={() => setViewMode('split-viewer')}
+                    className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-100 transition shrink-0"
+                  >
+                    <Layers className="w-3.5 h-3.5" />
+                    Plot Viewer
+                  </button>
+                  <button
+                    onClick={() => setViewMode('report')}
+                    className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-100 transition shrink-0"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    Scientific Report
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="max-w-7xl mx-auto p-4 space-y-5">
+              {/* Stat Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+                  <div className="text-xs text-slate-500 font-medium">Total Operations</div>
+                  <div className="text-2xl font-bold text-slate-800 mt-1">{agronomicInputs.length}</div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">Recorded events</div>
+                </div>
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+                  <div className="text-xs text-slate-500 font-medium">Fertilizer & Nutrition</div>
+                  <div className="text-2xl font-bold text-emerald-600 mt-1">{fertCount}</div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">Basal & fertigation</div>
+                </div>
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+                  <div className="text-xs text-slate-500 font-medium">Pesticide / Fungicide</div>
+                  <div className="text-2xl font-bold text-rose-600 mt-1">{protCount}</div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">Crop protection</div>
+                </div>
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+                  <div className="text-xs text-slate-500 font-medium">Biostimulants & Others</div>
+                  <div className="text-2xl font-bold text-purple-600 mt-1">{bioCount}</div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">Growth boosters</div>
+                </div>
+              </div>
+
+              {/* Quick Presets Bar */}
+              <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200/70 rounded-xl p-4 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-emerald-600" />
+                    <span className="text-xs font-bold text-emerald-900 uppercase tracking-wide">
+                      Quick Field Presets ({projectCategory.toUpperCase()})
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-emerald-700">Click any standard treatment below to prefill input log</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {presets.map((preset, pIdx) => (
+                    <button
+                      key={pIdx}
+                      onClick={() => {
+                        handleOpenProjAppModal();
+                        setTimeout(() => applyPresetToProjAppForm(preset), 50);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-emerald-200 hover:border-emerald-500 hover:bg-emerald-600 hover:text-white rounded-lg text-xs font-medium text-emerald-900 shadow-xs transition"
+                    >
+                      <Plus className="w-3 h-3 shrink-0" />
+                      <span>{preset.productName}</span>
+                      <span className="opacity-75 text-[10px]">({preset.dosage} {preset.dosageUnit})</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Agronomic Inputs Table / List */}
+              <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+                <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Leaf className="w-4 h-4 text-emerald-600" />
+                    <h3 className="font-bold text-slate-800 text-sm">Agronomic Inputs & Crop Management Log</h3>
+                  </div>
+                  <span className="text-xs text-slate-400">{agronomicInputs.length} entries</span>
+                </div>
+
+                {agronomicInputs.length === 0 ? (
+                  <div className="text-center py-12 px-4">
+                    <div className="w-12 h-12 rounded-full bg-emerald-50 flex items-center justify-center mx-auto mb-3">
+                      <Leaf className="w-6 h-6 text-emerald-600" />
+                    </div>
+                    <h4 className="text-sm font-bold text-slate-700">No Agronomic Inputs Logged Yet</h4>
+                    <p className="text-xs text-slate-400 max-w-md mx-auto mt-1 mb-4">
+                      Scientific trial dossiers require complete records of all field applications (fertilizers, fungicides, insecticides, biostimulants, soil amendments) with dosages, dates, and application methods.
+                    </p>
+                    <button
+                      onClick={() => handleOpenProjAppModal()}
+                      className={`inline-flex items-center gap-2 ${theme.bg} text-white px-4 py-2 rounded-lg text-xs font-bold shadow-sm transition`}
+                    >
+                      <Plus className="w-4 h-4" />
+                      Log First Agronomic Input
+                    </button>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-100">
+                        <tr>
+                          <th className="py-3 px-4">Date & Code</th>
+                          <th className="py-3 px-4">Category</th>
+                          <th className="py-3 px-4">Product & Active Ingredient</th>
+                          <th className="py-3 px-4">Dosage</th>
+                          <th className="py-3 px-4">Method & Scope</th>
+                          <th className="py-3 px-4">Stage & Purpose</th>
+                          <th className="py-3 px-4">Operator</th>
+                          <th className="py-3 px-4 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {agronomicInputs.map((item, idx) => {
+                          const badge = getInputCategoryBadge(item.inputType);
+                          return (
+                            <tr key={idx} className="hover:bg-slate-50 transition">
+                              <td className="py-3 px-4 whitespace-nowrap">
+                                <div className="font-bold text-slate-800">{formatDateTime(item.date)}</div>
+                                <div className="text-[10px] text-slate-400 font-mono mt-0.5">{item.code || `INP-${idx + 1}`}</div>
+                              </td>
+                              <td className="py-3 px-4 whitespace-nowrap">
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${badge.color}`}>
+                                  {badge.label}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="font-bold text-slate-800">{item.productName || '—'}</div>
+                                {item.activeIngredient && (
+                                  <div className="text-[11px] text-slate-500">{item.activeIngredient}</div>
+                                )}
+                              </td>
+                              <td className="py-3 px-4 whitespace-nowrap font-bold text-emerald-700">
+                                {item.dosage ? `${item.dosage} ${item.dosageUnit || ''}` : '—'}
+                              </td>
+                              <td className="py-3 px-4 whitespace-nowrap">
+                                <div className="font-medium text-slate-700">{item.method || 'Foliar Spray'}</div>
+                                <div className="text-[10px] text-slate-400">{item.appliedScope || 'Blanket'}</div>
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="text-slate-700 font-medium">{item.cropStage || '—'}</div>
+                                {item.targetPurpose && (
+                                  <div className="text-[10px] text-slate-500 italic">{item.targetPurpose}</div>
+                                )}
+                              </td>
+                              <td className="py-3 px-4 whitespace-nowrap text-slate-600">
+                                {item.operator || '—'}
+                              </td>
+                              <td className="py-3 px-4 whitespace-nowrap text-right">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <button
+                                    onClick={() => handleOpenProjAppModal(item, idx)}
+                                    className="p-1.5 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition"
+                                    title="Edit"
+                                  >
+                                    <Edit className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteProjApp(idx)}
+                                    className="p-1.5 rounded-lg text-red-500 hover:text-red-700 hover:bg-red-50 transition"
+                                    title="Delete"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+            {renderModals()}
+          </div>
+        </div>
+      );
+    }
+
+    if (viewMode === 'harvest-yield') {
+      const aggHarvest = aggregateProjectHarvest(projectTrials);
+      const uniquePickings = [...new Set(projectTrials.flatMap(t => {
+        const hData = safeJsonParse(t.HarvestDataJSON, {});
+        return (hData.pickings || []).map(p => parseInt(p.pickingNumber) || 1);
+      }))].sort((a, b) => a - b);
+
+      const trtMatrix = treatments.map(trtName => {
+        const trialsForTrt = projectTrials.filter(t => t.FormulationName === trtName);
+        const yields = trialsForTrt.map(t => parseFloat(t.Yield || t.YieldValue) || 0).filter(v => v > 0);
+        const mean = yields.length > 0 ? yields.reduce((a, b) => a + b, 0) / yields.length : 0;
+        const variance = yields.length > 1 ? yields.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / (yields.length - 1) : 0;
+        const sd = Math.sqrt(variance);
+        const cv = mean > 0 ? (sd / mean) * 100 : 0;
+
+        return {
+          name: trtName,
+          trials: trialsForTrt,
+          yields,
+          mean,
+          sd,
+          cv,
+        };
+      });
+
+      return (
+        <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50">
+          <TopBar title={`Harvest & Yield Matrix — ${activeProject.Name}`} onMenuClick={onMenuClick} />
+          <div className="flex-1 overflow-y-auto">
+            {/* Header */}
+            <div className="bg-white border-b px-4 py-4">
+              <div className="max-w-7xl mx-auto">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <button onClick={() => setViewMode('dashboard')} className="p-2 rounded-lg border hover:bg-slate-50 transition shrink-0">
+                      <ArrowLeft className="w-4 h-4 text-slate-600" />
+                    </button>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h2 className="text-xl font-bold text-slate-800">{activeProject.Name}</h2>
+                        <span className="px-2 py-0.5 rounded-full text-xs font-bold uppercase bg-amber-100 text-amber-800">
+                          Multi-Picking Yield
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {aggHarvest.totalPickingsCount} pickings logged across {projectTrials.length} plots · Unit: {projectTrials[0]?.YieldUnit || 'kg/plot'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => exportHarvestCSV(aggHarvest, activeProject.Name)}
+                      className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3.5 py-2 rounded-lg text-xs font-bold transition shadow-xs"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      Export Harvest CSV
+                    </button>
+                    <button
+                      onClick={() => handleOpenBatchHarvest()}
+                      disabled={isEffectiveLocked}
+                      className={`flex items-center gap-2 ${theme.bg} text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm transition disabled:opacity-50`}
+                    >
+                      <Plus className="w-4 h-4" />
+                      Batch Harvest Entry
+                    </button>
+                  </div>
+                </div>
+
+                {/* Navigation Tabs */}
+                <div className="flex items-center gap-2 mt-4 border-t border-slate-100 pt-3 overflow-x-auto">
+                  <button
+                    onClick={() => setViewMode('dashboard')}
+                    className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-100 transition shrink-0"
+                  >
+                    <LayoutGrid className="w-3.5 h-3.5" />
+                    Overview & Layout
+                  </button>
+                  <button
+                    onClick={() => setViewMode('agronomic-inputs')}
+                    className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-100 transition shrink-0"
+                  >
+                    <Leaf className="w-3.5 h-3.5" />
+                    Agronomic Inputs & Maintenance
+                    {(() => {
+                      const cnt = parseAgronomicInputLog(activeProject.ApplicationLogJSON || activeProject.AgronomicInputsJSON).length;
+                      return cnt > 0 ? (
+                        <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-slate-200 text-slate-700">{cnt}</span>
+                      ) : null;
+                    })()}
+                  </button>
+                  <button
+                    onClick={() => setViewMode('harvest-yield')}
+                    className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition shrink-0 ${theme.bg} text-white shadow-sm`}
+                  >
+                    <Table className="w-3.5 h-3.5" />
+                    Multi-Harvest & Yield Matrix
+                    {aggHarvest.totalPickingsCount > 0 && (
+                      <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-white/25 text-white">{aggHarvest.totalPickingsCount}</span>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setViewMode('split-viewer')}
+                    className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-100 transition shrink-0"
+                  >
+                    <Layers className="w-3.5 h-3.5" />
+                    Plot Viewer
+                  </button>
+                  <button
+                    onClick={() => setViewMode('report')}
+                    className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-100 transition shrink-0"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    Scientific Report
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="max-w-7xl mx-auto p-4 space-y-5">
+              {/* Yield KPI Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+                  <div className="text-xs text-slate-500 font-medium">Total Pickings</div>
+                  <div className="text-2xl font-bold text-slate-800 mt-1">{aggHarvest.totalPickingsCount}</div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">{uniquePickings.length} distinct picking sessions</div>
+                </div>
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+                  <div className="text-xs text-slate-500 font-medium">Mean Marketable Yield</div>
+                  <div className="text-2xl font-bold text-emerald-600 mt-1">
+                    {aggHarvest.avgMarketablePerPlot.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                  </div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">{projectTrials[0]?.YieldUnit || 'kg/plot'} per plot</div>
+                </div>
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+                  <div className="text-xs text-slate-500 font-medium">Marketable Rate</div>
+                  <div className="text-2xl font-bold text-teal-600 mt-1">{aggHarvest.marketablePct.toFixed(1)}%</div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">of total harvested biomass</div>
+                </div>
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+                  <div className="text-xs text-slate-500 font-medium">Extrapolated Yield</div>
+                  <div className="text-2xl font-bold text-blue-600 mt-1">
+                    {aggHarvest.extrapolatedMeanYieldTHa > 0 ? `${aggHarvest.extrapolatedMeanYieldTHa.toFixed(2)} t/ha` : '—'}
+                  </div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">Based on plot area</div>
+                </div>
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+                  <div className="text-xs text-slate-500 font-medium">Quality Metrics</div>
+                  <div className="text-lg font-bold text-purple-600 mt-1">
+                    {aggHarvest.avgBrix > 0 ? `${aggHarvest.avgBrix.toFixed(1)}°Bx` : '—'}
+                    {aggHarvest.avgMoisture > 0 && ` · ${aggHarvest.avgMoisture.toFixed(1)}% H₂O`}
+                  </div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">Brix & moisture averages</div>
+                </div>
+              </div>
+
+              {/* Treatment x Replication Yield Matrix */}
+              <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+                  <div>
+                    <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                      <Table className="w-4 h-4 text-emerald-600" />
+                      Treatment × Replication Harvest Matrix
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Cumulative marketable yield recorded across all pickings per replicate plot ({projectTrials[0]?.YieldUnit || 'kg/plot'}).
+                    </p>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                      <tr>
+                        <th className="py-2.5 px-3">Treatment</th>
+                        {projectBlocks.map((b, bIdx) => (
+                          <th key={b.ID || bIdx} className="py-2.5 px-3 text-center">
+                            {b.Name || `Rep ${bIdx + 1}`}
+                          </th>
+                        ))}
+                        <th className="py-2.5 px-3 text-right">Mean</th>
+                        <th className="py-2.5 px-3 text-right">±SD</th>
+                        <th className="py-2.5 px-3 text-right">CV%</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {trtMatrix.map((tRow, rIdx) => {
+                        const isCtrl = projectTrials.some(t => t.FormulationName === tRow.name && (t.IsControl === true || t.IsControl === 'true'));
+                        return (
+                          <tr key={rIdx} className={isCtrl ? 'bg-amber-50/30 hover:bg-amber-50/60' : 'hover:bg-slate-50'}>
+                            <td className="py-3 px-3 font-semibold text-slate-800 whitespace-nowrap">
+                              <div className="flex items-center gap-1.5">
+                                <span>{tRow.name}</span>
+                                {isCtrl && <span className="text-[9px] px-1.5 py-0.2 bg-amber-200 text-amber-800 rounded font-bold">UTC</span>}
+                              </div>
+                            </td>
+                            {projectBlocks.map((b, bIdx) => {
+                              const plot = projectTrials.find(t => t.FormulationName === tRow.name && String(t.BlockID) === String(b.ID));
+                              const plotYield = plot ? parseFloat(plot.Yield || plot.YieldValue) : null;
+                              const hData = plot ? safeJsonParse(plot.HarvestDataJSON, {}) : {};
+                              const pCount = Array.isArray(hData.pickings) ? hData.pickings.length : 0;
+
+                              return (
+                                <td key={b.ID || bIdx} className="py-3 px-3 text-center">
+                                  {plotYield !== null && !isNaN(plotYield) ? (
+                                    <div>
+                                      <span className="font-bold text-slate-800">{plotYield.toFixed(2)}</span>
+                                      {pCount > 0 && (
+                                        <div className="text-[10px] text-slate-400 mt-0.5">{pCount} pickings</div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="text-slate-300 italic">—</span>
+                                  )}
+                                </td>
+                              );
+                            })}
+                            <td className="py-3 px-3 text-right font-black text-emerald-700">
+                              {tRow.mean > 0 ? tRow.mean.toFixed(2) : '—'}
+                            </td>
+                            <td className="py-3 px-3 text-right text-slate-500">
+                              {tRow.sd > 0 ? tRow.sd.toFixed(2) : '—'}
+                            </td>
+                            <td className="py-3 px-3 text-right font-semibold">
+                              {tRow.cv > 0 ? (
+                                <span className={`px-1.5 py-0.5 rounded text-[11px] ${tRow.cv < 15 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                                  {tRow.cv.toFixed(1)}%
+                                </span>
+                              ) : '—'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Sequential Pickings Breakdown */}
+              {uniquePickings.length > 0 && (
+                <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+                  <h3 className="font-bold text-slate-800 text-sm mb-3">Sequential Pickings Summary</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                    {uniquePickings.map(pickNum => {
+                      const pickingsForNum = projectTrials.flatMap(t => {
+                        const hData = safeJsonParse(t.HarvestDataJSON, {});
+                        const picks = Array.isArray(hData.pickings) ? hData.pickings : [];
+                        return picks.filter(p => parseInt(p.pickingNumber) === pickNum);
+                      });
+
+                      const totalMarketable = pickingsForNum.reduce((acc, p) => acc + (parseFloat(p.actualMarketableWeight) || 0), 0);
+                      const totalCulls = pickingsForNum.reduce((acc, p) => acc + (parseFloat(p.actualUnmarketableWeight) || 0), 0);
+                      const totalFruits = pickingsForNum.reduce((acc, p) => acc + (parseInt(p.actualFruitCount) || 0), 0);
+                      const pickDate = pickingsForNum[0]?.harvestDate || '—';
+
+                      return (
+                        <div key={pickNum} className="border border-slate-200 rounded-lg p-3 bg-slate-50/50">
+                          <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                            <span className="font-bold text-slate-800 text-xs">Picking #{pickNum}</span>
+                            <span className="text-[11px] text-slate-500">{pickDate}</span>
+                          </div>
+                          <div className="mt-2 space-y-1 text-xs">
+                            <div className="flex justify-between text-slate-600">
+                              <span>Marketable Harvest:</span>
+                              <span className="font-bold text-emerald-700">{totalMarketable.toFixed(1)} {projectTrials[0]?.YieldUnit || ''}</span>
+                            </div>
+                            <div className="flex justify-between text-slate-600">
+                              <span>Culls / Unmarketable:</span>
+                              <span className="text-slate-500">{totalCulls.toFixed(1)} {projectTrials[0]?.YieldUnit || ''}</span>
+                            </div>
+                            {totalFruits > 0 && (
+                              <div className="flex justify-between text-slate-600">
+                                <span>Total Fruit Count:</span>
+                                <span className="font-medium text-slate-700">{totalFruits.toLocaleString()}</span>
+                              </div>
+                            )}
+                            <div className="flex justify-between text-slate-600">
+                              <span>Plots Harvested:</span>
+                              <span className="font-medium text-slate-700">{pickingsForNum.length} plots</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+            {renderModals()}
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50">
         <TopBar title={activeProject.Name} onMenuClick={onMenuClick} />
@@ -5194,6 +6084,63 @@ ${photosHtml}
                 >
                   {isAnalyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <BarChart2 className="w-4 h-4" />}
                   {isAnalyzing ? 'Analyzing…' : 'Run Analysis'}
+                </button>
+              </div>
+
+              {/* Navigation Tabs */}
+              <div className="flex items-center gap-2 mt-4 border-t border-slate-100 pt-3 overflow-x-auto">
+                <button
+                  onClick={() => setViewMode('dashboard')}
+                  className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition shrink-0 ${
+                    viewMode === 'dashboard' ? `${theme.bg} text-white shadow-sm` : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                  Overview & Layout
+                </button>
+                <button
+                  onClick={() => setViewMode('agronomic-inputs')}
+                  className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition shrink-0 ${
+                    viewMode === 'agronomic-inputs' ? `${theme.bg} text-white shadow-sm` : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  <Leaf className="w-3.5 h-3.5" />
+                  Agronomic Inputs & Maintenance
+                  {(() => {
+                    const cnt = parseAgronomicInputLog(activeProject.ApplicationLogJSON || activeProject.AgronomicInputsJSON).length;
+                    return cnt > 0 ? (
+                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${viewMode === 'agronomic-inputs' ? 'bg-white/25 text-white' : 'bg-slate-200 text-slate-700'}`}>{cnt}</span>
+                    ) : null;
+                  })()}
+                </button>
+                <button
+                  onClick={() => setViewMode('harvest-yield')}
+                  className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition shrink-0 ${
+                    viewMode === 'harvest-yield' ? `${theme.bg} text-white shadow-sm` : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  <Table className="w-3.5 h-3.5" />
+                  Multi-Harvest & Yield Matrix
+                  {(() => {
+                    const agg = aggregateProjectHarvest(projectTrials);
+                    return agg.totalPickingsCount > 0 ? (
+                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${viewMode === 'harvest-yield' ? 'bg-white/25 text-white' : 'bg-slate-200 text-slate-700'}`}>{agg.totalPickingsCount}</span>
+                    ) : null;
+                  })()}
+                </button>
+                <button
+                  onClick={() => setViewMode('split-viewer')}
+                  className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-100 transition shrink-0"
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  Plot Viewer
+                </button>
+                <button
+                  onClick={() => setViewMode('report')}
+                  className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-100 transition shrink-0"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  Scientific Report
                 </button>
               </div>
             </div>
@@ -6882,6 +7829,446 @@ ${photosHtml}
             </button>
           </div>
         </div>
+      </Modal>
+
+      {/* ── Project Agronomic Input Modal ── */}
+      <Modal
+        isOpen={isProjAppModalOpen}
+        onClose={() => setIsProjAppModalOpen(false)}
+        title={editingProjAppIdx !== null ? "Edit Agronomic Management Input" : "Log Agronomic Management Input"}
+      >
+        <form onSubmit={handleSaveProjApp} className="space-y-4 max-h-[80vh] overflow-y-auto pr-1">
+          {editingProjAppIdx === null && (
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+              <div className="text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                Quick Field Presets ({projectCategory.toUpperCase()})
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {(CATEGORY_INPUT_PRESETS[projectCategory] || CATEGORY_INPUT_PRESETS['nutrition']).map((preset, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => applyPresetToProjAppForm(preset)}
+                    className="text-[11px] px-2 py-1 rounded-md bg-white border border-slate-200 hover:border-emerald-500 hover:bg-emerald-50 text-slate-700 font-medium transition"
+                  >
+                    {preset.productName} ({preset.dosage} {preset.dosageUnit})
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Input Category *</label>
+              <select
+                value={projAppForm.inputType}
+                onChange={e => setProjAppForm(f => ({ ...f, inputType: e.target.value }))}
+                className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+              >
+                {INPUT_CATEGORIES.map(cat => (
+                  <option key={cat.value} value={cat.value}>{cat.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Operation Code</label>
+              <input
+                type="text"
+                value={projAppForm.code}
+                onChange={e => setProjAppForm(f => ({ ...f, code: e.target.value }))}
+                placeholder="e.g. INP-01, BASAL-01"
+                className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Product / Fertilizer / Chemical Name *</label>
+              <input
+                type="text"
+                required
+                value={projAppForm.productName}
+                onChange={e => setProjAppForm(f => ({ ...f, productName: e.target.value }))}
+                placeholder="e.g. NPK 10-26-26, Azoxystrobin, Seaweed Extract"
+                className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Active Ingredient / Composition</label>
+              <input
+                type="text"
+                value={projAppForm.activeIngredient}
+                onChange={e => setProjAppForm(f => ({ ...f, activeIngredient: e.target.value }))}
+                placeholder="e.g. 10% N, 26% P2O5, 26% K2O or Azoxystrobin 23% SC"
+                className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Application Date & Time *</label>
+              <input
+                type="datetime-local"
+                required
+                value={projAppForm.date}
+                onChange={e => setProjAppForm(f => ({ ...f, date: e.target.value }))}
+                className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Dosage Rate *</label>
+              <input
+                type="text"
+                required
+                value={projAppForm.dosage}
+                onChange={e => setProjAppForm(f => ({ ...f, dosage: e.target.value }))}
+                placeholder="e.g. 2.5, 100, 500"
+                className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Dosage Unit *</label>
+              <select
+                value={projAppForm.dosageUnit}
+                onChange={e => setProjAppForm(f => ({ ...f, dosageUnit: e.target.value }))}
+                className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+              >
+                {DOSAGE_UNITS.map(u => (
+                  <option key={u.value} value={u.value}>{u.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Application Method *</label>
+              <select
+                value={projAppForm.method}
+                onChange={e => setProjAppForm(f => ({ ...f, method: e.target.value }))}
+                className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+              >
+                {APPLICATION_METHODS.map(m => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Applied Scope</label>
+              <select
+                value={projAppForm.appliedScope}
+                onChange={e => setProjAppForm(f => ({ ...f, appliedScope: e.target.value }))}
+                className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+              >
+                <option value="Blanket / Entire Project">Blanket / Entire Project (All Plots)</option>
+                <option value="Prophylactic Buffer">Prophylactic Field Border / Buffer</option>
+                <option value="Treated Blocks Only">Treated Blocks Only</option>
+                <option value="Experimental Trial Plots Only">Experimental Trial Plots Only</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Crop Stage (BBCH)</label>
+              <input
+                type="text"
+                value={projAppForm.cropStage}
+                onChange={e => setProjAppForm(f => ({ ...f, cropStage: e.target.value }))}
+                placeholder="e.g. Vegetative (BBCH 21), Flowering (BBCH 65)"
+                className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Target Purpose / Disease / Pest</label>
+              <input
+                type="text"
+                value={projAppForm.targetPurpose}
+                onChange={e => setProjAppForm(f => ({ ...f, targetPurpose: e.target.value }))}
+                placeholder="e.g. Basal nutrition, Downy mildew prophylactic, Sucking pest control"
+                className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Operator / Agronomist</label>
+              <input
+                type="text"
+                value={projAppForm.operator}
+                onChange={e => setProjAppForm(f => ({ ...f, operator: e.target.value }))}
+                placeholder="Name of applicator"
+                className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+              />
+            </div>
+            <div className="flex items-center pt-5">
+              <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={projAppForm.syncToSubTrials}
+                  onChange={e => setProjAppForm(f => ({ ...f, syncToSubTrials: e.target.checked }))}
+                  className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                />
+                <span>Automatically sync to all {projectTrials.length} plots in this project</span>
+              </label>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Agronomic Notes & Observations</label>
+            <textarea
+              rows={2}
+              value={projAppForm.notes}
+              onChange={e => setProjAppForm(f => ({ ...f, notes: e.target.value }))}
+              placeholder="Application conditions, nozzle type, spray volume (L/ha), soil moisture..."
+              className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setIsProjAppModalOpen(false)}
+              className="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-800 transition"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-5 py-2 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition"
+            >
+              {editingProjAppIdx !== null ? "Update Agronomic Input" : "Save Agronomic Input"}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* ── Project Batch Harvest Entry Modal ── */}
+      <Modal
+        isOpen={isBatchHarvestModalOpen}
+        onClose={() => setIsBatchHarvestModalOpen(false)}
+        title={`Batch Harvest Entry — Picking #${batchHarvestPickingNum}`}
+      >
+        <form onSubmit={handleSaveBatchHarvest} className="space-y-4 max-h-[85vh] overflow-y-auto pr-1">
+          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-xs text-emerald-800">
+            Enter harvest data for all plots in this picking session. The cumulative total yield for each plot will be recalculated automatically and updated across ANOVA, charts, and scientific reports.
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-3 rounded-lg border border-slate-200">
+            <div>
+              <label className="block text-[11px] font-bold text-slate-600 mb-1">Picking #</label>
+              <input
+                type="number"
+                min="1"
+                required
+                value={batchHarvestPickingNum}
+                onChange={e => setBatchHarvestPickingNum(parseInt(e.target.value) || 1)}
+                className="w-full px-2.5 py-1.5 border rounded text-xs bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold text-slate-600 mb-1">Harvest Date</label>
+              <input
+                type="date"
+                required
+                value={batchHarvestDate}
+                onChange={e => setBatchHarvestDate(e.target.value)}
+                className="w-full px-2.5 py-1.5 border rounded text-xs bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold text-slate-600 mb-1">Yield Unit</label>
+              <select
+                value={batchHarvestUnit}
+                onChange={e => setBatchHarvestUnit(e.target.value)}
+                className="w-full px-2.5 py-1.5 border rounded text-xs bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+              >
+                {HARVEST_YIELD_UNITS.map(u => (
+                  <option key={u.value} value={u.value}>{u.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold text-slate-600 mb-1">Plot Area (m²)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={batchHarvestPlotArea}
+                onChange={e => setBatchHarvestPlotArea(e.target.value)}
+                placeholder="e.g. 15.0"
+                className="w-full px-2.5 py-1.5 border rounded text-xs bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <div className="border border-slate-200 rounded-lg overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-100 text-slate-700 font-semibold border-b border-slate-200">
+                <tr>
+                  <th className="py-2 px-2.5">Plot / Trt</th>
+                  <th className="py-2 px-2.5">Marketable ({batchHarvestUnit}) *</th>
+                  <th className="py-2 px-2.5">Unmarketable / Culls</th>
+                  <th className="py-2 px-2.5">Cull Reason</th>
+                  <th className="py-2 px-2.5">Fruit Count</th>
+                  <th className="py-2 px-2.5">Moisture %</th>
+                  <th className="py-2 px-2.5">Brix (°Bx)</th>
+                  <th className="py-2 px-2.5">Notes</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {projectTrials.map(trial => {
+                  const plotData = batchHarvestGrid[trial.ID] || {};
+                  const isCtrl = trial.IsControl === true || trial.IsControl === 'true';
+                  return (
+                    <tr key={trial.ID} className={isCtrl ? 'bg-amber-50/40 hover:bg-amber-50/70' : 'hover:bg-slate-50'}>
+                      <td className="py-2 px-2.5 font-medium whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-slate-800">Plot #{trial.PlotNumber || trial.ID.slice(-4)}</span>
+                          {isCtrl && <span className="text-[9px] px-1 py-0.2 bg-amber-200 text-amber-800 rounded font-bold">UTC</span>}
+                        </div>
+                        <div className="text-[10px] text-slate-500 truncate max-w-[120px]">{trial.FormulationName || 'Untreated'}</div>
+                      </td>
+                      <td className="py-1 px-1.5">
+                        <input
+                          type="number"
+                          step="any"
+                          value={plotData.marketableWeight || ''}
+                          onChange={e => {
+                            const val = e.target.value;
+                            setBatchHarvestGrid(prev => ({
+                              ...prev,
+                              [trial.ID]: { ...prev[trial.ID], marketableWeight: val }
+                            }));
+                          }}
+                          placeholder="0.0"
+                          className="w-24 px-2 py-1 border rounded text-xs focus:ring-1 focus:ring-emerald-500 font-bold text-slate-800"
+                        />
+                      </td>
+                      <td className="py-1 px-1.5">
+                        <input
+                          type="number"
+                          step="any"
+                          value={plotData.unmarketableWeight || ''}
+                          onChange={e => {
+                            const val = e.target.value;
+                            setBatchHarvestGrid(prev => ({
+                              ...prev,
+                              [trial.ID]: { ...prev[trial.ID], unmarketableWeight: val }
+                            }));
+                          }}
+                          placeholder="0.0"
+                          className="w-20 px-2 py-1 border rounded text-xs text-slate-600"
+                        />
+                      </td>
+                      <td className="py-1 px-1.5">
+                        <select
+                          value={plotData.cullReason || 'None / Normal'}
+                          onChange={e => {
+                            const val = e.target.value;
+                            setBatchHarvestGrid(prev => ({
+                              ...prev,
+                              [trial.ID]: { ...prev[trial.ID], cullReason: val }
+                            }));
+                          }}
+                          className="w-28 px-1.5 py-1 border rounded text-[11px] bg-white text-slate-700"
+                        >
+                          {CULL_REASONS.map(r => (
+                            <option key={r} value={r}>{r}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="py-1 px-1.5">
+                        <input
+                          type="number"
+                          value={plotData.fruitCount || ''}
+                          onChange={e => {
+                            const val = e.target.value;
+                            setBatchHarvestGrid(prev => ({
+                              ...prev,
+                              [trial.ID]: { ...prev[trial.ID], fruitCount: val }
+                            }));
+                          }}
+                          placeholder="#"
+                          className="w-16 px-2 py-1 border rounded text-xs text-slate-600"
+                        />
+                      </td>
+                      <td className="py-1 px-1.5">
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={plotData.moisturePct || ''}
+                          onChange={e => {
+                            const val = e.target.value;
+                            setBatchHarvestGrid(prev => ({
+                              ...prev,
+                              [trial.ID]: { ...prev[trial.ID], moisturePct: val }
+                            }));
+                          }}
+                          placeholder="%"
+                          className="w-16 px-2 py-1 border rounded text-xs text-slate-600"
+                        />
+                      </td>
+                      <td className="py-1 px-1.5">
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={plotData.brixScore || ''}
+                          onChange={e => {
+                            const val = e.target.value;
+                            setBatchHarvestGrid(prev => ({
+                              ...prev,
+                              [trial.ID]: { ...prev[trial.ID], brixScore: val }
+                            }));
+                          }}
+                          placeholder="°Bx"
+                          className="w-16 px-2 py-1 border rounded text-xs text-slate-600"
+                        />
+                      </td>
+                      <td className="py-1 px-1.5">
+                        <input
+                          type="text"
+                          value={plotData.notes || ''}
+                          onChange={e => {
+                            const val = e.target.value;
+                            setBatchHarvestGrid(prev => ({
+                              ...prev,
+                              [trial.ID]: { ...prev[trial.ID], notes: val }
+                            }));
+                          }}
+                          placeholder="Notes"
+                          className="w-24 px-2 py-1 border rounded text-xs text-slate-600"
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setIsBatchHarvestModalOpen(false)}
+              className="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-800 transition"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSavingBatchHarvest}
+              className="px-5 py-2 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded-lg shadow-sm transition flex items-center gap-1.5"
+            >
+              {isSavingBatchHarvest ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              {isSavingBatchHarvest ? "Saving All Plots..." : `Save Picking #${batchHarvestPickingNum} for All Plots`}
+            </button>
+          </div>
+        </form>
       </Modal>
 
       <AppSharingModal

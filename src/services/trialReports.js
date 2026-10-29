@@ -1731,13 +1731,43 @@ export async function generateComprehensivePdf(trial, options = {}) {
     y = await addPhotoGrid(doc, photos, y, ph, 50, showPhotoDates, trial.Date);
   }
 
+  // Agronomic Inputs & Crop Management Operations Log
+  const trialApps = safeJsonParse(trial.ApplicationLogJSON || trial.agronomicInputsJSON, []);
+  if (trialApps.length > 0) {
+    y = secHeading(doc, `${nextSec++}. Agronomic Management & Trial Inputs Log`, y, ph);
+    const appHead = [['App #', 'Date', 'Type', 'Product / Formulation', 'Dosage & Unit', 'Method', 'Crop Stage', 'Target / Purpose', 'Notes']];
+    const appBody = trialApps.map((a, aIdx) => [
+      a.code || `App ${aIdx + 1}`,
+      a.date ? String(a.date).split('T')[0] : '—',
+      (a.inputType || 'Input').toUpperCase(),
+      [a.productName, a.activeIngredient ? `(${a.activeIngredient})` : ''].filter(Boolean).join(' ') || '—',
+      [a.dosage, a.dosageUnit].filter(Boolean).join(' ') || '—',
+      a.method || 'Foliar Spray',
+      a.cropStage || '—',
+      a.targetPurpose || '—',
+      a.notes || '—',
+    ]);
+    autoTable(doc, {
+      startY: y,
+      head: appHead,
+      body: appBody,
+      headStyles: { fillColor: primaryColor },
+      theme: 'striped',
+      styles: { fontSize: 8 },
+      margin: { left: 14, right: 14 },
+    });
+    y = (doc.lastAutoTable?.finalY ?? y) + 10;
+  }
+
   // Harvest & Yield Report Section
   const harvest = safeJsonParse(trial.HarvestDataJSON, null);
-  if (harvest && (harvest.actualFruitCount || harvest.actualMarketableWeight || harvest.actualUnmarketableWeight || harvest.notes)) {
+  const pickingsList = harvest?.pickings && Array.isArray(harvest.pickings) ? harvest.pickings : [];
+  if (harvest && (harvest.actualFruitCount || harvest.actualMarketableWeight || harvest.actualUnmarketableWeight || harvest.notes || pickingsList.length > 0 || trial.YieldValue)) {
     y = secHeading(doc, `${nextSec++}. Harvest & Yield Report`, y, ph);
     const totalW = (parseFloat(harvest.actualMarketableWeight || 0) + parseFloat(harvest.actualUnmarketableWeight || 0));
     const avgW = harvest.actualFruitCount > 0 ? (totalW / harvest.actualFruitCount).toFixed(1) : '—';
     const markPct = totalW > 0 ? ((parseFloat(harvest.actualMarketableWeight || 0) / totalW) * 100).toFixed(1) : '—';
+    const unit = harvest.yieldUnit || trial.YieldUnit || 'kg/plot';
 
     autoTable(doc, {
       startY: y,
@@ -1745,10 +1775,10 @@ export async function generateComprehensivePdf(trial, options = {}) {
       body: [
         ['Harvest Date', harvest.harvestDate || '—'],
         ['Fruit Count per Plant', harvest.actualFruitCount ? String(harvest.actualFruitCount) : '—'],
-        ['Marketable Yield (g/plant)', harvest.actualMarketableWeight ? `${harvest.actualMarketableWeight} g` : '—'],
-        ['Unmarketable Yield (g/plant)', harvest.actualUnmarketableWeight ? `${harvest.actualUnmarketableWeight} g` : '—'],
-        ['Total Yield Weight (g/plant)', totalW ? `${totalW} g` : '—'],
-        ['Average Fruit Weight (g)', avgW !== '—' ? `${avgW} g` : '—'],
+        [`Marketable Yield (${unit})`, harvest.actualMarketableWeight ? `${harvest.actualMarketableWeight} ${unit}` : (trial.YieldValue ? `${trial.YieldValue} ${unit}` : '—')],
+        [`Unmarketable Yield (${unit})`, harvest.actualUnmarketableWeight ? `${harvest.actualUnmarketableWeight} ${unit}` : '—'],
+        [`Total Yield Weight (${unit})`, totalW ? `${totalW} ${unit}` : '—'],
+        ['Average Unit Weight (g)', avgW !== '—' ? `${avgW} g` : '—'],
         ['Marketable Percentage (%)', markPct !== '—' ? `${markPct}%` : '—'],
         ['Remarks / Harvest Notes', harvest.notes || '—']
       ],
@@ -1756,7 +1786,43 @@ export async function generateComprehensivePdf(trial, options = {}) {
       theme: 'striped',
       styles: { fontSize: 9 }
     });
-    y = (doc.lastAutoTable?.finalY ?? y) + 10;
+    y = (doc.lastAutoTable?.finalY ?? y) + 8;
+
+    // Multi-Picking Breakdown Table
+    if (pickingsList.length > 0) {
+      if (y + 35 > ph - 20) { doc.addPage(); y = 20; }
+      doc.setFont(undefined, 'bold'); doc.setFontSize(9.5);
+      doc.text('Sequential Harvest Pickings Breakdown:', 14, y); y += 5;
+      doc.setFont(undefined, 'normal');
+
+      const pickHead = [['Pick #', 'Date', 'Marketable', 'Unmarketable', 'Total', 'Market %', 'Count', 'Notes']];
+      const pickBody = pickingsList.map(p => {
+        const m = p.actualMarketableWeight ?? p.marketableWeight ?? '—';
+        const u = p.actualUnmarketableWeight ?? p.unmarketableWeight ?? '—';
+        const pTot = (parseFloat(m || 0) + parseFloat(u || 0)) || '—';
+        const pRatio = pTot > 0 && typeof m === 'number' ? `${((m / pTot) * 100).toFixed(1)}%` : (p.marketableRatio || '—');
+        return [
+          String(p.pickingNumber ?? 1),
+          p.harvestDate || '—',
+          m !== '—' ? `${m} ${p.yieldUnit || unit}` : '—',
+          u !== '—' ? `${u} ${p.yieldUnit || unit}` : '—',
+          pTot !== '—' ? `${pTot} ${p.yieldUnit || unit}` : '—',
+          pRatio,
+          String(p.actualFruitCount ?? p.fruitCount ?? '—'),
+          [p.cullReason, p.notes].filter(Boolean).join(' | ') || '—'
+        ];
+      });
+
+      autoTable(doc, {
+        startY: y,
+        head: pickHead,
+        body: pickBody,
+        headStyles: { fillColor: primaryColor },
+        theme: 'striped',
+        styles: { fontSize: 8 }
+      });
+      y = (doc.lastAutoTable?.finalY ?? y) + 10;
+    }
 
     // Render Harvest Photos if any
     const harvestPhotos = harvest.photos || [];
@@ -2197,13 +2263,43 @@ export async function generateScientificReport(trial, options = {}) {
     y = await addPhotoGrid(doc, photos, y, ph, 50, showPhotoDates, trial.Date);
   }
 
+  // Agronomic Inputs & Crop Management Operations Log
+  const trialAppsSci = safeJsonParse(trial.ApplicationLogJSON || trial.agronomicInputsJSON, []);
+  if (trialAppsSci.length > 0) {
+    y = secHeading(doc, `${nextSec++}. Agronomic Management & Trial Inputs Log`, y, ph);
+    const appHead = [['App #', 'Date', 'Type', 'Product / Formulation', 'Dosage & Unit', 'Method', 'Crop Stage', 'Target / Purpose', 'Notes']];
+    const appBody = trialAppsSci.map((a, aIdx) => [
+      a.code || `App ${aIdx + 1}`,
+      a.date ? String(a.date).split('T')[0] : '—',
+      (a.inputType || 'Input').toUpperCase(),
+      [a.productName, a.activeIngredient ? `(${a.activeIngredient})` : ''].filter(Boolean).join(' ') || '—',
+      [a.dosage, a.dosageUnit].filter(Boolean).join(' ') || '—',
+      a.method || 'Foliar Spray',
+      a.cropStage || '—',
+      a.targetPurpose || '—',
+      a.notes || '—',
+    ]);
+    autoTable(doc, {
+      startY: y,
+      head: appHead,
+      body: appBody,
+      headStyles: { fillColor: primaryColor },
+      theme: 'striped',
+      styles: { fontSize: 8 },
+      margin: { left: 14, right: 14 },
+    });
+    y = (doc.lastAutoTable?.finalY ?? y) + 10;
+  }
+
   // Harvest & Yield Report Section
   const harvest = safeJsonParse(trial.HarvestDataJSON, null);
-  if (harvest && (harvest.actualFruitCount || harvest.actualMarketableWeight || harvest.actualUnmarketableWeight || harvest.notes)) {
+  const pickingsList = harvest?.pickings && Array.isArray(harvest.pickings) ? harvest.pickings : [];
+  if (harvest && (harvest.actualFruitCount || harvest.actualMarketableWeight || harvest.actualUnmarketableWeight || harvest.notes || pickingsList.length > 0 || trial.YieldValue)) {
     y = secHeading(doc, `${nextSec++}. Harvest & Yield Report`, y, ph);
     const totalW = (parseFloat(harvest.actualMarketableWeight || 0) + parseFloat(harvest.actualUnmarketableWeight || 0));
     const avgW = harvest.actualFruitCount > 0 ? (totalW / harvest.actualFruitCount).toFixed(1) : '—';
     const markPct = totalW > 0 ? ((parseFloat(harvest.actualMarketableWeight || 0) / totalW) * 100).toFixed(1) : '—';
+    const unit = harvest.yieldUnit || trial.YieldUnit || 'kg/plot';
 
     autoTable(doc, {
       startY: y,
@@ -2211,10 +2307,10 @@ export async function generateScientificReport(trial, options = {}) {
       body: [
         ['Harvest Date', harvest.harvestDate || '—'],
         ['Fruit Count per Plant', harvest.actualFruitCount ? String(harvest.actualFruitCount) : '—'],
-        ['Marketable Yield (g/plant)', harvest.actualMarketableWeight ? `${harvest.actualMarketableWeight} g` : '—'],
-        ['Unmarketable Yield (g/plant)', harvest.actualUnmarketableWeight ? `${harvest.actualUnmarketableWeight} g` : '—'],
-        ['Total Yield Weight (g/plant)', totalW ? `${totalW} g` : '—'],
-        ['Average Fruit Weight (g)', avgW !== '—' ? `${avgW} g` : '—'],
+        [`Marketable Yield (${unit})`, harvest.actualMarketableWeight ? `${harvest.actualMarketableWeight} ${unit}` : (trial.YieldValue ? `${trial.YieldValue} ${unit}` : '—')],
+        [`Unmarketable Yield (${unit})`, harvest.actualUnmarketableWeight ? `${harvest.actualUnmarketableWeight} ${unit}` : '—'],
+        [`Total Yield Weight (${unit})`, totalW ? `${totalW} ${unit}` : '—'],
+        ['Average Unit Weight (g)', avgW !== '—' ? `${avgW} g` : '—'],
         ['Marketable Percentage (%)', markPct !== '—' ? `${markPct}%` : '—'],
         ['Remarks / Harvest Notes', harvest.notes || '—']
       ],
@@ -2222,7 +2318,43 @@ export async function generateScientificReport(trial, options = {}) {
       theme: 'striped',
       styles: { fontSize: 9 }
     });
-    y = (doc.lastAutoTable?.finalY ?? y) + 10;
+    y = (doc.lastAutoTable?.finalY ?? y) + 8;
+
+    // Multi-Picking Breakdown Table
+    if (pickingsList.length > 0) {
+      if (y + 35 > ph - 20) { doc.addPage(); y = 20; }
+      doc.setFont(undefined, 'bold'); doc.setFontSize(9.5);
+      doc.text('Sequential Harvest Pickings Breakdown:', 14, y); y += 5;
+      doc.setFont(undefined, 'normal');
+
+      const pickHead = [['Pick #', 'Date', 'Marketable', 'Unmarketable', 'Total', 'Market %', 'Count', 'Notes']];
+      const pickBody = pickingsList.map(p => {
+        const m = p.actualMarketableWeight ?? p.marketableWeight ?? '—';
+        const u = p.actualUnmarketableWeight ?? p.unmarketableWeight ?? '—';
+        const pTot = (parseFloat(m || 0) + parseFloat(u || 0)) || '—';
+        const pRatio = pTot > 0 && typeof m === 'number' ? `${((m / pTot) * 100).toFixed(1)}%` : (p.marketableRatio || '—');
+        return [
+          String(p.pickingNumber ?? 1),
+          p.harvestDate || '—',
+          m !== '—' ? `${m} ${p.yieldUnit || unit}` : '—',
+          u !== '—' ? `${u} ${p.yieldUnit || unit}` : '—',
+          pTot !== '—' ? `${pTot} ${p.yieldUnit || unit}` : '—',
+          pRatio,
+          String(p.actualFruitCount ?? p.fruitCount ?? '—'),
+          [p.cullReason, p.notes].filter(Boolean).join(' | ') || '—'
+        ];
+      });
+
+      autoTable(doc, {
+        startY: y,
+        head: pickHead,
+        body: pickBody,
+        headStyles: { fillColor: primaryColor },
+        theme: 'striped',
+        styles: { fontSize: 8 }
+      });
+      y = (doc.lastAutoTable?.finalY ?? y) + 10;
+    }
 
     // Render Harvest Photos if any
     const harvestPhotos = harvest.photos || [];
@@ -4356,6 +4488,106 @@ export async function generateMasterComprehensivePdf(project, subTrials, options
     y += 10;
   }
 
+  // Project Agronomic Inputs & Crop Management Operations Log
+  const masterApps = [];
+  const pApps = safeJsonParse(project.ApplicationLogJSON || project.AgronomicInputsJSON, []);
+  if (Array.isArray(pApps)) {
+    pApps.forEach((a, idx) => masterApps.push({ ...a, plot: 'All Plots', code: a.code || `App ${idx + 1}` }));
+  }
+  subTrials.forEach(st => {
+    const stApps = safeJsonParse(st.ApplicationLogJSON || st.agronomicInputsJSON, []);
+    stApps.forEach((a, idx) => masterApps.push({ ...a, plot: st.PlotNumber ? `Plot ${st.PlotNumber}` : (st.FormulationName || 'Plot'), code: a.code || `App ${idx + 1}` }));
+  });
+
+  if (masterApps.length > 0) {
+    if (y + 40 > ph - 20) { doc.addPage(); y = 20; }
+    y = secHeading(doc, `${sectionCounter++}. Agronomic Management & Trial Inputs Log`, y, ph, 14, primaryColor);
+    const mHead = [['App #', 'Date', 'Type', 'Product / Formulation', 'Dosage & Unit', 'Method', 'Crop Stage', 'Target / Purpose', 'Scope']];
+    const mBody = masterApps.map(a => [
+      a.code || '—',
+      a.date ? String(a.date).split('T')[0] : '—',
+      (a.inputType || 'Input').toUpperCase(),
+      [a.productName, a.activeIngredient ? `(${a.activeIngredient})` : ''].filter(Boolean).join(' ') || '—',
+      [a.dosage, a.dosageUnit].filter(Boolean).join(' ') || '—',
+      a.method || 'Foliar Spray',
+      a.cropStage || '—',
+      a.targetPurpose || '—',
+      a.plot || 'All Plots',
+    ]);
+    autoTable(doc, {
+      startY: y,
+      head: mHead,
+      body: mBody,
+      headStyles: { fillColor: primaryColor },
+      theme: 'striped',
+      styles: { fontSize: 7.5 },
+      margin: { left: 14, right: 14 },
+    });
+    y = (doc.lastAutoTable?.finalY ?? y) + 10;
+  }
+
+  // Multi-Harvest Pickings & Yield Distribution
+  const masterPickings = [];
+  subTrials.forEach(st => {
+    const hData = safeJsonParse(st.HarvestDataJSON, {});
+    let pList = Array.isArray(hData.pickings) ? hData.pickings : [];
+    if (pList.length === 0 && (hData.actualMarketableWeight || hData.actualFruitCount || st.YieldValue)) {
+      pList = [{
+        pickingNumber: 1,
+        harvestDate: hData.harvestDate || st.Date || '',
+        actualMarketableWeight: hData.actualMarketableWeight || st.YieldValue || '',
+        actualUnmarketableWeight: hData.actualUnmarketableWeight || '',
+        actualFruitCount: hData.actualFruitCount || '',
+        yieldUnit: st.YieldUnit || 'kg/plot',
+        notes: hData.notes || '',
+      }];
+    }
+    pList.forEach(p => {
+      masterPickings.push({
+        ...p,
+        treatment: st.FormulationName || 'Treated',
+        plot: st.PlotNumber || '',
+        rep: st.Replication || 'R1',
+        unit: p.yieldUnit || st.YieldUnit || 'kg/plot',
+      });
+    });
+  });
+
+  if (masterPickings.length > 0) {
+    if (y + 40 > ph - 20) { doc.addPage(); y = 20; }
+    y = secHeading(doc, `${sectionCounter++}. Sequential Harvest Pickings & Yield Log`, y, ph, 14, primaryColor);
+    const hHead = [['Pick #', 'Harvest Date', 'Treatment', 'Rep', 'Plot', 'Marketable Yield', 'Unmarketable Yield', 'Total Yield', 'Market %', 'Count', 'Notes']];
+    const hBody = masterPickings.map(p => {
+      const m = p.actualMarketableWeight ?? p.marketableWeight ?? '—';
+      const u = p.actualUnmarketableWeight ?? p.unmarketableWeight ?? '—';
+      const tot = (parseFloat(m || 0) + parseFloat(u || 0)) || '—';
+      const mRatio = tot > 0 && typeof m === 'number' ? `${((m / tot) * 100).toFixed(1)}%` : (p.marketableRatio || '—');
+      return [
+        String(p.pickingNumber ?? 1),
+        p.harvestDate ? String(p.harvestDate).split('T')[0] : '—',
+        p.treatment || '—',
+        p.rep || '—',
+        p.plot || '—',
+        m !== '—' ? `${m} ${p.unit}` : '—',
+        u !== '—' ? `${u} ${p.unit}` : '—',
+        tot !== '—' ? `${tot} ${p.unit}` : '—',
+        mRatio,
+        String(p.actualFruitCount ?? p.fruitCount ?? '—'),
+        [p.cullReason, p.notes].filter(Boolean).join(' | ') || '—'
+      ];
+    });
+    autoTable(doc, {
+      startY: y,
+      head: hHead,
+      body: hBody,
+      headStyles: { fillColor: primaryColor },
+      theme: 'striped',
+      styles: { fontSize: 7.5 },
+      margin: { left: 14, right: 14 },
+    });
+    y = (doc.lastAutoTable?.finalY ?? y) + 10;
+  }
+
   // Add individual Sub-Trial details sequentially
   for (let i = 0; i < subTrials.length; i++) {
     const st = subTrials[i];
@@ -5571,6 +5803,132 @@ export async function exportMasterDocx(project, subTrials, options = {}) {
 
   const photoSection = photoLogHtml ? `<h2>Photographic Log</h2>${photoLogHtml}` : '';
 
+  // Project Agronomic Inputs & Crop Management HTML
+  const masterAppsWord = [];
+  const pAppsWord = safeJsonParse(project.ApplicationLogJSON || project.AgronomicInputsJSON, []);
+  if (Array.isArray(pAppsWord)) {
+    pAppsWord.forEach((a, idx) => masterAppsWord.push({ ...a, plot: 'All Plots', code: a.code || `App ${idx + 1}` }));
+  }
+  subTrials.forEach(st => {
+    const stApps = safeJsonParse(st.ApplicationLogJSON || st.agronomicInputsJSON, []);
+    stApps.forEach((a, idx) => masterAppsWord.push({ ...a, plot: st.PlotNumber ? `Plot ${st.PlotNumber}` : (st.FormulationName || 'Plot'), code: a.code || `App ${idx + 1}` }));
+  });
+
+  let agronomicInputsHtml = '';
+  if (masterAppsWord.length > 0) {
+    agronomicInputsHtml = `
+      <h2>Agronomic Management & Trial Inputs Log</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>App #</th>
+            <th>Date</th>
+            <th>Type</th>
+            <th>Product / Formulation</th>
+            <th>Active Ingredient</th>
+            <th>Dosage & Unit</th>
+            <th>Method</th>
+            <th>Crop Stage</th>
+            <th>Target / Purpose</th>
+            <th>Scope</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${masterAppsWord.map(a => `
+            <tr>
+              <td><b>${a.code || '—'}</b></td>
+              <td>${a.date ? String(a.date).split('T')[0] : '—'}</td>
+              <td>${(a.inputType || 'Input').toUpperCase()}</td>
+              <td>${a.productName || '—'}</td>
+              <td>${a.activeIngredient || '—'}</td>
+              <td>${[a.dosage, a.dosageUnit].filter(Boolean).join(' ') || '—'}</td>
+              <td>${a.method || 'Foliar Spray'}</td>
+              <td>${a.cropStage || '—'}</td>
+              <td>${a.targetPurpose || '—'}</td>
+              <td>${a.plot || 'All Plots'}</td>
+              <td>${a.notes || '—'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+  }
+
+  // Multi-Harvest Pickings HTML
+  const masterPickingsWord = [];
+  subTrials.forEach(st => {
+    const hData = safeJsonParse(st.HarvestDataJSON, {});
+    let pList = Array.isArray(hData.pickings) ? hData.pickings : [];
+    if (pList.length === 0 && (hData.actualMarketableWeight || hData.actualFruitCount || st.YieldValue)) {
+      pList = [{
+        pickingNumber: 1,
+        harvestDate: hData.harvestDate || st.Date || '',
+        actualMarketableWeight: hData.actualMarketableWeight || st.YieldValue || '',
+        actualUnmarketableWeight: hData.actualUnmarketableWeight || '',
+        actualFruitCount: hData.actualFruitCount || '',
+        yieldUnit: st.YieldUnit || 'kg/plot',
+        notes: hData.notes || '',
+      }];
+    }
+    pList.forEach(p => {
+      masterPickingsWord.push({
+        ...p,
+        treatment: st.FormulationName || 'Treated',
+        plot: st.PlotNumber || '',
+        rep: st.Replication || 'R1',
+        unit: p.yieldUnit || st.YieldUnit || 'kg/plot',
+      });
+    });
+  });
+
+  let harvestLogHtml = '';
+  if (masterPickingsWord.length > 0) {
+    harvestLogHtml = `
+      <h2>Sequential Harvest Pickings & Yield Log</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Pick #</th>
+            <th>Harvest Date</th>
+            <th>Treatment</th>
+            <th>Rep</th>
+            <th>Plot</th>
+            <th>Marketable Yield</th>
+            <th>Unmarketable Yield</th>
+            <th>Total Yield</th>
+            <th>Market %</th>
+            <th>Count</th>
+            <th>Quality Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${masterPickingsWord.map(p => {
+            const m = p.actualMarketableWeight ?? p.marketableWeight ?? '—';
+            const u = p.actualUnmarketableWeight ?? p.unmarketableWeight ?? '—';
+            const tot = (parseFloat(m || 0) + parseFloat(u || 0)) || '—';
+            const mRatio = tot > 0 && typeof m === 'number' ? `${((m / tot) * 100).toFixed(1)}%` : (p.marketableRatio || '—');
+            return `
+              <tr>
+                <td><b>P#${p.pickingNumber ?? 1}</b></td>
+                <td>${p.harvestDate ? String(p.harvestDate).split('T')[0] : '—'}</td>
+                <td>${p.treatment || '—'}</td>
+                <td>${p.rep || '—'}</td>
+                <td>${p.plot || '—'}</td>
+                <td>${m !== '—' ? `${m} ${p.unit}` : '—'}</td>
+                <td>${u !== '—' ? `${u} ${p.unit}` : '—'}</td>
+                <td>${tot !== '—' ? `${tot} ${p.unit}` : '—'}</td>
+                <td>${mRatio}</td>
+                <td>${String(p.actualFruitCount ?? p.fruitCount ?? '—')}</td>
+                <td>${[p.cullReason, p.notes].filter(Boolean).join(' | ') || '—'}</td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    `;
+  }
+
   const wordHtml = `<!DOCTYPE html>
 <html xmlns:o="urn:schemas-microsoft-com:office:office"
       xmlns:w="urn:schemas-microsoft-com:office:word"
@@ -5611,6 +5969,8 @@ export async function exportMasterDocx(project, subTrials, options = {}) {
       ${subTrialRowsHtml}
     </tbody>
   </table>
+  ${agronomicInputsHtml}
+  ${harvestLogHtml}
   ${aiSummaryHtml}
   ${analysisHtml}
   ${photoSection}

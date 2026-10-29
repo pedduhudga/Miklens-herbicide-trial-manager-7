@@ -846,25 +846,59 @@ export async function generateProjectDocx(reportData, options = {}) {
     }
   }
 
-  // ─── Application Log (Adjuvant & Tank Mix) ───────────────────────────────────
+  // ─── Agronomic Inputs & Operations Log ──────────────────────────────────
   const appLogElements = [];
   const appLog = reportData.applicationLog || [];
-  const appLogWithData = appLog.filter(app => app.adjuvant || app.tankMix);
   if (appLog.length > 0) {
     appLogElements.push(
-      heading('Application Log', HeadingLevel.HEADING_2),
+      heading('Agronomic Management & Trial Inputs Log', HeadingLevel.HEADING_2),
       spacer(),
       makeTable(
-        ['Application', 'Date', 'Dosage', 'Method', 'Crop Stage', 'Adjuvant', 'Tank Mix'],
+        ['App #', 'Date', 'Type', 'Product / Formulation', 'Active Ingredient', 'Dosage', 'Method', 'Crop Stage', 'Target / Purpose', 'Notes'],
         appLog.map((app, i) => [
           app.code || `App ${i + 1}`,
           app.date || '—',
-          app.dosage || '—',
+          (app.inputType || 'Input').toUpperCase(),
+          app.productName || '—',
+          app.activeIngredient || '—',
+          [app.dosage, app.dosageUnit].filter(Boolean).join(' ') || '—',
           app.method || '—',
           app.cropStage || '—',
-          app.adjuvant || '—',
-          app.tankMix || '—',
+          app.targetPurpose || '—',
+          app.notes || '—',
         ])
+      ),
+      spacer()
+    );
+  }
+
+  // ─── Multi-Harvest Pickings & Yield Log ─────────────────────────────────
+  const pickings = reportData.harvestPickings || [];
+  if (pickings.length > 0) {
+    appLogElements.push(
+      heading('Sequential Harvest Pickings & Yield Log', HeadingLevel.HEADING_2),
+      spacer(),
+      makeTable(
+        ['Pick #', 'Harvest Date', 'Treatment Name', 'Plot #', 'Marketable Yield', 'Unmarketable Yield', 'Total Yield', 'Marketable %', 'Fruit Count', 'Quality Notes'],
+        pickings.map((p, i) => {
+          const unit = p.yieldUnit || 'kg/plot';
+          const mStr = p.actualMarketableWeight ? `${p.actualMarketableWeight} ${unit}` : '—';
+          const uStr = p.actualUnmarketableWeight ? `${p.actualUnmarketableWeight} ${unit}` : '—';
+          const totStr = p.totalWeight ? `${p.totalWeight} ${unit}` : '—';
+          const notes = [p.cullReason, p.notes].filter(Boolean).join(' | ') || '—';
+          return [
+            String(p.pickingNumber ?? (i + 1)),
+            p.harvestDate ? String(p.harvestDate).split('T')[0] : '—',
+            p.treatmentName || '—',
+            p.plotNumber || '—',
+            mStr,
+            uStr,
+            totStr,
+            p.marketableRatio || p.marketablePct || '—',
+            String(p.actualFruitCount ?? '—'),
+            notes,
+          ];
+        })
       ),
       spacer()
     );
