@@ -261,27 +261,6 @@ export default function Trials({ onMenuClick }) {
   const [projectDesignTab, setProjectDesignTab] = useState('all');
   const [batchObsModalProject, setBatchObsModalProject] = useState(null);
 
-  const toggleSection = useCallback((sectionId) => {
-    setCollapsedSections(prev => {
-      const isCurrentlyCollapsed = !!prev[sectionId];
-      if (isCurrentlyCollapsed && accordionSoloMode) {
-        // Expand this section and collapse all others
-        const next = {};
-        Object.keys(groupedRcbdTrials.groups || {}).forEach(id => {
-          if (id !== sectionId) next[id] = true;
-        });
-        if (groupedRcbdTrials.orphaned?.length > 0 && sectionId !== 'orphaned-rcbd') {
-          next['orphaned-rcbd'] = true;
-        }
-        return next;
-      }
-      return {
-        ...prev,
-        [sectionId]: !prev[sectionId]
-      };
-    });
-  }, [accordionSoloMode, groupedRcbdTrials]);
-
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDesignGuideOpen, setIsDesignGuideOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
@@ -1220,6 +1199,27 @@ export default function Trials({ onMenuClick }) {
   const matchedProjectIds = useMemo(() => {
     return Object.keys(groupedRcbdTrials.groups);
   }, [groupedRcbdTrials.groups]);
+
+  const toggleSection = useCallback((sectionId) => {
+    setCollapsedSections(prev => {
+      const isCurrentlyCollapsed = !!prev[sectionId];
+      if (isCurrentlyCollapsed && accordionSoloMode) {
+        // Expand this section and collapse all others
+        const next = {};
+        Object.keys(groupedRcbdTrials.groups || {}).forEach(id => {
+          if (id !== sectionId) next[id] = true;
+        });
+        if (groupedRcbdTrials.orphaned?.length > 0 && sectionId !== 'orphaned-rcbd') {
+          next['orphaned-rcbd'] = true;
+        }
+        return next;
+      }
+      return {
+        ...prev,
+        [sectionId]: !prev[sectionId]
+      };
+    });
+  }, [accordionSoloMode, groupedRcbdTrials]);
 
   // Keep focusedProjectId in sync with matched projects
   useEffect(() => {
@@ -2404,7 +2404,7 @@ export default function Trials({ onMenuClick }) {
     setIsObsModalOpen(true);
   };
 
-  const calculateResultRating = (efficacyData, isControl = false, categoryId = 'herbicide', trial = null) => {
+  function calculateResultRating(efficacyData, isControl = false, categoryId = 'herbicide', trial = null) {
     if (isControl) return 'Control';
     if (!efficacyData || efficacyData.length === 0) return 'Unrated';
     const primaryObsField = getPrimaryObservationField(categoryId);
