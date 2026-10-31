@@ -1,6 +1,7 @@
 import { getCategoryConfig } from '../utils/categoryConfig.js';
 import { resolvePhotoSrc } from '../utils/photoUtils.js';
 import { DEFAULT_GEMINI_MODEL, GEMINI_FALLBACK_MODELS } from '../utils/aiConstants.js';
+import { validateAIAnalysisCategory } from '../utils/aiCategoryIsolation.js';
 import { apiCall } from './db.js';
 
 // Provider order = fallback priority (first = tried first).
@@ -964,7 +965,6 @@ export async function analyzePhoto(imageData, context = {}, onProgress = null) {
 
   // Validate category isolation if category is provided in context
   if (context.category) {
-    const { validateAIAnalysisCategory } = await import('../utils/aiCategoryIsolation.js');
     validateAIAnalysisCategory(context.category, 'multiProvider photo analysis');
     console.log(`[MultiProvider AI] Category isolation enforced: analyzing ${context.category} photo`);
   }

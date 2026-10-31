@@ -8,6 +8,15 @@ import { AVAILABLE_GEMINI_MODELS, DEFAULT_GEMINI_MODEL, GEMINI_FALLBACK_MODELS }
 import { analyzeWeedCover } from '../utils/imageAnalysis.js';
 import { validateAIAnalysisCategory } from '../utils/aiCategoryIsolation.js';
 import { getCategoryConfig, getPrimaryObservationField } from '../utils/categoryConfig.js';
+import {
+  analyzePhoto,
+  analyzePhotosBatch,
+  identifyWeedFromPhoto,
+  generateTextWithAI,
+  parseHarvestTextLog,
+  getAPIKeys,
+  PROVIDERS
+} from './multiProviderAI.js';
 
 const GEMINI_MODEL_PRIORITY = GEMINI_FALLBACK_MODELS;
 
@@ -396,7 +405,6 @@ Respond ONLY with a single minified JSON object in this format: {"identification
   } catch (err) {
     console.warn('[identifyWeedsFromPhoto] Gemini failed, trying multiProviderAI fallback...', err.message);
     try {
-      const { identifyWeedFromPhoto } = await import('./multiProviderAI.js');
       const result = await identifyWeedFromPhoto(fileData, 'herbicide');
       if (result && Array.isArray(result.detections)) {
         return result.detections.map(d => ({
@@ -982,7 +990,6 @@ ${historyPrompt}`;
     } catch (geminiErr) {
       console.warn('[Efficacy] Gemini failed, trying multiProviderAI vision fallback...', geminiErr.message);
       try {
-        const { analyzePhoto } = await import('./multiProviderAI.js');
         const fallbackResult = await analyzePhoto(fileData, { ...analysisContext, category: categoryId });
         if (fallbackResult?.success && fallbackResult?.data) {
           aiResponseText = fallbackResult.data;
@@ -1162,11 +1169,10 @@ export {
   parseHarvestTextLog,
   getAPIKeys,
   PROVIDERS
-} from './multiProviderAI.js';
+};
 
 export class MultiProviderAI {
   async analyzePhoto(imageData, context, onProgress) {
-    const { analyzePhoto } = await import('./multiProviderAI.js');
     return analyzePhoto(imageData, context, onProgress);
   }
 }

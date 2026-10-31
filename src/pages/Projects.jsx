@@ -14,8 +14,6 @@ import {
   Pencil, Clock, Leaf, Table
 } from 'lucide-react';
 import Chart from 'chart.js/auto';
-import html2canvas from 'html2canvas';
-import { jsPDF } from 'jspdf';
 import { safeJsonParse } from '../utils/helpers.js';
 import { AnalysisEngine } from '../utils/analysisUtils.js';
 import PlotMap from '../components/PlotMap.jsx';
@@ -26,11 +24,8 @@ import { Info } from 'lucide-react';
 import { generateTextWithAI } from '../services/multiProviderAI.js';
 import AppSharingModal from '../components/AppSharingModal.jsx';
 import CategoryValidationAlert, { showCategoryValidationToast } from '../components/CategoryValidationAlert.jsx';
-import {
-  generateMasterComprehensivePdf,
-  exportMasterDocx,
-  generateMasterPpt
-} from '../services/trialReports.js';
+import ProjectAgronomicInputModal from '../components/projects/ProjectAgronomicInputModal.jsx';
+import ProjectBatchHarvestModal from '../components/projects/ProjectBatchHarvestModal.jsx';
 import {
   INPUT_CATEGORIES,
   DOSAGE_UNITS,
@@ -2658,7 +2653,11 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
 
       toast('Generating Greenhouse Layout PDF...', 'info');
 
-      // html2canvas and jsPDF are statically imported at the top
+      // Dynamically load html2canvas and jsPDF only when export is triggered
+      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+        import('html2canvas'),
+        import('jspdf')
+      ]);
 
       // ── OKLCH / OKLAB → RGB conversion math ─────────────────────────────
       const parseOklch = (colorStr) => {
@@ -4667,6 +4666,7 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
     const pTrials = (state.trials || []).filter(t => String(t.ProjectID) === String(activeProject.ID));
     const projectCategory = activeProject?.Category || activeCategory;
     try {
+      const { generateMasterComprehensivePdf } = await import('../services/trialReports.js');
       await generateMasterComprehensivePdf(activeProject, pTrials, {
         withIngredients: true,
         withWeeds: true,
@@ -4686,6 +4686,7 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
     if (!activeProject) return;
     const pTrials = (state.trials || []).filter(t => String(t.ProjectID) === String(activeProject.ID));
     try {
+      const { exportMasterDocx } = await import('../services/trialReports.js');
       await exportMasterDocx(activeProject, pTrials, {
         aiSummary: narrative,
         analysis: analysisResults
@@ -4700,6 +4701,7 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
     if (!activeProject) return;
     const pTrials = (state.trials || []).filter(t => String(t.ProjectID) === String(activeProject.ID));
     try {
+      const { generateMasterPpt } = await import('../services/trialReports.js');
       await generateMasterPpt(activeProject, pTrials);
     } catch (err) {
       console.error(err);
@@ -7861,444 +7863,36 @@ ${photosHtml}
       </Modal>
 
       {/* ── Project Agronomic Input Modal ── */}
-      <Modal
+      <ProjectAgronomicInputModal
         isOpen={isProjAppModalOpen}
         onClose={() => setIsProjAppModalOpen(false)}
-        title={editingProjAppIdx !== null ? "Edit Agronomic Management Input" : "Log Agronomic Management Input"}
-      >
-        <form onSubmit={handleSaveProjApp} className="space-y-4 max-h-[80vh] overflow-y-auto pr-1">
-          {editingProjAppIdx === null && (
-            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
-              <div className="text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                Quick Field Presets ({projectCategory.toUpperCase()})
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {(CATEGORY_INPUT_PRESETS[projectCategory] || CATEGORY_INPUT_PRESETS['nutrition']).map((preset, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => applyPresetToProjAppForm(preset)}
-                    className="text-[11px] px-2 py-1 rounded-md bg-white border border-slate-200 hover:border-emerald-500 hover:bg-emerald-50 text-slate-700 font-medium transition"
-                  >
-                    {preset.productName} ({preset.dosage} {preset.dosageUnit})
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Input Category *</label>
-              <select
-                value={projAppForm.inputType}
-                onChange={e => setProjAppForm(f => ({ ...f, inputType: e.target.value }))}
-                className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-              >
-                {INPUT_CATEGORIES.map(cat => (
-                  <option key={cat.value} value={cat.value}>{cat.label}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Operation Code</label>
-              <input
-                type="text"
-                value={projAppForm.code}
-                onChange={e => setProjAppForm(f => ({ ...f, code: e.target.value }))}
-                placeholder="e.g. INP-01, BASAL-01"
-                className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Product / Fertilizer / Chemical Name *</label>
-              <input
-                type="text"
-                required
-                value={projAppForm.productName}
-                onChange={e => setProjAppForm(f => ({ ...f, productName: e.target.value }))}
-                placeholder="e.g. NPK 10-26-26, Azoxystrobin, Seaweed Extract"
-                className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Active Ingredient / Composition</label>
-              <input
-                type="text"
-                value={projAppForm.activeIngredient}
-                onChange={e => setProjAppForm(f => ({ ...f, activeIngredient: e.target.value }))}
-                placeholder="e.g. 10% N, 26% P2O5, 26% K2O or Azoxystrobin 23% SC"
-                className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Application Date & Time *</label>
-              <input
-                type="datetime-local"
-                required
-                value={projAppForm.date}
-                onChange={e => setProjAppForm(f => ({ ...f, date: e.target.value }))}
-                className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Dosage Rate *</label>
-              <input
-                type="text"
-                required
-                value={projAppForm.dosage}
-                onChange={e => setProjAppForm(f => ({ ...f, dosage: e.target.value }))}
-                placeholder="e.g. 2.5, 100, 500"
-                className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Dosage Unit *</label>
-              <select
-                value={projAppForm.dosageUnit}
-                onChange={e => setProjAppForm(f => ({ ...f, dosageUnit: e.target.value }))}
-                className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-              >
-                {DOSAGE_UNITS.map(u => (
-                  <option key={u.value} value={u.value}>{u.label}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Application Method *</label>
-              <select
-                value={projAppForm.method}
-                onChange={e => setProjAppForm(f => ({ ...f, method: e.target.value }))}
-                className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-              >
-                {APPLICATION_METHODS.map(m => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Applied Scope</label>
-              <select
-                value={projAppForm.appliedScope}
-                onChange={e => setProjAppForm(f => ({ ...f, appliedScope: e.target.value }))}
-                className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-              >
-                <option value="Blanket / Entire Project">Blanket / Entire Project (All Plots)</option>
-                <option value="Prophylactic Buffer">Prophylactic Field Border / Buffer</option>
-                <option value="Treated Blocks Only">Treated Blocks Only</option>
-                <option value="Experimental Trial Plots Only">Experimental Trial Plots Only</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Crop Stage (BBCH)</label>
-              <input
-                type="text"
-                value={projAppForm.cropStage}
-                onChange={e => setProjAppForm(f => ({ ...f, cropStage: e.target.value }))}
-                placeholder="e.g. Vegetative (BBCH 21), Flowering (BBCH 65)"
-                className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Target Purpose / Disease / Pest</label>
-              <input
-                type="text"
-                value={projAppForm.targetPurpose}
-                onChange={e => setProjAppForm(f => ({ ...f, targetPurpose: e.target.value }))}
-                placeholder="e.g. Basal nutrition, Downy mildew prophylactic, Sucking pest control"
-                className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Operator / Agronomist</label>
-              <input
-                type="text"
-                value={projAppForm.operator}
-                onChange={e => setProjAppForm(f => ({ ...f, operator: e.target.value }))}
-                placeholder="Name of applicator"
-                className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-              />
-            </div>
-            <div className="flex items-center pt-5">
-              <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={projAppForm.syncToSubTrials}
-                  onChange={e => setProjAppForm(f => ({ ...f, syncToSubTrials: e.target.checked }))}
-                  className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                />
-                <span>Automatically sync to all {projectTrials.length} plots in this project</span>
-              </label>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Agronomic Notes & Observations</label>
-            <textarea
-              rows={2}
-              value={projAppForm.notes}
-              onChange={e => setProjAppForm(f => ({ ...f, notes: e.target.value }))}
-              placeholder="Application conditions, nozzle type, spray volume (L/ha), soil moisture..."
-              className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-            />
-          </div>
-
-          <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={() => setIsProjAppModalOpen(false)}
-              className="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-800 transition"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-5 py-2 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition"
-            >
-              {editingProjAppIdx !== null ? "Update Agronomic Input" : "Save Agronomic Input"}
-            </button>
-          </div>
-        </form>
-      </Modal>
+        editingProjAppIdx={editingProjAppIdx}
+        projAppForm={projAppForm}
+        setProjAppForm={setProjAppForm}
+        handleSaveProjApp={handleSaveProjApp}
+        projectCategory={projectCategory}
+        applyPresetToProjAppForm={applyPresetToProjAppForm}
+        projectTrials={projectTrials}
+      />
 
       {/* ── Project Batch Harvest Entry Modal ── */}
-      <Modal
+      <ProjectBatchHarvestModal
         isOpen={isBatchHarvestModalOpen}
         onClose={() => setIsBatchHarvestModalOpen(false)}
-        title={`Batch Harvest Entry — Picking #${batchHarvestPickingNum}`}
-      >
-        <form onSubmit={handleSaveBatchHarvest} className="space-y-4 max-h-[85vh] overflow-y-auto pr-1">
-          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-xs text-emerald-800">
-            Enter harvest data for all plots in this picking session. The cumulative total yield for each plot will be recalculated automatically and updated across ANOVA, charts, and scientific reports.
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-3 rounded-lg border border-slate-200">
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 mb-1">Picking #</label>
-              <input
-                type="number"
-                min="1"
-                required
-                value={batchHarvestPickingNum}
-                onChange={e => setBatchHarvestPickingNum(parseInt(e.target.value) || 1)}
-                className="w-full px-2.5 py-1.5 border rounded text-xs bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 mb-1">Harvest Date</label>
-              <input
-                type="date"
-                required
-                value={batchHarvestDate}
-                onChange={e => setBatchHarvestDate(e.target.value)}
-                className="w-full px-2.5 py-1.5 border rounded text-xs bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 mb-1">Yield Unit</label>
-              <select
-                value={batchHarvestUnit}
-                onChange={e => setBatchHarvestUnit(e.target.value)}
-                className="w-full px-2.5 py-1.5 border rounded text-xs bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-              >
-                {HARVEST_YIELD_UNITS.map(u => (
-                  <option key={u.value || u.id} value={u.value || u.id}>{u.label}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 mb-1">Plot Area (m²)</label>
-              <input
-                type="number"
-                step="0.01"
-                value={batchHarvestPlotArea}
-                onChange={e => setBatchHarvestPlotArea(e.target.value)}
-                placeholder="e.g. 15.0"
-                className="w-full px-2.5 py-1.5 border rounded text-xs bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-              />
-            </div>
-          </div>
-
-          <div className="border border-slate-200 rounded-lg overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-100 text-slate-700 font-semibold border-b border-slate-200">
-                <tr>
-                  <th className="py-2 px-2.5">Plot / Trt</th>
-                  <th className="py-2 px-2.5">Marketable ({batchHarvestUnit}) *</th>
-                  <th className="py-2 px-2.5">Unmarketable / Culls</th>
-                  <th className="py-2 px-2.5">Cull Reason</th>
-                  <th className="py-2 px-2.5">Fruit Count</th>
-                  <th className="py-2 px-2.5">Moisture %</th>
-                  <th className="py-2 px-2.5">Brix (°Bx)</th>
-                  <th className="py-2 px-2.5">Notes</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {projectTrials.map(trial => {
-                  const plotData = batchHarvestGrid[trial.ID] || {};
-                  const isCtrl = trial.IsControl === true || trial.IsControl === 'true';
-                  return (
-                    <tr key={trial.ID} className={isCtrl ? 'bg-amber-50/40 hover:bg-amber-50/70' : 'hover:bg-slate-50'}>
-                      <td className="py-2 px-2.5 font-medium whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-bold text-slate-800">Plot #{trial.PlotNumber || trial.ID.slice(-4)}</span>
-                          {isCtrl && <span className="text-[9px] px-1 py-0.2 bg-amber-200 text-amber-800 rounded font-bold">UTC</span>}
-                        </div>
-                        <div className="text-[10px] text-slate-500 truncate max-w-[120px]">{trial.FormulationName || 'Untreated'}</div>
-                      </td>
-                      <td className="py-1 px-1.5">
-                        <input
-                          type="number"
-                          step="any"
-                          value={plotData.marketableWeight || ''}
-                          onChange={e => {
-                            const val = e.target.value;
-                            setBatchHarvestGrid(prev => ({
-                              ...prev,
-                              [trial.ID]: { ...prev[trial.ID], marketableWeight: val }
-                            }));
-                          }}
-                          placeholder="0.0"
-                          className="w-24 px-2 py-1 border rounded text-xs focus:ring-1 focus:ring-emerald-500 font-bold text-slate-800"
-                        />
-                      </td>
-                      <td className="py-1 px-1.5">
-                        <input
-                          type="number"
-                          step="any"
-                          value={plotData.unmarketableWeight || ''}
-                          onChange={e => {
-                            const val = e.target.value;
-                            setBatchHarvestGrid(prev => ({
-                              ...prev,
-                              [trial.ID]: { ...prev[trial.ID], unmarketableWeight: val }
-                            }));
-                          }}
-                          placeholder="0.0"
-                          className="w-20 px-2 py-1 border rounded text-xs text-slate-600"
-                        />
-                      </td>
-                      <td className="py-1 px-1.5">
-                        <select
-                          value={plotData.cullReason || 'None / Normal'}
-                          onChange={e => {
-                            const val = e.target.value;
-                            setBatchHarvestGrid(prev => ({
-                              ...prev,
-                              [trial.ID]: { ...prev[trial.ID], cullReason: val }
-                            }));
-                          }}
-                          className="w-28 px-1.5 py-1 border rounded text-[11px] bg-white text-slate-700"
-                        >
-                          {CULL_REASONS.map(r => (
-                            <option key={r} value={r}>{r}</option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="py-1 px-1.5">
-                        <input
-                          type="number"
-                          value={plotData.fruitCount || ''}
-                          onChange={e => {
-                            const val = e.target.value;
-                            setBatchHarvestGrid(prev => ({
-                              ...prev,
-                              [trial.ID]: { ...prev[trial.ID], fruitCount: val }
-                            }));
-                          }}
-                          placeholder="#"
-                          className="w-16 px-2 py-1 border rounded text-xs text-slate-600"
-                        />
-                      </td>
-                      <td className="py-1 px-1.5">
-                        <input
-                          type="number"
-                          step="0.1"
-                          value={plotData.moisturePct || ''}
-                          onChange={e => {
-                            const val = e.target.value;
-                            setBatchHarvestGrid(prev => ({
-                              ...prev,
-                              [trial.ID]: { ...prev[trial.ID], moisturePct: val }
-                            }));
-                          }}
-                          placeholder="%"
-                          className="w-16 px-2 py-1 border rounded text-xs text-slate-600"
-                        />
-                      </td>
-                      <td className="py-1 px-1.5">
-                        <input
-                          type="number"
-                          step="0.1"
-                          value={plotData.brixScore || ''}
-                          onChange={e => {
-                            const val = e.target.value;
-                            setBatchHarvestGrid(prev => ({
-                              ...prev,
-                              [trial.ID]: { ...prev[trial.ID], brixScore: val }
-                            }));
-                          }}
-                          placeholder="°Bx"
-                          className="w-16 px-2 py-1 border rounded text-xs text-slate-600"
-                        />
-                      </td>
-                      <td className="py-1 px-1.5">
-                        <input
-                          type="text"
-                          value={plotData.notes || ''}
-                          onChange={e => {
-                            const val = e.target.value;
-                            setBatchHarvestGrid(prev => ({
-                              ...prev,
-                              [trial.ID]: { ...prev[trial.ID], notes: val }
-                            }));
-                          }}
-                          placeholder="Notes"
-                          className="w-24 px-2 py-1 border rounded text-xs text-slate-600"
-                        />
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={() => setIsBatchHarvestModalOpen(false)}
-              className="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-800 transition"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={isSavingBatchHarvest}
-              className="px-5 py-2 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded-lg shadow-sm transition flex items-center gap-1.5"
-            >
-              {isSavingBatchHarvest ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              {isSavingBatchHarvest ? "Saving All Plots..." : `Save Picking #${batchHarvestPickingNum} for All Plots`}
-            </button>
-          </div>
-        </form>
-      </Modal>
+        batchHarvestPickingNum={batchHarvestPickingNum}
+        setBatchHarvestPickingNum={setBatchHarvestPickingNum}
+        batchHarvestDate={batchHarvestDate}
+        setBatchHarvestDate={setBatchHarvestDate}
+        batchHarvestUnit={batchHarvestUnit}
+        setBatchHarvestUnit={setBatchHarvestUnit}
+        batchHarvestPlotArea={batchHarvestPlotArea}
+        setBatchHarvestPlotArea={setBatchHarvestPlotArea}
+        batchHarvestGrid={batchHarvestGrid}
+        setBatchHarvestGrid={setBatchHarvestGrid}
+        projectTrials={projectTrials}
+        handleSaveBatchHarvest={handleSaveBatchHarvest}
+        isSavingBatchHarvest={isSavingBatchHarvest}
+      />
 
       <AppSharingModal
         isOpen={isShareModalOpen}
