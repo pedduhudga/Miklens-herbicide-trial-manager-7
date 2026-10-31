@@ -140,7 +140,7 @@ const emptyForm = (category = 'herbicide') => {
     Category: category,
     TrialName: '',
     ProjectID: '', BlockID: '', FormulationID: '', FormulationName: '', InvestigatorName: '',
-    TrialDesign: 'Standard',
+    TrialDesign: 'PotTrial',
     Date: toDatetimeLocal(new Date()), Location: '', Dosage: '',
     Lat: '', Lon: '',
     Result: '', Notes: '', Conclusion: '',
@@ -150,11 +150,11 @@ const emptyForm = (category = 'herbicide') => {
     Replication: '', PlotNumber: '',
     BBCHCode: '', GPSLatitude: '', GPSLongitude: '',
     SoilPH: '', SoilClay: '', SoilSand: '', SoilOC: '', SoilTexture: '',
-    YieldValue: '', YieldUnit: 't/ha', YieldNotes: '', GrainMoisture: '', ThousandGrainWeight: '', HarvestDAA: '',
+    YieldValue: '', YieldUnit: 'g/pot', YieldNotes: '', GrainMoisture: '', ThousandGrainWeight: '', HarvestDAA: '',
     IsLive: true,
     ApplicationTiming: '',
     // Agronomic metadata
-    Crop: '', Variety: '', SiteType: '',
+    Crop: '', Variety: '', SiteType: 'Greenhouse / Polyhouse',
     PreviousCrop: '', IrrigationMethod: '', PlantPopulation: '',
   };
   // Add category-specific fields with empty defaults
@@ -8780,14 +8780,14 @@ If none are present, write "None".`;
                   <Info className="w-3.5 h-3.5" /> Guide
                 </button>
               </div>
-              <select value={formData.TrialDesign || 'Standard'} onChange={e => setFormData({...formData, TrialDesign: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
-                <option value="Standard">Standard / Individual Trial</option>
-                <option value="RCBD">RCBD (Randomized Complete Block)</option>
-                <option value="CRD">CRD (Completely Randomized Design)</option>
+              <select value={formData.TrialDesign || 'PotTrial'} onChange={e => setFormData({...formData, TrialDesign: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                <option value="PotTrial">🌿 Pot Trial / Greenhouse Grid (Rows × Pots/Benches)</option>
+                <option value="RCBD">🪴 RCBD (Randomized Block - Bench / Field)</option>
+                <option value="CRD">🧪 CRD — Completely Randomized (Growth Chamber / Pots / Lab)</option>
                 <option value="Split-Plot">Split-Plot Design</option>
                 <option value="Lattice">Alpha-Lattice Design</option>
                 <option value="Factorial">Factorial Design</option>
-                <option value="PotTrial">Pot Trial (Row-Based)</option>
+                <option value="Standard">🪴 Single Pot / Individual Inhouse Study</option>
               </select>
             </div>
             {(formData.TrialDesign === 'Split-Plot' || formData.TrialDesign === 'Factorial') && (
@@ -8852,7 +8852,19 @@ If none are present, write "None".`;
                   <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Site Type</label>
                   <select value={formData.SiteType || ''} onChange={e => setFormData({...formData, SiteType: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
                     <option value="">— Select Site Type —</option>
-                    {['Open field', 'Fallow land', 'Pot trial', 'Roadside', 'Bund', 'Non-Crop', 'Crop'].map(st => <option key={st} value={st}>{st}</option>)}
+                    <optgroup label="🏠 Inhouse & Controlled Environment (Primary Focus)">
+                      <option value="Greenhouse / Polyhouse">Greenhouse / Polyhouse</option>
+                      <option value="Pot trial (Indoor / Bench)">Pot trial (Indoor / Bench)</option>
+                      <option value="Growth Chamber / Phytotron">Growth Chamber / Phytotron</option>
+                      <option value="Shade Net / Nursery">Shade Net / Nursery</option>
+                      <option value="Laboratory Bioassay">Laboratory Bioassay</option>
+                    </optgroup>
+                    <optgroup label="🌾 Commercial Field Trials (Secondary Option)">
+                      <option value="Open field (Micro-plot)">Open field (Micro-plot)</option>
+                      <option value="Open field">Open field</option>
+                      <option value="Fallow land">Fallow land</option>
+                      <option value="Non-Crop">Non-Crop</option>
+                    </optgroup>
                   </select>
                 </div>
               </>
@@ -8865,7 +8877,7 @@ If none are present, write "None".`;
                       <Calculator size={10} /> Spray Mix Calc
                     </button>
                   </div>
-                  <input type="text" value={formData.Dosage} onChange={e => setFormData({...formData, Dosage: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]" placeholder="e.g. 1500 ml/ha" />
+                  <input type="text" value={formData.Dosage} onChange={e => setFormData({...formData, Dosage: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]" placeholder="e.g. 2.5 mL/L, 1.0 g/pot, or 1500 mL/ha" />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Result</label>
@@ -8886,7 +8898,19 @@ If none are present, write "None".`;
                   <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Site Type</label>
                   <select value={formData.SiteType || ''} onChange={e => setFormData({...formData, SiteType: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]">
                     <option value="">— Select Site Type —</option>
-                    {['Open field', 'Fallow land', 'Pot trial', 'Roadside', 'Bund', 'Non-Crop', 'Crop'].map(st => <option key={st} value={st}>{st}</option>)}
+                    <optgroup label="🏠 Inhouse & Controlled Environment (Primary Focus)">
+                      <option value="Greenhouse / Polyhouse">Greenhouse / Polyhouse</option>
+                      <option value="Pot trial (Indoor / Bench)">Pot trial (Indoor / Bench)</option>
+                      <option value="Growth Chamber / Phytotron">Growth Chamber / Phytotron</option>
+                      <option value="Shade Net / Nursery">Shade Net / Nursery</option>
+                      <option value="Laboratory Bioassay">Laboratory Bioassay</option>
+                    </optgroup>
+                    <optgroup label="🌾 Commercial Field Trials (Secondary Option)">
+                      <option value="Open field (Micro-plot)">Open field (Micro-plot)</option>
+                      <option value="Open field">Open field</option>
+                      <option value="Fallow land">Fallow land</option>
+                      <option value="Non-Crop">Non-Crop</option>
+                    </optgroup>
                   </select>
                 </div>
                 {catConfig.specificFields.map(field => {

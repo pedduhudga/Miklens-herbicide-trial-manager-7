@@ -10,45 +10,66 @@ export default function TrialDesignGuideModal({ isOpen, onClose }) {
 
   const designTypes = [
     {
-      id: 'rcbd',
-      name: 'RCBD (Block)',
-      fullName: 'Randomized Complete Block Design',
-      whenToUse: 'Most common field trials where soil fertility, gradient, or field conditions vary across the field.',
-      layout: 'Each block (replication) contains all treatments exactly once. Treatments are randomized within each block.',
+      id: 'pot',
+      name: 'Pot Trial (Greenhouse)',
+      fullName: 'Pot Trial & Greenhouse Layout Design',
+      whenToUse: 'Primary choice for in-house pot screening, greenhouse benches, growth chambers, and nursery bioassays.',
+      layout: 'Organized as a 2D matrix of Greenhouse Rows × Columns, with individual Pot Labels (e.g. R1 C1, R1 C2) and optional Block grouping.',
       example: {
-        treatments: ['T1 = Control', 'T2 = NPK Powder', 'T3 = NPK Liquid'],
+        treatments: ['T1 = Control', 'T2 = Formulation A', 'T3 = Formulation B'],
         visual: [
-          { block: 'Block 1', plots: ['T2', 'T1', 'T3'] },
-          { block: 'Block 2', plots: ['T3', 'T2', 'T1'] },
-          { block: 'Block 3', plots: ['T1', 'T3', 'T2'] }
+          { block: 'Bench Row 1', plots: ['T1 (Pot 1)', 'T2 (Pot 2)', 'T3 (Pot 3)'] },
+          { block: 'Bench Row 2', plots: ['T2 (Pot 4)', 'T3 (Pot 5)', 'T1 (Pot 6)'] },
+          { block: 'Bench Row 3', plots: ['T3 (Pot 7)', 'T1 (Pot 8)', 'T2 (Pot 9)'] }
         ]
       },
       advantages: [
-        'Most widely accepted design for standard field trials.',
-        'Controls and handles directional field/soil variability.',
-        'Simple and straightforward statistical analysis (ANOVA).'
+        'Purpose-built for indoor bench spaces, pots, growth cabinets, and polyhouses.',
+        'Supports stripe layout, randomized rows, and balanced pot assignment.',
+        'Captures individual pot metrics: Plant Height, Branches, Flowers, Fruit Count, and Yield (g/pot).'
       ],
-      recommendedFor: 'Efficacy trials for tomato, areca, biofertilizers, standard fertilizers, and biostimulants.'
+      recommendedFor: 'In-house screening, greenhouse pot bioassays, nursery trials, and growth chamber evaluation.'
     },
     {
       id: 'crd',
       name: 'CRD (Completely Random)',
       fullName: 'Completely Randomized Design',
-      whenToUse: 'Greenhouses, pot trials, laboratory incubator studies, or highly uniform/homogeneous fields.',
-      layout: 'Treatments are assigned to plots completely at random with no grouping/blocking.',
+      whenToUse: 'Indoor pot trials, growth chambers, laboratory incubator studies, or highly uniform greenhouse benches.',
+      layout: 'Treatments are assigned to pots or plots completely at random with no grouping/blocking.',
       example: {
         treatments: ['T1 = Control', 'T2 = NPK Powder', 'T3 = NPK Liquid'],
-        plots: ['T2', 'T1', 'T3', 'T2', 'T1']
+        plots: ['T2 (Pot 1)', 'T1 (Pot 2)', 'T3 (Pot 3)', 'T2 (Pot 4)', 'T1 (Pot 5)']
       },
       advantages: [
-        'Simplest experimental design to set up.',
+        'Simplest experimental design to set up in laboratory and greenhouse.',
         'Maximum degrees of freedom for error term (increases test power).',
         'Flexible: Can have different number of replicates per treatment.'
       ],
       disadvantages: [
-        'Poor choice when field conditions or microclimates vary (soil variation, shading, moisture).'
+        'Poor choice when ambient bench microclimates vary (heating/cooling gradients, edge effects).'
       ],
-      recommendedFor: 'Pot experiments, greenhouse bioassays, and laboratory trials.'
+      recommendedFor: 'Pot experiments, greenhouse bioassays, petri dish screening, and laboratory trials.'
+    },
+    {
+      id: 'rcbd',
+      name: 'RCBD (Block / Bench)',
+      fullName: 'Randomized Complete Block Design',
+      whenToUse: 'Greenhouse benches with light/temperature gradients, or standard field verification trials.',
+      layout: 'Each block (bench or replication) contains all treatments exactly once. Treatments are randomized within each block.',
+      example: {
+        treatments: ['T1 = Control', 'T2 = NPK Powder', 'T3 = NPK Liquid'],
+        visual: [
+          { block: 'Bench 1', plots: ['T2', 'T1', 'T3'] },
+          { block: 'Bench 2', plots: ['T3', 'T2', 'T1'] },
+          { block: 'Bench 3', plots: ['T1', 'T3', 'T2'] }
+        ]
+      },
+      advantages: [
+        'Controls and isolates directional bench/light/moisture variability.',
+        'Simple and straightforward statistical ANOVA analysis.',
+        'Standard benchmark for both greenhouse benches and field verification.'
+      ],
+      recommendedFor: 'Pot trials grouped by bench/shelf, and field verification trials for fertilizers and biostimulants.'
     },
     {
       id: 'split',
@@ -153,8 +174,7 @@ export default function TrialDesignGuideModal({ isOpen, onClose }) {
                 <div>
                   <h4 className="font-bold text-emerald-950">Choosing the Right Layout</h4>
                   <p className="text-emerald-800 text-xs mt-1">
-                    Selecting an appropriate layout ensures statistical validity and improves the precision of your efficacy ratings. 
-                    For standard nutrient, fertilizer, and biostimulant trials, **RCBD** is the industry benchmark.
+                    This platform is specifically optimized for **in-house, greenhouse, growth chamber, and pot-scale trials**, while maintaining full support for commercial field evaluations. Selecting an appropriate layout ensures statistical validity and maximizes statistical power.
                   </p>
                 </div>
               </div>
@@ -186,12 +206,13 @@ export default function TrialDesignGuideModal({ isOpen, onClose }) {
               {/* Recommended guidelines */}
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                 <h4 className="font-bold text-slate-800 mb-2 flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600" /> Quick Recommendations for Fertilizer & Biostimulant Trials
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" /> Quick Guidelines for In-House & Field Trials
                 </h4>
                 <ul className="list-disc pl-5 space-y-1.5 text-xs text-slate-600">
-                  <li>Use <strong className="text-slate-800">RCBD (Block)</strong> for most field-scale efficacy trials of fertilizers, biofertilizers, humic acid, and biostimulants.</li>
-                  <li>Use <strong className="text-slate-800">Factorial</strong> if you need to scientifically evaluate and isolate interactions between products (e.g., Biofertilizer alone vs. Humic acid alone vs. Combined treatment).</li>
-                  <li>Use <strong className="text-slate-800">CRD</strong> strictly for indoor pot trials, nurseries, or greenhouse studies where environmental gradients are non-existent.</li>
+                  <li>Use <strong className="text-slate-800">Pot Trial (Greenhouse Grid)</strong> as the primary standard for indoor greenhouse pot screening, bench arrangements, and growth chamber bioassays.</li>
+                  <li>Use <strong className="text-slate-800">CRD (Completely Random)</strong> for incubator tests, petri dish seed germination assays, or uniform growth cabinets with no directional light/temp gradient.</li>
+                  <li>Use <strong className="text-slate-800">RCBD (Block / Bench)</strong> when greenhouse benches have edge/cooling/lighting gradients, or for commercial field verification trials.</li>
+                  <li>Use <strong className="text-slate-800">Factorial & Split-Plot</strong> for multi-factor interaction experiments (e.g., Water Regimes × Biostimulant Doses).</li>
                 </ul>
               </div>
             </div>

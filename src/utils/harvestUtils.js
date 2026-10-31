@@ -4,17 +4,23 @@
 import { safeJsonParse } from './helpers.js';
 
 export const HARVEST_YIELD_UNITS = [
-  { id: 'kg_plot', label: 'kg / plot', factorToKg: 1 },
-  { id: 'q_ha', label: 'q / ha (quintals/ha)', factorToKg: 100 },
-  { id: 't_ha', label: 't / ha (tonnes/ha)', factorToKg: 1000 },
-  { id: 'kg_ha', label: 'kg / ha', factorToKg: 1 },
-  { id: 'cwt_acre', label: 'cwt / acre (hundredweight)', factorToKg: 112.085 },
-  { id: 'kg_plant', label: 'kg / plant', factorToKg: 1 },
-  { id: 'g_plant', label: 'g / plant', factorToKg: 0.001 },
-  { id: 'g_pot', label: 'g / pot', factorToKg: 0.001 },
-  { id: 'fruits_plant', label: 'fruits / plant', factorToKg: null },
-  { id: 'bunches_vine', label: 'bunches / vine', factorToKg: null },
-  { id: 'lbs_plot', label: 'lbs / plot', factorToKg: 0.453592 },
+  // ── Inhouse, Greenhouse & Small-Scale Trials (Primary Focus) ──
+  { id: 'g_pot', value: 'g/pot', label: 'g / pot (Indoor / Greenhouse Pot)', factorToKg: 0.001, isSmallScale: true },
+  { id: 'g_plant', value: 'g/plant', label: 'g / plant (Single Plant Harvest)', factorToKg: 0.001, isSmallScale: true },
+  { id: 'fruits_plant', value: 'fruits/plant', label: 'fruits / plant (Fruit Count per Plant)', factorToKg: null, isSmallScale: true },
+  { id: 'kg_pot', value: 'kg/pot', label: 'kg / pot (Large Pot / Tub)', factorToKg: 1, isSmallScale: true },
+  { id: 'kg_plant', value: 'kg/plant', label: 'kg / plant (Individual Plant)', factorToKg: 1, isSmallScale: true },
+  { id: 'g_tray', value: 'g/tray', label: 'g / tray (Seedling / Bench Tray)', factorToKg: 0.001, isSmallScale: true },
+  { id: 'bunches_vine', value: 'bunches/vine', label: 'bunches / vine (Climber / Vine)', factorToKg: null, isSmallScale: true },
+  { id: 'g_plot', value: 'g/plot', label: 'g / plot (Micro-plot / Bench)', factorToKg: 0.001, isSmallScale: true },
+  { id: 'kg_plot', value: 'kg/plot', label: 'kg / plot (Standard Small Plot)', factorToKg: 1, isSmallScale: true },
+
+  // ── Commercial & Field Scale Trials (Secondary Option) ──
+  { id: 'q_ha', value: 'q/ha', label: 'q / ha (Field Quintals / ha)', factorToKg: 100, isSmallScale: false },
+  { id: 't_ha', value: 't/ha', label: 't / ha (Field Tonnes / ha)', factorToKg: 1000, isSmallScale: false },
+  { id: 'kg_ha', value: 'kg/ha', label: 'kg / ha (Field kg / ha)', factorToKg: 1, isSmallScale: false },
+  { id: 'cwt_acre', value: 'cwt/acre', label: 'cwt / acre (Hundredweight / acre)', factorToKg: 112.085, isSmallScale: false },
+  { id: 'lbs_plot', value: 'lbs/plot', label: 'lbs / plot (Pounds / plot)', factorToKg: 0.453592, isSmallScale: false },
 ];
 
 export const CULL_REASONS = [
@@ -45,7 +51,7 @@ export function normalizePickingItem(raw, idx = 0) {
       actualUnmarketableWeight: '',
       totalWeight: '',
       marketableRatio: '',
-      yieldUnit: 'kg/plot',
+      yieldUnit: 'g/pot',
       plotAreaM2: '',
       moisturePct: '',
       brixScore: '',
@@ -68,32 +74,32 @@ export function normalizePickingItem(raw, idx = 0) {
   let extrapolatedKgHa = '';
   let extrapolatedQHa = '';
   let extrapolatedTHa = '';
-  const unit = raw.yieldUnit || 'kg/plot';
+  const unit = raw.yieldUnit || 'g/pot';
 
-  if (unit === 'q_ha' && totalWeight > 0) {
+  if ((unit === 'q_ha' || unit === 'q/ha') && totalWeight > 0) {
     extrapolatedQHa = totalWeight.toFixed(2);
     extrapolatedKgHa = (totalWeight * 100).toFixed(1);
     extrapolatedTHa = (totalWeight / 10).toFixed(2);
-  } else if (unit === 't_ha' && totalWeight > 0) {
+  } else if ((unit === 't_ha' || unit === 't/ha') && totalWeight > 0) {
     extrapolatedTHa = totalWeight.toFixed(2);
     extrapolatedKgHa = (totalWeight * 1000).toFixed(1);
     extrapolatedQHa = (totalWeight * 10).toFixed(2);
-  } else if (unit === 'kg_ha' && totalWeight > 0) {
+  } else if ((unit === 'kg_ha' || unit === 'kg/ha') && totalWeight > 0) {
     extrapolatedKgHa = totalWeight.toFixed(1);
     extrapolatedQHa = (totalWeight / 100).toFixed(2);
     extrapolatedTHa = (totalWeight / 1000).toFixed(2);
   } else if (areaM2 > 0 && totalWeight > 0) {
-    if (unit === 'kg/plot' || unit === 'kg' || unit === 'kg_plot') {
+    if (unit === 'kg/plot' || unit === 'kg' || unit === 'kg_plot' || unit === 'kg/pot' || unit === 'kg_pot' || unit === 'kg/plant' || unit === 'kg_plant') {
       const kgHa = (totalWeight / areaM2) * 10000;
       extrapolatedKgHa = kgHa.toFixed(1);
       extrapolatedQHa = (kgHa / 100).toFixed(2);
       extrapolatedTHa = (kgHa / 1000).toFixed(2);
-    } else if (unit === 'g/plot' || unit === 'g_plant' || unit === 'g' || unit === 'g_pot') {
+    } else if (unit === 'g/plot' || unit === 'g_plot' || unit === 'g/plant' || unit === 'g_plant' || unit === 'g' || unit === 'g/pot' || unit === 'g_pot' || unit === 'g/tray' || unit === 'g_tray') {
       const kgHa = ((totalWeight / 1000) / areaM2) * 10000;
       extrapolatedKgHa = kgHa.toFixed(1);
       extrapolatedQHa = (kgHa / 100).toFixed(2);
       extrapolatedTHa = (kgHa / 1000).toFixed(2);
-    } else if (unit === 'lbs_plot') {
+    } else if (unit === 'lbs_plot' || unit === 'lbs/plot') {
       const kgHa = ((totalWeight * 0.453592) / areaM2) * 10000;
       extrapolatedKgHa = kgHa.toFixed(1);
       extrapolatedQHa = (kgHa / 100).toFixed(2);
@@ -111,7 +117,7 @@ export function normalizePickingItem(raw, idx = 0) {
     actualUnmarketableWeight: raw.actualUnmarketableWeight !== '' && raw.actualUnmarketableWeight !== undefined ? raw.actualUnmarketableWeight : (raw.unmarketableWeight ?? ''),
     totalWeight: totalWeight > 0 ? parseFloat(totalWeight.toFixed(2)) : '',
     marketableRatio: marketableRatio !== '' ? `${marketableRatio}%` : '',
-    yieldUnit: raw.yieldUnit || 'kg/plot',
+    yieldUnit: raw.yieldUnit || 'g/pot',
     plotAreaM2: raw.plotAreaM2 || '',
     moisturePct: raw.moisturePct ?? raw.moisture ?? '',
     brixScore: raw.brixScore ?? raw.brix ?? '',
@@ -133,7 +139,7 @@ export function calculateHarvestTotals(pickingsList = [], defaultPlotAreaM2 = nu
   let cumFruits = 0;
   let latestDate = '';
   let earliestDate = '';
-  let unit = 'kg/plot';
+  let unit = 'g/pot';
 
   (pickingsList || []).forEach(p => {
     const m = parseFloat(p.actualMarketableWeight ?? p.marketableWeight ?? 0) || 0;
@@ -162,30 +168,30 @@ export function calculateHarvestTotals(pickingsList = [], defaultPlotAreaM2 = nu
   let extrapolatedTHa = '';
   const area = parseFloat(defaultPlotAreaM2 || (pickingsList[0]?.plotAreaM2) || 0);
 
-  if (unit === 'q_ha' && cumTotal > 0) {
+  if ((unit === 'q_ha' || unit === 'q/ha') && cumTotal > 0) {
     extrapolatedQHa = cumTotal.toFixed(2);
     extrapolatedKgHa = (cumTotal * 100).toFixed(1);
     extrapolatedTHa = (cumTotal / 10).toFixed(2);
-  } else if (unit === 't_ha' && cumTotal > 0) {
+  } else if ((unit === 't_ha' || unit === 't/ha') && cumTotal > 0) {
     extrapolatedTHa = cumTotal.toFixed(2);
     extrapolatedKgHa = (cumTotal * 1000).toFixed(1);
     extrapolatedQHa = (cumTotal * 10).toFixed(2);
-  } else if (unit === 'kg_ha' && cumTotal > 0) {
+  } else if ((unit === 'kg_ha' || unit === 'kg/ha') && cumTotal > 0) {
     extrapolatedKgHa = cumTotal.toFixed(1);
     extrapolatedQHa = (cumTotal / 100).toFixed(2);
     extrapolatedTHa = (cumTotal / 1000).toFixed(2);
   } else if (area > 0 && cumTotal > 0) {
-    if (unit === 'kg/plot' || unit === 'kg' || unit === 'kg_plot') {
+    if (unit === 'kg/plot' || unit === 'kg' || unit === 'kg_plot' || unit === 'kg/pot' || unit === 'kg_pot' || unit === 'kg/plant' || unit === 'kg_plant') {
       const kgHa = (cumTotal / area) * 10000;
       extrapolatedKgHa = kgHa.toFixed(1);
       extrapolatedQHa = (kgHa / 100).toFixed(2);
       extrapolatedTHa = (kgHa / 1000).toFixed(2);
-    } else if (unit === 'g/plot' || unit === 'g_plant' || unit === 'g' || unit === 'g_pot') {
+    } else if (unit === 'g/plot' || unit === 'g_plot' || unit === 'g/plant' || unit === 'g_plant' || unit === 'g' || unit === 'g/pot' || unit === 'g_pot' || unit === 'g/tray' || unit === 'g_tray') {
       const kgHa = ((cumTotal / 1000) / area) * 10000;
       extrapolatedKgHa = kgHa.toFixed(1);
       extrapolatedQHa = (kgHa / 100).toFixed(2);
       extrapolatedTHa = (kgHa / 1000).toFixed(2);
-    } else if (unit === 'lbs_plot') {
+    } else if (unit === 'lbs_plot' || unit === 'lbs/plot') {
       const kgHa = ((cumTotal * 0.453592) / area) * 10000;
       extrapolatedKgHa = kgHa.toFixed(1);
       extrapolatedQHa = (kgHa / 100).toFixed(2);

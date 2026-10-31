@@ -770,7 +770,7 @@ export default function Projects({ onMenuClick }) {
     weedSpecies: '',
     date: new Date().toISOString().split('T')[0],
     replications: '4',
-    trialDesign: 'RCBD',
+    trialDesign: 'PotTrial',
     mainFactorLevels: '',
     subFactorLevels: '',
     potRows: '9',
@@ -6995,16 +6995,16 @@ ${photosHtml}
       return (
         <>
         {/* ── Create Project Modal ── */}
-      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingProject ? "Edit RCBD Project" : "New RCBD Project"}>
+      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingProject ? "Edit Trial Project" : "New Trial Project"}>
         <form onSubmit={handleSave} className="space-y-4">
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1">Project Name *</label>
-            <input required value={formData.Name} onChange={e => setFormData(v => ({ ...v, Name: e.target.value }))} className={INPUT} placeholder="e.g., 2024 Pre-Emergent Corn Study" />
+            <input required value={formData.Name} onChange={e => setFormData(v => ({ ...v, Name: e.target.value }))} className={INPUT} placeholder="e.g., Inhouse Pot Screening - Formulation Efficacy" />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <div className="flex justify-between items-center mb-1">
-                <label className="block text-sm font-semibold text-slate-700">Location</label>
+                <label className="block text-sm font-semibold text-slate-700">Location / Bench</label>
                 <button
                   type="button"
                   onClick={handleAutofetchLocationAndWeather}
@@ -7022,7 +7022,7 @@ ${photosHtml}
                   )}
                 </button>
               </div>
-              <input value={formData.Location} onChange={e => setFormData(v => ({ ...v, Location: e.target.value }))} className={INPUT} placeholder="e.g., North Field" />
+              <input value={formData.Location} onChange={e => setFormData(v => ({ ...v, Location: e.target.value }))} className={INPUT} placeholder="e.g. Greenhouse Bay 2, Bench 4 or North Field" />
             </div>
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-1">Crop</label>
@@ -7048,7 +7048,9 @@ ${photosHtml}
                 <>
                   <option value="Weed Control Efficiency">Weed Control Efficiency (%)</option>
                   <option value="Crop Injury">Crop Injury / Phytotoxicity (%)</option>
-                  <option value="Yield">Yield (kg/ha)</option>
+                  <option value="Yield (g/pot)">Yield (g/pot - Pot Trial)</option>
+                  <option value="Yield (g/plant)">Yield (g/plant - Plant Harvest)</option>
+                  <option value="Yield">Yield (kg/ha - Field)</option>
                   <option value="Biomass Reduction">Biomass Reduction (%)</option>
                 </>
               )}
@@ -7056,7 +7058,9 @@ ${photosHtml}
                 <>
                   <option value="Disease Control Efficiency">Disease Control Efficiency (%)</option>
                   <option value="Crop Injury">Crop Injury / Phytotoxicity (%)</option>
-                  <option value="Yield">Yield (kg/ha)</option>
+                  <option value="Yield (g/pot)">Yield (g/pot - Pot Trial)</option>
+                  <option value="Yield (g/plant)">Yield (g/plant - Plant Harvest)</option>
+                  <option value="Yield">Yield (kg/ha - Field)</option>
                   <option value="Green Leaf Area">Green Leaf Area (%)</option>
                 </>
               )}
@@ -7064,21 +7068,27 @@ ${photosHtml}
                 <>
                   <option value="Pest Reduction Efficiency">Pest Reduction Efficiency (%)</option>
                   <option value="Crop Injury">Crop Injury / Phytotoxicity (%)</option>
-                  <option value="Yield">Yield (kg/ha)</option>
+                  <option value="Yield (g/pot)">Yield (g/pot - Pot Trial)</option>
+                  <option value="Yield (g/plant)">Yield (g/plant - Plant Harvest)</option>
+                  <option value="Yield">Yield (kg/ha - Field)</option>
                   <option value="Damage Rating">Damage Rating (0-9)</option>
                 </>
               )}
               {activeCategory === 'nutrition' && (
                 <>
                   <option value="Yield Improvement">Yield Improvement (%)</option>
+                  <option value="Yield (g/pot)">Yield (g/pot - Pot Trial)</option>
+                  <option value="Yield (g/plant)">Yield (g/plant - Plant Harvest)</option>
                   <option value="Chlorophyll Index">Chlorophyll Index (SPAD)</option>
-                  <option value="Biomass Weight">Biomass Weight (g/m²)</option>
+                  <option value="Biomass Weight">Biomass Weight (g/m² or g/pot)</option>
                   <option value="Plant Height">Plant Height (cm)</option>
                 </>
               )}
               {activeCategory === 'biostimulant' && (
                 <>
                   <option value="Growth Enhancement Index">Growth Enhancement Index</option>
+                  <option value="Yield (g/pot)">Yield (g/pot - Pot Trial)</option>
+                  <option value="Yield (g/plant)">Yield (g/plant - Plant Harvest)</option>
                   <option value="Root Biomass">Root Biomass (g)</option>
                   <option value="Shoot Biomass">Shoot Biomass (g)</option>
                   <option value="Chlorophyll Index">Chlorophyll Index (SPAD)</option>
@@ -7124,13 +7134,18 @@ ${photosHtml}
               onChange={e => setRandomizeForm(p => ({ ...p, trialDesign: e.target.value }))} 
               className={INPUT}
             >
-              <option value="RCBD">RCBD (Block)</option>
-              <option value="CRD">CRD (Completely Random)</option>
-              <option value="Split-Plot">Split-Plot</option>
-              <option value="Lattice">Alpha-Lattice</option>
-              <option value="Factorial">Factorial</option>
-              <option value="Strip-Plot">Strip-Plot</option>
-              <option value="PotTrial">Pot Trial (Row-Based)</option>
+              <optgroup label="🏠 Inhouse & Greenhouse Designs (Primary)">
+                <option value="PotTrial">🌿 Pot Trial / Greenhouse Grid (Rows × Pots/Benches)</option>
+                <option value="CRD">🧪 CRD — Completely Randomized (Growth Chamber / Pots / Lab)</option>
+                <option value="RCBD">🪴 RCBD Pot / Bench Trial (Grouped by Bench)</option>
+              </optgroup>
+              <optgroup label="🌾 Commercial Field Designs (Secondary)">
+                <option value="RCBD">RCBD Field Trial (Randomized Complete Block)</option>
+                <option value="Split-Plot">Split-Plot (Main × Sub-factor)</option>
+                <option value="Factorial">Factorial Multi-Factor</option>
+                <option value="Lattice">Alpha-Lattice</option>
+                <option value="Strip-Plot">Strip-Plot</option>
+              </optgroup>
             </select>
           </div>
           <div>
@@ -8103,7 +8118,7 @@ ${photosHtml}
                 className="w-full px-2.5 py-1.5 border rounded text-xs bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
               >
                 {HARVEST_YIELD_UNITS.map(u => (
-                  <option key={u.value} value={u.value}>{u.label}</option>
+                  <option key={u.value || u.id} value={u.value || u.id}>{u.label}</option>
                 ))}
               </select>
             </div>
