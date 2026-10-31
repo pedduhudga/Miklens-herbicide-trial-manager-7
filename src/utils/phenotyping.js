@@ -250,16 +250,28 @@ export async function analyzePlantPhenotype(imageSource, options = {}) {
   const roundedGreenPct = parseFloat(greenCanopyPct.toFixed(1));
   const roundedNecroticPct = parseFloat(necroticPct.toFixed(1));
 
+  // Calibrate category-specific agronomic indices from pixel distributions
+  const foliageRatio = totalFoliage > 0 ? (greenPixels / totalFoliage) : 0;
+  const estimatedHealthScore = Math.max(1, Math.min(10, Math.round(foliageRatio * 9) + 1));
+  const estimatedLcc = Math.max(1, Math.min(5, Math.round(((meanGli + 0.1) / 0.5) * 4) + 1));
+  const estimatedVigor = Math.max(0, Math.min(10, Math.round(Math.min(roundedGreenPct / 8, 10))));
+
   return {
     totalSampled,
     greenPixels,
     necroticPixels,
     totalFoliagePixels: totalFoliage,
     greenCanopyPct: roundedGreenPct,
+    greenLeafArea: roundedGreenPct,
     necroticPct: roundedNecroticPct,
     necrosisPct: roundedNecroticPct,
+    chlorosisNecrosisPct: roundedNecroticPct,
     calculatedDesiccationRate: roundedDesiccation,
     estimatedWeedControlPct: roundedDesiccation,
+    plantHealthScore: estimatedHealthScore,
+    estimatedLCCScore: estimatedLcc,
+    visualVigor: estimatedVigor,
+    canopyGreennessPct: roundedGreenPct,
     variMean: meanVari,
     gliMean: meanGli,
     exgMean: meanExg,

@@ -260,12 +260,62 @@ OUTPUT FORMAT - JSON ONLY (no extra text, no markdown wrapper around the JSON):
       const metricsPlaceholder = {};
       catConfig.observationFields.forEach(f => {
         if (f.key !== 'weedDetails') {
-          metricsPlaceholder[f.key] = `Estimated ${f.label} value (number or float)`;
+          if (f.key === 'deficiencySign') {
+            metricsPlaceholder[f.key] = 'None';
+          } else if (f.key === 'plantHealthScore') {
+            metricsPlaceholder[f.key] = 10;
+          } else if (f.key === 'leafColorScore') {
+            metricsPlaceholder[f.key] = 4;
+          } else if (f.key === 'visualVigor' || f.key === 'overallVigor' || f.key === 'shootVigor') {
+            metricsPlaceholder[f.key] = 8;
+          } else if (f.key === 'abioticStressRecovery') {
+            metricsPlaceholder[f.key] = 7;
+          } else if (f.key === 'greenLeafArea' || f.key === 'canopyGreennessPct' || f.key === 'canopyCoveragePct') {
+            metricsPlaceholder[f.key] = 85;
+          } else {
+            metricsPlaceholder[f.key] = 0;
+          }
         }
       });
 
+      let categorySpecificGuide = '';
+      if (context.category === 'fungicide') {
+        categorySpecificGuide = `\nPLANT PATHOLOGY DIAGNOSTIC KEYS:
+- Fungal/Bacterial Symptoms: Identify lesions, leaf spots with concentric rings, powdery/downy mildews, rust pustules, blights, water-soaking, chlorotic halos, anthracnose sunken spots.
+- Healthy Verification: If the foliage is clean and disease-free, report diseaseSeverity: 0, diseaseIncidence: 0, greenLeafArea: 100, plantHealthScore: 10, and targets: [] — DO NOT invent imaginary pathogens on clean leaves!
+- Differentiation: Distinguish disease lesions from physical tearing, insect chewing holes, chemical spray burn, sunscald, or natural senescence.`;
+      } else if (context.category === 'pesticide') {
+        categorySpecificGuide = `\nENTOMOLOGY DIAGNOSTIC KEYS:
+- Pest Detection: Accurately identify piercing-sucking pests (aphids, thrips, whiteflies, planthoppers, mealybugs, spider mites), chewing pests (armyworms, loopers, cutworms, beetles), leafminers, or stem borers.
+- Life Stages: Enumerate visible life stages (egg clusters, nymphs/larvae, pupae, adults).
+- Beneficial Predators: Distinguish pests from beneficial predators (ladybird beetles, lacewing larvae, syrphid fly larvae, parasitoid mummies).
+- Feeding Damage: Quantify chewing holes, windowpaning, leaf skeletonization, leaf curling, sooty mold, frass deposits, and silver stippling.
+- Healthy Verification: If the foliage is clean and uninfested, report pestCount: 0, feedingDamagePct: 0, damageRating: 0, and targets: [] — DO NOT hallucinate pest presence on clean crops!`;
+      } else if (context.category === 'nutrition') {
+        categorySpecificGuide = `\nPLANT NUTRITION & MOBILITY KEYS:
+- Mobile Nutrients (Lower/Older leaves affected first):
+  * Nitrogen (N): Uniform yellowing/chlorosis starting at leaf tip and progressing along midrib (V-shape).
+  * Phosphorus (P): Dark green foliage with purple/reddish-bronze anthocyanin pigments on leaf margins and stems.
+  * Potassium (K): Marginal necrosis, leaf edge firing, tip scorch while central leaf remains green.
+  * Magnesium (Mg): Distinct interveinal chlorosis on mature leaves (veins stay green while lamina yellows).
+- Immobile Nutrients (Upper/Younger leaves affected first):
+  * Iron (Fe): Sharp interveinal chlorosis on youngest emerging leaves (turns ivory-white under acute deficiency).
+  * Calcium (Ca): Hooked distorted young leaf tips, marginal necrosis, blossom end rot.
+  * Zinc (Zn): Interveinal chlorotic bands, "little leaf", rosetting of terminal nodes.
+  * Boron (B): Thick, brittle, curled terminal leaves, cracked/hollow stems.
+  * Sulfur (S): Uniform pale green chlorosis on upper leaves.
+- Healthy Verification: If the foliage is lush, uniform, and dark green, report deficiencySign: "None", deficiencySeverity: 0, leafColorScore: 4, visualVigor: 9, and targets: [] — DO NOT invent false deficiencies on healthy crops!`;
+      } else if (context.category === 'biostimulant') {
+        categorySpecificGuide = `\nPLANT PHYSIOLOGY & VIGOR KEYS:
+- Growth Enhancement: Evaluate canopy leaf expansion, shoot density, tiller proliferation, foliar luster/gloss, and internode spacing.
+- Abiotic Stress Recovery: Assess leaf turgidity vs wilting, absence of leaf rolling, and recovery from drought, heat, cold, or salinity shock.
+- Root Architecture (if root photo): Evaluate root branching density, lateral root proliferation, and nodulation.
+- Factual Auditing: Report genuine, verifiable visual differences only. DO NOT fabricate miraculous growth spurts or unsubstantiated claims.`;
+      }
+
       return `${catConfig.aiPhotoPrompt}
 ${tagInstruction}
+${categorySpecificGuide}
 
 PLANT & PLOT INFORMATION:
 - Category: ${catConfig.name}
@@ -278,11 +328,11 @@ ${historyNote}
 
 ADDITIONAL ANALYSIS FEATURES: ${catConfig.aiFeatures.join(', ')}
 
-RULES FOR SCIENTIFIC ASSESSMENT (CRITICAL - AVOID HALLUCINATION):
-0. IMAGE VALIDITY PRE-CHECK (CANOPY VERIFICATION): If this image depicts commercial fertilizer/chemical packaging, marketing flyers, pamphlets, documents, machinery, people, indoor items, or non-plot assets: you MUST set "isValidPlotPhoto": false, "invalidationReason": "Depicts commercial product packaging / non-plot asset rather than an experimental crop canopy.", "metrics": {}, "targets": [], "confidence": "LOW", "overallAssessment": "Evaluation precluded: Submitted media depicts commercial product packaging or promotional materials rather than an experimental crop canopy.", "notes": "Evaluation precluded: Non-plot image asset."
-1. STAGE & METRIC ACCURACY: Estimate values only for metrics and symptoms that are directly and clearly visible in the crop plot photo. Do NOT invent or assume data.
+RULES FOR SCIENTIFIC ASSESSMENT (CRITICAL - ZERO FALSE INFO & AVOID HALLUCINATION):
+0. IMAGE VALIDITY PRE-CHECK (CANOPY VERIFICATION): If this image depicts commercial fertilizer/chemical packaging, bottles, marketing flyers, pamphlets, documents, machinery, people, indoor items, or non-plot assets: you MUST set "isValidPlotPhoto": false, "invalidationReason": "Depicts commercial product packaging / non-plot asset rather than an experimental crop canopy.", "metrics": {}, "targets": [], "confidence": "LOW", "overallAssessment": "Evaluation precluded: Submitted media depicts commercial product packaging or promotional materials rather than an experimental crop canopy.", "notes": "Evaluation precluded: Non-plot image asset."
+1. STAGE & METRIC ACCURACY: Estimate values only for metrics and symptoms that are directly and clearly visible in the crop plot photo. Do NOT invent or assume data. If clean and healthy, report 0 severity.
 2. STAGE-APPROPRIATE METRICS (GROWTH-STAGE FILTERING): If the BBCH Growth Stage is early/vegetative (BBCH stage label starting with BBCH 00 through BBCH 59, i.e., before flowering and fruiting), reproductive and yield metrics (such as "fruitCount", "marketableYield", "unmarketableYield", "marketableYieldEstimateGrams", "unmarketableYieldEstimateGrams") are biologically not applicable. For these metrics in the "metrics" JSON object, you MUST set them to null. Do NOT return 0 or "Not detected". Only return numerical estimations for these if the BBCH stage is BBCH 61 or later (flowering/fruiting/ripening) and fruits are actually visible.
-3. PHYSICAL, SENSOR & LABORATORY LIMITATION: Physical parameters like plant height (e.g., 'plantHeightAvg'), sensor measurements like chlorophyll index (SPAD readings), and laboratory chemical tissue tests CANNOT be measured or determined from a 2D photo. You MUST set these to null in the "metrics" JSON object. Do NOT guess or estimate these values under any circumstances.
+3. PHYSICAL, SENSOR & LABORATORY LIMITATION: Physical parameters like plant height in cm without reference scale, sensor measurements like chlorophyll index (SPAD readings), and laboratory chemical tissue tests CANNOT be measured or determined from a 2D photo. You MUST set these to null in the "metrics" JSON object. Do NOT guess or estimate these values under any circumstances.
 4. STRICT VERIFICATION & CONFIDENCE: Only report disease lesions, insect pests, nutrient deficiencies, or vigor differences that you are 100% sure exist based on visual evidence. If a symptom is ambiguous or invisible, set its estimated metric value to 0 or leave it out of targets.
 5. CONCISE, FACTUAL NARRATIVES: Keep the "overallAssessment" and "notes" fields extremely brief, direct, and factual (1-2 sentences maximum). Do not use fluff, advice, or recommendations.
 6. TARGET LEVEL CONFIDENCE: For each item in the "targets" list, you MUST include a "confidence" field containing an estimated percentage confidence (integer 0-100) based on visual clarity and characteristic symptom presentation.

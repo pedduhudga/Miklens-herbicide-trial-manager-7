@@ -544,36 +544,58 @@ ${historyPrompt}`;
         required: ["weedDetails"]
       };
     } else if (categoryId === 'fungicide') {
-      prompt = `Act as an expert plant pathologist. Analyze this fungicide trial plot photo to identify disease symptoms (such as lesions, spots, rusts, blights, or mildews). To prevent hallucinations, only report symptoms and diseases that are clearly and indisputably visible on the leaves or canopy.
-      
-      Estimate the following observation metrics:
-      - "diseaseSeverity": Percentage of leaf/canopy area affected by disease symptoms (0-100%).
-      - "diseaseIncidence": Percentage of plants/leaves displaying visible disease symptoms (0-100%).
-      - "greenLeafArea": Percentage of healthy, active green leaf area remaining (0-100%).
-      - "plantHealthScore": Overall plant health rating on a scale of 1-10 (10 being perfect health, 1 being dead/severely diseased).
-      - "phytotoxicity": Percentage of crop displaying pesticide/chemical injury symptoms (0-100%).
-      
-      Respond ONLY with a single minified JSON object in this exact format:
-      {
-        "metrics": {
-          "diseaseSeverity": NUMBER,
-          "diseaseIncidence": NUMBER,
-          "greenLeafArea": NUMBER,
-          "plantHealthScore": NUMBER,
-          "phytotoxicity": NUMBER
-        },
-        "details": {
-          "identifiedDiseases": ["Scientific Name / Common Name"],
-          "symptoms": ["e.g. chlorotic spots, powdery lesions"],
-          "confidence": "High|Medium|Low",
-          "notes": "..."
-        }
-      }
-      ${historyPrompt}`;
+      prompt = `Act as a senior clinical plant pathologist. Conduct an expert visual diagnosis on this fungicide trial crop plot or pot photo to identify plant disease symptoms (fungal spots, rust pustules, blights, downy/powdery mildews, anthracnose, sclerotinia, bacterial blights, viral mosaics) with maximum scientific accuracy.
+
+PRE-CHECK (CRITICAL — ZERO FALSE INFO / NON-PLOT REJECTION):
+If this photo shows commercial fertilizer/chemical packaging, bottles, product flyers, advertisements, indoor non-plot objects, vehicles, people, or completely blurry/unusable images: YOU MUST set "isValidPlotPhoto": false, "invalidationReason": "Image depicts non-plot asset or packaging rather than crop canopy", "metrics": {"diseaseSeverity": 0, "diseaseIncidence": 0, "greenLeafArea": 0, "plantHealthScore": 0, "phytotoxicity": 0}, "targets": [], "details": {"identifiedDiseases": [], "symptoms": [], "confidence": "Low", "notes": "Evaluation precluded: Non-plot image."}}.
+
+ZERO-HALLUCINATION & ACCURACY RULES:
+1. ONLY report symptoms and diseases that are directly, unmistakably visible on the leaves, stems, or fruits. If the foliage is clean, green, and disease-free, report "diseaseSeverity": 0, "diseaseIncidence": 0, "greenLeafArea": 100, "plantHealthScore": 10, "phytotoxicity": 0, and "targets": [{"name": "Healthy Foliage", "value": 0, "status": "Healthy", "confidence": 98, "notes": "No disease symptoms or lesions observed"}]. DO NOT fabricate pathogens on clean crops!
+2. Format identified diseases dynamically as "Common Name (Scientific Name)" with specific visual diagnostic grounding.
+3. Distinguish disease lesions from physical/mechanical damage, insect chewing, spray burn/phytotoxicity, sunscald, or senescence.
+4. Estimate:
+   - "diseaseSeverity": Percentage of canopy/leaf area visibly damaged by disease (0-100%).
+   - "diseaseIncidence": Percentage of leaves/stems showing symptoms (0-100%).
+   - "greenLeafArea": Percentage of active healthy green leaf area remaining (0-100%).
+   - "plantHealthScore": Overall health scale 1-10 (10 = pristine, 1 = severely diseased/collapsed).
+   - "phytotoxicity": Chemical leaf burn/scorching percentage (0-100%).
+   - "lesionCountAvg": Estimated average lesion count per leaf (number).
+   - "chloroticHaloIncidence": Percentage of lesions displaying surrounding yellow halos (0-100%).
+   - "defoliationPct": Estimated premature leaf drop or defoliation (0-100%).
+   - "sporulationScore": Visual spore pustule / velvet coating intensity (0-10).
+
+Respond ONLY with a single minified JSON object in this exact format:
+{
+  "isValidPlotPhoto": true,
+  "invalidationReason": null,
+  "metrics": {
+    "diseaseSeverity": NUMBER,
+    "diseaseIncidence": NUMBER,
+    "greenLeafArea": NUMBER,
+    "plantHealthScore": NUMBER,
+    "phytotoxicity": NUMBER,
+    "lesionCountAvg": NUMBER,
+    "chloroticHaloIncidence": NUMBER,
+    "defoliationPct": NUMBER,
+    "sporulationScore": NUMBER
+  },
+  "targets": [
+    {"name": "Common Name (Scientific Name)", "value": NUMBER, "status": "Symptomatic/Healthy/Stressed", "confidence": NUMBER, "notes": "..."}
+  ],
+  "details": {
+    "identifiedDiseases": ["..."],
+    "symptoms": ["..."],
+    "confidence": "High|Medium|Low",
+    "notes": "..."
+  }
+}
+${historyPrompt}`;
 
       responseSchema = {
         type: Type.OBJECT,
         properties: {
+          isValidPlotPhoto: { type: Type.BOOLEAN },
+          invalidationReason: { type: Type.STRING },
           metrics: {
             type: Type.OBJECT,
             properties: {
@@ -581,92 +603,338 @@ ${historyPrompt}`;
               diseaseIncidence: { type: Type.NUMBER },
               greenLeafArea: { type: Type.NUMBER },
               plantHealthScore: { type: Type.NUMBER },
-              phytotoxicity: { type: Type.NUMBER }
+              phytotoxicity: { type: Type.NUMBER },
+              lesionCountAvg: { type: Type.NUMBER },
+              chloroticHaloIncidence: { type: Type.NUMBER },
+              defoliationPct: { type: Type.NUMBER },
+              sporulationScore: { type: Type.NUMBER }
             },
-            required: ["diseaseSeverity", "diseaseIncidence"]
+            required: ["diseaseSeverity", "diseaseIncidence", "greenLeafArea", "plantHealthScore"]
+          },
+          targets: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                name: { type: Type.STRING },
+                value: { type: Type.NUMBER },
+                status: { type: Type.STRING },
+                confidence: { type: Type.NUMBER },
+                notes: { type: Type.STRING }
+              },
+              required: ["name", "status"]
+            }
           },
           details: {
             type: Type.OBJECT,
             properties: {
-              identifiedDiseases: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING }
-              },
-              symptoms: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING }
-              },
+              identifiedDiseases: { type: Type.ARRAY, items: { type: Type.STRING } },
+              symptoms: { type: Type.ARRAY, items: { type: Type.STRING } },
               confidence: { type: Type.STRING },
               notes: { type: Type.STRING }
             },
-            required: ["identifiedDiseases", "confidence", "notes"]
+            required: ["confidence", "notes"]
           }
         },
-        required: ["metrics", "details"]
+        required: ["isValidPlotPhoto", "metrics", "details"]
       };
     } else if (categoryId === 'pesticide') {
-      prompt = `Act as an expert agricultural entomologist. Analyze this pesticide trial plot photo to identify pests, insect infestations, or crop damage. To prevent hallucinations and ensure 100% accuracy, only report pest species, insects, or feeding damage (e.g., holes, chewing) that are directly and clearly visible in the photo.
-      
-      Estimate the following observation metrics:
-      - "pestCount": Total visual count of target pests per unit/plant.
-      - "liveInsectCount": Visual count of active live insects.
-      - "deadInsectCount": Visual count of dead target pests.
-      - "feedingDamagePct": Estimated percentage of feeding damage on the leaves/crop (0-100%).
-      - "damageRating": Overall crop damage rating on a scale of 0-9 (0 being no damage, 9 being completely destroyed).
-      - "phytotoxicity": Percentage of crop displaying chemical injury symptoms (0-100%).
-      
-      Respond ONLY with a single minified JSON object in this exact format:
-      {
-        "metrics": {
-          "pestCount": NUMBER,
-          "liveInsectCount": NUMBER,
-          "deadInsectCount": NUMBER,
-          "feedingDamagePct": NUMBER,
-          "damageRating": NUMBER,
-          "phytotoxicity": NUMBER
-        },
-        "details": {
-          "identifiedPests": ["Scientific Name / Common Name"],
-          "damageTypes": ["e.g. foliar chewing, leaf skeletonizing"],
-          "confidence": "High|Medium|Low",
-          "notes": "..."
-        }
-      }
-      ${historyPrompt}`;
+      prompt = `Act as a senior agricultural entomologist. Analyze this pesticide/insecticide trial plot or pot photo to identify, classify, and count crop insect pests, mites, developmental life stages, and feeding damage symptoms with scientific precision.
+
+PRE-CHECK (CRITICAL — ZERO FALSE INFO / NON-PLOT REJECTION):
+If this photo shows commercial chemical/pesticide bottles, jugs, packaging flyers, advertisements, indoor non-plot assets, machinery, people, or completely blurred images: YOU MUST set "isValidPlotPhoto": false, "invalidationReason": "Image depicts non-plot asset or packaging rather than crop canopy", "metrics": {"pestCount": 0, "liveInsectCount": 0, "deadInsectCount": 0, "feedingDamagePct": 0, "damageRating": 0, "phytotoxicity": 0}, "targets": [], "details": {"identifiedPests": [], "damageTypes": [], "confidence": "Low", "notes": "Evaluation precluded: Non-plot image."}}.
+
+ZERO-HALLUCINATION & ACCURACY RULES:
+1. ONLY report pest species, insects, or feeding injuries that are directly, unmistakably visible. If the foliage is clean, uninfested, and undamaged, report "pestCount": 0, "liveInsectCount": 0, "deadInsectCount": 0, "feedingDamagePct": 0, "damageRating": 0, "phytotoxicity": 0, and "targets": [{"name": "Healthy Foliage", "value": 0, "status": "Healthy", "confidence": 98, "notes": "No pest infestation or feeding damage observed"}]. DO NOT invent imaginary insects or chewing damage on clean leaves!
+2. Format identified pests dynamically as "Common Name (Scientific Name)" with life stage.
+3. Distinguish target pests from beneficial predators (ladybeetles, lacewing larvae, syrphid flies, parasitoid wasps).
+4. Estimate:
+   - "pestCount": Total visual count of target pest individuals.
+   - "liveInsectCount": Count of active, motile insects.
+   - "deadInsectCount": Count of desiccated, moribund, or dead insects.
+   - "eggCount": Count of egg clusters or individual eggs.
+   - "larvaCount": Count of caterpillars, nymphs, or larvae.
+   - "adultCount": Count of winged or mature adult insects.
+   - "feedingDamagePct": Estimated percentage of foliar area consumed or damaged (0-100%).
+   - "damageRating": Standard crop damage score 0-9 (0 = zero damage, 9 = completely skeletonized/destroyed).
+   - "beneficialCount": Count of observed beneficial predatory insects.
+   - "sootyMoldSeverity": Score 0-10 for black sooty mold following honeydew excretion.
+   - "frassIncidence": Score 0-10 for visible fecal frass deposits.
+   - "leafCurlingSeverity": Score 0-10 for leaf rolling or twisting from sucking pests.
+   - "phytotoxicity": Chemical injury percentage (0-100%).
+
+Respond ONLY with a single minified JSON object in this exact format:
+{
+  "isValidPlotPhoto": true,
+  "invalidationReason": null,
+  "metrics": {
+    "pestCount": NUMBER,
+    "liveInsectCount": NUMBER,
+    "deadInsectCount": NUMBER,
+    "eggCount": NUMBER,
+    "larvaCount": NUMBER,
+    "adultCount": NUMBER,
+    "feedingDamagePct": NUMBER,
+    "damageRating": NUMBER,
+    "beneficialCount": NUMBER,
+    "sootyMoldSeverity": NUMBER,
+    "frassIncidence": NUMBER,
+    "leafCurlingSeverity": NUMBER,
+    "phytotoxicity": NUMBER
+  },
+  "targets": [
+    {"name": "Common Name (Scientific Name)", "value": NUMBER, "status": "Symptomatic/Healthy/Stressed", "confidence": NUMBER, "notes": "..."}
+  ],
+  "details": {
+    "identifiedPests": ["..."],
+    "damageTypes": ["..."],
+    "confidence": "High|Medium|Low",
+    "notes": "..."
+  }
+}
+${historyPrompt}`;
 
       responseSchema = {
         type: Type.OBJECT,
         properties: {
+          isValidPlotPhoto: { type: Type.BOOLEAN },
+          invalidationReason: { type: Type.STRING },
           metrics: {
             type: Type.OBJECT,
             properties: {
               pestCount: { type: Type.NUMBER },
               liveInsectCount: { type: Type.NUMBER },
               deadInsectCount: { type: Type.NUMBER },
+              eggCount: { type: Type.NUMBER },
+              larvaCount: { type: Type.NUMBER },
+              adultCount: { type: Type.NUMBER },
               feedingDamagePct: { type: Type.NUMBER },
               damageRating: { type: Type.NUMBER },
+              beneficialCount: { type: Type.NUMBER },
+              sootyMoldSeverity: { type: Type.NUMBER },
+              frassIncidence: { type: Type.NUMBER },
+              leafCurlingSeverity: { type: Type.NUMBER },
               phytotoxicity: { type: Type.NUMBER }
             },
-            required: ["pestCount"]
+            required: ["pestCount", "feedingDamagePct", "damageRating"]
+          },
+          targets: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                name: { type: Type.STRING },
+                value: { type: Type.NUMBER },
+                status: { type: Type.STRING },
+                confidence: { type: Type.NUMBER },
+                notes: { type: Type.STRING }
+              },
+              required: ["name", "status"]
+            }
           },
           details: {
             type: Type.OBJECT,
             properties: {
-              identifiedPests: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING }
-              },
-              damageTypes: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING }
-              },
+              identifiedPests: { type: Type.ARRAY, items: { type: Type.STRING } },
+              damageTypes: { type: Type.ARRAY, items: { type: Type.STRING } },
               confidence: { type: Type.STRING },
               notes: { type: Type.STRING }
             },
-            required: ["identifiedPests", "confidence", "notes"]
+            required: ["confidence", "notes"]
           }
         },
-        required: ["metrics", "details"]
+        required: ["isValidPlotPhoto", "metrics", "details"]
+      };
+    } else if (categoryId === 'nutrition') {
+      prompt = `Act as a senior crop nutritionist and soil-plant diagnostician. Analyze this plant nutrition trial plot or pot photo to evaluate crop nutrient status, foliar chlorosis patterns, and visual vigor with clinical scientific rigor.
+
+PRE-CHECK (CRITICAL — ZERO FALSE INFO / NON-PLOT REJECTION):
+If this photo shows commercial fertilizer bags, chemical bottles, marketing brochures, flyers, indoor non-plot items, or non-canopy imagery: YOU MUST set "isValidPlotPhoto": false, "invalidationReason": "Image depicts non-plot asset or fertilizer packaging rather than crop canopy", "metrics": {"visualVigor": 0, "deficiencySeverity": 0, "leafColorScore": 1, "interveinalChlorosis": 0, "leafMarginNecrosis": 0, "canopyCoveragePct": 0, "chlorosisIncidencePct": 0}, "targets": [], "details": {"deficiencySymptoms": [], "confidence": "Low", "notes": "Evaluation precluded: Non-plot image."}}.
+
+ZERO-HALLUCINATION & DIAGNOSTIC ACCURACY RULES:
+1. ONLY report nutrient deficiencies that are clearly substantiated by foliar diagnostic symptoms:
+   - Mobile Nutrients (Lower/Old leaves affected first):
+     * Nitrogen (N): Uniform chlorosis starting from tip along midrib (V-shape).
+     * Phosphorus (P): Dark green foliage with purple/bronze anthocyanin pigments on margins and stems.
+     * Potassium (K): Marginal necrosis, leaf edge firing, tip scorch.
+     * Magnesium (Mg): Distinct interveinal chlorosis on mature leaves with dark green veins.
+   - Immobile Nutrients (Upper/Young leaves affected first):
+     * Iron (Fe): Sharp interveinal chlorosis on youngest apical leaves (ivory-white when severe).
+     * Calcium (Ca): Hooked distorted young leaf tips, marginal necrosis, blossom end rot.
+     * Zinc (Zn): Interveinal chlorotic bands, "little leaf", rosetting of terminal nodes.
+     * Boron (B): Thick, brittle, curled terminal leaves, hollow/cracked stems.
+     * Sulfur (S): Uniform pale chlorosis on upper leaves.
+2. If the crop is healthy, turgid, and rich green, report "visualVigor": 9, "deficiencySign": "None", "deficiencySeverity": 0, "leafColorScore": 4, "interveinalChlorosis": 0, "leafMarginNecrosis": 0, and "targets": [{"name": "Adequate Nutrition", "value": 0, "status": "Sufficient", "confidence": 98, "notes": "Foliage exhibits uniform greenness with no visible deficiency symptoms"}]. DO NOT fabricate mineral deficiencies on healthy crops!
+3. Laboratory limitations: Do NOT invent exact SPAD sensor units, tissue ppm, or plant height in cm without reference scale. Estimate visible canopy indices.
+4. Estimate:
+   - "visualVigor": Overall visual vigor rating on scale 0-10 (10 = lush, optimal vigor).
+   - "deficiencySign": Dominant visible deficiency code ("None", "N", "P", "K", "Mg", "Ca", "S", "Zn", "Mn", "Fe", "B", "Cu").
+   - "deficiencySeverity": Severity of visible deficiency on scale 0-10 (0 = none, 10 = acute necrosis/collapse).
+   - "leafColorScore": Standard 1-5 scale on IRRI Leaf Color Chart (1 = yellowish-green, 5 = deep dark green).
+   - "interveinalChlorosis": Rating 0-10 for interveinal yellowing.
+   - "leafMarginNecrosis": Rating 0-10 for edge firing/scorch.
+   - "canopyCoveragePct": Ground/pot surface area covered by green canopy (0-100%).
+   - "chlorosisIncidencePct": Percentage of leaves showing yellowing/chlorosis (0-100%).
+
+Respond ONLY with a single minified JSON object in this exact format:
+{
+  "isValidPlotPhoto": true,
+  "invalidationReason": null,
+  "metrics": {
+    "visualVigor": NUMBER,
+    "deficiencySign": "None|N|P|K|Mg|Ca|S|Zn|Mn|Fe|B|Cu",
+    "deficiencySeverity": NUMBER,
+    "leafColorScore": NUMBER,
+    "interveinalChlorosis": NUMBER,
+    "leafMarginNecrosis": NUMBER,
+    "canopyCoveragePct": NUMBER,
+    "chlorosisIncidencePct": NUMBER
+  },
+  "targets": [
+    {"name": "Nutrient Target", "value": NUMBER, "status": "Sufficient/Deficient/Marginal", "confidence": NUMBER, "notes": "..."}
+  ],
+  "details": {
+    "deficiencySymptoms": ["..."],
+    "confidence": "High|Medium|Low",
+    "notes": "..."
+  }
+}
+${historyPrompt}`;
+
+      responseSchema = {
+        type: Type.OBJECT,
+        properties: {
+          isValidPlotPhoto: { type: Type.BOOLEAN },
+          invalidationReason: { type: Type.STRING },
+          metrics: {
+            type: Type.OBJECT,
+            properties: {
+              visualVigor: { type: Type.NUMBER },
+              deficiencySign: { type: Type.STRING },
+              deficiencySeverity: { type: Type.NUMBER },
+              leafColorScore: { type: Type.NUMBER },
+              interveinalChlorosis: { type: Type.NUMBER },
+              leafMarginNecrosis: { type: Type.NUMBER },
+              canopyCoveragePct: { type: Type.NUMBER },
+              chlorosisIncidencePct: { type: Type.NUMBER }
+            },
+            required: ["visualVigor", "deficiencySeverity", "leafColorScore"]
+          },
+          targets: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                name: { type: Type.STRING },
+                value: { type: Type.NUMBER },
+                status: { type: Type.STRING },
+                confidence: { type: Type.NUMBER },
+                notes: { type: Type.STRING }
+              },
+              required: ["name", "status"]
+            }
+          },
+          details: {
+            type: Type.OBJECT,
+            properties: {
+              deficiencySymptoms: { type: Type.ARRAY, items: { type: Type.STRING } },
+              confidence: { type: Type.STRING },
+              notes: { type: Type.STRING }
+            },
+            required: ["confidence", "notes"]
+          }
+        },
+        required: ["isValidPlotPhoto", "metrics", "details"]
+      };
+    } else if (categoryId === 'biostimulant') {
+      prompt = `Act as a senior plant physiologist and crop vigor specialist. Analyze this biostimulant trial plot or pot photo to evaluate vegetative growth enhancement, canopy expansion, foliar luster, and abiotic stress resilience (drought, heat, salinity, transplant shock).
+
+PRE-CHECK (CRITICAL — ZERO FALSE INFO / NON-PLOT REJECTION):
+If this photo shows commercial biostimulant bottles, jugs, advertising flyers, marketing posters, indoor office assets, or non-canopy imagery: YOU MUST set "isValidPlotPhoto": false, "invalidationReason": "Image depicts non-plot asset or packaging rather than crop canopy", "metrics": {"overallVigor": 0, "shootVigor": 0, "abioticStressRecovery": 5, "leafAreaIndexEstimated": 0, "shootDensityScore": 0, "wiltingIndex": 0, "canopyGreennessPct": 0, "foliarUniformityScore": 0}, "targets": [], "details": {"growthObservations": [], "confidence": "Low", "notes": "Evaluation precluded: Non-plot image."}}.
+
+ZERO-HALLUCINATION & ACCURACY RULES:
+1. ONLY report verifiable physiological differences. Distinguish genuine biostimulant enhancement (enhanced shoot density, expanded leaf area, darker green foliar luster, turgid leaves) from normal baseline growth. DO NOT fabricate miraculous growth spurts or unsubstantiated claims.
+2. In stress recovery trials, accurately evaluate turgidity vs wilting, absence of leaf roll, and recovery from thermal or osmotic stress.
+3. If viewing root systems (washed roots or rhizobox), evaluate root branching density, lateral root proliferation, and nodulation.
+4. Estimate:
+   - "overallVigor": Overall crop vigor rating on scale 0-10 (10 = exceptional vigor).
+   - "shootVigor": Shoot and branch development rating on scale 0-10.
+   - "abioticStressRecovery": Resilience and recovery score 1-10 (1 = severe unrecovered stress/wilting, 10 = complete recovery, fully turgid).
+   - "leafAreaIndexEstimated": Visual canopy density index on scale 0-10 (10 = fully closed dense canopy).
+   - "shootDensityScore": Density of shoots/tillers per plant/pot on scale 0-10.
+   - "wiltingIndex": Wilting or flaccidity score on scale 0-10 (0 = fully turgid/erect, 10 = completely desiccated/wilted).
+   - "canopyGreennessPct": Percentage of canopy displaying vibrant, healthy green foliage (0-100%).
+   - "foliarUniformityScore": Uniformity and consistency of canopy growth on scale 0-10.
+
+Respond ONLY with a single minified JSON object in this exact format:
+{
+  "isValidPlotPhoto": true,
+  "invalidationReason": null,
+  "metrics": {
+    "overallVigor": NUMBER,
+    "shootVigor": NUMBER,
+    "abioticStressRecovery": NUMBER,
+    "leafAreaIndexEstimated": NUMBER,
+    "shootDensityScore": NUMBER,
+    "wiltingIndex": NUMBER,
+    "canopyGreennessPct": NUMBER,
+    "foliarUniformityScore": NUMBER
+  },
+  "targets": [
+    {"name": "Growth / Vigor Parameter", "value": NUMBER, "status": "Vigorous/Healthy/Stressed", "confidence": NUMBER, "notes": "..."}
+  ],
+  "details": {
+    "growthObservations": ["..."],
+    "confidence": "High|Medium|Low",
+    "notes": "..."
+  }
+}
+${historyPrompt}`;
+
+      responseSchema = {
+        type: Type.OBJECT,
+        properties: {
+          isValidPlotPhoto: { type: Type.BOOLEAN },
+          invalidationReason: { type: Type.STRING },
+          metrics: {
+            type: Type.OBJECT,
+            properties: {
+              overallVigor: { type: Type.NUMBER },
+              shootVigor: { type: Type.NUMBER },
+              abioticStressRecovery: { type: Type.NUMBER },
+              leafAreaIndexEstimated: { type: Type.NUMBER },
+              shootDensityScore: { type: Type.NUMBER },
+              wiltingIndex: { type: Type.NUMBER },
+              canopyGreennessPct: { type: Type.NUMBER },
+              foliarUniformityScore: { type: Type.NUMBER }
+            },
+            required: ["overallVigor", "shootVigor", "abioticStressRecovery"]
+          },
+          targets: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                name: { type: Type.STRING },
+                value: { type: Type.NUMBER },
+                status: { type: Type.STRING },
+                confidence: { type: Type.NUMBER },
+                notes: { type: Type.STRING }
+              },
+              required: ["name", "status"]
+            }
+          },
+          details: {
+            type: Type.OBJECT,
+            properties: {
+              growthObservations: { type: Type.ARRAY, items: { type: Type.STRING } },
+              confidence: { type: Type.STRING },
+              notes: { type: Type.STRING }
+            },
+            required: ["confidence", "notes"]
+          }
+        },
+        required: ["isValidPlotPhoto", "metrics", "details"]
       };
     } else {
       prompt = `As an agricultural expert analyzing a photo from a ${categoryId} trial, estimate the trial's primary observation metric named "${primaryField}". Respond ONLY with a single minified JSON object in this exact format: {"metrics": {"${primaryField}": NUMBER}, "details": {"observations": ["..."], "confidence": "High|Medium|Low", "notes": "..."}}. Provide numeric values where possible (0-100 for percentages, or raw numeric for counts). ${historyPrompt}`;
@@ -797,17 +1065,52 @@ ${historyPrompt}`;
     }
 
 
-    // Non-herbicide: expect { metrics: { primaryField: number }, details: {...}, value: number }
-    const aiData = {};
-    if (parsed.metrics && typeof parsed.metrics === 'object') {
-      aiData.metrics = parsed.metrics;
-    }
+    // Non-herbicide: process structured output with invalidation and targets support
+    const aiData = {
+      isValidPlotPhoto: parsed.isValidPlotPhoto !== false,
+      invalidationReason: parsed.invalidationReason || null,
+      metrics: (parsed.metrics && typeof parsed.metrics === 'object') ? parsed.metrics : {},
+      targets: Array.isArray(parsed.targets) ? parsed.targets : [],
+      details: parsed.details || {},
+      overallAssessment: parsed.overallAssessment || parsed.details?.notes || parsed.notes || '',
+      notes: parsed.notes || parsed.details?.notes || '',
+      confidence: parsed.confidence || parsed.details?.confidence || 'MEDIUM',
+      bbchStage: parsed.bbchStage || ''
+    };
+
     if (typeof parsed.value === 'number') aiData.value = parsed.value;
-    if (parsed.details) aiData.details = parsed.details;
     if (parsed[primaryField] !== undefined) {
-      aiData.metrics = aiData.metrics || {};
       const v = Number(parsed[primaryField]);
       if (!Number.isNaN(v)) aiData.metrics[primaryField] = v;
+    }
+
+    // Auto-normalize identified items into targets array if targets was empty
+    if (aiData.targets.length === 0 && parsed.details) {
+      if (Array.isArray(parsed.details.identifiedDiseases) && parsed.details.identifiedDiseases.length > 0) {
+        aiData.targets = parsed.details.identifiedDiseases.map(d => ({
+          name: d,
+          value: parsed.metrics?.diseaseSeverity ?? 0,
+          status: (parsed.metrics?.diseaseSeverity ?? 0) > 0 ? 'Symptomatic' : 'Healthy',
+          confidence: parsed.details.confidence === 'High' ? 90 : parsed.details.confidence === 'Medium' ? 70 : 50,
+          notes: Array.isArray(parsed.details.symptoms) ? parsed.details.symptoms.join(', ') : (parsed.details.notes || '')
+        }));
+      } else if (Array.isArray(parsed.details.identifiedPests) && parsed.details.identifiedPests.length > 0) {
+        aiData.targets = parsed.details.identifiedPests.map(p => ({
+          name: p,
+          value: parsed.metrics?.pestCount ?? 0,
+          status: (parsed.metrics?.pestCount ?? 0) > 0 ? 'Symptomatic' : 'Healthy',
+          confidence: parsed.details.confidence === 'High' ? 90 : parsed.details.confidence === 'Medium' ? 70 : 50,
+          notes: Array.isArray(parsed.details.damageTypes) ? parsed.details.damageTypes.join(', ') : (parsed.details.notes || '')
+        }));
+      } else if (Array.isArray(parsed.details.deficiencySymptoms) && parsed.details.deficiencySymptoms.length > 0) {
+        aiData.targets = parsed.details.deficiencySymptoms.map(s => ({
+          name: typeof s === 'string' ? s : (s.name || 'Deficiency'),
+          value: parsed.metrics?.deficiencySeverity ?? 0,
+          status: (parsed.metrics?.deficiencySeverity ?? 0) > 0 ? 'Deficient' : 'Sufficient',
+          confidence: 85,
+          notes: parsed.details.notes || ''
+        }));
+      }
     }
 
     return aiData;

@@ -916,10 +916,20 @@ export default function PhotoAnalyzerView({
                   </div>
                   <div className="flex items-baseline justify-between">
                     <span className="text-2xl font-black text-white">
-                      {phenotypeResult ? `${phenotypeResult.estimatedWeedControlPct}%` : '—'}
+                      {phenotypeResult ? (
+                        activeCategory === 'fungicide' ? `${phenotypeResult.greenLeafArea}%` :
+                        activeCategory === 'nutrition' ? `LCC ${phenotypeResult.estimatedLCCScore}` :
+                        activeCategory === 'biostimulant' ? `${phenotypeResult.visualVigor}/10` :
+                        activeCategory === 'pesticide' ? `${phenotypeResult.greenCanopyPct}%` :
+                        `${phenotypeResult.estimatedWeedControlPct}%`
+                      ) : '—'}
                     </span>
                     <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
-                      Estimated Weed Kill
+                      {activeCategory === 'fungicide' ? 'Green Leaf Area' :
+                       activeCategory === 'nutrition' ? 'Leaf Color Index' :
+                       activeCategory === 'biostimulant' ? 'Calibrated Vigor' :
+                       activeCategory === 'pesticide' ? 'Intact Canopy' :
+                       'Estimated Weed Kill'}
                     </span>
                   </div>
                 </div>
@@ -1155,15 +1165,31 @@ export default function PhotoAnalyzerView({
                   type="button"
                   disabled={!phenotypeResult}
                   onClick={() => {
-                    const killVal = phenotypeResult?.estimatedWeedControlPct ?? phenotypeResult?.calculatedDesiccationRate;
-                    if (killVal !== undefined && killVal !== null && onApplyValue) {
-                      onApplyValue(killVal);
+                    const applyVal = activeCategory === 'fungicide'
+                      ? (phenotypeResult?.greenLeafArea ?? phenotypeResult?.greenCanopyPct)
+                      : activeCategory === 'nutrition'
+                      ? (phenotypeResult?.canopyGreennessPct ?? phenotypeResult?.greenCanopyPct)
+                      : activeCategory === 'biostimulant'
+                      ? (phenotypeResult?.canopyGreennessPct ?? phenotypeResult?.greenCanopyPct)
+                      : activeCategory === 'pesticide'
+                      ? (phenotypeResult?.greenCanopyPct ?? phenotypeResult?.greenLeafArea)
+                      : (phenotypeResult?.estimatedWeedControlPct ?? phenotypeResult?.calculatedDesiccationRate);
+                    if (applyVal !== undefined && applyVal !== null && onApplyValue) {
+                      onApplyValue(applyVal);
                       onClose();
                     }
                   }}
                   className="flex-1 py-2 px-3 text-xs font-bold bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white rounded-xl shadow transition"
                 >
-                  Apply Phenotype Kill ({phenotypeResult ? (phenotypeResult.estimatedWeedControlPct ?? phenotypeResult.calculatedDesiccationRate ?? 0) : 0}%)
+                  {activeCategory === 'fungicide'
+                    ? `Apply GLA (${phenotypeResult ? (phenotypeResult.greenLeafArea ?? phenotypeResult.greenCanopyPct ?? 0) : 0}%)`
+                    : activeCategory === 'nutrition'
+                    ? `Apply Greenness (${phenotypeResult ? (phenotypeResult.canopyGreennessPct ?? phenotypeResult.greenCanopyPct ?? 0) : 0}%)`
+                    : activeCategory === 'biostimulant'
+                    ? `Apply Vigor (${phenotypeResult ? (phenotypeResult.canopyGreennessPct ?? phenotypeResult.greenCanopyPct ?? 0) : 0}%)`
+                    : activeCategory === 'pesticide'
+                    ? `Apply Intact Canopy (${phenotypeResult ? (phenotypeResult.greenCanopyPct ?? phenotypeResult.greenLeafArea ?? 0) : 0}%)`
+                    : `Apply Phenotype Kill (${phenotypeResult ? (phenotypeResult.estimatedWeedControlPct ?? phenotypeResult.calculatedDesiccationRate ?? 0) : 0}%)`}
                 </button>
               ) : (
                 onApplyValue && localResults && localResults.length > 0 && (

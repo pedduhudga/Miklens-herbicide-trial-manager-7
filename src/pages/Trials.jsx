@@ -4042,7 +4042,34 @@ export default function Trials({ onMenuClick }) {
 
     // Normalize target details list
     const isHerbicide = trialCat === 'herbicide';
-    const aiTargetsList = isHerbicide ? (aiData.weeds || []) : (aiData.targets || []);
+    let aiTargetsList = isHerbicide ? (aiData.weeds || []) : (aiData.targets || []);
+    if (!isHerbicide && (!aiTargetsList || aiTargetsList.length === 0) && aiData.details) {
+      if (Array.isArray(aiData.details.identifiedDiseases) && aiData.details.identifiedDiseases.length > 0) {
+        aiTargetsList = aiData.details.identifiedDiseases.map(d => ({
+          name: d,
+          value: aiData.metrics?.diseaseSeverity ?? 0,
+          status: (aiData.metrics?.diseaseSeverity ?? 0) > 0 ? 'Symptomatic' : 'Healthy',
+          confidence: aiData.details.confidence === 'High' ? 90 : aiData.details.confidence === 'Medium' ? 70 : 50,
+          notes: Array.isArray(aiData.details.symptoms) ? aiData.details.symptoms.join(', ') : (aiData.details.notes || '')
+        }));
+      } else if (Array.isArray(aiData.details.identifiedPests) && aiData.details.identifiedPests.length > 0) {
+        aiTargetsList = aiData.details.identifiedPests.map(p => ({
+          name: p,
+          value: aiData.metrics?.pestCount ?? 0,
+          status: (aiData.metrics?.pestCount ?? 0) > 0 ? 'Symptomatic' : 'Healthy',
+          confidence: aiData.details.confidence === 'High' ? 90 : aiData.details.confidence === 'Medium' ? 70 : 50,
+          notes: Array.isArray(aiData.details.damageTypes) ? aiData.details.damageTypes.join(', ') : (aiData.details.notes || '')
+        }));
+      } else if (Array.isArray(aiData.details.deficiencySymptoms) && aiData.details.deficiencySymptoms.length > 0) {
+        aiTargetsList = aiData.details.deficiencySymptoms.map(s => ({
+          name: typeof s === 'string' ? s : (s.name || 'Deficiency'),
+          value: aiData.metrics?.deficiencySeverity ?? 0,
+          status: (aiData.metrics?.deficiencySeverity ?? 0) > 0 ? 'Deficient' : 'Sufficient',
+          confidence: 85,
+          notes: aiData.details.notes || ''
+        }));
+      }
+    }
     
     const isDetectedVal = (coverVal, statusStr) => {
       const s = String(statusStr || '').toLowerCase();
@@ -4178,7 +4205,7 @@ export default function Trials({ onMenuClick }) {
       invalidReason: isInvalidImage ? (aiData.preclusionReason || cleanNotes || 'Non-plot image (commercial product / flyer / packaging)') : null,
       [primaryObsField]: isInvalidImage ? null : primaryValue,
       weedCover: isHerbicide ? (isInvalidImage ? null : primaryValue) : null,
-      weedDetails: isInvalidImage ? [] : (normalizedWeeds.length > 0 ? normalizedWeeds : [{ species: isHerbicide ? 'No weeds detected' : 'No targets detected', cover: 0, status: '', notes: aiData.notes || 'AI-analyzed', confidence: null, detectedCount: 0, incidence: 0.0 }]),
+      weedDetails: isInvalidImage ? [] : (normalizedWeeds.length > 0 ? normalizedWeeds : [{ species: isHerbicide ? 'No weeds detected' : 'Healthy Crop (No Symptoms)', cover: 0, status: isHerbicide ? '' : 'Healthy', notes: aiData.notes || 'AI-analyzed: No symptoms detected', confidence: 95, detectedCount: 0, incidence: 0.0 }]),
       notes: cleanNotes,
       aiConfidence: isInvalidImage ? 'LOW' : (aiData.confidence || 'MEDIUM'),
       aiEfficacyAssessment: cleanEfficacy,
@@ -4215,6 +4242,8 @@ export default function Trials({ onMenuClick }) {
         const num = parseFloat(v);
         if (!isNaN(num)) {
           newObs[k] = num;
+        } else if (typeof v === 'string') {
+          newObs[k] = v;
         }
       });
     }
@@ -4266,6 +4295,8 @@ export default function Trials({ onMenuClick }) {
             } else {
               mergedObs[k] = num;
             }
+          } else if (typeof v === 'string') {
+            mergedObs[k] = v;
           }
         });
       }
