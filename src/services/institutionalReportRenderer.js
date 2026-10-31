@@ -220,10 +220,15 @@ function drawEfficacyKineticChart(doc, reportData, startX, startY, chartW, chart
   doc.rect(startX, startY, chartW, 1.5, 'F');
 
   // Chart Title
+  const cat = reportData.category;
+  const chartTitleText = cat === 'fungicide' ? '5.2 Bio-Efficacy Kinetic Progression & Suppression Dynamics (% DCE)'
+    : cat === 'pesticide' ? '5.2 Target Pest Mortality & Suppression Kinetics (%)'
+    : (cat === 'nutrition' || cat === 'biostimulant') ? '5.2 Crop Vigor & Growth Dynamics (% Gain)'
+    : '5.2 Bio-Efficacy Kinetic Progression & Suppression Dynamics (% WCE)';
   doc.setFontSize(7.8);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(...DARK_TEXT);
-  doc.text('5.2 Bio-Efficacy Kinetic Progression & Suppression Dynamics (% WCE)', startX + 5, startY + 5.5);
+  doc.text(chartTitleText, startX + 5, startY + 5.5);
 
   // Plot Area Geometry
   const plotLeft = startX + 16;
@@ -260,10 +265,14 @@ function drawEfficacyKineticChart(doc, reportData, startX, startY, chartW, chart
     curDashX += dashLen + gapLen;
   }
 
+  const cutoffText = cat === 'fungicide' ? '70% Regulatory Bio-Efficacy Cutoff (DCE >= 70%)'
+    : cat === 'pesticide' ? '70% Target Pest Suppression Cutoff (Efficacy >= 70%)'
+    : (cat === 'nutrition' || cat === 'biostimulant') ? '70% Target Growth Enhancement Benchmark (Gain >= 70%)'
+    : '70% Regulatory Bio-Efficacy Cutoff (WCE >= 70%)';
   doc.setFontSize(5.5);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(217, 119, 6);
-  doc.text('70% Regulatory Bio-Efficacy Cutoff (WCE >= 70%)', plotRight, y70 - 1.2, { align: 'right' });
+  doc.text(cutoffText, plotRight, y70 - 1.2, { align: 'right' });
 
   // X-Axis Data Points & DAAs
   let rawPoints = timeline.filter(t => t.daa !== undefined).map(t => ({
@@ -792,9 +801,23 @@ export async function generateInstitutionalPDF(reportData) {
   doc.rect(14, curY, 3, 18, 'F');
 
   const cardColW = (pw - 28) / 3;
+  const isNutritionOrBiostimulant = cat === 'nutrition' || cat === 'biostimulant';
+  const densityUnit = cat === 'herbicide' ? 'weeds/m²'
+    : cat === 'pesticide' ? 'pests/sample'
+    : cat === 'fungicide' ? '% severity'
+    : 'vigor index';
+
+  const effKpiVal = isNutritionOrBiostimulant
+    ? `${p.peakControl.toFixed(1)}% Vigor Gain`
+    : cat === 'pesticide'
+      ? `${p.peakControl.toFixed(1)}% Pest Suppression`
+      : cat === 'fungicide'
+        ? `${p.peakControl.toFixed(1)}% Disease Control`
+        : `${p.peakControl.toFixed(1)}% Mortality`;
+
   const kpiItems = [
-    { label: 'PEAK BIO-EFFICACY', val: `${p.peakControl.toFixed(1)}% Mortality`, sub: `Achieved at ${p.peakDaa} DAT` },
-    { label: 'NET CANOPY REDUCTION', val: `${p.netReduction.toFixed(1)}% Net Reduction`, sub: `Baseline ${p.baselineCover}% -> ${p.finalCover}%` },
+    { label: 'PEAK BIO-EFFICACY', val: effKpiVal, sub: `Achieved at ${p.peakDaa} DAT` },
+    { label: isNutritionOrBiostimulant ? 'NET VIGOR GAIN' : 'NET CANOPY REDUCTION', val: `${p.netReduction.toFixed(1)}% ${isNutritionOrBiostimulant ? 'Vigor Gain' : 'Net Reduction'}`, sub: `Baseline ${p.baselineCover}% -> ${p.finalCover}%` },
     { label: 'CROP SAFETY CLEARANCE', val: `${p.phytoScore.toFixed(1)} / 10 Score`, sub: `Rating: ${p.phytoDesc.injuryLevel}` }
   ];
 
@@ -842,16 +865,22 @@ export async function generateInstitutionalPDF(reportData) {
   if (stdTrt) {
     comparisonClause = `, compared with ${stdTrt.mortality7.toFixed(2)}% under ${stdTrt.productName}`;
   } else if (ctrlTrt) {
-    comparisonClause = `, while the untreated control recorded 0.00% mortality`;
+    comparisonClause = `, while the untreated control recorded 0.00% ${isNutritionOrBiostimulant ? 'gain' : 'control'}`;
   }
 
-  const p1 = `The field trial was conducted in ${dc.cropDisplay} naturally infested with a mixed population of ${targetLabel}. The treatments were applied as a post-emergence spray over the crop canopy and existing target flora to assess bio-efficacy and crop safety. The predominant species observed in the experimental plot was ${reportData.dominantFloraName}. Application of ${bestTrt.productName} @ ${bestTrt.dose || 'calibrated dose'} resulted in peak bio-efficacy, recording ${p.peakControl.toFixed(2)}% mortality at ${p.peakDaa || 7} DAT${comparisonClause}. Target population density under ${bestTrt.productName} decreased from ${p.baselineCover.toFixed(2)} weeds/m² before treatment to ${p.finalCover.toFixed(2)} weeds/m² at ${p.peakDaa || 7} DAT, indicating rapid post-emergence suppression.`;
+  const p1 = isNutritionOrBiostimulant
+    ? `The field trial was conducted in ${dc.cropDisplay} naturally evaluated for ${targetLabel}. The treatments were applied over the crop canopy to assess growth stimulation, vegetative vigor enhancement, and crop safety. Application of ${bestTrt.productName} @ ${bestTrt.dose || 'calibrated dose'} resulted in peak vigor enhancement, recording ${p.peakControl.toFixed(2)}% gain at ${p.peakDaa || 7} DAT${comparisonClause}. Crop vigor under ${bestTrt.productName} progressed from ${p.baselineCover.toFixed(2)} ${densityUnit} before treatment to ${p.finalCover.toFixed(2)} ${densityUnit} at ${p.peakDaa || 7} DAT, indicating rapid vegetative stimulation.`
+    : `The field trial was conducted in ${dc.cropDisplay} naturally infested with a mixed population of ${targetLabel}. The treatments were applied as a post-emergence spray over the crop canopy and existing target flora to assess bio-efficacy and crop safety. The predominant species observed in the experimental plot was ${reportData.dominantFloraName}. Application of ${bestTrt.productName} @ ${bestTrt.dose || 'calibrated dose'} resulted in peak bio-efficacy, recording ${p.peakControl.toFixed(2)}% ${cat === 'fungicide' ? 'disease control' : cat === 'pesticide' ? 'pest suppression' : 'mortality'} at ${p.peakDaa || 7} DAT${comparisonClause}. Target population density under ${bestTrt.productName} decreased from ${p.baselineCover.toFixed(2)} ${densityUnit} before treatment to ${p.finalCover.toFixed(2)} ${densityUnit} at ${p.peakDaa || 7} DAT, indicating rapid post-emergence suppression.`;
 
   let p2 = '';
   if (isMulti) {
-    p2 = `Target density was monitored across observation intervals. Across the evaluated treatments, ${bestTrt.productName} maintained superior suppression compared to untreated checks and baseline levels, demonstrating consistent bio-efficacy throughout the assessment window.`;
+    p2 = isNutritionOrBiostimulant
+      ? `Crop vigor and physiological parameters were monitored across observation intervals. Across the evaluated treatments, ${bestTrt.productName} maintained superior growth response compared to untreated checks and baseline levels, demonstrating consistent biostimulatory efficacy throughout the assessment window.`
+      : `Target density was monitored across observation intervals. Across the evaluated treatments, ${bestTrt.productName} maintained superior suppression compared to untreated checks and baseline levels, demonstrating consistent bio-efficacy throughout the assessment window.`;
   } else {
-    p2 = `Target density was subsequently monitored across post-treatment observation intervals, maintaining sustained suppression compared to pre-treatment baseline levels (${p.baselineCover.toFixed(2)} weeds/m²), confirming persistent control without rapid weed regeneration.`;
+    p2 = isNutritionOrBiostimulant
+      ? `Crop vigor was subsequently monitored across post-treatment observation intervals, maintaining sustained vegetative enhancement compared to pre-treatment baseline levels (${p.baselineCover.toFixed(2)} ${densityUnit}), confirming persistent positive growth response.`
+      : `Target density was subsequently monitored across post-treatment observation intervals, maintaining sustained suppression compared to pre-treatment baseline levels (${p.baselineCover.toFixed(2)} ${densityUnit}), confirming persistent control without rapid target regeneration.`;
   }
 
   let p3 = '';
@@ -860,12 +889,16 @@ export async function generateInstitutionalPDF(reportData) {
       .filter(t => t.biomass && t.biomass.hasBiomass && t.biomass.fresh !== null)
       .map(t => `${t.productName} recorded ${t.biomass.fresh.toFixed(2)} g/m² fresh weight${t.biomass.dry !== null ? ` and ${t.biomass.dry.toFixed(2)} g/m² dry weight` : ''}`)
       .join('; ');
-    p3 = `Biomass accumulation analysis indicated significant target mass reduction: ${bioDetails}. This confirms the high agronomic effectiveness of the treatment in suppressing vegetative growth.`;
+    p3 = isNutritionOrBiostimulant
+      ? `Biomass accumulation analysis indicated significant vegetative biomass gains: ${bioDetails}. This confirms the high agronomic effectiveness of the treatment in promoting crop growth.`
+      : `Biomass accumulation analysis indicated significant target mass reduction: ${bioDetails}. This confirms the high agronomic effectiveness of the treatment in suppressing vegetative growth.`;
   } else {
-    p3 = `Target canopy reduction reached ${p.netReduction.toFixed(1)}%, reflecting substantial suppression of vegetative biomass and weed pressure. The post-treatment progression confirms strong agronomic performance under standardized field conditions.`;
+    p3 = isNutritionOrBiostimulant
+      ? `Overall vegetative vigor gain reached ${p.netReduction.toFixed(1)}%, reflecting substantial physiological enhancement and crop growth stimulation under standardized field conditions.`
+      : `Target canopy reduction reached ${p.netReduction.toFixed(1)}%, reflecting substantial suppression of vegetative biomass and target pressure. The post-treatment progression confirms strong agronomic performance under standardized field conditions.`;
   }
 
-  const p4 = `With respect to crop safety, ${bestTrt.productName} recorded a crop safety score of ${p.phytoScore.toFixed(2)} at 7 DAT, corresponding to ${p.phytoDesc.injuryLevel}, characterized by ${p.phytoDesc.symptoms}. Crop foliage exhibited complete physiological clearance without persistent injury or growth stunting. Overall, ${bestTrt.productName} demonstrated high weed suppression alongside verified crop safety under ${dc.studyDesign}.`;
+  const p4 = `With respect to crop safety, ${bestTrt.productName} recorded a crop safety score of ${p.phytoScore.toFixed(2)} at 7 DAT, corresponding to ${p.phytoDesc.injuryLevel}, characterized by ${p.phytoDesc.symptoms}. Crop foliage exhibited complete physiological clearance without persistent injury or growth stunting. Overall, ${bestTrt.productName} demonstrated high ${isNutritionOrBiostimulant ? 'growth promotion' : cat === 'fungicide' ? 'disease control' : cat === 'pesticide' ? 'pest suppression' : 'weed suppression'} alongside verified crop safety under ${dc.studyDesign}.`;
 
   const textWrapWidth = 178;
   [p1, p2, p3, p4].forEach(paragraph => {
@@ -886,9 +919,22 @@ export async function generateInstitutionalPDF(reportData) {
   doc.roundedRect(14, execBenchY, pw - 28, execBenchH, 1.5, 1.5, 'D');
 
   const benchColW = (pw - 28) / 3;
+  const benchMainVal = isNutritionOrBiostimulant
+    ? `${p.peakControl.toFixed(1)}% Peak Gain`
+    : cat === 'fungicide'
+      ? `${p.peakControl.toFixed(1)}% Peak Control`
+      : cat === 'pesticide'
+        ? `${p.peakControl.toFixed(1)}% Peak Suppression`
+        : `${p.peakControl.toFixed(1)}% Peak Mortality`;
+
+  const benchSubVal = cat === 'fungicide' ? 'Validated Bio-Efficacy DCE >= 70% Threshold'
+    : cat === 'pesticide' ? 'Validated Pest Suppression >= 70% Threshold'
+    : isNutritionOrBiostimulant ? 'Validated Growth Enhancement Benchmark'
+    : 'Validated Abbott WCE >= 70% Threshold';
+
   const benchItems = [
-    { title: 'POPULATION SUPPRESSION INDEX', main: `${p.baselineCover.toFixed(1)} -> ${p.finalCover.toFixed(1)} No./m2`, sub: `Net Reduction: ${p.netReduction.toFixed(1)}%` },
-    { title: 'BIO-EFFICACY BENCHMARK', main: `${p.peakControl.toFixed(1)}% Peak Mortality`, sub: 'Validated Abbott WCE >= 70% Threshold' },
+    { title: isNutritionOrBiostimulant ? 'GROWTH ENHANCEMENT INDEX' : 'POPULATION SUPPRESSION INDEX', main: `${p.baselineCover.toFixed(1)} -> ${p.finalCover.toFixed(1)} ${densityUnit}`, sub: isNutritionOrBiostimulant ? `Net Gain: ${p.netReduction.toFixed(1)}%` : `Net Reduction: ${p.netReduction.toFixed(1)}%` },
+    { title: 'BIO-EFFICACY BENCHMARK', main: benchMainVal, sub: benchSubVal },
     { title: 'CROP SAFETY & SELECTIVITY', main: `${p.phytoScore.toFixed(1)} / 10 Score`, sub: `Complete Foliar Safety (${p.phytoDesc.injuryLevel})` }
   ];
 
@@ -1303,12 +1349,19 @@ export async function generateInstitutionalPDF(reportData) {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // PAGE 5: 4 BOTANICAL TARGET FLORA, BIO-EFFICACY RESULTS & AGRONOMIC INFERENCE
+  // PAGE 5: 4 TARGET FLORA/FAUNA/CROP RESPONSE, BIO-EFFICACY RESULTS & AGRONOMIC INFERENCE
   // ═══════════════════════════════════════════════════════════════════════════
   doc.addPage();
   curY = 24;
 
-  drawSectionBanner(doc, '4 BOTANICAL TARGET FLORA, BIO-EFFICACY RESULTS & AGRONOMIC INFERENCE', curY);
+  const sec4BannerTitle = cat === 'fungicide'
+    ? '4 TARGET PATHOGEN PROFILE, BIO-EFFICACY RESULTS & AGRONOMIC INFERENCE'
+    : cat === 'pesticide'
+      ? '4 TARGET PEST FAUNA, BIO-EFFICACY RESULTS & AGRONOMIC INFERENCE'
+      : (cat === 'nutrition' || cat === 'biostimulant')
+        ? '4 CROP PHYSIOLOGICAL RESPONSE, GROWTH DYNAMICS & AGRONOMIC INFERENCE'
+        : '4 BOTANICAL TARGET FLORA, BIO-EFFICACY RESULTS & AGRONOMIC INFERENCE';
+  drawSectionBanner(doc, sec4BannerTitle, curY);
   curY += 7;
 
   doc.setFontSize(9);
@@ -1320,7 +1373,11 @@ export async function generateInstitutionalPDF(reportData) {
   doc.setFontSize(7.8);
   doc.setFont('helvetica', 'italic');
   doc.setTextColor(...MUTED_TEXT);
-  doc.text(`Table 1. ${cat === 'pesticide' ? 'Target pest species' : cat === 'fungicide' ? 'Target fungal pathogen profile' : 'Weed flora'} observed in the experimental plot prior to treatment application:`, 14, curY);
+  const floraTableCaption = cat === 'pesticide' ? 'Target pest species'
+    : cat === 'fungicide' ? 'Target fungal pathogen profile'
+    : (cat === 'nutrition' || cat === 'biostimulant') ? 'Crop growth and baseline vegetative parameters'
+    : 'Weed flora';
+  doc.text(`Table 1. ${floraTableCaption} observed in the experimental plot prior to treatment application:`, 14, curY);
 
   curY += 2;
   autoTable(doc, {
@@ -1344,19 +1401,29 @@ export async function generateInstitutionalPDF(reportData) {
 
   const tMetrics = reportData.treatmentMetrics;
 
-  // Table 2: Mortality
+  // Table 2: Mortality / Suppression / Vigor
   curY = doc.lastAutoTable.finalY + 4;
   doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(...DARK_TEXT);
-  doc.text(`Table 2: Effect of different treatments on mortality / bio-efficacy of ${targetLabel}`, 14, curY);
+  const t2Title = isNutritionOrBiostimulant
+    ? `Table 2: Effect of different treatments on crop vigor / growth gain of ${targetLabel}`
+    : `Table 2: Effect of different treatments on mortality / bio-efficacy of ${targetLabel}`;
+  doc.text(t2Title, 14, curY);
 
   curY += 2;
+  const t2Header = isNutritionOrBiostimulant
+    ? 'Crop Vigor / Gain (%) at 7 DAT'
+    : cat === 'fungicide'
+      ? 'Disease Control (%) at 7 DAT'
+      : cat === 'pesticide'
+        ? 'Pest Suppression (%) at 7 DAT'
+        : 'Weed Mortality (%) at 7 DAT';
   autoTable(doc, {
     startY: curY,
     margin: { left: 14, right: 14 },
     tableWidth: 182,
-    head: [['Trt. No.', 'Product Name', 'Dose / Lit of Water', 'Weed Mortality (%) at 7 DAT']],
+    head: [['Trt. No.', 'Product Name', 'Dose / Lit of Water', t2Header]],
     body: tMetrics.map(t => [t.trNo, t.productName, t.dose, `${t.mortality7.toFixed(2)}%`]),
     theme: 'grid',
     headStyles: { fillColor: MIKLENS_GREEN, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.2, halign: 'center', cellPadding: 2 },
@@ -1379,12 +1446,19 @@ export async function generateInstitutionalPDF(reportData) {
     }
   });
 
-  // Table 3: Weed Density
+  // Table 3: Target Density / Disease Severity / Pest Count / Vigor
   curY = doc.lastAutoTable.finalY + 4;
   doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(...DARK_TEXT);
-  doc.text(`Table 3: Effect of different treatments on Target Density (No./m²)`, 14, curY);
+  const t3Title = cat === 'fungicide'
+    ? 'Table 3: Effect of different treatments on Disease Severity (%)'
+    : cat === 'pesticide'
+      ? 'Table 3: Effect of different treatments on Pest Density (count/sample)'
+      : isNutritionOrBiostimulant
+        ? 'Table 3: Effect of different treatments on Crop Vigor / Growth Index'
+        : 'Table 3: Effect of different treatments on Target Density (No./m²)';
+  doc.text(t3Title, 14, curY);
 
   curY += 2;
   autoTable(doc, {
@@ -1421,14 +1495,19 @@ export async function generateInstitutionalPDF(reportData) {
   doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(...DARK_TEXT);
-  doc.text(`Table 4: Effect of different treatments on Target Biomass Accumulation`, 14, curY);
+  const t4Title = isNutritionOrBiostimulant
+    ? 'Table 4: Effect of different treatments on Crop Biomass Accumulation'
+    : 'Table 4: Effect of different treatments on Target Biomass Accumulation';
+  doc.text(t4Title, 14, curY);
 
   curY += 2;
+  const t4FreshHdr = cat === 'herbicide' ? 'Weed Fresh Weight (g/m²)' : 'Fresh Biomass (g)';
+  const t4DryHdr = cat === 'herbicide' ? 'Weed Dry Weight (g/m²)' : 'Dry Biomass (g)';
   autoTable(doc, {
     startY: curY,
     margin: { left: 14, right: 14 },
     tableWidth: 182,
-    head: [['Trt. No.', 'Product Name', 'Dose / Lit of Water', 'Weed Fresh Weight (g/m²)', 'Weed Dry Weight (g/m²)']],
+    head: [['Trt. No.', 'Product Name', 'Dose / Lit of Water', t4FreshHdr, t4DryHdr]],
     body: tMetrics.map(t => [
       t.trNo,
       t.productName,
@@ -1509,22 +1588,31 @@ export async function generateInstitutionalPDF(reportData) {
 
   let infBiomassSentence = '';
   if (reportData.hasBiomassData && infBestTrt.biomass && infBestTrt.biomass.fresh !== null) {
-    infBiomassSentence = ` Recorded weed fresh weight under ${infBestTrt.productName} was ${infBestTrt.biomass.fresh.toFixed(2)} g/m²${infBestTrt.biomass.dry !== null ? ` (dry weight: ${infBestTrt.biomass.dry.toFixed(2)} g/m²)` : ''}, confirming significant suppression of biomass accumulation.`;
+    const wtLabel = cat === 'herbicide' ? 'weed fresh weight' : 'fresh biomass';
+    infBiomassSentence = ` Recorded ${wtLabel} under ${infBestTrt.productName} was ${infBestTrt.biomass.fresh.toFixed(2)} g${cat === 'herbicide' ? '/m²' : ''}${infBestTrt.biomass.dry !== null ? ` (dry weight: ${infBestTrt.biomass.dry.toFixed(2)} g${cat === 'herbicide' ? '/m²' : ''})` : ''}, confirming significant ${isNutritionOrBiostimulant ? 'biomass enhancement' : 'suppression of biomass accumulation'}.`;
   } else {
-    infBiomassSentence = ` Overall net canopy reduction reached ${p.netReduction.toFixed(1)}%, confirming high agronomic effectiveness in suppressing target vegetation.`;
+    infBiomassSentence = isNutritionOrBiostimulant
+      ? ` Overall vegetative vigor gain reached ${p.netReduction.toFixed(1)}%, confirming high agronomic effectiveness in enhancing crop growth.`
+      : ` Overall net canopy reduction reached ${p.netReduction.toFixed(1)}%, confirming high agronomic effectiveness in suppressing target vegetation.`;
   }
 
-  const infText = `Application of ${infBestTrt.productName} @ ${infBestTrt.dose || 'calibrated dose'} resulted in peak mortality of ${p.peakControl.toFixed(2)}% at ${p.peakDaa || 7} DAT${infStdComp}. Target density decreased from ${p.baselineCover.toFixed(2)} weeds/m² before treatment to ${p.finalCover.toFixed(2)} weeds/m² at ${p.peakDaa || 7} DAT, indicating rapid post-emergence suppression.${infBiomassSentence} Phytotoxicity on ${dc.cropDisplay || 'the crop'} was scored at ${p.phytoScore.toFixed(2)} / 10 (${p.phytoDesc.injuryLevel}), demonstrating complete physiological recovery and crop selectivity.`;
+  const infText = isNutritionOrBiostimulant
+    ? `Application of ${infBestTrt.productName} @ ${infBestTrt.dose || 'calibrated dose'} resulted in peak vigor improvement of ${p.peakControl.toFixed(2)}% at ${p.peakDaa || 7} DAT${infStdComp}. Crop vigor increased from ${p.baselineCover.toFixed(2)} ${densityUnit} before treatment to ${p.finalCover.toFixed(2)} ${densityUnit} at ${p.peakDaa || 7} DAT, indicating positive vegetative stimulation.${infBiomassSentence} Phytotoxicity on ${dc.cropDisplay || 'the crop'} was scored at ${p.phytoScore.toFixed(2)} / 10 (${p.phytoDesc.injuryLevel}), demonstrating complete physiological tolerance and crop selectivity.`
+    : `Application of ${infBestTrt.productName} @ ${infBestTrt.dose || 'calibrated dose'} resulted in peak mortality of ${p.peakControl.toFixed(2)}% at ${p.peakDaa || 7} DAT${infStdComp}. Target density decreased from ${p.baselineCover.toFixed(2)} ${densityUnit} before treatment to ${p.finalCover.toFixed(2)} ${densityUnit} at ${p.peakDaa || 7} DAT, indicating rapid post-emergence suppression.${infBiomassSentence} Phytotoxicity on ${dc.cropDisplay || 'the crop'} was scored at ${p.phytoScore.toFixed(2)} / 10 (${p.phytoDesc.injuryLevel}), demonstrating complete physiological recovery and crop selectivity.`;
 
   const infLines = doc.splitTextToSize(infText, 178);
   doc.text(infLines, 14, curY);
 
   curY += infLines.length * 3.8 + 4;
   if (curY < 235) {
+    const s43Title = cat === 'fungicide' ? '4.3 Target Pathogen Classification & Fungicide Response Spectrum'
+      : cat === 'pesticide' ? '4.3 Target Pest Classification & Insecticide Susceptibility Spectrum'
+      : isNutritionOrBiostimulant ? '4.3 Crop Growth Profile & Physiological Response Matrix'
+      : '4.3 Target Flora Botanical Classification & Response Spectrum Matrix';
     doc.setFontSize(8.5);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(...MIKLENS_GREEN);
-    doc.text('4.3 Target Flora Botanical Classification & Response Spectrum Matrix', 14, curY);
+    doc.text(s43Title, 14, curY);
 
     curY += 2.5;
     const floraMatrixRows = reportData.weedFloraTable.map(w => {
@@ -1534,11 +1622,12 @@ export async function generateInstitutionalPDF(reportData) {
       return [w.sNo, w.scientificName, w.botanicalFamily, group, resp];
     });
 
+    const respHdr = `Observed ${cat === 'fungicide' ? 'Fungicide' : cat === 'pesticide' ? 'Insecticide' : isNutritionOrBiostimulant ? 'Growth' : 'Herbicide'} Response Spectrum`;
     autoTable(doc, {
       startY: curY,
       margin: { left: 14, right: 14 },
       tableWidth: 182,
-      head: [['#', 'Target Flora Scientific Name', 'Botanical Family', 'Morphological Group', 'Observed Herbicide Response Spectrum']],
+      head: [['#', 'Target Flora / Indicator Scientific Name', 'Botanical Family', 'Morphological Group', respHdr]],
       body: floraMatrixRows,
       theme: 'grid',
       headStyles: { fillColor: MIKLENS_GREEN, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 6.8, halign: 'center', cellPadding: 1.8 },
@@ -1577,10 +1666,10 @@ export async function generateInstitutionalPDF(reportData) {
       tableWidth: 182,
       head: [['Statistical Parameter / Metric', 'Recorded Value', 'Agronomic Evaluation & Regulatory Significance']],
       body: [
-        ['Pre-Treatment Baseline Infestation', `${p.baselineCover.toFixed(2)} weeds/m²`, 'Baseline target pressure prior to application'],
-        ['Final Monitored Target Level', `${p.finalCover.toFixed(2)} weeds/m²`, 'Residual living target canopy at evaluation'],
-        ['Net Canopy Reduction', `${p.netReduction.toFixed(2)}%`, 'Overall target population suppression achieved'],
-        ['Peak Bio-Efficacy Achieved', `${p.peakControl.toFixed(2)}%`, `Maximum suppression reached at ${p.peakDaa} DAT`],
+        ['Pre-Treatment Baseline Level', `${p.baselineCover.toFixed(2)} ${densityUnit}`, 'Baseline target pressure / crop metric prior to application'],
+        ['Final Monitored Target Level', `${p.finalCover.toFixed(2)} ${densityUnit}`, 'Residual living target / monitored crop metric at evaluation'],
+        [isNutritionOrBiostimulant ? 'Net Growth Enhancement' : 'Net Canopy Reduction', `${p.netReduction.toFixed(2)}%`, isNutritionOrBiostimulant ? 'Overall crop vegetative gain achieved' : 'Overall target population suppression achieved'],
+        ['Peak Bio-Efficacy Achieved', `${p.peakControl.toFixed(2)}%`, `Maximum ${isNutritionOrBiostimulant ? 'growth response' : 'suppression'} reached at ${p.peakDaa} DAT`],
         ['Mean Suppression Stability', `${p.meanControl.toFixed(2)}% ± ${p.sem.toFixed(2)}%`, `Mean control across post-treatment intervals (SE(m) ± ${p.sem.toFixed(2)})`],
         ['Coefficient of Variation (CV %)', `${p.cv.toFixed(2)}%`, 'Uniformity index and plot measurement consistency'],
         ['Crop Phytotoxicity Rating', `${p.phytoScore.toFixed(2)} / 10`, `Safety clearance: ${p.phytoDesc.injuryLevel}`]
@@ -1979,19 +2068,31 @@ export async function generateInstitutionalDocx(reportData) {
   const stdTrt = tMetrics.find(t => t.isStandardCheck);
   const ctrlTrt = tMetrics.find(t => t.isControl);
 
+  const isNutritionOrBiostimulant = cat === 'nutrition' || cat === 'biostimulant';
+  const densityUnit = cat === 'herbicide' ? 'weeds/m²'
+    : cat === 'pesticide' ? 'pests/sample'
+    : cat === 'fungicide' ? '% severity'
+    : 'vigor index';
+
   let compClause = '';
   if (stdTrt) {
     compClause = `, compared with ${stdTrt.mortality7.toFixed(2)}% under ${stdTrt.productName}`;
   } else if (ctrlTrt) {
-    compClause = `, while the untreated control recorded 0.00% mortality`;
+    compClause = `, while the untreated control recorded 0.00% ${isNutritionOrBiostimulant ? 'gain' : 'control'}`;
   }
 
-  const p1 = `The field trial was conducted in ${dc.cropDisplay} naturally infested with a mixed population of ${targetLabel}. The treatments were applied as a post-emergence spray over the crop canopy and existing target flora to assess bio-efficacy and crop safety. The predominant species observed in the experimental plot was ${reportData.dominantFloraName}. Application of ${bestTrt.productName} @ ${bestTrt.dose || 'calibrated dose'} resulted in peak bio-efficacy, recording ${p.peakControl.toFixed(2)}% mortality at ${p.peakDaa || 7} DAT${compClause}. Target population density under ${bestTrt.productName} decreased from ${p.baselineCover.toFixed(2)} weeds/m² before treatment to ${p.finalCover.toFixed(2)} weeds/m² at ${p.peakDaa || 7} DAT, indicating rapid post-emergence suppression.`;
+  const p1 = isNutritionOrBiostimulant
+    ? `The field trial was conducted in ${dc.cropDisplay} naturally evaluated for ${targetLabel}. The treatments were applied over the crop canopy to assess growth stimulation, vegetative vigor enhancement, and crop safety. Application of ${bestTrt.productName} @ ${bestTrt.dose || 'calibrated dose'} resulted in peak vigor enhancement, recording ${p.peakControl.toFixed(2)}% gain at ${p.peakDaa || 7} DAT${compClause}. Crop vigor under ${bestTrt.productName} progressed from ${p.baselineCover.toFixed(2)} ${densityUnit} before treatment to ${p.finalCover.toFixed(2)} ${densityUnit} at ${p.peakDaa || 7} DAT, indicating rapid vegetative stimulation.`
+    : `The field trial was conducted in ${dc.cropDisplay} naturally infested with a mixed population of ${targetLabel}. The treatments were applied as a post-emergence spray over the crop canopy and existing target flora to assess bio-efficacy and crop safety. The predominant species observed in the experimental plot was ${reportData.dominantFloraName}. Application of ${bestTrt.productName} @ ${bestTrt.dose || 'calibrated dose'} resulted in peak bio-efficacy, recording ${p.peakControl.toFixed(2)}% ${cat === 'fungicide' ? 'disease control' : cat === 'pesticide' ? 'pest suppression' : 'mortality'} at ${p.peakDaa || 7} DAT${compClause}. Target population density under ${bestTrt.productName} decreased from ${p.baselineCover.toFixed(2)} ${densityUnit} before treatment to ${p.finalCover.toFixed(2)} ${densityUnit} at ${p.peakDaa || 7} DAT, indicating rapid post-emergence suppression.`;
 
   const isMulti = tMetrics.length > 1;
   const p2 = isMulti
-    ? `Target density was monitored across observation intervals. Across the evaluated treatments, ${bestTrt.productName} maintained superior suppression compared to untreated checks and baseline levels, demonstrating consistent bio-efficacy throughout the assessment window.`
-    : `Target density was subsequently monitored across post-treatment observation intervals, maintaining sustained suppression compared to pre-treatment baseline levels (${p.baselineCover.toFixed(2)} weeds/m²), confirming persistent control without rapid weed regeneration.`;
+    ? (isNutritionOrBiostimulant
+        ? `Crop vigor and physiological parameters were monitored across observation intervals. Across the evaluated treatments, ${bestTrt.productName} maintained superior growth response compared to untreated checks and baseline levels, demonstrating consistent biostimulatory efficacy throughout the assessment window.`
+        : `Target density was monitored across observation intervals. Across the evaluated treatments, ${bestTrt.productName} maintained superior suppression compared to untreated checks and baseline levels, demonstrating consistent bio-efficacy throughout the assessment window.`)
+    : (isNutritionOrBiostimulant
+        ? `Crop vigor was subsequently monitored across post-treatment observation intervals, maintaining sustained vegetative enhancement compared to pre-treatment baseline levels (${p.baselineCover.toFixed(2)} ${densityUnit}), confirming persistent positive growth response.`
+        : `Target density was subsequently monitored across post-treatment observation intervals, maintaining sustained suppression compared to pre-treatment baseline levels (${p.baselineCover.toFixed(2)} ${densityUnit}), confirming persistent control without rapid target regeneration.`);
 
   let p3 = '';
   if (reportData.hasBiomassData) {
@@ -1999,14 +2100,31 @@ export async function generateInstitutionalDocx(reportData) {
       .filter(t => t.biomass && t.biomass.hasBiomass && t.biomass.fresh !== null)
       .map(t => `${t.productName} recorded ${t.biomass.fresh.toFixed(2)} g/m² fresh weight${t.biomass.dry !== null ? ` and ${t.biomass.dry.toFixed(2)} g/m² dry weight` : ''}`)
       .join('; ');
-    p3 = `Biomass accumulation analysis indicated significant target mass reduction: ${bioDetails}. This confirms the high agronomic effectiveness of the treatment in suppressing vegetative growth.`;
+    p3 = isNutritionOrBiostimulant
+      ? `Biomass accumulation analysis indicated significant vegetative biomass gains: ${bioDetails}. This confirms the high agronomic effectiveness of the treatment in promoting crop growth.`
+      : `Biomass accumulation analysis indicated significant target mass reduction: ${bioDetails}. This confirms the high agronomic effectiveness of the treatment in suppressing vegetative growth.`;
   } else {
-    p3 = `Target canopy reduction reached ${p.netReduction.toFixed(1)}%, reflecting substantial suppression of vegetative biomass and weed pressure. The post-treatment progression confirms strong agronomic performance under standardized field conditions.`;
+    p3 = isNutritionOrBiostimulant
+      ? `Overall vegetative vigor gain reached ${p.netReduction.toFixed(1)}%, reflecting substantial physiological enhancement and crop growth stimulation under standardized field conditions.`
+      : `Target canopy reduction reached ${p.netReduction.toFixed(1)}%, reflecting substantial suppression of vegetative biomass and target pressure. The post-treatment progression confirms strong agronomic performance under standardized field conditions.`;
   }
 
-  const p4 = `With respect to crop safety, ${bestTrt.productName} recorded a crop safety score of ${p.phytoScore.toFixed(2)} at 7 DAT (${p.phytoDesc.injuryLevel}), characterized by ${p.phytoDesc.symptoms}. Crop foliage exhibited complete physiological clearance without persistent injury or growth stunting. Overall, ${bestTrt.productName} demonstrated high weed suppression alongside verified crop safety under ${dc.studyDesign}.`;
+  const p4 = `With respect to crop safety, ${bestTrt.productName} recorded a crop safety score of ${p.phytoScore.toFixed(2)} at 7 DAT (${p.phytoDesc.injuryLevel}), characterized by ${p.phytoDesc.symptoms}. Crop foliage exhibited complete physiological clearance without persistent injury or growth stunting. Overall, ${bestTrt.productName} demonstrated high ${isNutritionOrBiostimulant ? 'growth promotion' : cat === 'fungicide' ? 'disease control' : cat === 'pesticide' ? 'pest suppression' : 'weed suppression'} alongside verified crop safety under ${dc.studyDesign}.`;
 
   const hasPhotos = reportData.photoUrls && reportData.photoUrls.length > 0;
+
+  const benchMainVal = isNutritionOrBiostimulant
+    ? `${p.peakControl.toFixed(1)}% Peak Gain`
+    : cat === 'fungicide'
+      ? `${p.peakControl.toFixed(1)}% Peak Control`
+      : cat === 'pesticide'
+        ? `${p.peakControl.toFixed(1)}% Peak Suppression`
+        : `${p.peakControl.toFixed(1)}% Peak Mortality`;
+
+  const benchSubVal = cat === 'fungicide' ? 'Validated Bio-Efficacy DCE >= 70% Threshold'
+    : cat === 'pesticide' ? 'Validated Pest Suppression >= 70% Threshold'
+    : isNutritionOrBiostimulant ? 'Validated Growth Enhancement Benchmark'
+    : 'Validated Abbott WCE >= 70% Threshold';
 
   const docChildren = [
     // ═════════════════════════════════════════════════════════════════════════
@@ -2154,14 +2272,14 @@ export async function generateInstitutionalDocx(reportData) {
         new TableRow({
           children: [
             createDocxCell({ text: 'PEAK BIO-EFFICACY', isHeader: true, headerColor: HEX_EMERALD, width: 33, align: AlignmentType.CENTER }),
-            createDocxCell({ text: 'NET CANOPY REDUCTION', isHeader: true, headerColor: HEX_SLATE, width: 34, align: AlignmentType.CENTER }),
+            createDocxCell({ text: isNutritionOrBiostimulant ? 'NET VIGOR GAIN' : 'NET CANOPY REDUCTION', isHeader: true, headerColor: HEX_SLATE, width: 34, align: AlignmentType.CENTER }),
             createDocxCell({ text: 'CROP SAFETY CLEARANCE', isHeader: true, headerColor: HEX_FOREST, width: 33, align: AlignmentType.CENTER })
           ]
         }),
         new TableRow({
           children: [
-            createDocxCell({ text: `${p.peakControl.toFixed(1)}% Mortality (at ${p.peakDaa} DAT)`, highlight: true, width: 33, align: AlignmentType.CENTER }),
-            createDocxCell({ text: `${p.netReduction.toFixed(1)}% Net Reduction (Baseline ${p.baselineCover.toFixed(1)}% → ${p.finalCover.toFixed(1)}%)`, isAlt: true, width: 34, align: AlignmentType.CENTER }),
+            createDocxCell({ text: `${p.peakControl.toFixed(1)}% ${isNutritionOrBiostimulant ? 'Gain' : cat === 'pesticide' ? 'Suppression' : cat === 'fungicide' ? 'Control' : 'Mortality'} (at ${p.peakDaa} DAT)`, highlight: true, width: 33, align: AlignmentType.CENTER }),
+            createDocxCell({ text: `${p.netReduction.toFixed(1)}% ${isNutritionOrBiostimulant ? 'Net Gain' : 'Net Reduction'} (Baseline ${p.baselineCover.toFixed(1)}% → ${p.finalCover.toFixed(1)}%)`, isAlt: true, width: 34, align: AlignmentType.CENTER }),
             createDocxCell({ text: `${p.phytoScore.toFixed(1)} / 10 (${p.phytoDesc.injuryLevel})`, highlight: true, width: 33, align: AlignmentType.CENTER })
           ]
         })
@@ -2190,15 +2308,15 @@ export async function generateInstitutionalDocx(reportData) {
       rows: [
         new TableRow({
           children: [
-            createDocxCell({ text: 'POPULATION SUPPRESSION INDEX', isHeader: true, headerColor: HEX_EMERALD, width: 33 }),
+            createDocxCell({ text: isNutritionOrBiostimulant ? 'GROWTH ENHANCEMENT INDEX' : 'POPULATION SUPPRESSION INDEX', isHeader: true, headerColor: HEX_EMERALD, width: 33 }),
             createDocxCell({ text: 'BIO-EFFICACY BENCHMARK', isHeader: true, headerColor: HEX_EMERALD, width: 34 }),
             createDocxCell({ text: 'CROP SAFETY & SELECTIVITY', isHeader: true, headerColor: HEX_EMERALD, width: 33 })
           ]
         }),
         new TableRow({
           children: [
-            createDocxCell({ text: `${p.baselineCover.toFixed(1)} → ${p.finalCover.toFixed(1)} No./m²\nNet Reduction: ${p.netReduction.toFixed(1)}%`, width: 33, isAlt: true }),
-            createDocxCell({ text: `${p.peakControl.toFixed(1)}% Peak Mortality\nValidated Abbott WCE ≥ 70% Threshold`, width: 34, isAlt: true, highlight: true }),
+            createDocxCell({ text: `${p.baselineCover.toFixed(1)} → ${p.finalCover.toFixed(1)} ${densityUnit}\n${isNutritionOrBiostimulant ? 'Net Gain' : 'Net Reduction'}: ${p.netReduction.toFixed(1)}%`, width: 33, isAlt: true }),
+            createDocxCell({ text: `${benchMainVal}\n${benchSubVal}`, width: 34, isAlt: true, highlight: true }),
             createDocxCell({ text: `${p.phytoScore.toFixed(1)} / 10 Score\nComplete Foliar Safety (${p.phytoDesc.injuryLevel})`, width: 33, isAlt: true })
           ]
         })
@@ -2636,7 +2754,7 @@ export async function generateInstitutionalDocx(reportData) {
 
     new Paragraph({
       children: [
-        new TextRun({ text: `Table 2: Effect of different treatments on mortality / bio-efficacy of ${targetLabel}`, italics: true, font: 'Arial' })
+        new TextRun({ text: `Table 2: Effect of different treatments on ${isNutritionOrBiostimulant ? 'crop vigor / growth gain of' : 'mortality / bio-efficacy of'} ${targetLabel}`, italics: true, font: 'Arial' })
       ]
     }),
     new Table({
@@ -2647,7 +2765,7 @@ export async function generateInstitutionalDocx(reportData) {
             createDocxCell({ text: 'Trt. No.', isHeader: true, headerColor: HEX_EMERALD, width: 15, align: AlignmentType.CENTER }),
             createDocxCell({ text: 'Product Commercial Name', isHeader: true, headerColor: HEX_EMERALD, width: 45 }),
             createDocxCell({ text: 'Dose / Lit', isHeader: true, headerColor: HEX_EMERALD, width: 20, align: AlignmentType.CENTER }),
-            createDocxCell({ text: 'Weed Mortality (%) at 7 DAT', isHeader: true, headerColor: HEX_EMERALD, width: 20, align: AlignmentType.CENTER })
+            createDocxCell({ text: isNutritionOrBiostimulant ? 'Crop Vigor / Gain (%) at 7 DAT' : cat === 'fungicide' ? 'Disease Control (%) at 7 DAT' : cat === 'pesticide' ? 'Pest Suppression (%) at 7 DAT' : 'Weed Mortality (%) at 7 DAT', isHeader: true, headerColor: HEX_EMERALD, width: 20, align: AlignmentType.CENTER })
           ]
         }),
         ...tMetrics.map((t, idx) => new TableRow({
@@ -2664,7 +2782,7 @@ export async function generateInstitutionalDocx(reportData) {
 
     new Paragraph({
       children: [
-        new TextRun({ text: `Table 3: Effect of different treatments on Target Density (No./m²)`, italics: true, font: 'Arial' })
+        new TextRun({ text: `Table 3: Effect of different treatments on ${cat === 'fungicide' ? 'Disease Severity (%)' : cat === 'pesticide' ? 'Pest Density (count/sample)' : isNutritionOrBiostimulant ? 'Crop Vigor / Growth Index' : 'Target Density (No./m²)'}`, italics: true, font: 'Arial' })
       ]
     }),
     new Table({
@@ -2698,7 +2816,7 @@ export async function generateInstitutionalDocx(reportData) {
 
     new Paragraph({
       children: [
-        new TextRun({ text: `Table 4: Effect of different treatments on Target Biomass Accumulation`, italics: true, font: 'Arial' })
+        new TextRun({ text: `Table 4: Effect of different treatments on ${isNutritionOrBiostimulant ? 'Crop Biomass Accumulation' : 'Target Biomass Accumulation'}`, italics: true, font: 'Arial' })
       ]
     }),
     new Table({
@@ -2709,8 +2827,8 @@ export async function generateInstitutionalDocx(reportData) {
             createDocxCell({ text: 'Trt. No.', isHeader: true, headerColor: HEX_FOREST, width: 15, align: AlignmentType.CENTER }),
             createDocxCell({ text: 'Product Name', isHeader: true, headerColor: HEX_FOREST, width: 40 }),
             createDocxCell({ text: 'Dose', isHeader: true, headerColor: HEX_FOREST, width: 15, align: AlignmentType.CENTER }),
-            createDocxCell({ text: 'Fresh wt (g/m²)', isHeader: true, headerColor: HEX_FOREST, width: 15, align: AlignmentType.CENTER }),
-            createDocxCell({ text: 'Dry wt (g/m²)', isHeader: true, headerColor: HEX_FOREST, width: 15, align: AlignmentType.CENTER })
+            createDocxCell({ text: cat === 'herbicide' ? 'Fresh wt (g/m²)' : 'Fresh wt (g)', isHeader: true, headerColor: HEX_FOREST, width: 15, align: AlignmentType.CENTER }),
+            createDocxCell({ text: cat === 'herbicide' ? 'Dry wt (g/m²)' : 'Dry wt (g)', isHeader: true, headerColor: HEX_FOREST, width: 15, align: AlignmentType.CENTER })
           ]
         }),
         ...tMetrics.map((t, idx) => new TableRow({
@@ -2770,16 +2888,19 @@ export async function generateInstitutionalDocx(reportData) {
     new Paragraph({
       children: [
         new TextRun({
-          text: `Application of ${bestTrt.productName} @ ${bestTrt.dose || 'calibrated dose'} resulted in peak mortality of ${p.peakControl.toFixed(2)}% at ${p.peakDaa || 7} DAT${compClause}. Target density decreased from ${p.baselineCover.toFixed(2)} weeds/m² before treatment to ${p.finalCover.toFixed(2)} weeds/m² at ${p.peakDaa || 7} DAT, indicating rapid post-emergence suppression. Overall net canopy reduction reached ${p.netReduction.toFixed(1)}%, confirming high agronomic effectiveness in suppressing target vegetation. Phytotoxicity on ${dc.cropDisplay || 'the crop'} was scored at ${p.phytoScore.toFixed(2)} / 10 (${p.phytoDesc.injuryLevel}), demonstrating complete physiological recovery and crop selectivity.`,
+          text: `Application of ${bestTrt.productName} @ ${bestTrt.dose || 'calibrated dose'} resulted in peak ${isNutritionOrBiostimulant ? 'vigor enhancement of' : 'mortality of'} ${p.peakControl.toFixed(2)}% at ${p.peakDaa || 7} DAT${compClause}. ${isNutritionOrBiostimulant ? 'Crop vigor progressed' : 'Target density decreased'} from ${p.baselineCover.toFixed(2)} ${densityUnit} before treatment to ${p.finalCover.toFixed(2)} ${densityUnit} at ${p.peakDaa || 7} DAT, indicating rapid ${isNutritionOrBiostimulant ? 'vegetative stimulation' : 'post-emergence suppression'}. Overall ${isNutritionOrBiostimulant ? 'crop vegetative vigor gain' : 'net canopy reduction'} reached ${p.netReduction.toFixed(1)}%, confirming high agronomic effectiveness in ${isNutritionOrBiostimulant ? 'promoting crop growth' : 'suppressing target vegetation'}. Phytotoxicity on ${dc.cropDisplay || 'the crop'} was scored at ${p.phytoScore.toFixed(2)} / 10 (${p.phytoDesc.injuryLevel}), demonstrating complete physiological ${isNutritionOrBiostimulant ? 'tolerance' : 'recovery'} and crop selectivity.`,
           font: 'Arial'
         })
       ]
     }),
     new Paragraph({ text: '' }),
 
-    // 4.3 Target Flora Botanical Response Matrix
+    // 4.3 Target Flora / Taxon Response Matrix
     new Paragraph({
-      text: '4.3 Target Flora Botanical Classification & Response Spectrum Matrix',
+      text: cat === 'fungicide' ? '4.3 Target Pathogen Classification & Fungicide Response Spectrum'
+        : cat === 'pesticide' ? '4.3 Target Pest Classification & Insecticide Susceptibility Spectrum'
+        : isNutritionOrBiostimulant ? '4.3 Crop Growth Profile & Physiological Response Matrix'
+        : '4.3 Target Flora Botanical Classification & Response Spectrum Matrix',
       heading: HeadingLevel.HEADING_3
     }),
     new Table({
@@ -2788,8 +2909,8 @@ export async function generateInstitutionalDocx(reportData) {
         new TableRow({
           children: [
             createDocxCell({ text: '#', isHeader: true, headerColor: HEX_EMERALD, width: 8, align: AlignmentType.CENTER }),
-            createDocxCell({ text: 'Target Flora Scientific Name', isHeader: true, headerColor: HEX_EMERALD, width: 30 }),
-            createDocxCell({ text: 'Botanical Family', isHeader: true, headerColor: HEX_EMERALD, width: 22 }),
+            createDocxCell({ text: 'Target Taxon / Scientific Name', isHeader: true, headerColor: HEX_EMERALD, width: 30 }),
+            createDocxCell({ text: 'Botanical / Taxonomic Family', isHeader: true, headerColor: HEX_EMERALD, width: 22 }),
             createDocxCell({ text: 'Morphological Group', isHeader: true, headerColor: HEX_EMERALD, width: 18 }),
             createDocxCell({ text: 'Observed Response Spectrum', isHeader: true, headerColor: HEX_EMERALD, width: 22 })
           ]
@@ -2834,10 +2955,10 @@ export async function generateInstitutionalDocx(reportData) {
             ]
           }),
           ...[
-            ['Pre-Treatment Baseline Infestation', `${p.baselineCover.toFixed(2)} weeds/m²`, 'Baseline target pressure prior to application'],
-            ['Final Monitored Target Level', `${p.finalCover.toFixed(2)} weeds/m²`, 'Residual living target canopy at evaluation'],
-            ['Net Canopy Reduction', `${p.netReduction.toFixed(2)}%`, 'Overall target population suppression achieved'],
-            ['Peak Bio-Efficacy Achieved', `${p.peakControl.toFixed(2)}%`, `Maximum suppression reached at ${p.peakDaa} DAT`],
+            ['Pre-Treatment Baseline Level', `${p.baselineCover.toFixed(2)} ${densityUnit}`, 'Baseline target pressure / crop metric prior to application'],
+            ['Final Monitored Target Level', `${p.finalCover.toFixed(2)} ${densityUnit}`, 'Residual living target / monitored crop metric at evaluation'],
+            [isNutritionOrBiostimulant ? 'Net Growth Enhancement' : 'Net Canopy Reduction', `${p.netReduction.toFixed(2)}%`, isNutritionOrBiostimulant ? 'Overall crop vegetative gain achieved' : 'Overall target population suppression achieved'],
+            ['Peak Bio-Efficacy Achieved', `${p.peakControl.toFixed(2)}%`, `Maximum ${isNutritionOrBiostimulant ? 'growth response' : 'suppression'} reached at ${p.peakDaa} DAT`],
             ['Mean Suppression Stability', `${p.meanControl.toFixed(2)}% ± ${p.sem.toFixed(2)}%`, `Mean control across post-treatment intervals (SE(m) ± ${p.sem.toFixed(2)})`],
             ['Coefficient of Variation (CV %)', `${p.cv.toFixed(2)}%`, 'Uniformity index and plot measurement consistency'],
             ['Crop Phytotoxicity Rating', `${p.phytoScore.toFixed(2)} / 10`, `Safety clearance: ${p.phytoDesc.injuryLevel}`]
@@ -2947,7 +3068,10 @@ export async function generateInstitutionalDocx(reportData) {
 
     // 5.2 Bio-Efficacy Kinetic Progression & Suppression Dynamics Table
     new Paragraph({
-      text: '5.2 Bio-Efficacy Kinetic Progression & Suppression Dynamics (% WCE)',
+      text: cat === 'fungicide' ? '5.2 Bio-Efficacy Kinetic Progression & Suppression Dynamics (% DCE)'
+        : cat === 'pesticide' ? '5.2 Target Pest Mortality & Suppression Kinetics (%)'
+        : isNutritionOrBiostimulant ? '5.2 Crop Vigor & Growth Dynamics (% Gain)'
+        : '5.2 Bio-Efficacy Kinetic Progression & Suppression Dynamics (% WCE)',
       heading: HeadingLevel.HEADING_3
     }),
     new Table({
@@ -2957,7 +3081,7 @@ export async function generateInstitutionalDocx(reportData) {
           children: [
             createDocxCell({ text: 'Evaluation Interval (DAT)', isHeader: true, headerColor: HEX_EMERALD, width: 22, align: AlignmentType.CENTER }),
             createDocxCell({ text: 'Suppression Kinetic Progress Bar (0% to 100%)', isHeader: true, headerColor: HEX_EMERALD, width: 44 }),
-            createDocxCell({ text: 'Recorded WCE (%)', isHeader: true, headerColor: HEX_EMERALD, width: 17, align: AlignmentType.CENTER }),
+            createDocxCell({ text: cat === 'fungicide' ? 'Recorded DCE (%)' : cat === 'pesticide' ? 'Suppression (%)' : isNutritionOrBiostimulant ? 'Vigor Gain (%)' : 'Recorded WCE (%)', isHeader: true, headerColor: HEX_EMERALD, width: 17, align: AlignmentType.CENTER }),
             createDocxCell({ text: 'Regulatory Clearance Status', isHeader: true, headerColor: HEX_EMERALD, width: 17, align: AlignmentType.CENTER })
           ]
         }),

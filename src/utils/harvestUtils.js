@@ -1,7 +1,7 @@
 // src/utils/harvestUtils.js
 // Standardized Multi-Harvest, Picking Logs, and Yield Extrapolations for scientific agronomic trials.
 
-import { safeJsonParse } from './helpers.js';
+import { safeJsonParse, getPlotAreaHectares } from './helpers.js';
 
 export const HARVEST_YIELD_UNITS = [
   // ── Inhouse, Greenhouse & Small-Scale Trials (Primary Focus) ──
@@ -39,7 +39,7 @@ export const CULL_REASONS = [
 /**
  * Normalizes an individual picking record.
  */
-export function normalizePickingItem(raw, idx = 0) {
+export function normalizePickingItem(raw, idx = 0, defaultPlotAreaM2 = null) {
   if (!raw || typeof raw !== 'object') {
     return {
       id: `p_${Date.now()}_${idx}`,
@@ -52,7 +52,7 @@ export function normalizePickingItem(raw, idx = 0) {
       totalWeight: '',
       marketableRatio: '',
       yieldUnit: 'g/pot',
-      plotAreaM2: '',
+      plotAreaM2: defaultPlotAreaM2 || '',
       moisturePct: '',
       brixScore: '',
       cullReason: '',
@@ -70,7 +70,7 @@ export function normalizePickingItem(raw, idx = 0) {
   const marketableRatio = totalWeight > 0 ? ((mWeight / totalWeight) * 100).toFixed(1) : (mWeight > 0 ? '100.0' : '');
 
   // Calculate extrapolated kg/ha, q/ha, and t/ha if plot area in m² is given or if in per-ha units
-  const areaM2 = parseFloat(raw.plotAreaM2 || 0);
+  const areaM2 = parseFloat(raw.plotAreaM2 || defaultPlotAreaM2 || 0);
   let extrapolatedKgHa = '';
   let extrapolatedQHa = '';
   let extrapolatedTHa = '';
@@ -289,10 +289,13 @@ export function aggregateProjectHarvest(subTrials = []) {
       }];
     }
 
-    const normList = pList.map((p, pIdx) => normalizePickingItem(p, pIdx));
+    const trialPlotAreaM2 = parseFloat(trial.PlotAreaM2 || trial.NetPlotAreaM2 || trial.PlotArea || 0) ||
+      (trial.PlotSize ? getPlotAreaHectares(trial.PlotSize) * 10000 : 0);
+
+    const normList = pList.map((p, pIdx) => normalizePickingItem(p, pIdx, trialPlotAreaM2 > 0 ? trialPlotAreaM2 : null));
     treatmentMap[tName].pickings.push(...normList);
 
-    const totals = calculateHarvestTotals(normList);
+    const totals = calculateHarvestTotals(normList, trialPlotAreaM2 > 0 ? trialPlotAreaM2 : null);
     treatmentMap[tName].reps[rep] = {
       trialId: trial.ID,
       plotNumber: trial.PlotNumber || '',
@@ -320,6 +323,7 @@ export function aggregateProjectHarvest(subTrials = []) {
 
   // Calculate Treatment Means and ANOVA variance statistics across replications
   const cumulativeTable = Object.values(treatmentMap).map(trt => {
+    const isControl = Boolean(trt.trials?.some(t => t.IsControl) || /control|untreated/i.test(trt.name));
     const repVals = Object.values(trt.reps);
     const n = repVals.length;
     const meanMarketable = n > 0 ? repVals.reduce((sum, r) => sum + (Number(r.marketable) || 0), 0) / n : 0;
@@ -340,6 +344,7 @@ export function aggregateProjectHarvest(subTrials = []) {
 
     return {
       treatmentName: trt.name,
+      isControl,
       replicationsCount: n,
       meanMarketable: parseFloat(meanMarketable.toFixed(2)),
       meanUnmarketable: parseFloat(meanUnmarketable.toFixed(2)),
@@ -354,6 +359,35 @@ export function aggregateProjectHarvest(subTrials = []) {
       cvMarketable: parseFloat(cvMarketable.toFixed(1)),
       reps: trt.reps,
     };
+  });
+
+  // Calculate Yield Benefit / Improvement over Untreated Control
+  const controlTrt = cumulativeTable.find(t => t.isControl) || cumulativeTable.find(t => /control|untreated/i.test(t.treatmentName));
+  const controlMeanTotal = controlTrt?.meanTotal || 0;
+  const controlMeanMarketable = controlTrt?.meanMarketable || 0;
+  const controlMeanExtrapolated = (controlTrt?.meanExtrapolatedKgHa && controlTrt.meanExtrapolatedKgHa !== '—')
+    ? Number(controlTrt.meanExtrapolatedKgHa)
+    : 0;
+
+  cumulativeTable.forEach(row => {
+    if (row.isControl) {
+      row.yieldIncreasePct = 0.0;
+      row.marketableYieldIncreasePct = 0.0;
+      row.extrapolatedYieldIncreasePct = 0.0;
+    } else {
+      row.yieldIncreasePct = controlMeanTotal > 0
+        ? parseFloat((((row.meanTotal - controlMeanTotal) / controlMeanTotal) * 100).toFixed(2))
+        : null;
+      row.marketableYieldIncreasePct = controlMeanMarketable > 0
+        ? parseFloat((((row.meanMarketable - controlMeanMarketable) / controlMeanMarketable) * 100).toFixed(2))
+        : null;
+      const rowExtrap = (row.meanExtrapolatedKgHa && row.meanExtrapolatedKgHa !== '—')
+        ? Number(row.meanExtrapolatedKgHa)
+        : 0;
+      row.extrapolatedYieldIncreasePct = (controlMeanExtrapolated > 0 && rowExtrap > 0)
+        ? parseFloat((((rowExtrap - controlMeanExtrapolated) / controlMeanExtrapolated) * 100).toFixed(2))
+        : null;
+    }
   });
 
   let totalMarketable = 0;

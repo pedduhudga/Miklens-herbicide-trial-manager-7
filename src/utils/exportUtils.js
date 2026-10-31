@@ -833,7 +833,7 @@ export function exportToExcel(dataByEntity, filename = 'Miklens_Export') {
                         const firstObs = parsed[0] || {};
                         row['Efficacy_Obs_Count'] = parsed.length;
                         row['Efficacy_First_DAA'] = firstObs.daa ?? firstObs.day ?? '';
-                        row['Efficacy_First_Value'] = firstObs.weedCover ?? firstObs.diseaseSeverity ?? firstObs.pestCount ?? firstObs.visualVigor ?? '';
+                        row['Efficacy_First_Value'] = getObservationPrimaryValue(row.Category || category, firstObs) ?? firstObs.weedCover ?? firstObs.diseaseSeverity ?? firstObs.pestCount ?? firstObs.visualVigor ?? '';
                         row['Efficacy_Data'] = JSON.stringify(parsed).substring(0, 500); // Truncate for Excel
                     }
                 } catch (e) {
@@ -934,7 +934,7 @@ export function exportTrialObservations(trials, category, filename = 'TrialObser
                     DAA: obs.daa ?? obs.day ?? obs.DAA ?? '',
                     Observation_Index: idx + 1,
                     // Primary observation value based on category
-                    Primary_Value: obs.weedCover ?? obs.diseaseSeverity ?? obs.pestCount ?? obs.visualVigor ?? obs.overallVigor ?? '',
+                    Primary_Value: getObservationPrimaryValue(trial.Category || category, obs) ?? obs.weedCover ?? obs.diseaseSeverity ?? obs.pestCount ?? obs.visualVigor ?? obs.overallVigor ?? '',
                     // Include all observation fields
                     WCE: obs.wce ?? obs.WCE ?? '',
                     Control_Pct: obs.controlPct ?? obs.control ?? '',

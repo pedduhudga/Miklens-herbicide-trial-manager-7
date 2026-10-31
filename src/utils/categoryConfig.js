@@ -436,6 +436,47 @@ export function calculateEfficacy(categoryId, treatedValue, controlValue) {
   }
 }
 
+/**
+ * Henderson-Tilton insecticidal efficacy formula:
+ * Corrects for natural pest population changes in untreated control plots.
+ * Efficacy (%) = (1 - (Ta / Tb) * (Cb / Ca)) * 100
+ */
+export function calculateHendersonTilton(treatedAfter, treatedBefore, controlAfter, controlBefore) {
+  const ta = Number(treatedAfter);
+  const tb = Number(treatedBefore);
+  const ca = Number(controlAfter);
+  const cb = Number(controlBefore);
+  if (isNaN(ta) || isNaN(tb) || isNaN(ca) || isNaN(cb) || tb <= 0 || ca <= 0 || cb <= 0) {
+    if (ca > 0 && !isNaN(ta)) {
+      return Math.max(0, Math.min(100, (1 - ta / ca) * 100));
+    }
+    return 0;
+  }
+  const ratio = (ta / tb) * (cb / ca);
+  return Math.max(0, Math.min(100, (1 - ratio) * 100));
+}
+
+/**
+ * Area Under Disease Progress Curve (AUDPC)
+ * Shaner and Finney (1977) trapezoidal integration:
+ * AUDPC = sum(((y_i + y_{i+1}) / 2) * (t_{i+1} - t_i))
+ */
+export function calculateAUDPC(observations = [], severityKey = 'diseaseSeverity') {
+  if (!Array.isArray(observations) || observations.length < 2) return 0;
+  const sorted = [...observations].sort((a, b) => Number(a.daa || 0) - Number(b.daa || 0));
+  let audpc = 0;
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const t1 = Number(sorted[i].daa || 0);
+    const t2 = Number(sorted[i + 1].daa || 0);
+    const y1 = Number(sorted[i][severityKey] ?? sorted[i].diseaseSeverity ?? sorted[i].diseaseSeverityPct ?? sorted[i].severity ?? 0);
+    const y2 = Number(sorted[i + 1][severityKey] ?? sorted[i + 1].diseaseSeverity ?? sorted[i + 1].diseaseSeverityPct ?? sorted[i + 1].severity ?? 0);
+    if (t2 > t1) {
+      audpc += ((y1 + y2) / 2) * (t2 - t1);
+    }
+  }
+  return parseFloat(audpc.toFixed(2));
+}
+
 // Helper: determine descriptive rating based on calculated efficacy percentage
 export function getRatingFromEfficacy(categoryId, efficacyVal) {
   if (efficacyVal === null || efficacyVal === undefined || isNaN(efficacyVal)) return 'Unrated';

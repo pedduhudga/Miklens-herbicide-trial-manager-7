@@ -225,7 +225,21 @@ export function performANOVA(trials, options = {}) {
     if (observations.length > 0) {
       const latest = observations[observations.length - 1];
       const category = trial.Category || 'herbicide';
-      let value = latest[metric] ?? latest[metric === 'yield' ? 'yieldKgPlot' : metric] ?? latest.controlPct ?? latest.wce ?? getObservationPrimaryValue(category, latest) ?? latest.diseaseSeverity ?? latest.pestCount ?? latest.yieldKgPlot ?? latest.overallVigor;
+      let value = latest[metric] ?? latest[metric === 'yield' ? 'yieldKgPlot' : metric];
+      if (value === null || value === undefined) {
+        if (latest.controlPct !== undefined && latest.controlPct !== null) {
+          value = latest.controlPct;
+        } else if (category === 'herbicide' && latest.wce !== undefined && latest.wce !== null) {
+          value = latest.wce;
+        } else {
+          value = getObservationPrimaryValue(category, latest) ?? 
+            (category === 'fungicide' ? (latest.diseaseSeverity ?? latest.diseaseIncidence) :
+             category === 'pesticide' ? (latest.pestCount ?? latest.feedingDamagePct) :
+             category === 'nutrition' ? (latest.visualVigor ?? latest.nutrientDeficiencyScore) :
+             category === 'biostimulant' ? (latest.overallVigor ?? latest.vigorScore) :
+             latest.weedCover);
+        }
+      }
       if (metric === 'yield' && (value === null || value === undefined || value === '')) {
         value = trial.Yield ?? trial.YieldValue;
       }

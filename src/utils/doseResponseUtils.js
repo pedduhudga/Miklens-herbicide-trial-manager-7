@@ -500,7 +500,9 @@ export function extractDoseResponseData(trials, formulation, targetSpecies = nul
     if (!obs) return;
     
     const primaryMetricKey = config.primaryMetric?.key || 'WCE';
-    const rawVal = obs[primaryMetricKey] ?? obs.controlPct ?? obs.wce ?? obs.efficacy ?? obs.value ?? getObservationPrimaryValue(activeCategory, obs);
+    const rawVal = obs[primaryMetricKey] ?? obs.controlPct ?? obs.efficacy ?? 
+      (activeCategory === 'herbicide' ? obs.wce : null) ?? 
+      obs.value ?? getObservationPrimaryValue(activeCategory, obs);
     const response = parseFloat(rawVal);
     
     if (isNaN(response)) return;
@@ -600,6 +602,20 @@ export function compareDoseResponseCurves(primaryFit, compareFit) {
   };
 }
 
+export function getEffectiveDoseLabel(categoryId = 'herbicide') {
+  switch (categoryId) {
+    case 'fungicide':
+      return { ed50Label: 'EC50', ed90Label: 'EC90', fullLabel: 'Effective Concentration (EC50)' };
+    case 'pesticide':
+      return { ed50Label: 'LC50', ed90Label: 'LC90', fullLabel: 'Lethal Concentration (LC50)' };
+    case 'nutrition':
+    case 'biostimulant':
+      return { ed50Label: 'ED50', ed90Label: 'ED90', fullLabel: 'Effective Dose (ED50)' };
+    default:
+      return { ed50Label: 'ED50', ed90Label: 'ED90', fullLabel: 'Effective Dose (ED50)' };
+  }
+}
+
 // Export all functions
 export default {
   fitFourPLModel,
@@ -608,5 +624,6 @@ export default {
   performDoseResponseAnalysis,
   extractDoseResponseData,
   fitDoseResponse,
-  compareDoseResponseCurves
+  compareDoseResponseCurves,
+  getEffectiveDoseLabel
 };

@@ -336,7 +336,7 @@ function formatSoilProfile(soil) {
 export function getTimelineData(efficacy, categoryId = 'herbicide', trial = null) {
   const config = getCategoryConfig(categoryId);
   const primaryField = getPrimaryObservationField(categoryId);
-  const targetValue = trial ? (trial[config.targetField] || trial.WeedSpecies || 'Total') : 'Total';
+  const targetValue = trial ? (trial[config.targetField] || trial.DiseaseTarget || trial.PestTarget || trial.NutrientType || trial.BiostimulantType || trial.WeedSpecies || 'Total') : 'Total';
   const trialDate = trial?.Date || '';
   const isNonCrop = categoryId === 'herbicide' && (
     trial?.SiteType ? (trial.SiteType !== 'Crop' && trial.SiteType !== '') :
@@ -593,7 +593,7 @@ function calcWCE(efficacy, categoryId = 'herbicide', trial = null) {
 
   const getValue = (obs) => Number(getObservationPrimaryValue(categoryId, obs) ?? 0);
   
-  const targetName = trial ? (trial[config.targetField] || trial.WeedSpecies || 'Total') : 'Total';
+  const targetName = trial ? (trial[config.targetField] || trial.DiseaseTarget || trial.PestTarget || trial.NutrientType || trial.BiostimulantType || trial.WeedSpecies || 'Total') : 'Total';
 
   efficacy.forEach(obs => {
     if (categoryId === 'herbicide' && obs.weedDetails && obs.weedDetails.length > 0) {
@@ -1212,8 +1212,8 @@ function calculateAUDPC(plotObservations, severityKey) {
   const sorted = [...plotObservations].sort((a, b) => (parseFloat(a.daa || 0)) - (parseFloat(b.daa || 0)));
   let audpc = 0;
   for (let i = 0; i < sorted.length - 1; i++) {
-    const y1 = parseFloat(sorted[i][severityKey]);
-    const y2 = parseFloat(sorted[i+1][severityKey]);
+    const y1 = parseFloat(sorted[i][severityKey] ?? sorted[i].diseaseSeverity ?? sorted[i].diseaseSeverityPct ?? sorted[i].severity ?? 0);
+    const y2 = parseFloat(sorted[i+1][severityKey] ?? sorted[i+1].diseaseSeverity ?? sorted[i+1].diseaseSeverityPct ?? sorted[i+1].severity ?? 0);
     const t1 = parseFloat(sorted[i].daa || 0);
     const t2 = parseFloat(sorted[i+1].daa || 0);
     if (!isNaN(y1) && !isNaN(y2)) {
@@ -1252,6 +1252,21 @@ function getAdvancedIndicesTableData(trial, efficacy, categoryId) {
       const rep = plotObs[0]?.replication || plotObs[0]?.rep || 1;
       const trt = plotObs[0]?.treatmentNumber || plotObs[0]?.treatment || 1;
       data.push([`Plot ${plotNum} (Rep ${rep}, Trt ${trt})`, `AUDPC`, String(audpc)]);
+    });
+  } else if (categoryId === 'pesticide') {
+    const sorted = [...efficacy].sort((a,b) => getDaaVal(a) - getDaaVal(b));
+    const baseline = sorted[0];
+    const baseCount = baseline ? (getObservationPrimaryValue(categoryId, baseline) ?? 0) : 0;
+    sorted.forEach((obs) => {
+      const daa = getDaaVal(obs);
+      const count = getObservationPrimaryValue(categoryId, obs) ?? 0;
+      const reduction = baseCount > 0 ? Math.max(0, ((baseCount - count) / baseCount) * 100) : 0;
+      const plot = obs.plotNumber || obs.plot || 1;
+      const rep = obs.replication || obs.rep || 1;
+      data.push([`Plot ${plot} (Rep ${rep}, DAA ${daa})`, 'Pest Population (count/sample)', `${Number(count).toFixed(1)}`]);
+      if (daa > 0 && baseCount > 0) {
+        data.push([`Plot ${plot} (Rep ${rep}, DAA ${daa})`, 'Pest Suppression over Baseline (%)', `${reduction.toFixed(1)}%`]);
+      }
     });
   } else if (categoryId === 'biostimulant') {
     efficacy.forEach((obs, idx) => {
