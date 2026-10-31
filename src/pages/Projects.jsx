@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAppState } from '../hooks/useAppState.jsx';
 import { useAuth } from '../hooks/useAuth.js';
 import TopBar from '../components/TopBar.jsx';
@@ -688,7 +688,21 @@ export default function Projects({ onMenuClick }) {
   }, [activeCategory, config.primaryMetric.label]);
 
   // dashboard state
+  const location = useLocation();
   const [activeProjectId, setActiveProjectId] = useState(null);
+
+  useEffect(() => {
+    // Check URL query string or hash for focus parameter (e.g. ?focus=PID or #/projects?focus=PID)
+    const searchParams = new URLSearchParams(location.search);
+    let focusId = searchParams.get('focus');
+    if (!focusId && typeof window !== 'undefined' && window.location.hash.includes('?')) {
+      const hashParams = new URLSearchParams(window.location.hash.split('?')[1]);
+      focusId = hashParams.get('focus');
+    }
+    if (focusId) {
+      setActiveProjectId(focusId);
+    }
+  }, [location.search, location.hash]);
   const [analysisResults, setAnalysisResults] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [postHocMethod, setPostHocMethod] = useState('lsd');
