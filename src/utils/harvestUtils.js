@@ -5,9 +5,12 @@ import { safeJsonParse } from './helpers.js';
 
 export const HARVEST_YIELD_UNITS = [
   { id: 'kg_plot', label: 'kg / plot', factorToKg: 1 },
-  { id: 'g_plant', label: 'g / plant', factorToKg: 0.001 },
-  { id: 'kg_ha', label: 'kg / ha', factorToKg: 1 },
+  { id: 'q_ha', label: 'q / ha (quintals/ha)', factorToKg: 100 },
   { id: 't_ha', label: 't / ha (tonnes/ha)', factorToKg: 1000 },
+  { id: 'kg_ha', label: 'kg / ha', factorToKg: 1 },
+  { id: 'cwt_acre', label: 'cwt / acre (hundredweight)', factorToKg: 112.085 },
+  { id: 'kg_plant', label: 'kg / plant', factorToKg: 1 },
+  { id: 'g_plant', label: 'g / plant', factorToKg: 0.001 },
   { id: 'g_pot', label: 'g / pot', factorToKg: 0.001 },
   { id: 'fruits_plant', label: 'fruits / plant', factorToKg: null },
   { id: 'bunches_vine', label: 'bunches / vine', factorToKg: null },
@@ -48,6 +51,8 @@ export function normalizePickingItem(raw, idx = 0) {
       brixScore: '',
       cullReason: '',
       extrapolatedYieldKgHa: '',
+      extrapolatedYieldQHa: '',
+      extrapolatedYieldTHa: '',
       notes: '',
       photos: [],
     };
@@ -58,15 +63,41 @@ export function normalizePickingItem(raw, idx = 0) {
   const totalWeight = mWeight + uWeight;
   const marketableRatio = totalWeight > 0 ? ((mWeight / totalWeight) * 100).toFixed(1) : (mWeight > 0 ? '100.0' : '');
 
-  // Calculate extrapolated kg/ha if plot area in m² is given
+  // Calculate extrapolated kg/ha, q/ha, and t/ha if plot area in m² is given or if in per-ha units
   const areaM2 = parseFloat(raw.plotAreaM2 || 0);
   let extrapolatedKgHa = '';
-  if (areaM2 > 0 && totalWeight > 0) {
-    const unit = raw.yieldUnit || 'kg/plot';
-    if (unit === 'kg/plot' || unit === 'kg') {
-      extrapolatedKgHa = ((totalWeight / areaM2) * 10000).toFixed(1);
-    } else if (unit === 'g/plot' || unit === 'g_plant') {
-      extrapolatedKgHa = (((totalWeight / 1000) / areaM2) * 10000).toFixed(1);
+  let extrapolatedQHa = '';
+  let extrapolatedTHa = '';
+  const unit = raw.yieldUnit || 'kg/plot';
+
+  if (unit === 'q_ha' && totalWeight > 0) {
+    extrapolatedQHa = totalWeight.toFixed(2);
+    extrapolatedKgHa = (totalWeight * 100).toFixed(1);
+    extrapolatedTHa = (totalWeight / 10).toFixed(2);
+  } else if (unit === 't_ha' && totalWeight > 0) {
+    extrapolatedTHa = totalWeight.toFixed(2);
+    extrapolatedKgHa = (totalWeight * 1000).toFixed(1);
+    extrapolatedQHa = (totalWeight * 10).toFixed(2);
+  } else if (unit === 'kg_ha' && totalWeight > 0) {
+    extrapolatedKgHa = totalWeight.toFixed(1);
+    extrapolatedQHa = (totalWeight / 100).toFixed(2);
+    extrapolatedTHa = (totalWeight / 1000).toFixed(2);
+  } else if (areaM2 > 0 && totalWeight > 0) {
+    if (unit === 'kg/plot' || unit === 'kg' || unit === 'kg_plot') {
+      const kgHa = (totalWeight / areaM2) * 10000;
+      extrapolatedKgHa = kgHa.toFixed(1);
+      extrapolatedQHa = (kgHa / 100).toFixed(2);
+      extrapolatedTHa = (kgHa / 1000).toFixed(2);
+    } else if (unit === 'g/plot' || unit === 'g_plant' || unit === 'g' || unit === 'g_pot') {
+      const kgHa = ((totalWeight / 1000) / areaM2) * 10000;
+      extrapolatedKgHa = kgHa.toFixed(1);
+      extrapolatedQHa = (kgHa / 100).toFixed(2);
+      extrapolatedTHa = (kgHa / 1000).toFixed(2);
+    } else if (unit === 'lbs_plot') {
+      const kgHa = ((totalWeight * 0.453592) / areaM2) * 10000;
+      extrapolatedKgHa = kgHa.toFixed(1);
+      extrapolatedQHa = (kgHa / 100).toFixed(2);
+      extrapolatedTHa = (kgHa / 1000).toFixed(2);
     }
   }
 
@@ -86,6 +117,8 @@ export function normalizePickingItem(raw, idx = 0) {
     brixScore: raw.brixScore ?? raw.brix ?? '',
     cullReason: raw.cullReason || '',
     extrapolatedYieldKgHa: raw.extrapolatedYieldKgHa || extrapolatedKgHa,
+    extrapolatedYieldQHa: raw.extrapolatedYieldQHa || extrapolatedQHa,
+    extrapolatedYieldTHa: raw.extrapolatedYieldTHa || extrapolatedTHa,
     notes: raw.notes || '',
     photos: Array.isArray(raw.photos) ? raw.photos : [],
   };
@@ -125,16 +158,37 @@ export function calculateHarvestTotals(pickingsList = [], defaultPlotAreaM2 = nu
 
   // Area extrapolation
   let extrapolatedKgHa = '';
+  let extrapolatedQHa = '';
   let extrapolatedTHa = '';
   const area = parseFloat(defaultPlotAreaM2 || (pickingsList[0]?.plotAreaM2) || 0);
-  if (area > 0 && cumTotal > 0) {
-    if (unit === 'kg/plot' || unit === 'kg') {
+
+  if (unit === 'q_ha' && cumTotal > 0) {
+    extrapolatedQHa = cumTotal.toFixed(2);
+    extrapolatedKgHa = (cumTotal * 100).toFixed(1);
+    extrapolatedTHa = (cumTotal / 10).toFixed(2);
+  } else if (unit === 't_ha' && cumTotal > 0) {
+    extrapolatedTHa = cumTotal.toFixed(2);
+    extrapolatedKgHa = (cumTotal * 1000).toFixed(1);
+    extrapolatedQHa = (cumTotal * 10).toFixed(2);
+  } else if (unit === 'kg_ha' && cumTotal > 0) {
+    extrapolatedKgHa = cumTotal.toFixed(1);
+    extrapolatedQHa = (cumTotal / 100).toFixed(2);
+    extrapolatedTHa = (cumTotal / 1000).toFixed(2);
+  } else if (area > 0 && cumTotal > 0) {
+    if (unit === 'kg/plot' || unit === 'kg' || unit === 'kg_plot') {
       const kgHa = (cumTotal / area) * 10000;
       extrapolatedKgHa = kgHa.toFixed(1);
+      extrapolatedQHa = (kgHa / 100).toFixed(2);
       extrapolatedTHa = (kgHa / 1000).toFixed(2);
-    } else if (unit === 'g/plot' || unit === 'g_plant' || unit === 'g') {
+    } else if (unit === 'g/plot' || unit === 'g_plant' || unit === 'g' || unit === 'g_pot') {
       const kgHa = ((cumTotal / 1000) / area) * 10000;
       extrapolatedKgHa = kgHa.toFixed(1);
+      extrapolatedQHa = (kgHa / 100).toFixed(2);
+      extrapolatedTHa = (kgHa / 1000).toFixed(2);
+    } else if (unit === 'lbs_plot') {
+      const kgHa = ((cumTotal * 0.453592) / area) * 10000;
+      extrapolatedKgHa = kgHa.toFixed(1);
+      extrapolatedQHa = (kgHa / 100).toFixed(2);
       extrapolatedTHa = (kgHa / 1000).toFixed(2);
     }
   }
@@ -162,6 +216,7 @@ export function calculateHarvestTotals(pickingsList = [], defaultPlotAreaM2 = nu
     averageMoisture: avgMoist,
     averageFruitWeightG: avgUnitWeight !== '—' ? `${avgUnitWeight} g` : '—',
     extrapolatedKgHa: extrapolatedKgHa || '',
+    extrapolatedQHa: extrapolatedQHa || '',
     extrapolatedTHa: extrapolatedTHa || '',
     harvestDate: latestDate || '',
     latestHarvestDate: latestDate || '',
@@ -241,6 +296,8 @@ export function aggregateProjectHarvest(subTrials = []) {
       fruitCount: totals.actualFruitCount || 0,
       marketablePct: totals.marketablePct,
       extrapolatedKgHa: totals.extrapolatedKgHa,
+      extrapolatedQHa: totals.extrapolatedQHa,
+      extrapolatedTHa: totals.extrapolatedTHa,
       pickingsCount: normList.length,
     };
 
@@ -255,7 +312,7 @@ export function aggregateProjectHarvest(subTrials = []) {
     });
   });
 
-  // Calculate Treatment Means
+  // Calculate Treatment Means and ANOVA variance statistics across replications
   const cumulativeTable = Object.values(treatmentMap).map(trt => {
     const repVals = Object.values(trt.reps);
     const n = repVals.length;
@@ -266,6 +323,15 @@ export function aggregateProjectHarvest(subTrials = []) {
     const meanExtrapolated = n > 0 ? repVals.reduce((sum, r) => sum + (Number(r.extrapolatedKgHa) || 0), 0) / n : 0;
     const marketablePct = meanTotal > 0 ? ((meanMarketable / meanTotal) * 100).toFixed(1) : (meanMarketable > 0 ? '100.0' : '—');
 
+    // ANOVA Variance Statistics across Replications (SD, SE, CV%)
+    const mVals = repVals.map(r => Number(r.marketable) || 0);
+    const varianceMarketable = n > 1
+      ? mVals.reduce((acc, val) => acc + Math.pow(val - meanMarketable, 2), 0) / (n - 1)
+      : 0;
+    const sdMarketable = Math.sqrt(varianceMarketable);
+    const seMarketable = n > 1 ? sdMarketable / Math.sqrt(n) : 0;
+    const cvMarketable = meanMarketable > 0 ? (sdMarketable / meanMarketable) * 100 : 0;
+
     return {
       treatmentName: trt.name,
       replicationsCount: n,
@@ -275,6 +341,11 @@ export function aggregateProjectHarvest(subTrials = []) {
       meanFruitCount: Math.round(meanFruitCount),
       marketablePct: marketablePct !== '—' ? `${marketablePct}%` : '—',
       meanExtrapolatedKgHa: meanExtrapolated > 0 ? parseFloat(meanExtrapolated.toFixed(1)) : '—',
+      meanExtrapolatedQHa: meanExtrapolated > 0 ? parseFloat((meanExtrapolated / 100).toFixed(2)) : '—',
+      meanExtrapolatedTHa: meanExtrapolated > 0 ? parseFloat((meanExtrapolated / 1000).toFixed(2)) : '—',
+      sdMarketable: parseFloat(sdMarketable.toFixed(2)),
+      seMarketable: parseFloat(seMarketable.toFixed(2)),
+      cvMarketable: parseFloat(cvMarketable.toFixed(1)),
       reps: trt.reps,
     };
   });
@@ -307,6 +378,7 @@ export function aggregateProjectHarvest(subTrials = []) {
   const validExtrapolated = cumulativeTable.map(t => parseFloat(t.meanExtrapolatedKgHa)).filter(n => !isNaN(n) && n > 0);
   const avgExtrapolatedKgHa = validExtrapolated.length > 0 ? validExtrapolated.reduce((a, b) => a + b, 0) / validExtrapolated.length : 0;
   const extrapolatedMeanYieldTHa = avgExtrapolatedKgHa > 0 ? avgExtrapolatedKgHa / 1000 : 0;
+  const extrapolatedMeanYieldQHa = avgExtrapolatedKgHa > 0 ? avgExtrapolatedKgHa / 100 : 0;
 
   const hasData = allPickings.length > 0 || cumulativeTable.some(t => t.meanTotal > 0);
 
@@ -324,6 +396,7 @@ export function aggregateProjectHarvest(subTrials = []) {
     avgMarketablePerPlot,
     marketablePct: overallMarketablePct,
     extrapolatedMeanYieldTHa,
+    extrapolatedMeanYieldQHa,
     avgBrix,
     avgMoisture,
   };
@@ -337,7 +410,7 @@ export function exportHarvestCSV(pickingsInput = [], filename = 'Harvest_Log.csv
     ? pickingsInput
     : (Array.isArray(pickingsInput?.pickingsTable) ? pickingsInput.pickingsTable : []);
   if (!pickings.length) return '';
-  const headers = ['PlotNumber', 'Treatment', 'IsControl', 'PickingNumber', 'HarvestDate', 'MarketableWeight', 'UnmarketableWeight', 'TotalWeight', 'MarketableRatio', 'FruitCount', 'YieldUnit', 'MoisturePct', 'BrixScore', 'CullReason', 'ExtrapolatedKgHa', 'Notes'];
+  const headers = ['PlotNumber', 'Treatment', 'IsControl', 'PickingNumber', 'HarvestDate', 'MarketableWeight', 'UnmarketableWeight', 'TotalWeight', 'MarketableRatio', 'FruitCount', 'YieldUnit', 'MoisturePct', 'BrixScore', 'CullReason', 'ExtrapolatedKgHa', 'ExtrapolatedQHa', 'Notes'];
   const rows = pickings.map(p => [
     p.plotNumber || '',
     `"${(p.treatmentName || '').replace(/"/g, '""')}"`,
@@ -354,6 +427,7 @@ export function exportHarvestCSV(pickingsInput = [], filename = 'Harvest_Log.csv
     p.brixScore || '',
     `"${(p.cullReason || '').replace(/"/g, '""')}"`,
     p.extrapolatedYieldKgHa || '',
+    p.extrapolatedYieldQHa || '',
     `"${(p.notes || '').replace(/"/g, '""')}"`
   ]);
 

@@ -257,4 +257,66 @@ describe('Multi-Harvest & Yield Utils', () => {
     expect(csv).toContain('101');
     expect(csv).toContain('Nutri-Pro');
   });
+
+  it('supports quintals per hectare (q_ha) and computes ANOVA variance across reps', () => {
+    // 1. Check unit definition
+    const qHaUnit = HARVEST_YIELD_UNITS.find(u => u.id === 'q_ha');
+    expect(qHaUnit).toBeDefined();
+    expect(qHaUnit.factorToKg).toBe(100);
+
+    // 2. Normalization with plot area
+    const item = normalizePickingItem({
+      pickingNumber: 1,
+      actualMarketableWeight: 200,
+      actualUnmarketableWeight: 20,
+      yieldUnit: 'kg/plot',
+      plotAreaM2: 20, // 220 kg on 20 m2 = 11 kg/m2 -> 110,000 kg/ha -> 1,100 q/ha -> 110 t/ha
+    });
+    expect(item.extrapolatedYieldKgHa).toBe('110000.0');
+    expect(item.extrapolatedYieldQHa).toBe('1100.00');
+    expect(item.extrapolatedYieldTHa).toBe('110.00');
+
+    // 3. Multi-replication ANOVA variance check
+    const multiRepTrials = [
+      {
+        ID: 'T_R1',
+        FormulationName: 'BioBoost-100',
+        Replication: 'R1',
+        HarvestDataJSON: JSON.stringify({
+          pickings: [{ pickingNumber: 1, actualMarketableWeight: 100 }],
+        }),
+      },
+      {
+        ID: 'T_R2',
+        FormulationName: 'BioBoost-100',
+        Replication: 'R2',
+        HarvestDataJSON: JSON.stringify({
+          pickings: [{ pickingNumber: 1, actualMarketableWeight: 120 }],
+        }),
+      },
+      {
+        ID: 'T_R3',
+        FormulationName: 'BioBoost-100',
+        Replication: 'R3',
+        HarvestDataJSON: JSON.stringify({
+          pickings: [{ pickingNumber: 1, actualMarketableWeight: 110 }],
+        }),
+      },
+    ];
+
+    const agg = aggregateProjectHarvest(multiRepTrials);
+    const trt = agg.cumulativeTable.find(t => t.treatmentName === 'BioBoost-100');
+    expect(trt).toBeDefined();
+    expect(trt.replicationsCount).toBe(3);
+    // Mean = (100 + 120 + 110) / 3 = 110
+    expect(trt.meanMarketable).toBe(110);
+    // Sample variance = ((100-110)^2 + (120-110)^2 + (110-110)^2) / (3-1) = (100 + 100 + 0) / 2 = 100
+    // SD = 10
+    expect(trt.sdMarketable).toBe(10);
+    // SE = 10 / sqrt(3) ~ 5.77
+    expect(trt.seMarketable).toBeCloseTo(5.77, 2);
+    // CV% = (10 / 110) * 100 ~ 9.09%
+    expect(trt.cvMarketable).toBeCloseTo(9.1, 1);
+  });
 });
+

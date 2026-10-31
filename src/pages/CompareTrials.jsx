@@ -410,11 +410,15 @@ export default function CompareTrials({ onMenuClick }) {
       };
     });
 
+    const durationLabel = (activeCategory === 'nutrition' || activeCategory === 'biostimulant')
+      ? 'Evaluation Duration'
+      : (activeCategory === 'fungicide' ? 'Protection Duration' : (activeCategory === 'pesticide' ? 'Suppression Duration' : 'Control Duration'));
+
     const contextData = trialPerformances.map(p =>
       `Formulation: ${p.name}
 Active Ingredients: ${p.ingredients}
 Dosage: ${p.dosage}
-Control Duration: ${p.duration}
+${durationLabel}: ${p.duration}
 Final Overall ${config.primaryMetric.label}: ${p.primaryVal}%
 Target Breakdowns: ${p.targetBreakdown}
 Soil Profile: ${p.soil}
@@ -721,7 +725,7 @@ ${contextData}`;
                 <Table className="w-4 h-4 text-slate-500" />
                 {config.name} Metrics Timeline ({config.primaryMetric.unit || 'Value'} per DAA)
               </h3>
-              <p className="text-xs text-slate-400 mt-0.5">Comparing {config.primaryMetric.label} and control/performance % at each Days After Application point</p>
+              <p className="text-xs text-slate-400 mt-0.5">Comparing {config.primaryMetric.label} and performance progression at each Days After Application point</p>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm text-left">
@@ -745,7 +749,17 @@ ${contextData}`;
                           <td key={trial.ID} className="px-5 py-3">
                             {obs ? (
                               <span className="font-semibold text-slate-800">{obs[primaryObsField]}{config.primaryMetric.unit}
-                                {obs.controlPct !== undefined && <span className="text-xs text-emerald-600 ml-1">({obs.controlPct}% ctrl)</span>}
+                                {obs.controlPct !== undefined && (
+                                  <span className="text-xs text-emerald-600 ml-1">
+                                    ({activeCategory === 'nutrition' || activeCategory === 'biostimulant'
+                                      ? `+${obs.controlPct}% vigor`
+                                      : activeCategory === 'fungicide'
+                                        ? `${obs.controlPct}% DCE`
+                                        : activeCategory === 'pesticide'
+                                          ? `${obs.controlPct}% mort`
+                                          : `${obs.controlPct}% ctrl`})
+                                  </span>
+                                )}
                               </span>
                             ) : <span className="text-slate-300">—</span>}
                           </td>

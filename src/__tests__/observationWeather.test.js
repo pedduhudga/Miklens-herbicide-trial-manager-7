@@ -127,7 +127,7 @@ describe('Observation Weather & Microclimate Service', () => {
 
     expect(res1.temp).toBe(29.0);
     expect(res2.temp).toBe(29.0);
-    // 3 network requests for res1 (ambient weather, soil data, interval), 0 for res2 (100% cache hit)
-    expect(fetchCount).toBe(3);
+    // 4 network requests for res1 (ambient weather, soil data, SoilGrids pedology, interval), 0 for res2 (100% cache hit)
+    expect(fetchCount).toBe(4);
   });
 });

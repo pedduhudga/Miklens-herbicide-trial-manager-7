@@ -164,13 +164,13 @@ describe('Next-Generation Agronomic RAG Engine', () => {
   });
 
   describe('Dense Semantic Vector Engine', () => {
-    it('generates normalized 256D vector and assigns high cosine similarity to related concepts', () => {
+    it('generates normalized 512D vector and assigns high cosine similarity to related concepts', () => {
       const vecA = generateLocalSemanticVector('Cynodon dactylon bermudagrass root translocation systemic kill');
       const vecB = generateLocalSemanticVector('Grass perennial rhizome suppression systemic herbicide duration');
       const vecC = generateLocalSemanticVector('Powdery mildew fungal spore fruit rot fungicide');
 
-      expect(vecA.length).toBe(256);
-      expect(vecB.length).toBe(256);
+      expect(vecA.length).toBe(512);
+      expect(vecB.length).toBe(512);
 
       const simRelated = cosineSimilarity(vecA, vecB);
       const simUnrelated = cosineSimilarity(vecA, vecC);
