@@ -131,13 +131,27 @@ function FormulationCard({
                   {ratingBadge.label}
                 </span>
 
-                {/* Control Days */}
+                {/* Control Days / Duration Badge */}
                 {stats?.avgCtrlDays !== null && stats?.avgCtrlDays > 0 && (
                   <span
                     className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-50 text-amber-800 border border-amber-200/90 inline-flex items-center gap-0.5 shrink-0"
-                    title={`Average sustained control duration: ${stats.avgCtrlDays} days`}
+                    title={
+                      (form.Category || 'herbicide') === 'nutrition' || (form.Category || 'herbicide') === 'biostimulant'
+                        ? `Average monitoring duration: ${stats.avgCtrlDays} days`
+                        : (form.Category || 'herbicide') === 'fungicide'
+                        ? `Average disease protection window: ${stats.avgCtrlDays} days`
+                        : (form.Category || 'herbicide') === 'pesticide'
+                        ? `Average pest knockdown suppression: ${stats.avgCtrlDays} days`
+                        : `Average sustained control duration: ${stats.avgCtrlDays} days`
+                    }
                   >
-                    ⏳ {stats.avgCtrlDays}d Control
+                    {(form.Category || 'herbicide') === 'nutrition' || (form.Category || 'herbicide') === 'biostimulant'
+                      ? `📅 ${stats.avgCtrlDays}d Monitored`
+                      : (form.Category || 'herbicide') === 'fungicide'
+                      ? `🛡️ ${stats.avgCtrlDays}d Protection`
+                      : (form.Category || 'herbicide') === 'pesticide'
+                      ? `⚡ ${stats.avgCtrlDays}d Suppression`
+                      : `⏳ ${stats.avgCtrlDays}d Control`}
                   </span>
                 )}
 
@@ -382,13 +396,29 @@ function FormulationCard({
           {/* Streamlined KPI Grid */}
           <div className="grid grid-cols-4 divide-x divide-slate-100 bg-slate-50/70 rounded-xl p-2.5 mb-3 border border-slate-100/90 text-center">
             <div className="px-1">
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Kill Rate</span>
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">
+                {(form.Category || 'herbicide') === 'nutrition' || (form.Category || 'herbicide') === 'biostimulant'
+                  ? 'Mean Vigor'
+                  : (form.Category || 'herbicide') === 'fungicide'
+                  ? 'DCE Control'
+                  : (form.Category || 'herbicide') === 'pesticide'
+                  ? 'Mortality'
+                  : 'Kill Rate'}
+              </span>
               <span className={`text-xs font-black block mt-0.5 ${stats?.avgEfficacy >= 90 ? 'text-emerald-700' : stats?.avgEfficacy >= 75 ? 'text-teal-700' : 'text-slate-800'}`}>
-                {stats?.avgEfficacy !== null ? `${stats.avgEfficacy}%` : '–'}
+                {stats?.avgEfficacy !== null ? `${(form.Category || 'herbicide') === 'nutrition' || (form.Category || 'herbicide') === 'biostimulant' ? '+' : ''}${stats.avgEfficacy}%` : '–'}
               </span>
             </div>
             <div className="px-1">
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Residual</span>
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">
+                {(form.Category || 'herbicide') === 'nutrition' || (form.Category || 'herbicide') === 'biostimulant'
+                  ? 'Monitoring'
+                  : (form.Category || 'herbicide') === 'fungicide'
+                  ? 'Protection'
+                  : (form.Category || 'herbicide') === 'pesticide'
+                  ? 'Suppression'
+                  : 'Residual'}
+              </span>
               <span className="text-xs font-black text-amber-700 block mt-0.5">
                 {stats?.avgCtrlDays !== null ? `${stats.avgCtrlDays}d` : '–'}
               </span>
@@ -1496,9 +1526,33 @@ export default function Formulations({ onMenuClick }) {
                 onChange={e => setSortBy(e.target.value)}
                 className="bg-transparent font-semibold outline-none cursor-pointer text-slate-800 text-xs"
               >
-                <option value="best">Sort: Best (Long Control & High Kill) 🏆</option>
-                <option value="control-days">Sort: Longest Control Days ⏳</option>
-                <option value="efficacy">Sort: Highest Kill Rate ⚡</option>
+                <option value="best">
+                  {activeCategory === 'nutrition' || activeCategory === 'biostimulant' 
+                    ? 'Sort: Best (Top Vigor & Yield) 🏆' 
+                    : activeCategory === 'fungicide' 
+                    ? 'Sort: Best (Long Protection & High DCE) 🏆' 
+                    : activeCategory === 'pesticide' 
+                    ? 'Sort: Best (Long Suppression & High Kill) 🏆' 
+                    : 'Sort: Best (Long Control & High Kill) 🏆'}
+                </option>
+                <option value="control-days">
+                  {activeCategory === 'nutrition' || activeCategory === 'biostimulant' 
+                    ? 'Sort: Longest Monitoring Duration ⏳' 
+                    : activeCategory === 'fungicide' 
+                    ? 'Sort: Longest Protection Window ⏳' 
+                    : activeCategory === 'pesticide' 
+                    ? 'Sort: Longest Suppression Window ⏳' 
+                    : 'Sort: Longest Control Days ⏳'}
+                </option>
+                <option value="efficacy">
+                  {activeCategory === 'nutrition' || activeCategory === 'biostimulant' 
+                    ? 'Sort: Highest Vigor Boost ⚡' 
+                    : activeCategory === 'fungicide' 
+                    ? 'Sort: Highest Disease Control ⚡' 
+                    : activeCategory === 'pesticide' 
+                    ? 'Sort: Highest Mortality ⚡' 
+                    : 'Sort: Highest Kill Rate ⚡'}
+                </option>
                 <option value="spectrum">Sort: Broadest Spectrum 🎯</option>
                 <option value="trials">Sort: Most Field Tested 🔬</option>
                 <option value="cost">Sort: Lowest Cost 💰</option>

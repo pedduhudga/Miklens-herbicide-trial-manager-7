@@ -248,8 +248,17 @@ export function useTrialsFilter(trials, {
     if (filterDateStart) list = list.filter(t => t.Date && t.Date >= filterDateStart);
     if (filterDateEnd)   list = list.filter(t => t.Date && t.Date <= filterDateEnd);
 
-    // Helper to extract control days from trial (strictly matching TrialCard logic)
+    // Helper to extract control days / monitoring duration from trial (strictly matching TrialCard logic)
     const getTrialControlDays = (t) => {
+      if (activeCategory === 'nutrition' || activeCategory === 'biostimulant') {
+        if (t.FinalControlDuration && !isNaN(parseInt(t.FinalControlDuration, 10))) {
+          return parseInt(t.FinalControlDuration, 10);
+        }
+        if (t.Date) {
+          return Math.max(0, Math.round((new Date() - new Date(t.Date)) / 86400000));
+        }
+        return 0;
+      }
       const effDays = calculateEffectiveControlDays(t);
       if (effDays > 0) return effDays;
       if (t.FinalControlDuration && !isNaN(parseInt(t.FinalControlDuration, 10))) {
@@ -261,9 +270,10 @@ export function useTrialsFilter(trials, {
 
     // Quick Performance Filter Chips
     if (performanceFilter === 'high-kill') {
+      const minThreshold = (activeCategory === 'nutrition' || activeCategory === 'biostimulant') ? 15 : 70;
       list = list.filter(t => {
         const eff = getTrialCalculatedEfficacy(t, activeCategory);
-        return eff !== null && eff !== undefined && eff >= 70;
+        return eff !== null && eff !== undefined && eff >= minThreshold;
       });
     } else if (performanceFilter === 'long-control') {
       list = list.filter(t => getTrialControlDays(t) >= 15);

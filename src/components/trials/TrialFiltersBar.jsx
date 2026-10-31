@@ -49,7 +49,8 @@ export default function TrialFiltersBar({
   tabCounts = {},
   performanceFilter = 'all',
   setPerformanceFilter,
-  performanceCounts = {}
+  performanceCounts = {},
+  activeCategory = 'herbicide'
 }) {
   const renderUtilityActions = (containerClass = '') => {
     if (isViewer) return null;
@@ -225,7 +226,9 @@ export default function TrialFiltersBar({
           <button
             type="button"
             onClick={onOpenVoiceScout}
-            title="AI Voice Field Scout: Dictate notes, DAA, weed control % hands-free"
+            title={activeCategory === 'nutrition' || activeCategory === 'biostimulant'
+              ? "AI Voice Field Scout: Dictate notes, DAA, crop vigor & inputs hands-free"
+              : "AI Voice Field Scout: Dictate notes, DAA, weed/pest control efficacy hands-free"}
             className="p-1.5 sm:px-3 sm:py-2 rounded-lg bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-700 flex items-center gap-1.5 text-xs sm:text-sm font-semibold transition shadow-2xs shrink-0 group active:scale-95"
           >
             <Mic className="w-4 h-4 text-purple-600 group-hover:scale-110 transition-transform animate-pulse" />
@@ -357,9 +360,31 @@ export default function TrialFiltersBar({
             onChange={e => setSortBy(e.target.value)}
             className="text-xs sm:text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-[#154734]/30 font-medium"
           >
-            <option value="best">🏆 Best (High Kill & Long Residual)</option>
-            <option value="kill-rate">⚡ Highest Kill Rate / Efficacy</option>
-            <option value="control-days">⏳ Longest Control Days</option>
+            <option value="best">
+              {activeCategory === 'nutrition' || activeCategory === 'biostimulant'
+                ? '🏆 Best (Top Vigor & Yield)'
+                : activeCategory === 'fungicide'
+                ? '🏆 Best (Highest Suppression & Protection)'
+                : activeCategory === 'pesticide'
+                ? '🏆 Best (Highest Mortality & Suppression)'
+                : '🏆 Best (High Kill & Long Residual)'}
+            </option>
+            <option value="kill-rate">
+              {activeCategory === 'nutrition' || activeCategory === 'biostimulant'
+                ? '⚡ Highest Vigor / Response'
+                : activeCategory === 'fungicide'
+                ? '⚡ Highest Disease Control'
+                : activeCategory === 'pesticide'
+                ? '⚡ Highest Mortality Rate'
+                : '⚡ Highest Kill Rate / Efficacy'}
+            </option>
+            <option value="control-days">
+              {activeCategory === 'nutrition' || activeCategory === 'biostimulant'
+                ? '⏳ Longest Monitored Period'
+                : activeCategory === 'fungicide'
+                ? '⏳ Longest Protection Period'
+                : '⏳ Longest Control Days'}
+            </option>
             <option value="date-desc">Newest First</option>
             <option value="date-asc">Oldest First</option>
             <option value="name">By Formulation</option>
@@ -492,7 +517,15 @@ export default function TrialFiltersBar({
                 : 'bg-white border border-slate-200 text-slate-600 hover:bg-emerald-50 hover:text-[#154734]'
             }`}
           >
-            <span>⚡ High Kill (≥70%)</span>
+            <span>
+              {activeCategory === 'nutrition' || activeCategory === 'biostimulant'
+                ? '🌿 High Vigor (≥15%)'
+                : activeCategory === 'fungicide'
+                ? '🛡️ High Control (≥70%)'
+                : activeCategory === 'pesticide'
+                ? '⚡ High Mortality (≥70%)'
+                : '⚡ High Kill (≥70%)'}
+            </span>
             {performanceCounts?.highKill !== undefined && (
               <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
                 performanceFilter === 'high-kill' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-[#154734]'
@@ -510,7 +543,15 @@ export default function TrialFiltersBar({
                 : 'bg-white border border-slate-200 text-slate-600 hover:bg-amber-50 hover:text-amber-700'
             }`}
           >
-            <span>⏳ Long Residual (≥15d)</span>
+            <span>
+              {activeCategory === 'nutrition' || activeCategory === 'biostimulant'
+                ? '⏳ Extended Monitoring (≥15d)'
+                : activeCategory === 'fungicide'
+                ? '🛡️ Extended Protection (≥15d)'
+                : activeCategory === 'pesticide'
+                ? '⏳ Extended Knockdown (≥15d)'
+                : '⏳ Long Residual (≥15d)'}
+            </span>
             {performanceCounts?.longControl !== undefined && (
               <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
                 performanceFilter === 'long-control' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-700'

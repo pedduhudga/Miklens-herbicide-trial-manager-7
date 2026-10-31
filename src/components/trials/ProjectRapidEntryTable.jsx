@@ -19,6 +19,7 @@ export default function ProjectRapidEntryTable({
   onViewDetails,
   onEdit,
   onOpenObsModal,
+  onOpenBatchAppModal,
   onSaveInlineObservation,
   selectedForBulk = new Set(),
   onToggleBulk,
@@ -29,7 +30,12 @@ export default function ProjectRapidEntryTable({
   const [tableSearch, setTableSearch] = useState('');
 
   const primaryField = getPrimaryObservationField(activeCategory);
-  const primaryMetricLabel = catConfig.primaryMetric?.label || 'Efficacy';
+  const primaryMetricLabel = catConfig.primaryMetric?.label || (
+    activeCategory === 'nutrition' ? 'Vigor / Brix' :
+    activeCategory === 'biostimulant' ? 'Vigor Index' :
+    activeCategory === 'fungicide' ? 'Disease Severity' :
+    activeCategory === 'pesticide' ? 'Pest Count' : 'Weed Cover'
+  );
   const primaryMetricUnit = catConfig.primaryMetric?.unit || '%';
 
   const filteredTrials = trialsList.filter(t => {
@@ -94,6 +100,18 @@ export default function ProjectRapidEntryTable({
         </div>
 
         <div className="flex items-center gap-2">
+          {onOpenBatchAppModal && (
+            <button
+              type="button"
+              onClick={onOpenBatchAppModal}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-emerald-800 bg-emerald-100/80 hover:bg-emerald-200 dark:text-emerald-300 dark:bg-emerald-950/60 rounded-xl transition shadow-2xs"
+              title="Apply fertilizer, protection spray, or agronomic input across all plots in this trial"
+            >
+              <Leaf className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Batch Agronomic Input</span>
+            </button>
+          )}
+
           <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium hidden sm:inline">
             ⚡ Quick Rate:
           </span>

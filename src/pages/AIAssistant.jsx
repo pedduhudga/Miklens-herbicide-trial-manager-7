@@ -2600,10 +2600,18 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                           </button>
                           <button
                             type="button"
-                            onClick={() => sendMessage(`Query database: show all plot trials with efficacy > 85%, listing formulation, target weed, dosage, and control days.`)}
+                            onClick={() => sendMessage(
+                              activeCategory === 'nutrition' || activeCategory === 'biostimulant'
+                                ? `Query database: show all plot trials with vigor > 15%, listing formulation, target crop, dosage, and monitoring duration.`
+                                : activeCategory === 'fungicide'
+                                ? `Query database: show all plot trials with disease control > 85%, listing formulation, target disease, dosage, and protection duration.`
+                                : activeCategory === 'pesticide'
+                                ? `Query database: show all plot trials with mortality > 85%, listing formulation, target pest, dosage, and suppression duration.`
+                                : `Query database: show all plot trials with efficacy > 85%, listing formulation, target weed, dosage, and control days.`
+                            )}
                             className="w-full text-left text-[11px] font-semibold text-blue-800 hover:text-blue-950 p-2 rounded-lg bg-blue-50/70 hover:bg-blue-100/70 transition flex items-center justify-between"
                           >
-                            <span>🔍 Query Trials (&gt;85%)</span>
+                            <span>🔍 Query Trials ({activeCategory === 'nutrition' || activeCategory === 'biostimulant' ? '&gt;15%' : '&gt;85%'})</span>
                             <ArrowRight className="w-3 h-3 shrink-0" />
                           </button>
                         </div>
@@ -2951,13 +2959,23 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                         type="button"
                         onClick={() => {
                           setIsToolsDrawerOpen(false);
-                          sendMessage(`Query database: show all plot trials with efficacy > 85%, listing formulation, target weed, dosage, and control days.`);
+                          sendMessage(
+                            activeCategory === 'nutrition' || activeCategory === 'biostimulant'
+                              ? `Query database: show all plot trials with vigor > 15%, listing formulation, target crop, dosage, and monitoring duration.`
+                              : activeCategory === 'fungicide'
+                              ? `Query database: show all plot trials with disease control > 85%, listing formulation, target disease, dosage, and protection duration.`
+                              : activeCategory === 'pesticide'
+                              ? `Query database: show all plot trials with mortality > 85%, listing formulation, target pest, dosage, and suppression duration.`
+                              : `Query database: show all plot trials with efficacy > 85%, listing formulation, target weed, dosage, and control days.`
+                          );
                         }}
                         className="p-2.5 rounded-xl border border-slate-200 hover:border-blue-300 bg-slate-50 hover:bg-blue-50/50 text-left transition cursor-pointer active:scale-95 group"
                       >
                         <span className="text-base block mb-0.5">🔍</span>
                         <span className="font-bold text-xs text-slate-800 group-hover:text-blue-900 block">Query Trials</span>
-                        <span className="text-[10px] text-slate-500 block truncate">Filter trials &gt;85%</span>
+                        <span className="text-[10px] text-slate-500 block truncate">
+                          Filter trials {activeCategory === 'nutrition' || activeCategory === 'biostimulant' ? '&gt;15%' : '&gt;85%'}
+                        </span>
                       </button>
 
                       <button
@@ -3118,12 +3136,20 @@ Simulate the outcome and return ONLY a valid JSON object in \`\`\`json ... \`\`\
                     <button
                       type="button"
                       disabled={isLoading}
-                      onClick={() => sendMessage(`Query database: show all plot trials with efficacy > 85%, listing formulation, target weed, dosage, and control days.`)}
+                      onClick={() => sendMessage(
+                        activeCategory === 'nutrition' || activeCategory === 'biostimulant'
+                          ? `Query database: show all plot trials with vigor > 15%, listing formulation, target crop, dosage, and monitoring duration.`
+                          : activeCategory === 'fungicide'
+                          ? `Query database: show all plot trials with disease control > 85%, listing formulation, target disease, dosage, and protection duration.`
+                          : activeCategory === 'pesticide'
+                          ? `Query database: show all plot trials with mortality > 85%, listing formulation, target pest, dosage, and suppression duration.`
+                          : `Query database: show all plot trials with efficacy > 85%, listing formulation, target weed, dosage, and control days.`
+                      )}
                       className="shrink-0 text-xs px-2.5 py-1 rounded-xl bg-blue-50/90 hover:bg-blue-100 text-blue-900 border border-blue-200/80 font-semibold transition active:scale-95 flex items-center gap-1 shadow-2xs hover:shadow-xs cursor-pointer disabled:opacity-50"
                       title="Filter and aggregate trials matching specific efficacy thresholds"
                     >
                       <span>🔍</span>
-                      <span>Query Trials (&gt;85%)</span>
+                      <span>Query Trials ({activeCategory === 'nutrition' || activeCategory === 'biostimulant' ? '&gt;15%' : '&gt;85%'})</span>
                     </button>
                     <button
                       type="button"

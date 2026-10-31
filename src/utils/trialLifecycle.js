@@ -126,7 +126,10 @@ export function getDetailedControlDaysInfo(trial, controlTrial = null) {
     if (/(?:precluded|packaging|fertilizer advertisement|commercial product|marketing flyer|promotional poster|product label|fertilizer packaging|not (?:a|an) (?:experimental|crop|field|plot|canopy)|cannot be evaluated|non-plot|non-agricultural)/i.test(textBlob)) {
       return false;
     }
-    return o.weedCover !== null && o.weedCover !== undefined;
+    return (o.weedCover !== null && o.weedCover !== undefined) ||
+           (o.controlPct !== null && o.controlPct !== undefined) ||
+           (o.wce !== null && o.wce !== undefined) ||
+           (o.weedPressurePct !== null && o.weedPressurePct !== undefined);
   });
 
   if (validObservations.length === 0) {

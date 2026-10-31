@@ -44,6 +44,7 @@ import TrialKanbanBoard from '../components/trials/TrialKanbanBoard.jsx';
 import PhotoComparisonModal from '../components/PhotoComparisonModal.jsx';
 import ProjectRapidEntryTable from '../components/trials/ProjectRapidEntryTable.jsx';
 import ProjectBatchObservationModal from '../components/trials/ProjectBatchObservationModal.jsx';
+import BatchApplicationModal from '../components/trials/BatchApplicationModal.jsx';
 import { prefetchTrialPhotos } from '../services/photoCacheService.js';
 import { GEMINI_FALLBACK_MODELS } from '../utils/aiConstants.js';
 import {
@@ -260,6 +261,7 @@ export default function Trials({ onMenuClick }) {
   const [projectPlotsViewMode, setProjectPlotsViewMode] = useState({}); // { [pid]: 'cards' | 'table' }
   const [projectDesignTab, setProjectDesignTab] = useState('all');
   const [batchObsModalProject, setBatchObsModalProject] = useState(null);
+  const [batchAppModalData, setBatchAppModalData] = useState(null); // { trials: [], project: null }
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDesignGuideOpen, setIsDesignGuideOpen] = useState(false);
@@ -1011,26 +1013,51 @@ export default function Trials({ onMenuClick }) {
       }];
     }
 
-    // When sorting by Longest Control Days, group by Duration Tiers
+    // When sorting by Longest Control Days / Duration, group by Duration Tiers
     if (sortBy === 'control-days') {
+      const isNutrition = activeCategory === 'nutrition' || activeCategory === 'biostimulant';
+      const isFungicide = activeCategory === 'fungicide';
+      const isPesticide = activeCategory === 'pesticide';
+      const suffix = isNutrition ? 'Days Monitored' : isFungicide ? 'Days Protection' : isPesticide ? 'Days Suppression' : 'Days Control';
       const tiers = [
-        { key: '🏆 30+ Days Sustained Control', min: 30, max: Infinity, trials: [] },
-        { key: '⭐ 20–29 Days Control', min: 20, max: 29.99, trials: [] },
-        { key: '🌿 10–19 Days Control', min: 10, max: 19.99, trials: [] },
-        { key: '🌱 1–9 Days Control', min: 1, max: 9.99, trials: [] },
-        { key: '⚠️ 0 Days / Ineffective Control', min: -Infinity, max: 0.99, trials: [] }
+        { key: `🏆 30+ ${suffix}`, min: 30, max: Infinity, trials: [] },
+        { key: `⭐ 20–29 ${suffix}`, min: 20, max: 29.99, trials: [] },
+        { key: `🌿 10–19 ${suffix}`, min: 10, max: 19.99, trials: [] },
+        { key: `🌱 1–9 ${suffix}`, min: 1, max: 9.99, trials: [] },
+        { key: `⚠️ 0 ${suffix} / Low`, min: -Infinity, max: 0.99, trials: [] }
       ];
       filteredTrials.forEach(t => {
-        const days = calculateEffectiveControlDays(t) || (parseInt(t.FinalControlDuration, 10) || 0);
+        let days = 0;
+        if (isNutrition) {
+          days = t.FinalControlDuration ? (parseInt(t.FinalControlDuration, 10) || 0) : (t.Date ? Math.max(0, Math.round((new Date() - new Date(t.Date)) / 86400000)) : 0);
+        } else {
+          days = calculateEffectiveControlDays(t) || (parseInt(t.FinalControlDuration, 10) || 0);
+        }
         const tier = tiers.find(tr => days >= tr.min && days <= tr.max) || tiers[tiers.length - 1];
         tier.trials.push(t);
       });
       return tiers.filter(tr => tr.trials.length > 0);
     }
 
-    // When sorting by Kill Rate, group by Efficacy Rating Tiers
+    // When sorting by Primary Metric / Kill Rate, group by Efficacy Rating Tiers
     if (sortBy === 'kill-rate') {
-      const tiers = [
+      const isNutrition = activeCategory === 'nutrition' || activeCategory === 'biostimulant';
+      const tiers = isNutrition ? [
+        { key: '🏆 Exceptional Vigor & Yield (≥ 20%)', min: 20, max: Infinity, trials: [] },
+        { key: '⭐ Strong Growth Boost (10% – 19%)', min: 10, max: 19.99, trials: [] },
+        { key: '🌿 Moderate Vigor (5% – 9%)', min: 5, max: 9.99, trials: [] },
+        { key: '⚠️ Low Vigor (< 5%)', min: -Infinity, max: 4.99, trials: [] }
+      ] : activeCategory === 'fungicide' ? [
+        { key: '🏆 High Disease Control (≥ 85%)', min: 85, max: Infinity, trials: [] },
+        { key: '⭐ Good Disease Control (70% – 84%)', min: 70, max: 84.99, trials: [] },
+        { key: '🌿 Moderate Control (50% – 69%)', min: 50, max: 69.99, trials: [] },
+        { key: '⚠️ Low Disease Control (< 50%)', min: -Infinity, max: 49.99, trials: [] }
+      ] : activeCategory === 'pesticide' ? [
+        { key: '🏆 High Pest Mortality (≥ 85%)', min: 85, max: Infinity, trials: [] },
+        { key: '⭐ Good Knockdown (70% – 84%)', min: 70, max: 84.99, trials: [] },
+        { key: '🌿 Moderate Suppression (50% – 69%)', min: 50, max: 69.99, trials: [] },
+        { key: '⚠️ Low Mortality (< 50%)', min: -Infinity, max: 49.99, trials: [] }
+      ] : [
         { key: '🏆 Excellent Kill Rate (≥ 70%)', min: 70, max: Infinity, trials: [] },
         { key: '⭐ Good Kill Rate (55% – 69%)', min: 55, max: 69.99, trials: [] },
         { key: '🌿 Fair Kill Rate (40% – 54%)', min: 40, max: 54.99, trials: [] },
@@ -1044,17 +1071,23 @@ export default function Trials({ onMenuClick }) {
       return tiers.filter(tr => tr.trials.length > 0);
     }
 
-    // When sorting by Best (High Kill & Long Control), group by Overall Performance Tiers
+    // When sorting by Best, group by Overall Performance Tiers
     if (sortBy === 'best') {
+      const isNutrition = activeCategory === 'nutrition' || activeCategory === 'biostimulant';
       const tiers = [
-        { key: '🏆 Top Tier: High Kill & Extended Control', minScore: 65, trials: [] },
+        { key: isNutrition ? '🏆 Top Tier: Peak Vigor & Extended Monitoring' : activeCategory === 'fungicide' ? '🏆 Top Tier: High Control & Extended Protection' : activeCategory === 'pesticide' ? '🏆 Top Tier: Rapid Knockdown & Sustained Suppression' : '🏆 Top Tier: High Kill & Extended Control', minScore: 65, trials: [] },
         { key: '⭐ Strong Performance', minScore: 45, trials: [] },
         { key: '🌿 Moderate Performance', minScore: 25, trials: [] },
-        { key: '⚠️ Developing / Low Control', minScore: -Infinity, trials: [] }
+        { key: isNutrition ? '⚠️ Developing / Low Vigor' : '⚠️ Developing / Low Control', minScore: -Infinity, trials: [] }
       ];
       filteredTrials.forEach(t => {
         const eff = getTrialCalculatedEfficacy(t, activeCategory) ?? 0;
-        const days = calculateEffectiveControlDays(t) || (parseInt(t.FinalControlDuration, 10) || 0);
+        let days = 0;
+        if (isNutrition) {
+          days = t.FinalControlDuration ? (parseInt(t.FinalControlDuration, 10) || 0) : (t.Date ? Math.max(0, Math.round((new Date() - new Date(t.Date)) / 86400000)) : 0);
+        } else {
+          days = calculateEffectiveControlDays(t) || (parseInt(t.FinalControlDuration, 10) || 0);
+        }
         const score = eff * 0.5 + Math.min(100, (days / 30) * 100) * 0.5;
         const tier = tiers.find(tr => score >= tr.minScore) || tiers[tiers.length - 1];
         tier.trials.push(t);
@@ -1409,6 +1442,61 @@ export default function Trials({ onMenuClick }) {
       detail: { msg: `✓ Saved batch observations across ${updatedList.length} plot(s)!`, type: 'success' }
     }));
   }, [activeCategory, state.trials, updateState, getAppState]);
+
+  const handleSaveBatchApplication = useCallback(async (applicationData, targetTrialIds) => {
+    if (!targetTrialIds || targetTrialIds.length === 0) return;
+    const allTrials = getAppState?.()?.trials || state.trials || [];
+    const patchPromises = [];
+    const updatedList = [];
+
+    const nowIso = new Date().toISOString();
+
+    for (const id of targetTrialIds) {
+      const trial = allTrials.find(t => t.ID === id);
+      if (!trial) continue;
+
+      const newApp = {
+        id: `app_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+        date: applicationData.date || new Date().toISOString().slice(0, 10),
+        time: applicationData.time || '',
+        applicationType: applicationData.applicationType || 'Fertilizer',
+        productName: applicationData.productName || '',
+        activeIngredient: applicationData.activeIngredient || '',
+        dosage: applicationData.dosage || '',
+        dosageUnit: applicationData.dosageUnit || 'kg/ha',
+        method: applicationData.method || 'Soil Application',
+        cropStage: applicationData.cropStage || '',
+        purpose: applicationData.purpose || '',
+        operator: applicationData.operator || '',
+        weather: applicationData.weather || '',
+        notes: applicationData.notes || '',
+        createdAt: nowIso
+      };
+
+      const existingApps = Array.isArray(trial.Applications) ? trial.Applications : [];
+      const updatedTrial = {
+        ...trial,
+        Applications: [...existingApps, newApp],
+        UpdatedAt: nowIso
+      };
+
+      updatedList.push(updatedTrial);
+      patchPromises.push(trialsService.update(trial.ID, updatedTrial).catch(err => {
+        console.warn('Failed to persist batch application for trial', trial.ID, err);
+      }));
+    }
+
+    if (updatedList.length === 0) return;
+
+    const updatedTrialMap = new Map(updatedList.map(t => [t.ID, t]));
+    const nextTrials = allTrials.map(t => updatedTrialMap.get(t.ID) || t);
+    updateState({ trials: nextTrials });
+
+    await Promise.all(patchPromises);
+    window.dispatchEvent(new CustomEvent('app:toast', {
+      detail: { msg: `✓ Recorded application across ${updatedList.length} trial(s)!`, type: 'success' }
+    }));
+  }, [state.trials, updateState, getAppState]);
 
   const projectFilterOptions = useMemo(() => {
     const designs = new Set();
@@ -5982,7 +6070,14 @@ Rules:
 
   const handleEditControlDays = useCallback(async (trial) => {
     const current = trial.FinalControlDuration || String(Math.max(0, Math.round((new Date() - new Date(trial.Date || Date.now())) / 86400000)));
-    const val = window.prompt(`Edit control days for "${trial.FormulationName}":`, current);
+    const promptLabel = activeCategory === 'nutrition' || activeCategory === 'biostimulant'
+      ? `Edit monitoring duration (days) for "${trial.FormulationName}":`
+      : activeCategory === 'fungicide'
+      ? `Edit disease protection period (days) for "${trial.FormulationName}":`
+      : activeCategory === 'pesticide'
+      ? `Edit pest suppression period (days) for "${trial.FormulationName}":`
+      : `Edit control days for "${trial.FormulationName}":`;
+    const val = window.prompt(promptLabel, current);
     if (val === null || val.trim() === '') return;
     const days = parseInt(val.trim(), 10);
     if (isNaN(days) || days < 0) { window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Invalid number', type: 'error' } })); return; }
@@ -5990,8 +6085,15 @@ Rules:
     updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updated.ID ? updated : t) });
     if (activeTrial?.ID === updated.ID) setActiveTrial(updated);
     try { await updateTrial({ ID: updated.ID, FinalControlDuration: String(days) }, getAppState); } catch(e) {}
-    window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Control days set to ${days}`, type: 'success' } }));
-  }, [state.trials, activeTrial, updateState, getAppState]);
+    const successToast = activeCategory === 'nutrition' || activeCategory === 'biostimulant'
+      ? `Monitoring duration set to ${days} days`
+      : activeCategory === 'fungicide'
+      ? `Protection period set to ${days} days`
+      : activeCategory === 'pesticide'
+      ? `Suppression period set to ${days} days`
+      : `Control days set to ${days}`;
+    window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: successToast, type: 'success' } }));
+  }, [state.trials, activeTrial, updateState, getAppState, activeCategory]);
 
 
 
@@ -6015,10 +6117,16 @@ Rules:
 
     trials.forEach(t => {
       const eff = getTrialCalculatedEfficacy(t, activeCategory);
-      if (eff !== null && eff !== undefined && eff >= 70) highKill++;
+      const minThreshold = (activeCategory === 'nutrition' || activeCategory === 'biostimulant') ? 15 : 70;
+      if (eff !== null && eff !== undefined && eff >= minThreshold) highKill++;
 
-      const effDays = calculateEffectiveControlDays(t);
-      const days = effDays > 0 ? effDays : (parseInt(t.FinalControlDuration, 10) || 0);
+      let days = 0;
+      if (activeCategory === 'nutrition' || activeCategory === 'biostimulant') {
+        days = t.FinalControlDuration ? (parseInt(t.FinalControlDuration, 10) || 0) : (t.Date ? Math.max(0, Math.round((new Date() - new Date(t.Date)) / 86400000)) : 0);
+      } else {
+        const effDays = calculateEffectiveControlDays(t);
+        days = effDays > 0 ? effDays : (parseInt(t.FinalControlDuration, 10) || 0);
+      }
       if (days >= 15) longControl++;
 
       const isFinalized = t.IsCompleted === true || t.IsCompleted === 'true' || t.ControlFinalized === true || t.ControlFinalized === 'true';
@@ -6070,15 +6178,20 @@ Rules:
   const avgControlDays = useMemo(() => {
     let sum = 0, count = 0;
     trials.forEach(t => {
-      const effDays = calculateEffectiveControlDays(t);
-      const days = effDays > 0 ? effDays : (parseInt(t.FinalControlDuration, 10) || 0);
+      let days = 0;
+      if (activeCategory === 'nutrition' || activeCategory === 'biostimulant') {
+        days = t.FinalControlDuration ? (parseInt(t.FinalControlDuration, 10) || 0) : (t.Date ? Math.max(0, Math.round((new Date() - new Date(t.Date)) / 86400000)) : 0);
+      } else {
+        const effDays = calculateEffectiveControlDays(t);
+        days = effDays > 0 ? effDays : (parseInt(t.FinalControlDuration, 10) || 0);
+      }
       if (days > 0) {
         sum += days;
         count++;
       }
     });
     return count > 0 ? Math.round(sum / count) : 0;
-  }, [trials]);
+  }, [trials, activeCategory]);
 
   const ownerOptions = useMemo(() => {
     const emailSet = new Set();
@@ -7070,7 +7183,15 @@ If none are present, write "None".`;
                 </span>
               </h1>
               <p className="text-slate-300 text-xs mt-1 max-w-xl leading-relaxed">
-                Live agronomic monitoring, weed/pest control efficacy tracking, photo comparisons, and EPPO/EWRS residual lifecycles.
+                {activeCategory === 'nutrition'
+                  ? 'Crop nutrition diagnostics, vegetative vigor, Brix/chlorophyll dynamics, agronomic inputs, and yield tracking.'
+                  : activeCategory === 'biostimulant'
+                  ? 'Plant stress mitigation, root/canopy bio-enhancement, growth index tracking, and yield resilience.'
+                  : activeCategory === 'fungicide'
+                  ? 'Fungal disease incidence suppression, AUDPC tracking, protective barriers, and crop health scoring.'
+                  : activeCategory === 'pesticide'
+                  ? 'Insect pest knock-down, mortality efficacy, predator safety, and pest suppression tracking.'
+                  : 'Live agronomic monitoring, weed efficacy tracking, photo comparisons, and EPPO/EWRS residual lifecycles.'}
               </p>
             </div>
 
@@ -7083,21 +7204,34 @@ If none are present, write "None".`;
               </div>
               <div className="bg-emerald-500/10 backdrop-blur-xs rounded-xl p-2.5 border border-emerald-500/20 flex flex-col">
                 <span className="text-[10px] font-medium text-emerald-300 uppercase tracking-wider flex items-center gap-1">
-                  ⚡ Mean Efficacy
+                  {activeCategory === 'nutrition' || activeCategory === 'biostimulant' ? '🌿 Mean Vigor' :
+                   activeCategory === 'fungicide' ? '🛡️ Mean Control' :
+                   activeCategory === 'pesticide' ? '⚡ Mean Mortality' : '⚡ Mean Efficacy'}
                 </span>
                 <span className="text-base sm:text-lg font-bold text-emerald-400 mt-0.5">
-                  {avgEfficacy > 0 ? `${avgEfficacy}%` : '–'}
+                  {avgEfficacy > 0 ? (activeCategory === 'nutrition' || activeCategory === 'biostimulant' ? `+${avgEfficacy}%` : `${avgEfficacy}%`) : '–'}
                 </span>
-                <span className="text-[10px] text-emerald-300/70">{performanceCounts.highKill} high-kill plots</span>
+                <span className="text-[10px] text-emerald-300/70">
+                  {activeCategory === 'nutrition' || activeCategory === 'biostimulant' ? `${performanceCounts.highKill} high-vigor plots` :
+                   activeCategory === 'fungicide' ? `${performanceCounts.highKill} high-control plots` :
+                   `${performanceCounts.highKill} high-kill plots`}
+                </span>
               </div>
               <div className="bg-amber-500/10 backdrop-blur-xs rounded-xl p-2.5 border border-amber-500/20 flex flex-col">
                 <span className="text-[10px] font-medium text-amber-300 uppercase tracking-wider flex items-center gap-1">
-                  ⏳ Mean Residual
+                  {activeCategory === 'nutrition' || activeCategory === 'biostimulant' ? '📅 Crop Monitoring' :
+                   activeCategory === 'fungicide' ? '🛡️ Protection Period' :
+                   activeCategory === 'pesticide' ? '⏳ Knockdown Duration' : '⏳ Mean Residual'}
                 </span>
                 <span className="text-base sm:text-lg font-bold text-amber-400 mt-0.5">
                   {avgControlDays > 0 ? `${avgControlDays}d` : '–'}
                 </span>
-                <span className="text-[10px] text-amber-300/70">{performanceCounts.longControl} with ≥15d control</span>
+                <span className="text-[10px] text-amber-300/70">
+                  {activeCategory === 'nutrition' || activeCategory === 'biostimulant' ? `${performanceCounts.longControl} active monitoring (≥15d)` :
+                   activeCategory === 'fungicide' ? `${performanceCounts.longControl} with ≥15d protection` :
+                   activeCategory === 'pesticide' ? `${performanceCounts.longControl} with ≥15d suppression` :
+                   `${performanceCounts.longControl} with ≥15d control`}
+                </span>
               </div>
               <div className="bg-blue-500/10 backdrop-blur-xs rounded-xl p-2.5 border border-blue-500/20 flex flex-col">
                 <span className="text-[10px] font-medium text-blue-300 uppercase tracking-wider flex items-center gap-1">
@@ -7169,6 +7303,7 @@ If none are present, write "None".`;
           performanceFilter={performanceFilter}
           setPerformanceFilter={setPerformanceFilter}
           performanceCounts={performanceCounts}
+          activeCategory={activeCategory}
         />
 
         {/* ── GRID ── */}
@@ -7555,6 +7690,17 @@ If none are present, write "None".`;
                                   <span>Batch Record Obs</span>
                                 </button>
 
+                                {/* 🌱 Batch Application Button */}
+                                <button
+                                  type="button"
+                                  onClick={() => setBatchAppModalData({ trials: trialsList, project: proj })}
+                                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-emerald-800 bg-emerald-100/90 hover:bg-emerald-200 dark:text-emerald-300 dark:bg-emerald-950/60 rounded-xl transition shadow-xs"
+                                  title="Apply fertilizer, protection spray, or input across all plots in this trial"
+                                >
+                                  <Leaf className="w-3.5 h-3.5 text-emerald-600" />
+                                  <span>Batch Input</span>
+                                </button>
+
                                 {/* Export Excel Button */}
                                 <button
                                   type="button"
@@ -7604,6 +7750,7 @@ If none are present, write "None".`;
                                   onViewDetails={handleViewDetails}
                                   onEditPlot={handleOpenModal}
                                   onOpenBatchModal={() => setBatchObsModalProject({ project: proj, trials: trialsList })}
+                                  onOpenBatchAppModal={() => setBatchAppModalData({ trials: trialsList, project: proj })}
                                   selectedForBulk={selectedForBulk}
                                   onToggleBulk={toggleBulk}
                                 />
@@ -7880,6 +8027,17 @@ If none are present, write "None".`;
                                 <span className="hidden sm:inline">Batch Obs</span>
                               </button>
 
+                              {/* Batch Input Button */}
+                              <button
+                                type="button"
+                                onClick={() => setBatchAppModalData({ trials: trialsList, project: proj })}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-emerald-800 bg-emerald-100/90 hover:bg-emerald-200 dark:text-emerald-300 dark:bg-emerald-950/60 rounded-lg transition shadow-xs"
+                                title="Apply fertilizer or spray across all plots in this trial"
+                              >
+                                <Leaf className="w-3 h-3 text-emerald-600" />
+                                <span className="hidden sm:inline">Batch Input</span>
+                              </button>
+
                               {/* Export Excel Button */}
                               <button
                                 type="button"
@@ -7942,6 +8100,7 @@ If none are present, write "None".`;
                                   onViewDetails={handleViewDetails}
                                   onEditPlot={handleOpenModal}
                                   onOpenBatchModal={() => setBatchObsModalProject({ project: proj, trials: trialsList })}
+                                  onOpenBatchAppModal={() => setBatchAppModalData({ trials: trialsList, project: proj })}
                                   selectedForBulk={selectedForBulk}
                                   onToggleBulk={toggleBulk}
                                 />
@@ -8251,6 +8410,21 @@ If none are present, write "None".`;
                   </button>
                 );
               })()}
+
+              {!isViewer && (
+                <button 
+                  type="button"
+                  onClick={() => {
+                    const selectedTrialsList = trials.filter(t => selectedForBulk.has(t.ID));
+                    setBatchAppModalData({ trials: selectedTrialsList, project: null });
+                  }} 
+                  className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-[11px] sm:text-xs flex items-center gap-1.5 transition shrink-0 active:scale-95 shadow-xs"
+                  title="Apply the same fertilizer, spray, or agronomic input to all selected plots/plants"
+                >
+                  <Leaf className="w-3.5 h-3.5 text-emerald-200" />
+                  <span>Batch Input ({selectedForBulk.size})</span>
+                </button>
+              )}
 
               {!isViewer && (
                 <button 
@@ -9323,9 +9497,29 @@ If none are present, write "None".`;
                         });
                       }
 
-                      infoFields.push(
-                        ['Control Days', (() => { if (detailTrial.FinalControlDuration) return `${detailTrial.FinalControlDuration}d (finalized)`; if (!detailTrial.Date) return '—'; const d = Math.max(0, Math.round((new Date() - new Date(detailTrial.Date)) / 86400000)); return `${d}d (running)`; })(), Clock]
-                      );
+                      if (activeCategory === 'herbicide') {
+                        infoFields.push(
+                          ['Control Days', (() => { if (detailTrial.FinalControlDuration) return `${detailTrial.FinalControlDuration}d (finalized)`; if (!detailTrial.Date) return '—'; const d = Math.max(0, Math.round((new Date() - new Date(detailTrial.Date)) / 86400000)); return `${d}d (running)`; })(), Clock]
+                        );
+                      } else if (activeCategory === 'fungicide') {
+                        infoFields.push(
+                          ['Protection Period', (() => { if (detailTrial.FinalControlDuration) return `${detailTrial.FinalControlDuration}d (finalized)`; if (!detailTrial.Date) return '—'; const d = Math.max(0, Math.round((new Date() - new Date(detailTrial.Date)) / 86400000)); return `${d}d (active)`; })(), Shield]
+                        );
+                      } else if (activeCategory === 'pesticide') {
+                        infoFields.push(
+                          ['Suppression Period', (() => { if (detailTrial.FinalControlDuration) return `${detailTrial.FinalControlDuration}d (finalized)`; if (!detailTrial.Date) return '—'; const d = Math.max(0, Math.round((new Date() - new Date(detailTrial.Date)) / 86400000)); return `${d}d (active)`; })(), Zap]
+                        );
+                      } else {
+                        // Nutrition / Biostimulant - strictly monitoring duration & agronomic inputs
+                        infoFields.push(
+                          ['Monitoring Duration', (() => { if (!detailTrial.Date) return '—'; const d = Math.max(0, Math.round((new Date() - new Date(detailTrial.Date)) / 86400000)); return `${d}d monitored`; })(), Calendar]
+                        );
+                        if (Array.isArray(detailTrial.Applications) && detailTrial.Applications.length > 0) {
+                          infoFields.push(
+                            ['Agronomic Inputs', `${detailTrial.Applications.length} applied`, Leaf]
+                          );
+                        }
+                      }
 
                       if (detailTrial.YieldValue) {
                         const yieldLabel = activeCategory === 'herbicide' ? 'Yield (t/ha)' : (catConfig.specificFields.find(f => f.key === 'YieldValue')?.label || 'Yield');
@@ -9369,13 +9563,21 @@ If none are present, write "None".`;
                       <Navigation className="w-3 h-3" /> GPS: {detailTrial.Lat}, {detailTrial.Lon}
                     </div>
                   )}
-                  {/* Control Finalization */}
+                  {/* Lifecycle Finalization Banner */}
                   {(detailTrial.ControlFinalized === true || detailTrial.ControlFinalized === 'true') && (
-                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 flex items-center gap-2 text-xs">
-                      <Lock className="w-3.5 h-3.5 text-orange-500" />
-                      <span className="font-semibold text-orange-700">Control Finalized</span>
-                      {detailTrial.FinalControlDuration && <span className="text-orange-600">· {detailTrial.FinalControlDuration} days</span>}
-                      {detailTrial.FinalizationDate && <span className="text-orange-500">· {formatDateTime(detailTrial.FinalizationDate)}</span>}
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 flex items-center gap-2 text-xs">
+                      <Lock className="w-3.5 h-3.5 text-emerald-600" />
+                      <span className="font-semibold text-emerald-800">
+                        {activeCategory === 'herbicide' ? 'Control Finalized' : 
+                         activeCategory === 'fungicide' ? 'Disease Protection Finalized' : 
+                         activeCategory === 'pesticide' ? 'Pest Suppression Finalized' : 'Trial Evaluation Finalized'}
+                      </span>
+                      {detailTrial.FinalControlDuration && (
+                        <span className="text-emerald-700">
+                          · {detailTrial.FinalControlDuration} {activeCategory === 'nutrition' || activeCategory === 'biostimulant' ? 'days monitored' : 'days duration'}
+                        </span>
+                      )}
+                      {detailTrial.FinalizationDate && <span className="text-emerald-600">· {formatDateTime(detailTrial.FinalizationDate)}</span>}
                     </div>
                   )}
                   {!isViewer && (
@@ -9404,30 +9606,53 @@ If none are present, write "None".`;
               {detailTab === 'observations' && (
                 (() => {
                   const { sorted, baseCover } = obsData;
+                  const isHerbicide = activeCategory === 'herbicide';
+                  const isNutritionOrBio = activeCategory === 'nutrition' || activeCategory === 'biostimulant';
                   const controlDaysDetails = getDetailedControlDaysInfo(detailTrial);
-                  let controlDays = null;
-                  let controlDaysBadgeStyle = 'bg-blue-100 text-blue-800 border border-blue-200';
+                  let timelineBadgeText = null;
+                  let timelineBadgeStyle = 'bg-blue-100 text-blue-800 border border-blue-200';
+                  let timelineBadgeTooltip = '';
 
-                  if (detailTrial.ControlFinalized === true || detailTrial.ControlFinalized === 'true') {
-                    if (detailTrial.FinalControlDuration) {
-                      controlDays = `${detailTrial.FinalControlDuration} days (finalized)`;
-                    } else {
-                      controlDays = `${controlDaysDetails.effectiveDays} days (finalized)`;
+                  if (isHerbicide) {
+                    if (detailTrial.ControlFinalized === true || detailTrial.ControlFinalized === 'true') {
+                      timelineBadgeText = `⏱ ${detailTrial.FinalControlDuration || controlDaysDetails.effectiveDays} days (finalized)`;
+                      timelineBadgeStyle = 'bg-emerald-100 text-emerald-800 border border-emerald-300';
+                    } else if (controlDaysDetails.status === 'breakdown_regrowth') {
+                      timelineBadgeText = `⏱ ${controlDaysDetails.effectiveDays}d control (regrowth @ DAA ${controlDaysDetails.breakdownDaa})`;
+                      timelineBadgeStyle = 'bg-amber-100 text-amber-800 border border-amber-300';
+                    } else if (controlDaysDetails.effectiveDays > 0) {
+                      timelineBadgeText = `⏱ ${controlDaysDetails.effectiveDays}d control (sustained ≥70%)`;
+                      timelineBadgeStyle = 'bg-blue-100 text-blue-800 border border-blue-300';
+                    } else if (controlDaysDetails.status === 'baseline_only') {
+                      timelineBadgeText = '⏱ Baseline only (awaiting field evaluations)';
+                      timelineBadgeStyle = 'bg-slate-100 text-slate-700 border border-slate-300';
+                    } else if (detailTrial.Date) {
+                      const d = Math.floor((new Date() - new Date(detailTrial.Date)) / 86400000);
+                      timelineBadgeText = `⏱ ${Math.max(0, d)} days active (<70% initial)`;
+                      timelineBadgeStyle = 'bg-slate-100 text-slate-700 border border-slate-300';
                     }
-                    controlDaysBadgeStyle = 'bg-emerald-100 text-emerald-800 border border-emerald-300';
-                  } else if (controlDaysDetails.status === 'breakdown_regrowth') {
-                    controlDays = `${controlDaysDetails.effectiveDays}d control (regrowth @ DAA ${controlDaysDetails.breakdownDaa})`;
-                    controlDaysBadgeStyle = 'bg-amber-100 text-amber-800 border border-amber-300';
-                  } else if (controlDaysDetails.effectiveDays > 0) {
-                    controlDays = `${controlDaysDetails.effectiveDays}d control (sustained ≥70%)`;
-                    controlDaysBadgeStyle = 'bg-blue-100 text-blue-800 border border-blue-300';
-                  } else if (controlDaysDetails.status === 'baseline_only') {
-                    controlDays = 'Baseline only (awaiting field evaluations)';
-                    controlDaysBadgeStyle = 'bg-slate-100 text-slate-700 border border-slate-300';
-                  } else if (detailTrial.Date) {
-                    const d = Math.floor((new Date() - new Date(detailTrial.Date)) / 86400000);
-                    controlDays = `${Math.max(0, d)} days active (<70% initial)`;
-                    controlDaysBadgeStyle = 'bg-slate-100 text-slate-700 border border-slate-300';
+                    timelineBadgeTooltip = controlDaysDetails.reason || 'Scientific EPPO/EWRS Standard Effective Control Days';
+                  } else if (isNutritionOrBio) {
+                    const daysMonitored = detailTrial.Date ? Math.max(0, Math.floor((new Date() - new Date(detailTrial.Date)) / 86400000)) : 0;
+                    const apps = Array.isArray(detailTrial.Applications) ? detailTrial.Applications.length : 0;
+                    if (detailTrial.ControlFinalized === true || detailTrial.ControlFinalized === 'true') {
+                      timelineBadgeText = `🌿 ${detailTrial.FinalControlDuration || daysMonitored}d evaluation (finalized)`;
+                      timelineBadgeStyle = 'bg-emerald-100 text-emerald-800 border border-emerald-300';
+                    } else {
+                      timelineBadgeText = `🌿 ${daysMonitored}d monitoring · ${apps} inputs applied`;
+                      timelineBadgeStyle = 'bg-teal-50 text-teal-800 border border-teal-200';
+                    }
+                    timelineBadgeTooltip = 'Crop nutrition & biostimulant growth monitoring timeline';
+                  } else if (activeCategory === 'fungicide') {
+                    const days = detailTrial.FinalControlDuration || controlDaysDetails.effectiveDays || (detailTrial.Date ? Math.max(0, Math.floor((new Date() - new Date(detailTrial.Date)) / 86400000)) : 0);
+                    timelineBadgeText = `🛡️ ${days}d protection window`;
+                    timelineBadgeStyle = 'bg-indigo-50 text-indigo-800 border border-indigo-200';
+                    timelineBadgeTooltip = 'Fungicide disease protection period';
+                  } else {
+                    const days = detailTrial.FinalControlDuration || controlDaysDetails.effectiveDays || (detailTrial.Date ? Math.max(0, Math.floor((new Date() - new Date(detailTrial.Date)) / 86400000)) : 0);
+                    timelineBadgeText = `⚡ ${days}d pest knockdown duration`;
+                    timelineBadgeStyle = 'bg-amber-50 text-amber-800 border border-amber-200';
+                    timelineBadgeTooltip = 'Pest control & knockdown suppression window';
                   }
                   return (
                   <div>
@@ -9449,12 +9674,12 @@ If none are present, write "None".`;
                     <div className="flex justify-between items-center mb-3">
                       <div>
                         <h3 className="font-semibold text-slate-700">Observation Timeline</h3>
-                        {controlDays && (
+                        {timelineBadgeText && (
                           <span 
-                            className={`text-xs font-semibold px-2 py-0.5 rounded-full mt-1 inline-block ${controlDaysBadgeStyle}`}
-                            title={controlDaysDetails.reason || 'Scientific EPPO/EWRS Standard Effective Control Days'}
+                            className={`text-xs font-semibold px-2 py-0.5 rounded-full mt-1 inline-block ${timelineBadgeStyle}`}
+                            title={timelineBadgeTooltip}
                           >
-                            ⏱ {controlDays}
+                            {timelineBadgeText}
                           </span>
                         )}
                       </div>
@@ -9705,16 +9930,31 @@ If none are present, write "None".`;
                                   </p>
                                   <div className="space-y-1.5">
                                      {obs.weedDetails.map((wd, wIdx) => {
-                                       const canonical = canonicalizeWeedSpecies(wd.species);
-                                       const bio = getWeedBiology(canonical);
-                                       const eppo = bio.eppoCode || getWeedEPPOCode(canonical);
+                                       const isHerbicide = activeCategory === 'herbicide';
+                                       const canonical = isHerbicide ? canonicalizeWeedSpecies(wd.species) : wd.species;
+                                       const bio = isHerbicide ? getWeedBiology(canonical) : {};
+                                       const eppo = isHerbicide ? (bio.eppoCode || getWeedEPPOCode(canonical)) : null;
                                        return (
                                          <div key={wIdx} className="flex items-center justify-between text-xs gap-2 flex-wrap bg-slate-50/60 rounded px-2 py-1 border border-slate-100">
                                            <div className="flex items-center gap-1.5 flex-1 min-w-[140px]">
                                              <span className="text-slate-700 font-semibold truncate">{canonical || 'Unknown'}</span>
-                                             {eppo && (
+                                             {isHerbicide && eppo && (
                                                <span className="text-[9px] font-mono font-bold bg-slate-100 text-slate-700 px-1 py-0.2 rounded border border-slate-200" title={`EPPO Code: ${eppo}`}>
                                                  {eppo}
+                                               </span>
+                                             )}
+                                             {isHerbicide && bio.type && (
+                                               <span className={`text-[9px] font-semibold px-1 py-0.2 rounded ${
+                                                 bio.type === 'Sedge' ? 'bg-amber-100 text-amber-800' :
+                                                 bio.type === 'Grass' ? 'bg-lime-100 text-lime-800' :
+                                                 'bg-teal-100 text-teal-800'
+                                               }`}>
+                                                 {bio.type}
+                                               </span>
+                                             )}
+                                             {isHerbicide && bio.regrowthRisk && (
+                                               <span className="text-[9px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 px-1 py-0.2 rounded" title="Perennial or tuberous regrowth risk">
+                                                 ⚠️ Perennial
                                                </span>
                                              )}
                                              {bio.type && (
@@ -13508,11 +13748,22 @@ If none are present, write "None".`;
         <ProjectBatchObservationModal
           isOpen={!!batchObsModalProject}
           onClose={() => setBatchObsModalProject(null)}
-          project={batchObsModalProject}
-          trialsList={groupedRcbdTrials.groups[batchObsModalProject.ID] || (state.trials || []).filter(t => String(t.ProjectID) === String(batchObsModalProject.ID))}
+          project={batchObsModalProject.project || batchObsModalProject}
+          trialsList={batchObsModalProject.trials || groupedRcbdTrials.groups[batchObsModalProject.project?.ID || batchObsModalProject.ID] || (state.trials || []).filter(t => String(t.ProjectID) === String(batchObsModalProject.project?.ID || batchObsModalProject.ID))}
           activeCategory={activeCategory}
           catConfig={catConfig}
           onSaveBatch={handleSaveBatchObservation}
+        />
+      )}
+
+      {batchAppModalData && (
+        <BatchApplicationModal
+          isOpen={!!batchAppModalData}
+          onClose={() => setBatchAppModalData(null)}
+          trialsList={batchAppModalData.trials || []}
+          project={batchAppModalData.project}
+          activeCategory={activeCategory}
+          onSaveBatchApplication={handleSaveBatchApplication}
         />
       )}
 

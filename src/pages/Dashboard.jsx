@@ -1173,7 +1173,15 @@ export default function Dashboard({ onMenuClick }) {
                     <Award className="w-4 h-4 text-[#154734]" />
                     Top Formulation Leaderboard
                   </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">Ranked by combined Kill % and Sustained Control Days</p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {activeCategory === 'nutrition' || activeCategory === 'biostimulant'
+                      ? 'Ranked by combined Vigor % and Monitoring Duration'
+                      : activeCategory === 'fungicide'
+                      ? 'Ranked by Disease Control % and Protection Period'
+                      : activeCategory === 'pesticide'
+                      ? 'Ranked by Pest Knockdown % and Suppression Duration'
+                      : 'Ranked by combined Kill % and Sustained Control Days'}
+                  </p>
                 </div>
 
                 <div className="flex flex-wrap gap-1.5 items-center">
@@ -1231,7 +1239,13 @@ export default function Dashboard({ onMenuClick }) {
                             <span className="text-[11px] text-slate-400 font-medium">{count} trial{count !== 1 ? 's' : ''}</span>
                             {avgEff !== null && (
                               <span className="font-semibold text-[#154734] bg-[#eef5f1] px-2 py-0.5 rounded-md border border-[#d6e5dc]">
-                                {avgEff}% Kill
+                                {activeCategory === 'nutrition' || activeCategory === 'biostimulant'
+                                  ? `+${avgEff}% Vigor`
+                                  : activeCategory === 'fungicide'
+                                  ? `${avgEff}% DCE`
+                                  : activeCategory === 'pesticide'
+                                  ? `${avgEff}% Mortality`
+                                  : `${avgEff}% Kill`}
                               </span>
                             )}
                             {avgDays !== null && (
@@ -1259,7 +1273,7 @@ export default function Dashboard({ onMenuClick }) {
                     <Target className="w-4 h-4 text-[#154734]" />
                     Target {catConfig.targetLabel} Match Finder
                   </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">Lookup top treatments validated against a target pest or weed</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Lookup top treatments validated against target {catConfig.targetLabel.toLowerCase()}s</p>
                 </div>
 
                 <div className="space-y-3">

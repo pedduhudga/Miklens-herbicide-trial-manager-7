@@ -360,18 +360,67 @@ const TrialCard = memo(function TrialCard({
     return validObs.slice().sort((a, b) => (parseFloat(b.daa) || 0) - (parseFloat(a.daa) || 0))[0];
   }, [efficacyData, categoryId]);
 
-  // EWRS Rating and suggested grade based on scientific efficacy
+  const isHerbicide = categoryId === 'herbicide';
+
+  // Harvest yield & apps info for Nutrition / Biostimulant / All
+  const harvestPickings = useMemo(() => safeJsonParse(trial.HarvestPickingsJSON, []), [trial.HarvestPickingsJSON]);
+  const totalHarvestYield = useMemo(() => {
+    return harvestPickings.reduce((sum, p) => sum + (parseFloat(p.marketableYield) || parseFloat(p.yield) || 0), 0);
+  }, [harvestPickings]);
+  const harvestUnit = harvestPickings[0]?.yieldUnit || trial.YieldUnit || 'kg';
+  const appCount = useMemo(() => safeJsonParse(trial.ApplicationLogJSON, []).length, [trial.ApplicationLogJSON]);
+
+  const maxDaa = useMemo(() => {
+    if (!efficacyData || efficacyData.length === 0) return 0;
+    return Math.max(...efficacyData.map(o => parseFloat(o.daa) || 0), 0);
+  }, [efficacyData]);
+
+  // EWRS Rating and suggested grade based on scientific efficacy (EWRS for herbicide only)
   const efficacyMetrics = useMemo(() => {
     if (!latestObs) return { primaryVal: null, ewrs: null, autoRating: null };
     const primaryVal = getObservationPrimaryValue(categoryId, latestObs);
-    const ewrs = (primaryVal !== undefined && primaryVal !== null && !isNaN(primaryVal))
+    const ewrs = (isHerbicide && primaryVal !== undefined && primaryVal !== null && !isNaN(primaryVal))
       ? getEWRSScale(primaryVal)
       : null;
     const autoRating = (primaryVal !== undefined && primaryVal !== null && !isNaN(primaryVal))
       ? getRatingFromEfficacy(categoryId, primaryVal)
       : null;
     return { primaryVal, ewrs, autoRating };
-  }, [latestObs, categoryId]);
+  }, [latestObs, categoryId, isHerbicide]);
+
+  // Category-specific rating scale tooltips
+  const ratingScaleHints = useMemo(() => {
+    if (categoryId === 'nutrition' || categoryId === 'biostimulant') {
+      return [
+        ['Excellent', 'bg-emerald-500', '≥20% Vigor / Yield Boost'],
+        ['Good', 'bg-blue-500', '10–19% Vigor / Yield Boost'],
+        ['Fair', 'bg-amber-500', '5–9% Vigor / Yield Boost'],
+        ['Poor', 'bg-red-500', '<5% Vigor / Yield Boost']
+      ];
+    }
+    if (categoryId === 'fungicide') {
+      return [
+        ['Excellent', 'bg-emerald-500', '≥85% Disease Control (DCE)'],
+        ['Good', 'bg-blue-500', '70–84% Disease Control (DCE)'],
+        ['Fair', 'bg-amber-500', '50–69% Disease Control (DCE)'],
+        ['Poor', 'bg-red-500', '<50% Disease Control (DCE)']
+      ];
+    }
+    if (categoryId === 'pesticide') {
+      return [
+        ['Excellent', 'bg-emerald-500', '≥85% Pest Mortality'],
+        ['Good', 'bg-blue-500', '70–84% Pest Mortality'],
+        ['Fair', 'bg-amber-500', '50–69% Pest Mortality'],
+        ['Poor', 'bg-red-500', '<50% Pest Mortality']
+      ];
+    }
+    return [
+      ['Excellent', 'bg-emerald-500', '≥90% WCE • EWRS 1–2'],
+      ['Good', 'bg-blue-500', '80–89% WCE • EWRS 3–4'],
+      ['Fair', 'bg-amber-500', '60–79% WCE • EWRS 5–6'],
+      ['Poor', 'bg-red-500', '<60% WCE • EWRS 7–9']
+    ];
+  }, [categoryId]);
 
   // Advanced botanical weed taxonomy parsing
   const weedSpeciesList = useMemo(() => {
@@ -784,36 +833,38 @@ const TrialCard = memo(function TrialCard({
             <span>{formatDateTime(trial.Date) || '—'}</span>
           </div>
           <div className="flex items-center gap-1.5"><FlaskConical className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{trial.Dosage || '—'}</span></div>
-          {/* Advanced Botanical Weed Identification */}
-          {weedSpeciesList.length > 0 ? (
-            <div className="space-y-1 pt-0.5">
-              {weedSpeciesList.map((w, idx) => (
-                <div key={idx} className="flex items-center gap-1.5 text-xs flex-wrap">
-                  <Activity className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
-                  <span className="font-semibold text-slate-700 truncate">{w.canonical}</span>
-                  {w.eppoCode && (
-                    <span className="text-[9px] font-mono font-bold bg-slate-100 text-slate-700 px-1 py-0.2 rounded border border-slate-200" title={`EPPO Code: ${w.eppoCode}`}>
-                      {w.eppoCode}
+          {/* Advanced Botanical Weed Identification - Herbicide trials only */}
+          {isHerbicide && (
+            weedSpeciesList.length > 0 ? (
+              <div className="space-y-1 pt-0.5">
+                {weedSpeciesList.map((w, idx) => (
+                  <div key={idx} className="flex items-center gap-1.5 text-xs flex-wrap">
+                    <Activity className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
+                    <span className="font-semibold text-slate-700 truncate">{w.canonical}</span>
+                    {w.eppoCode && (
+                      <span className="text-[9px] font-mono font-bold bg-slate-100 text-slate-700 px-1 py-0.2 rounded border border-slate-200" title={`EPPO Code: ${w.eppoCode}`}>
+                        {w.eppoCode}
+                      </span>
+                    )}
+                    <span className={`text-[9px] font-semibold px-1 py-0.2 rounded ${
+                      w.type === 'Sedge' ? 'bg-amber-100 text-amber-800' :
+                      w.type === 'Grass' ? 'bg-lime-100 text-lime-800' :
+                      'bg-teal-100 text-teal-800'
+                    }`}>
+                      {w.type}
                     </span>
-                  )}
-                  <span className={`text-[9px] font-semibold px-1 py-0.2 rounded ${
-                    w.type === 'Sedge' ? 'bg-amber-100 text-amber-800' :
-                    w.type === 'Grass' ? 'bg-lime-100 text-lime-800' :
-                    'bg-teal-100 text-teal-800'
-                  }`}>
-                    {w.type}
-                  </span>
-                  {w.regrowthRisk && (
-                    <span className="text-[9px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 px-1 py-0.2 rounded flex items-center gap-0.5" title="Perennial weed or sedge with tuber/rhizome regrowth risk">
-                      ⚠️ Perennial
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-          ) : trial.WeedSpecies ? (
-            <div className="flex items-center gap-1.5"><Activity className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{trial.WeedSpecies}</span></div>
-          ) : null}
+                    {w.regrowthRisk && (
+                      <span className="text-[9px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 px-1 py-0.2 rounded flex items-center gap-0.5" title="Perennial weed or sedge with tuber/rhizome regrowth risk">
+                        ⚠️ Perennial
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : trial.WeedSpecies ? (
+              <div className="flex items-center gap-1.5"><Activity className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{trial.WeedSpecies}</span></div>
+            ) : null
+          )}
           {trial.TrialDesign === 'Split-Plot' && (trial.MainFactor || trial.SubFactor) && (
             <div className="text-[10px] text-slate-500 bg-slate-50 border border-slate-200 rounded p-1 pl-1.5 font-medium space-y-0.5">
               <div>Main Factor: <span className="font-bold text-slate-700">{trial.MainFactor || 'N/A'}</span></div>
@@ -831,63 +882,106 @@ const TrialCard = memo(function TrialCard({
               <div>Sub-Block: <span className="font-bold text-slate-700">{trial.SubBlockID}</span></div>
             </div>
           )}
-          {/* Scientific Control Days with Breakdown & Linear Interpolation Indicator */}
-          {controlDaysInfo?.status === 'baseline_only' && (
-            <div 
-              className="flex items-center gap-1.5 flex-wrap pt-0.5" 
-              onClick={stopPropagation}
-              title={controlDaysInfo?.reason || 'Baseline recorded — awaiting post-application evaluations'}
-            >
-              <Clock className="w-3.5 h-3.5 shrink-0 text-slate-400" />
-              <span className="font-semibold text-slate-500 text-[11px]">
-                Baseline (Awaiting field observations)
-              </span>
-            </div>
-          )}
-          {controlDaysInfo?.status !== 'baseline_only' && controlDays !== null && controlDays >= 0 && (
-            <div 
-              className="flex items-center gap-1.5 flex-wrap pt-0.5" 
-              onClick={stopPropagation}
-              title={controlDaysInfo?.reason || `Scientific EPPO Control Duration: ${controlDays} days`}
-            >
-              <Clock className="w-3.5 h-3.5 shrink-0 text-slate-400" />
-              <span className={`font-semibold ${
-                controlDaysInfo?.status === 'breakdown_regrowth'
-                  ? 'text-amber-700 font-bold'
-                  : (isCompleted ? 'text-emerald-600' : 'text-blue-600')
-              }`}>
-                {controlDays}d control
-                {controlDaysInfo?.status === 'breakdown_regrowth' && (
-                  <span className="text-[10px] font-medium text-amber-800 bg-amber-50 border border-amber-200 px-1 py-0.2 rounded ml-1">
-                    Regrowth @ {controlDaysInfo.breakdownDaa}d
-                  </span>
-                )}
-                {controlDaysInfo?.status === 'active_sustained' && !isCompleted && (
-                  <span className="text-[10px] font-medium text-emerald-800 bg-emerald-50 border border-emerald-200 px-1 py-0.2 rounded ml-1">
-                    Sustained ≥70%
-                  </span>
-                )}
-                {isCompleted ? ' (finalized)' : ''}
-              </span>
-              {isEditable && (
-                <button onClick={handleEditControlDays} title="Edit / override control days" className="text-slate-300 hover:text-slate-600 transition">
-                  <Pencil className="w-3 h-3" />
-                </button>
+          {/* Category-Specific Lifecycle & Duration Indicator */}
+          {categoryId === 'nutrition' || categoryId === 'biostimulant' ? (
+            <div className="flex items-center gap-1.5 flex-wrap pt-0.5" onClick={stopPropagation}>
+              {totalHarvestYield > 0 ? (
+                <div 
+                  className="flex items-center gap-1 text-xs text-emerald-700 font-bold" 
+                  title={`Total Marketable Yield: ${totalHarvestYield.toFixed(2)} ${harvestUnit} across ${harvestPickings.length} pickings`}
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>{totalHarvestYield.toFixed(1)} {harvestUnit} ({harvestPickings.length} pickings)</span>
+                  {isCompleted && <span className="text-[10px] font-normal text-slate-400 ml-1">(finalized)</span>}
+                </div>
+              ) : (
+                <div 
+                  className="flex items-center gap-1.5 text-xs text-slate-600 font-semibold" 
+                  title={`Trial monitored over ${maxDaa} days with ${appCount} agronomic inputs`}
+                >
+                  <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span>{maxDaa > 0 ? `${maxDaa}d monitored` : (appCount > 0 ? `${appCount} inputs applied` : 'Active crop')}</span>
+                  {appCount > 0 && maxDaa > 0 && (
+                    <span className="text-[10px] font-medium text-emerald-800 bg-emerald-50 border border-emerald-200 px-1 py-0.2 rounded ml-1">
+                      {appCount} apps
+                    </span>
+                  )}
+                  {isCompleted && <span className="text-[10px] font-normal text-slate-400 ml-1">(finalized)</span>}
+                </div>
               )}
             </div>
+          ) : categoryId === 'fungicide' ? (
+            <div className="flex items-center gap-1.5 flex-wrap pt-0.5" onClick={stopPropagation} title={`Disease protection period: ${controlDays} days`}>
+              <ShieldCheck className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+              <span className={`text-xs font-semibold ${isCompleted ? 'text-emerald-600' : 'text-teal-700'}`}>
+                {controlDays}d protection
+                {isCompleted && <span className="text-[10px] font-normal text-slate-400 ml-1">(finalized)</span>}
+              </span>
+            </div>
+          ) : categoryId === 'pesticide' ? (
+            <div className="flex items-center gap-1.5 flex-wrap pt-0.5" onClick={stopPropagation} title={`Pest knockdown/suppression period: ${controlDays} days`}>
+              <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              <span className={`text-xs font-semibold ${isCompleted ? 'text-emerald-600' : 'text-blue-600'}`}>
+                {controlDays}d suppression
+                {isCompleted && <span className="text-[10px] font-normal text-slate-400 ml-1">(finalized)</span>}
+              </span>
+            </div>
+          ) : (
+            /* Scientific Herbicide Control Days with Breakdown & Linear Interpolation */
+            <>
+              {controlDaysInfo?.status === 'baseline_only' && (
+                <div 
+                  className="flex items-center gap-1.5 flex-wrap pt-0.5" 
+                  onClick={stopPropagation}
+                  title={controlDaysInfo?.reason || 'Baseline recorded — awaiting post-application evaluations'}
+                >
+                  <Clock className="w-3.5 h-3.5 shrink-0 text-slate-400" />
+                  <span className="font-semibold text-slate-500 text-[11px]">
+                    Baseline (Awaiting field observations)
+                  </span>
+                </div>
+              )}
+              {controlDaysInfo?.status !== 'baseline_only' && controlDays !== null && controlDays >= 0 && (
+                <div 
+                  className="flex items-center gap-1.5 flex-wrap pt-0.5" 
+                  onClick={stopPropagation}
+                  title={controlDaysInfo?.reason || `Scientific EPPO Control Duration: ${controlDays} days`}
+                >
+                  <Clock className="w-3.5 h-3.5 shrink-0 text-slate-400" />
+                  <span className={`font-semibold ${
+                    controlDaysInfo?.status === 'breakdown_regrowth'
+                      ? 'text-amber-700 font-bold'
+                      : (isCompleted ? 'text-emerald-600' : 'text-blue-600')
+                  }`}>
+                    {controlDays}d control
+                    {controlDaysInfo?.status === 'breakdown_regrowth' && (
+                      <span className="text-[10px] font-medium text-amber-800 bg-amber-50 border border-amber-200 px-1 py-0.2 rounded ml-1">
+                        Regrowth @ {controlDaysInfo.breakdownDaa}d
+                      </span>
+                    )}
+                    {controlDaysInfo?.status === 'active_sustained' && !isCompleted && (
+                      <span className="text-[10px] font-medium text-emerald-800 bg-emerald-50 border border-emerald-200 px-1 py-0.2 rounded ml-1">
+                        Sustained ≥70%
+                      </span>
+                    )}
+                    {isCompleted ? ' (finalized)' : ''}
+                  </span>
+                  {isEditable && (
+                    <button onClick={handleEditControlDays} title="Edit / override control days" className="text-slate-300 hover:text-slate-600 transition">
+                      <Pencil className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </div>
 
-        {/* Quick Rating with Scientific EPPO & EWRS Scales */}
+        {/* Quick Rating with Category-Specific Scientific Scales */}
         {isEditable && (
           <div className="mt-2 flex items-center gap-1.5 sm:gap-1 flex-wrap" onClick={stopPropagation}>
             <span className="text-[10px] text-slate-400 mr-0.5 font-medium">Rate:</span>
-            {[
-              ['Excellent', 'bg-emerald-500', '≥90% WCE • EWRS 1–2'],
-              ['Good', 'bg-blue-500', '80–89% WCE • EWRS 3–4'],
-              ['Fair', 'bg-amber-500', '60–79% WCE • EWRS 5–6'],
-              ['Poor', 'bg-red-500', '<60% WCE • EWRS 7–9']
-            ].map(([r, col, eppoHint]) => (
+            {ratingScaleHints.map(([r, col, eppoHint]) => (
               <button key={r} onClick={e => handleQuickRate(e, r)}
                 title={trial.Result === r ? `${r} (active) — tap to clear` : `${r} (${eppoHint})`}
                 className={`min-w-[30px] h-7 sm:h-6 sm:min-w-[22px] flex items-center justify-center text-[11px] sm:text-[9px] font-bold rounded-md transition active:scale-95 touch-manipulation ${
