@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   Camera, Image as ImageIcon, Eye, Edit, Plus, Check, Clock,
-  Sparkles, Leaf, CheckCircle2, ChevronRight, Scale
+  Sparkles, Leaf, CheckCircle2, ChevronRight, Scale, Zap, Ruler
 } from 'lucide-react';
 import { safeJsonParse } from '../../utils/helpers.js';
 import { validateEfficacyData } from '../../utils/analysisUtils.js';
@@ -128,6 +128,18 @@ export default function ProjectRapidEntryTable({
         </div>
 
         <div className="flex items-center gap-2">
+          {onOpenBatchModal && (
+            <button
+              type="button"
+              onClick={onOpenBatchModal}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 rounded-xl transition shadow-2xs"
+              title="Mass record plant heights, notes and metrics across all plots/pots simultaneously"
+            >
+              <Ruler className="w-3.5 h-3.5" />
+              <span>Mass Obs & Height</span>
+            </button>
+          )}
+
           {onOpenBatchAppModal && (
             <button
               type="button"

@@ -17,7 +17,7 @@ import {
   Navigation, FolderOpen, Lock, Unlock,
   FileDown, Share2, MoreVertical, FileSpreadsheet,
   FileCode, MonitorPlay, Archive, Pencil, ScanLine, Crop, Clock, Calculator, Loader2, ShieldCheck,
-  Table, Zap, Layers, Target, Check, Columns3
+  Table, Zap, Layers, Target, Check, Columns3, Ruler
 } from 'lucide-react';
 import { safeJsonParse } from '../utils/helpers.js';
 import { resolvePhotoSrc, getPhotoThumbnailSrc, isPhotoBroken, getDriveFileId, compressImage, deduplicatePhotoList } from '../utils/photoUtils.js';
@@ -1385,20 +1385,28 @@ export default function Trials({ onMenuClick }) {
       const trial = allTrials.find(t => String(t.ID) === String(trialId));
       if (!trial) return;
 
-      const hasValue = entry.metricValue !== '' && !isNaN(parseFloat(entry.metricValue));
+      const hasPlantHeight = entry.plantHeight !== '' && entry.plantHeight != null && !isNaN(parseFloat(entry.plantHeight));
+      const hasValue = entry.metricValue !== '' && entry.metricValue != null && !isNaN(parseFloat(entry.metricValue));
       const hasRating = !!entry.rating;
-      if (!hasValue && !hasRating && !entry.notes) return;
+      if (!hasPlantHeight && !hasValue && !hasRating && !entry.notes) return;
 
       const trialCat = trial.Category || activeCategory || 'herbicide';
       const efficacyData = validateEfficacyData(safeJsonParse(trial.EfficacyDataJSON, []), trialCat, true);
 
-      if (hasValue || entry.notes) {
+      if (hasPlantHeight || hasValue || entry.notes) {
         const numVal = hasValue ? parseFloat(entry.metricValue) : null;
+        const heightVal = hasPlantHeight ? parseFloat(entry.plantHeight) : null;
         const noteText = [generalNotes, entry.notes].filter(Boolean).join(' | ');
 
         let obs = efficacyData.find(o => Number(o.daa) === Number(batchDaa) || o.date === date);
         if (obs) {
           if (hasValue) obs[primaryField] = numVal;
+          if (hasPlantHeight) {
+            obs['Plant Height'] = heightVal;
+            obs.plantHeight = heightVal;
+            obs.plant_height = heightVal;
+            obs.potHeights = [heightVal];
+          }
           if (trialCat === 'herbicide' && hasValue) {
             obs.weedCover = numVal;
             if (!obs.weedDetails || obs.weedDetails.length === 0) {
@@ -1416,8 +1424,14 @@ export default function Trials({ onMenuClick }) {
             treatment: trial.FormulationName || 'Treated',
             plot: trial.PlotNumber || '1',
             rep: trial.Replication || 1,
-            notes: noteText || 'Batch observation entry',
+            notes: noteText || 'Mass observation entry',
             bbchStage: bbchStage || '',
+            ...(hasPlantHeight ? {
+              'Plant Height': heightVal,
+              plantHeight: heightVal,
+              plant_height: heightVal,
+              potHeights: [heightVal]
+            } : {}),
             ...(hasValue ? { [primaryField]: numVal } : {}),
             ...(trialCat === 'herbicide' && hasValue ? {
               weedCover: numVal,
@@ -7824,10 +7838,10 @@ If none are present, write "None".`;
                                   type="button"
                                   onClick={() => setBatchObsModalProject({ project: proj, trials: trialsList })}
                                   className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 rounded-xl transition shadow-xs"
-                                  title="Record notes, ratings and metrics across all plots/pots in this trial simultaneously"
+                                  title="Mass record plant heights, notes and metrics across all plots/pots in this trial simultaneously"
                                 >
-                                  <Zap className="w-3.5 h-3.5 fill-white" />
-                                  <span>Batch Record Obs</span>
+                                  <Ruler className="w-3.5 h-3.5" />
+                                  <span>Mass Obs & Height</span>
                                 </button>
 
                                 {/* 🌱 Batch Application Button */}
@@ -8341,10 +8355,12 @@ If none are present, write "None".`;
                               <button
                                 type="button"
                                 onClick={() => setBatchObsModalProject({ project: proj, trials: trialsList })}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-white bg-amber-500 hover:bg-amber-600 rounded-lg transition shadow-xs"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-white bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 rounded-lg transition shadow-xs"
+                                title="Mass record plant heights, notes and metrics across all plots/pots simultaneously"
                               >
-                                <Zap className="w-3 h-3 fill-white" />
-                                <span className="hidden sm:inline">Batch Obs</span>
+                                <Ruler className="w-3 h-3" />
+                                <span className="hidden sm:inline">Mass Obs & Height</span>
+                                <span className="sm:hidden">Height</span>
                               </button>
 
                               {/* Batch Input Button */}

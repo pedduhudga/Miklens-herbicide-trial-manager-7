@@ -11,11 +11,11 @@ import {
   ClipboardList, Package, Sparkles, Save, Loader2, CheckCircle2,
   AlertTriangle, AlertCircle, ShieldAlert, LayoutGrid, TrendingUp,
   Sigma, Printer, MapPin, Thermometer, Droplets, CloudRain, Image, Share2,
-  Pencil, Clock, Leaf, Table
+  Pencil, Clock, Leaf, Table, Zap, Ruler
 } from 'lucide-react';
 import Chart from 'chart.js/auto';
 import { safeJsonParse } from '../utils/helpers.js';
-import { AnalysisEngine } from '../utils/analysisUtils.js';
+import { AnalysisEngine, validateEfficacyData } from '../utils/analysisUtils.js';
 import PlotMap from '../components/PlotMap.jsx';
 import { formatDate, formatDateTime, toDatetimeLocal, calculateDAA } from '../utils/dateUtils.js';
 import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryValue, calculateEfficacy } from '../utils/categoryConfig.js';
@@ -26,6 +26,7 @@ import AppSharingModal from '../components/AppSharingModal.jsx';
 import CategoryValidationAlert, { showCategoryValidationToast } from '../components/CategoryValidationAlert.jsx';
 import ProjectAgronomicInputModal from '../components/projects/ProjectAgronomicInputModal.jsx';
 import ProjectBatchHarvestModal from '../components/projects/ProjectBatchHarvestModal.jsx';
+import ProjectBatchObservationModal from '../components/trials/ProjectBatchObservationModal.jsx';
 import {
   INPUT_CATEGORIES,
   DOSAGE_UNITS,
@@ -739,6 +740,8 @@ export default function Projects({ onMenuClick }) {
   const [batchHarvestPlotArea, setBatchHarvestPlotArea] = useState('');
   const [batchHarvestGrid, setBatchHarvestGrid] = useState({});
   const [isSavingBatchHarvest, setIsSavingBatchHarvest] = useState(false);
+  // Project Batch Observation & Mass Plant Height Entry state
+  const [batchObsModalProject, setBatchObsModalProject] = useState(null);
   const [selectedControlTrialId, setSelectedControlTrialId] = useState('');
   const [selectedTreatedTrialId, setSelectedTreatedTrialId] = useState('');
   const [selectedDaa, setSelectedDaa] = useState(0);
@@ -1728,6 +1731,100 @@ export default function Projects({ onMenuClick }) {
       toast('Failed to save batch harvest: ' + err.message, 'error');
     } finally {
       setIsSavingBatchHarvest(false);
+    }
+  };
+
+  // ── Project Mass Observation & Plant Height Entry Handlers ─────────────────
+  const handleSaveBatchObservation = async ({ batchDaa, date, generalNotes, bbchStage, plotEntries, primaryField }) => {
+    try {
+      const allTrials = getAppState().trials || state.trials || [];
+      let updatedTrialsList = [...allTrials];
+      let updatedCount = 0;
+
+      for (const [trialId, entry] of Object.entries(plotEntries)) {
+        const trial = allTrials.find(t => String(t.ID) === String(trialId));
+        if (!trial) continue;
+
+        const hasPlantHeight = entry.plantHeight !== '' && entry.plantHeight != null && !isNaN(parseFloat(entry.plantHeight));
+        const hasValue = entry.metricValue !== '' && entry.metricValue != null && !isNaN(parseFloat(entry.metricValue));
+        const hasRating = !!entry.rating;
+        if (!hasPlantHeight && !hasValue && !hasRating && !entry.notes) continue;
+
+        const trialCat = trial.Category || activeCategory || 'herbicide';
+        const efficacyData = validateEfficacyData(safeJsonParse(trial.EfficacyDataJSON, []), trialCat, true);
+
+        const numVal = hasValue ? parseFloat(entry.metricValue) : null;
+        const heightVal = hasPlantHeight ? parseFloat(entry.plantHeight) : null;
+        const noteText = [generalNotes, entry.notes].filter(Boolean).join(' | ');
+
+        let obs = efficacyData.find(o => Number(o.daa) === Number(batchDaa) || o.date === date);
+        if (obs) {
+          if (hasValue) obs[primaryField] = numVal;
+          if (hasPlantHeight) {
+            obs['Plant Height'] = heightVal;
+            obs.plantHeight = heightVal;
+            obs.plant_height = heightVal;
+            obs.potHeights = [heightVal];
+          }
+          if (trialCat === 'herbicide' && hasValue) {
+            obs.weedCover = numVal;
+            if (!obs.weedDetails || obs.weedDetails.length === 0) {
+              obs.weedDetails = [{ species: 'Total', cover: numVal, status: '', notes: noteText }];
+            } else {
+              obs.weedDetails = obs.weedDetails.map(w => ({ ...w, cover: numVal }));
+            }
+          }
+          if (noteText) obs.notes = obs.notes ? `${obs.notes} | ${noteText}` : noteText;
+          if (bbchStage) obs.bbchStage = bbchStage;
+        } else {
+          obs = {
+            daa: Number(batchDaa),
+            date: date || new Date().toISOString().split('T')[0],
+            treatment: trial.FormulationName || 'Treated',
+            plot: trial.PlotNumber || '1',
+            rep: trial.Replication || 1,
+            notes: noteText || 'Mass observation entry',
+            bbchStage: bbchStage || '',
+            ...(hasPlantHeight ? {
+              'Plant Height': heightVal,
+              plantHeight: heightVal,
+              plant_height: heightVal,
+              potHeights: [heightVal]
+            } : {}),
+            ...(hasValue ? { [primaryField]: numVal } : {}),
+            ...(trialCat === 'herbicide' && hasValue ? {
+              weedCover: numVal,
+              weedDetails: [{ species: 'Total', cover: numVal, status: '', notes: noteText }]
+            } : {})
+          };
+          efficacyData.push(obs);
+        }
+        efficacyData.sort((a, b) => a.daa - b.daa);
+
+        const updatedTrial = {
+          ...trial,
+          EfficacyDataJSON: JSON.stringify(efficacyData),
+          ...(entry.rating ? { Result: entry.rating, isManualRating: true } : {})
+        };
+
+        updatedTrialsList = updatedTrialsList.map(item => item.ID === trial.ID ? updatedTrial : item);
+        await updateTrial(updatedTrial, getAppState);
+        updatedCount++;
+      }
+
+      if (updatedCount > 0) {
+        updateState({ trials: updatedTrialsList });
+        toast(`Mass observations recorded for ${updatedCount} plots successfully!`);
+        if (activeProjectId) {
+          runAnalysis(postHocMethod);
+        }
+      } else {
+        toast('No observations or measurements entered to save', 'warning');
+      }
+      setBatchObsModalProject(null);
+    } catch (err) {
+      console.error('Failed to save mass batch observation:', err);
+      toast('Failed to save mass batch observations: ' + err.message, 'error');
     }
   };
 
@@ -6517,6 +6614,14 @@ ${photosHtml}
                   <p className="text-xs text-slate-500 mt-0.5">Metric: {activeProject.Metric} · {projectBlocks.length} blocks · {projectTrials.length} plots · {treatments.length} treatments</p>
                 </div>
                 <button
+                  onClick={() => setBatchObsModalProject({ project: activeProject, trials: projectTrials })}
+                  className="flex items-center gap-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-xs transition shrink-0"
+                  title="Mass record plant heights, notes and metrics across all plots/pots simultaneously"
+                >
+                  <Ruler className="w-4 h-4" />
+                  <span>Mass Obs & Height</span>
+                </button>
+                <button
                   onClick={() => setShowMap(true)}
                   className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition shrink-0"
                 >
@@ -7398,9 +7503,23 @@ ${photosHtml}
                   {p.Location && <div className="flex items-center gap-2 text-xs"><span className="text-slate-400">Location:</span><span className="truncate">{p.Location}</span></div>}
                 </div>
 
-                <div className="pt-3 border-t border-slate-50 flex justify-between items-center">
+                <div className="pt-3 border-t border-slate-50 flex justify-between items-center gap-2">
                   <span className="text-[10px] text-slate-400">{formatDateTime(p.CreatedAt) || '—'}</span>
-                  <span className={`${theme.text} font-bold text-xs flex items-center gap-1`}>View Dashboard <ChevronRight className={`h-3.5 w-3.5`} /></span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setBatchObsModalProject({ project: p, trials: pt });
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-white bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 rounded-lg shadow-2xs transition"
+                      title="Mass Plant Height & Observation Entry"
+                    >
+                      <Ruler className="w-3 h-3" />
+                      <span>Mass Obs</span>
+                    </button>
+                    <span className={`${theme.text} font-bold text-xs flex items-center gap-1`}>View Dashboard <ChevronRight className={`h-3.5 w-3.5`} /></span>
+                  </div>
                 </div>
               </div>
             );
@@ -8348,6 +8467,17 @@ ${photosHtml}
         handleSaveBatchHarvest={handleSaveBatchHarvest}
         isSavingBatchHarvest={isSavingBatchHarvest}
       />
+
+      {/* ── Project Batch Observation & Mass Plant Height Entry Modal ── */}
+      {batchObsModalProject && (
+        <ProjectBatchObservationModal
+          isOpen={!!batchObsModalProject}
+          onClose={() => setBatchObsModalProject(null)}
+          project={batchObsModalProject.project || batchObsModalProject}
+          trialsList={batchObsModalProject.trials || (state.trials || []).filter(t => String(t.ProjectID) === String(batchObsModalProject.project?.ID || batchObsModalProject.ID))}
+          onSave={handleSaveBatchObservation}
+        />
+      )}
 
       <AppSharingModal
         isOpen={isShareModalOpen}
