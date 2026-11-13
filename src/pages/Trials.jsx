@@ -122,6 +122,19 @@ const getAutomaticPotPrefix = (targetTrial, allTrials) => {
   }
   return '';
 };
+
+export const SCIENTIFIC_FOCUS_TAGS = [
+  { value: 'Whole Canopy (Standard)', label: 'Whole Canopy (Standard)', hint: 'Hold the camera parallel to the ground to avoid perspective bias for ground cover.' },
+  { value: 'Leaf Close-up (Top / Adaxial)', label: 'Leaf Close-up (Top / Adaxial)', hint: 'Ensure leaf is centered and in focus. Avoid casting shadows with your hand or device.' },
+  { value: 'Leaf Close-up (Underside / Abaxial)', label: 'Leaf Close-up (Underside / Abaxial)', hint: 'Turn the leaf over and shield it from direct sunlight to capture spores, eggs, or mites clearly.' },
+  { value: 'Leaf Close-up (New Growth)', label: 'Leaf Close-up (New Growth)', hint: 'Take a high-detail close-up of young leaves at the top of the plant to detect immobile deficiencies (Iron/Calcium).' },
+  { value: 'Leaf Close-up (Old Growth)', label: 'Leaf Close-up (Old Growth)', hint: 'Take a high-detail close-up of mature leaves near the bottom of the plant to detect mobile deficiencies (Nitrogen/Potassium).' },
+  { value: 'Stem / Meristem Close-up', label: 'Stem / Meristem Close-up', hint: 'Focus directly on stems, node junctions, or growing tips. Avoid hand shadows.' },
+  { value: 'Fruit / Produce Close-up', label: 'Fruit / Produce Close-up', hint: 'Ensure fruits/produce are centered and in focus. Avoid extreme glare.' }
+];
+
+export const FOCUS_PREFIX_REGEX = /^(Plant \d+ \(Pot [A-Z]\)|Pot [a-zA-Z0-9_\-\s]+) - /;
+
 import AppSharingModal from '../components/AppSharingModal.jsx';
 import SprayCalculatorModal from '../components/SprayCalculatorModal.jsx';
 import TrialDesignGuideModal from '../components/TrialDesignGuideModal.jsx';
@@ -670,6 +683,10 @@ export default function Trials({ onMenuClick }) {
 
   // --- Photo date prompt (shown after crop, before AI analysis) ---
   const [pendingPhotoAnalysis, setPendingPhotoAnalysis] = useState(null); // { dataUrl, date }
+
+  // --- Batch Photo Review Modal (Multi-Pot continuous camera captures) ---
+  const [pendingBatchPhotos, setPendingBatchPhotos] = useState(null); // Array of { id, dataUrl, date, targetTrial, tag, potLabel }
+  const [retakingBatchIndex, setRetakingBatchIndex] = useState(null); // Index of batch item currently being retaken
 
   // --- AI single generation ---
   const [aiGenRunning, setAiGenRunning] = useState(false);
@@ -3834,11 +3851,70 @@ export default function Trials({ onMenuClick }) {
     setPendingPhotoAnalysis({ dataUrl, date: toDatetimeLocal(new Date()), targetTrial });
   };
 
+  const handleBatchCapturesDone = (captures) => {
+    if (!captures || captures.length === 0) return;
+    const mapped = captures.map((c, idx) => {
+      const trial = c.targetTrial || (state.trials || []).find(t => t.ID === c.trialId) || activeTrial;
+      const proj = (state.projects || []).find(p => String(p.ID) === String(trial?.ProjectID));
+      const isPotTrial = (trial?.TrialDesign === 'PotTrial' || trial?.TrialDesign === 'rcbd-pot' || !!trial?.PotLabel) || (proj?.Design === 'PotTrial' || proj?.Design === 'rcbd-pot');
+      const potObsMode = proj?.PotObsMode || trial?.PotObsMode || 'row-wise';
+      const autoPotPrefix = isPotTrial ? getAutomaticPotPrefix(trial, state.trials) : '';
+      const defaultTag = isPotTrial 
+        ? (autoPotPrefix 
+            ? `${autoPotPrefix} - Whole Canopy (Standard)` 
+            : (potObsMode === 'pot-wise' 
+                ? `Pot ${trial?.PotLabel || 'Single Pot'} - Whole Canopy (Standard)`
+                : `Plant ${idx + 1} (Pot A) - Whole Canopy (Standard)`))
+        : 'Whole Canopy (Standard)';
+
+      return {
+        id: c.id || `${Date.now()}_${idx}_${Math.random().toString(36).substr(2, 5)}`,
+        dataUrl: c.dataUrl,
+        targetTrial: trial,
+        date: toDatetimeLocal(new Date()),
+        tag: defaultTag,
+        potLabel: trial?.PotLabel || trial?.PlotNumber || `Pot #${idx + 1}`
+      };
+    });
+
+    setPendingBatchPhotos(prev => {
+      if (!prev || prev.length === 0) return mapped;
+      // Preserve any existing user edits for photos that were already in previous batch
+      const existingMap = new Map(prev.map(p => [p.id, p]));
+      return mapped.map(item => existingMap.has(item.id) ? { ...item, ...existingMap.get(item.id) } : item);
+    });
+  };
+
   const handleCapturePhoto = (dataUrl) => {
     const targetTrial = quickActionTrialRef.current || activeTrial;
     if (!targetTrial) return;
     quickActionTrialRef.current = null;
     setIsCameraOpen(false);
+
+    // If we were retaking a specific photo inside the Batch Photo Review modal:
+    if (retakingBatchIndex !== null && retakingBatchIndex >= 0) {
+      const replaceIdx = retakingBatchIndex;
+      setRetakingBatchIndex(null);
+      openCropperFor(dataUrl, (croppedUrl) => {
+        setPendingBatchPhotos(prev => {
+          if (!prev) return prev;
+          const next = [...prev];
+          if (next[replaceIdx]) {
+            next[replaceIdx] = {
+              ...next[replaceIdx],
+              dataUrl: croppedUrl,
+              targetTrial: targetTrial
+            };
+          }
+          return next;
+        });
+        window.dispatchEvent(new CustomEvent('app:toast', {
+          detail: { msg: 'Photo retaken and updated in batch review', type: 'success' }
+        }));
+      });
+      return;
+    }
+
     if (cameraMode === 'harvest') {
       openCropperFor(dataUrl, async (url) => {
         window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Adding harvest photo...', type: 'info' } }));
@@ -13283,6 +13359,433 @@ If none are present, write "None".`;
         );
       })()}
 
+      {/* ── BATCH PHOTO REVIEW & SETUP MODAL (Multi-Pot Continuous Camera Captures) ── */}
+      {pendingBatchPhotos && pendingBatchPhotos.length > 0 && (() => {
+        const firstTrial = pendingBatchPhotos[0]?.targetTrial || activeTrial;
+        const targetProj = (projects || []).find(p => String(p.ID) === String(firstTrial?.ProjectID));
+        
+        // Find all project trials or general trials for target pot selection
+        const candidateTrials = firstTrial?.ProjectID
+          ? (state.trials || []).filter(t => String(t.ProjectID) === String(firstTrial.ProjectID))
+          : (state.trials || []);
+
+        const sortedCandidates = [...candidateTrials].sort((a, b) => {
+          const colA = a.PotCol != null ? parseInt(a.PotCol, 10) : 999;
+          const colB = b.PotCol != null ? parseInt(b.PotCol, 10) : 999;
+          if (colA !== colB) return colA - colB;
+          const rowA = a.PotRow != null ? parseInt(a.PotRow, 10) : (parseInt(a.PlotNumber, 10) || 0);
+          const rowB = b.PotRow != null ? parseInt(b.PotRow, 10) : (parseInt(b.PlotNumber, 10) || 0);
+          return rowA - rowB;
+        });
+
+        const updateBatchItem = (index, updates) => {
+          setPendingBatchPhotos(prev => {
+            if (!prev) return prev;
+            const next = [...prev];
+            next[index] = { ...next[index], ...updates };
+            return next;
+          });
+        };
+
+        const applyDateToAll = (newDate) => {
+          if (!newDate) return;
+          setPendingBatchPhotos(prev => (prev ? prev.map(p => ({ ...p, date: newDate })) : null));
+          window.dispatchEvent(new CustomEvent('app:toast', {
+            detail: { msg: `Applied date to all ${pendingBatchPhotos.length} photos`, type: 'info' }
+          }));
+        };
+
+        const applyFocusTagToAll = (newFocus) => {
+          if (!newFocus) return;
+          setPendingBatchPhotos(prev => (
+            prev ? prev.map(p => {
+              const prefixMatch = (p.tag || '').match(FOCUS_PREFIX_REGEX);
+              const prefix = prefixMatch ? prefixMatch[0] : '';
+              return { ...p, tag: `${prefix}${newFocus}` };
+            }) : null
+          ));
+          window.dispatchEvent(new CustomEvent('app:toast', {
+            detail: { msg: `Applied tag "${newFocus}" to all photos`, type: 'info' }
+          }));
+        };
+
+        const handleSaveAll = async () => {
+          const batch = [...pendingBatchPhotos];
+          setPendingBatchPhotos(null);
+
+          window.dispatchEvent(new CustomEvent('app:toast', {
+            detail: {
+              msg: `Saving and analyzing ${batch.length} pot photos...`,
+              type: 'info'
+            }
+          }));
+
+          for (let i = 0; i < batch.length; i++) {
+            const item = batch[i];
+            await saveAndAnalyzePhoto(item.dataUrl, item.date, item.targetTrial, item.tag);
+          }
+
+          window.dispatchEvent(new CustomEvent('app:toast', {
+            detail: {
+              msg: `All ${batch.length} photos saved successfully!`,
+              type: 'success'
+            }
+          }));
+        };
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-2 sm:p-4 animate-fade-in backdrop-blur-xs">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] flex flex-col overflow-hidden border border-slate-200">
+              
+              {/* Modal Header */}
+              <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/80">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-violet-600 text-white flex items-center justify-center shadow-xs">
+                    <Sparkles className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-extrabold text-base sm:text-lg text-slate-900 tracking-tight">
+                        Batch Photo Review & Setup
+                      </h3>
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-violet-100 text-violet-800 border border-violet-200">
+                        {pendingBatchPhotos.length} {pendingBatchPhotos.length === 1 ? 'Photo' : 'Photos'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 font-medium hidden sm:block">
+                      Crop photos, adjust date/time, reassign plots, or retake/discard photos before saving.
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => {
+                    if (window.confirm(`Discard all ${pendingBatchPhotos.length} captured photo(s) in this batch?`)) {
+                      setPendingBatchPhotos(null);
+                    }
+                  }}
+                  className="p-1.5 hover:bg-slate-200/70 rounded-lg text-slate-500 hover:text-slate-800 transition"
+                  title="Discard Batch & Close"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Quick Batch Toolbar: Apply Date or Tag to All */}
+              <div className="px-5 py-2.5 bg-violet-50/60 border-b border-violet-100/80 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-bold text-violet-900 flex items-center gap-1">
+                    <Clock className="w-3.5 h-3.5 text-violet-600" /> Apply to All:
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <input 
+                      type="datetime-local"
+                      id="bulk-batch-date"
+                      defaultValue={pendingBatchPhotos[0]?.date}
+                      className="px-2 py-1 text-xs border border-violet-200 rounded-md bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-violet-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const input = document.getElementById('bulk-batch-date');
+                        if (input && input.value) applyDateToAll(input.value);
+                      }}
+                      className="px-2 py-1 rounded-md bg-violet-600 hover:bg-violet-700 text-white font-semibold transition active:scale-95"
+                    >
+                      Set Date
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-1 ml-1 sm:ml-3">
+                    <select
+                      id="bulk-batch-tag"
+                      className="px-2 py-1 text-xs border border-violet-200 rounded-md bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-violet-500 font-medium"
+                    >
+                      {SCIENTIFIC_FOCUS_TAGS.map(f => (
+                        <option key={f.value} value={f.value}>{f.label}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const sel = document.getElementById('bulk-batch-tag');
+                        if (sel && sel.value) applyFocusTagToAll(sel.value);
+                      }}
+                      className="px-2 py-1 rounded-md bg-violet-600 hover:bg-violet-700 text-white font-semibold transition active:scale-95"
+                    >
+                      Set Tag
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Scrollable Photo Cards List */}
+              <div className="flex-1 overflow-y-auto p-3 sm:p-5 space-y-3.5 bg-slate-50/50">
+                {pendingBatchPhotos.map((item, idx) => {
+                  const targetTrial = item.targetTrial;
+                  const itemProj = (projects || []).find(p => String(p.ID) === String(targetTrial?.ProjectID));
+                  const isPotTrial = (targetTrial?.TrialDesign === 'PotTrial' || targetTrial?.TrialDesign === 'rcbd-pot' || !!targetTrial?.PotLabel) || (itemProj?.Design === 'PotTrial' || itemProj?.Design === 'rcbd-pot');
+                  const potObsMode = itemProj?.PotObsMode || targetTrial?.PotObsMode || 'row-wise';
+                  const currentTag = item.tag || 'Whole Canopy (Standard)';
+                  const currentFocus = currentTag.replace(FOCUS_PREFIX_REGEX, '');
+
+                  // Calculate DAA
+                  let daaDays = 0;
+                  if (targetTrial?.Date && item.date) {
+                    const diff = new Date(item.date) - new Date(targetTrial.Date);
+                    if (!isNaN(diff)) daaDays = Math.max(0, Math.round(diff / 86400000));
+                  }
+
+                  return (
+                    <div 
+                      key={item.id || idx}
+                      className="bg-white border border-slate-200 hover:border-violet-300 rounded-xl p-3.5 shadow-xs transition"
+                    >
+                      {/* Card Header: Badge, Plot Label & Treatment Name, Discard & Retake */}
+                      <div className="flex items-center justify-between pb-2.5 mb-2.5 border-b border-slate-100 gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="w-5 h-5 rounded-full bg-slate-800 text-white text-[11px] font-black flex items-center justify-center shrink-0">
+                            {idx + 1}
+                          </span>
+                          <span className="font-extrabold text-xs sm:text-sm text-slate-800 truncate">
+                            {targetTrial?.PotLabel ? `🪴 Pot ${targetTrial.PotLabel}` : `Plot ${targetTrial?.PlotNumber || (idx + 1)}`}
+                            <span className="font-normal text-slate-600 ml-1.5">
+                              • {targetTrial?.FormulationName || 'Untreated Control'}
+                            </span>
+                            {targetTrial?.Block && (
+                              <span className="text-[11px] font-semibold text-slate-400 ml-1">
+                                (Block {targetTrial.Block}{targetTrial?.Replication ? ` · Rep ${targetTrial.Replication}` : ''})
+                              </span>
+                            )}
+                          </span>
+                        </div>
+
+                        {/* Right: Retake & Discard Buttons */}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRetakingBatchIndex(idx);
+                              quickActionTrialRef.current = targetTrial;
+                              setActiveTrial(targetTrial);
+                              setIsCameraOpen(true);
+                            }}
+                            className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200 flex items-center gap-1 transition active:scale-95"
+                            title="Re-open camera to retake photo for this pot"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                            <span>Retake</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPendingBatchPhotos(prev => {
+                                const next = prev.filter((_, i) => i !== idx);
+                                return next.length > 0 ? next : null;
+                              });
+                            }}
+                            className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 flex items-center gap-1 transition active:scale-95"
+                            title="Discard this photo from batch"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">Discard</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Card Body: Thumbnail & Details Inputs */}
+                      <div className="flex flex-col sm:flex-row gap-3.5">
+                        
+                        {/* Thumbnail & Crop Button */}
+                        <div className="flex sm:flex-col items-center gap-2 shrink-0">
+                          <div className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-lg border border-slate-200 overflow-hidden bg-slate-900 shadow-inner group">
+                            <img 
+                              src={item.dataUrl} 
+                              alt={`Capture ${idx + 1}`} 
+                              className="w-full h-full object-cover" 
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              openCropperFor(item.dataUrl, (croppedUrl) => {
+                                updateBatchItem(idx, { dataUrl: croppedUrl });
+                              });
+                            }}
+                            className="px-3 py-1.5 sm:w-full rounded-lg bg-violet-50 hover:bg-violet-100 text-violet-700 border border-violet-200 text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95"
+                            title="Crop & zoom photo"
+                          >
+                            <Crop className="w-3.5 h-3.5 text-violet-600" />
+                            <span>Crop</span>
+                          </button>
+                        </div>
+
+                        {/* Input Options Grid */}
+                        <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2.5 min-w-0">
+                          
+                          {/* Target Pot / Plot Reassignment */}
+                          <div className="sm:col-span-2">
+                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                              Target Plot / Pot
+                            </label>
+                            <select
+                              value={targetTrial?.ID || ''}
+                              onChange={(e) => {
+                                const newId = e.target.value;
+                                const selectedTrial = candidateTrials.find(t => String(t.ID) === String(newId));
+                                if (selectedTrial) {
+                                  const autoPrefix = isPotTrial ? getAutomaticPotPrefix(selectedTrial, state.trials) : '';
+                                  const updatedTag = autoPrefix ? `${autoPrefix} - ${currentFocus}` : currentFocus;
+                                  updateBatchItem(idx, {
+                                    targetTrial: selectedTrial,
+                                    potLabel: selectedTrial.PotLabel || selectedTrial.PlotNumber,
+                                    tag: updatedTag
+                                  });
+                                }
+                              }}
+                              className="w-full px-2.5 py-1.5 text-xs font-semibold border border-slate-300 rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                            >
+                              {sortedCandidates.map(cTrial => {
+                                const pLabel = cTrial.PotLabel ? `Pot ${cTrial.PotLabel}` : `Plot ${cTrial.PlotNumber || cTrial.ID}`;
+                                const repStr = cTrial.Block ? ` · Block ${cTrial.Block}` : '';
+                                const formStr = cTrial.FormulationName || 'Untreated Control';
+                                return (
+                                  <option key={cTrial.ID} value={cTrial.ID}>
+                                    {pLabel} - {formStr}{repStr}
+                                  </option>
+                                );
+                              })}
+                            </select>
+                          </div>
+
+                          {/* Date & Time Input */}
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="text-[10px] font-bold text-slate-500 uppercase">
+                                Photo Date & Time
+                              </label>
+                              {targetTrial?.Date && (
+                                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
+                                  DAA: {daaDays}d
+                                </span>
+                              )}
+                            </div>
+                            <input 
+                              type="datetime-local"
+                              value={item.date}
+                              onChange={e => updateBatchItem(idx, { date: e.target.value })}
+                              className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                            />
+                          </div>
+
+                          {/* Sub-Plant Selection (if Pot Trial with multiple plants) */}
+                          {isPotTrial && potObsMode !== 'pot-wise' ? (
+                            <div>
+                              <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                                Target Plant / Pot Letter
+                              </label>
+                              <select
+                                value={(() => {
+                                  const potMatch = currentTag.match(/Plant \d+ \(Pot [A-Z]\)/);
+                                  return potMatch ? potMatch[0] : 'General';
+                                })()}
+                                onChange={e => {
+                                  const selectedPlant = e.target.value;
+                                  const newTag = selectedPlant === 'General' ? currentFocus : `${selectedPlant} - ${currentFocus}`;
+                                  updateBatchItem(idx, { tag: newTag });
+                                }}
+                                className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-400 font-medium"
+                              >
+                                <option value="General">General / All Pots</option>
+                                {(() => {
+                                  let potCount = 3;
+                                  if (targetTrial?.PotLabel) {
+                                    const m = targetTrial.PotLabel.match(/(\d+)\s*Pots?/i);
+                                    if (m) potCount = parseInt(m[1], 10);
+                                  }
+                                  const opts = [];
+                                  for (let pIdx = 0; pIdx < potCount; pIdx++) {
+                                    const potLetter = String.fromCharCode(65 + pIdx);
+                                    const val = `Plant ${pIdx + 1} (Pot ${potLetter})`;
+                                    opts.push(<option key={val} value={val}>{val}</option>);
+                                  }
+                                  return opts;
+                                })()}
+                              </select>
+                            </div>
+                          ) : null}
+
+                          {/* Focus Tag Selection */}
+                          <div className={isPotTrial && potObsMode !== 'pot-wise' ? '' : 'sm:col-span-1'}>
+                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                              Scientific Focus Tag
+                            </label>
+                            <select
+                              value={currentFocus}
+                              onChange={e => {
+                                const selectedFocus = e.target.value;
+                                const prefixMatch = currentTag.match(FOCUS_PREFIX_REGEX);
+                                const prefix = prefixMatch ? prefixMatch[0] : '';
+                                updateBatchItem(idx, { tag: `${prefix}${selectedFocus}` });
+                              }}
+                              className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-400 font-medium"
+                            >
+                              {SCIENTIFIC_FOCUS_TAGS.map(f => (
+                                <option key={f.value} value={f.value}>{f.label}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Modal Footer: Discard All, Add More Pots, and Save & Analyse All */}
+              <div className="px-5 py-3.5 border-t border-slate-200 bg-white flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm(`Discard all ${pendingBatchPhotos.length} captured photo(s)?`)) {
+                        setPendingBatchPhotos(null);
+                      }
+                    }}
+                    className="px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 rounded-lg border border-transparent hover:border-red-200 transition"
+                  >
+                    Discard All
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Keep current batch intact and reopen camera to snap additional pots
+                      setIsCameraOpen(true);
+                    }}
+                    className="px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 rounded-lg border border-slate-300 flex items-center gap-1.5 transition active:scale-95"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add More Pots</span>
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleSaveAll}
+                  className="px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-gradient-to-r from-violet-600 to-emerald-600 hover:from-violet-700 hover:to-emerald-700 text-white shadow-md flex items-center gap-2 active:scale-95 transition"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>Save & Analyse All ({pendingBatchPhotos.length} Photos)</span>
+                </button>
+              </div>
+
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── BULK QR CARD PRINT MODAL ── */}
       {isBulkQrModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -13402,9 +13905,24 @@ If none are present, write "None".`;
               setActiveTrial(nextTrial);
             }}
             onCapture={handleCapturePhoto}
-            onClose={() => setIsCameraOpen(false)}
+            onClose={() => {
+              setIsCameraOpen(false);
+              setRetakingBatchIndex(null);
+            }}
             initialAspectRatio={initialAspect}
             allowBurst={true}
+            initialCaptures={pendingBatchPhotos ? pendingBatchPhotos.map(p => ({
+              id: p.id,
+              dataUrl: p.dataUrl,
+              targetTrial: p.targetTrial,
+              trialId: p.targetTrial?.ID,
+              potLabel: p.potLabel,
+              timestamp: p.date
+            })) : []}
+            onMultiCaptureDone={(captures) => {
+              setIsCameraOpen(false);
+              handleBatchCapturesDone(captures);
+            }}
             onBurstCapture={(burstDataUrl, count, targetTrial) => {
               const trialToSave = targetTrial || currentTrial;
               const label = trialToSave?.PotLabel || trialToSave?.PlotNumber ? `Pot ${trialToSave?.PotLabel || trialToSave?.PlotNumber}` : `Photo #${count}`;

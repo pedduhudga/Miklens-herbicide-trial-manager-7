@@ -17,6 +17,8 @@ export default function CameraCapture({
   onAspectChange,
   allowBurst = false,
   onBurstCapture = null,
+  onMultiCaptureDone = null,
+  initialCaptures = [],
   trial = null,
   trials = [],
   onSelectTrial = null
@@ -44,9 +46,16 @@ export default function CameraCapture({
 
   // Capture Modes: 'single' | 'multi' (continuous multi-pot) | 'burst'
   const [captureMode, setCaptureMode] = useState(allowBurst ? 'multi' : 'single');
-  const [sessionCaptures, setSessionCaptures] = useState([]);
+  const [sessionCaptures, setSessionCaptures] = useState(initialCaptures || []);
   const [isCapturing, setIsCapturing] = useState(false);
   const [shutterFlash, setShutterFlash] = useState(false);
+
+  useEffect(() => {
+    if (initialCaptures && initialCaptures.length > 0) {
+      setSessionCaptures(initialCaptures);
+      setCaptureMode('multi');
+    }
+  }, [initialCaptures]);
 
   // Tap-to-Focus Reticle
   const [tapReticle, setTapReticle] = useState(null); // { x, y, status: 'focusing' | 'locked' }
@@ -546,28 +555,45 @@ export default function CameraCapture({
     const currentTargetTrial = activeTrial;
     const newCount = sessionCaptures.length + 1;
     const captureMeta = {
-      id: Date.now(),
+      id: `${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
       dataUrl: capturedDataUrl,
+      targetTrial: currentTargetTrial,
       trialId: currentTargetTrial?.ID,
-      potLabel: currentTargetTrial?.PotLabel || currentTargetTrial?.PlotNumber
+      potLabel: currentTargetTrial?.PotLabel || currentTargetTrial?.PlotNumber || `Pot #${newCount}`,
+      plotNumber: currentTargetTrial?.PlotNumber,
+      treatmentName: currentTargetTrial?.FormulationName || 'Untreated Control',
+      count: newCount,
+      timestamp: new Date().toISOString()
     };
 
     setSessionCaptures(prev => [...prev, captureMeta]);
 
     // Burst (3x) Mode execution
     if (captureMode === 'burst') {
-      if (onBurstCapture) {
-        onBurstCapture(capturedDataUrl, newCount, currentTargetTrial);
-      }
+      const burstList = [captureMeta];
       for (let b = 1; b <= 2; b++) {
         await new Promise(r => setTimeout(r, 120));
         setShutterFlash(true);
         triggerHaptic('light');
         setTimeout(() => setShutterFlash(false), 70);
         const nextUrl = await captureSingleFrame();
-        if (nextUrl && onBurstCapture) {
-          onBurstCapture(nextUrl, newCount + b, currentTargetTrial);
+        if (nextUrl) {
+          burstList.push({
+            id: `${Date.now()}_${b}_${Math.random().toString(36).substr(2, 6)}`,
+            dataUrl: nextUrl,
+            targetTrial: currentTargetTrial,
+            trialId: currentTargetTrial?.ID,
+            potLabel: currentTargetTrial?.PotLabel || currentTargetTrial?.PlotNumber || `Photo #${newCount + b}`,
+            plotNumber: currentTargetTrial?.PlotNumber,
+            treatmentName: currentTargetTrial?.FormulationName || 'Untreated Control',
+            count: newCount + b,
+            timestamp: new Date().toISOString()
+          });
         }
+      }
+      setSessionCaptures(prev => [...prev, ...burstList.slice(1)]);
+      if (!onMultiCaptureDone && onBurstCapture) {
+        burstList.forEach((item, idx) => onBurstCapture(item.dataUrl, newCount + idx, currentTargetTrial));
       }
       setIsCapturing(false);
       return;
@@ -575,11 +601,15 @@ export default function CameraCapture({
 
     // Multi-Pot Mode execution
     if (captureMode === 'multi') {
-      if (onBurstCapture) {
-        onBurstCapture(capturedDataUrl, newCount, currentTargetTrial);
-      } else if (onCapture) {
-        onCapture(capturedDataUrl);
-      }
+      // Stage locally in sessionCaptures - DO NOT save immediately.
+      // User will review, crop, adjust dates & tags on 'Done'.
+      window.dispatchEvent(new CustomEvent('app:toast', { 
+        detail: { 
+          msg: `📸 Pot ${captureMeta.potLabel} captured! (${newCount})`, 
+          type: 'info',
+          duration: 1800
+        } 
+      }));
 
       if (autoAdvancePot && trials && trials.length > 1) {
         handleNextPot();
@@ -593,6 +623,14 @@ export default function CameraCapture({
     onCapture(capturedDataUrl);
     setIsCapturing(false);
     onClose();
+  };
+
+  const handleDoneCapturing = () => {
+    if (onMultiCaptureDone && sessionCaptures.length > 0) {
+      onMultiCaptureDone(sessionCaptures);
+    } else {
+      onClose();
+    }
   };
 
   // ── Responsive Viewfinder Dimensions ──────────────────────────────────────
@@ -695,15 +733,31 @@ export default function CameraCapture({
               </button>
             )}
 
-            {captureMode === 'multi' && sessionCaptures.length > 0 ? (
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-3 py-1 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 shadow-md transition active:scale-95"
-              >
-                <Check className="w-3.5 h-3.5" />
-                <span>Done ({sessionCaptures.length})</span>
-              </button>
+            {sessionCaptures.length > 0 ? (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleDoneCapturing}
+                  className="px-3 py-1 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 shadow-md transition active:scale-95 animate-pulse"
+                  title="Finish & Review Captures"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Done ({sessionCaptures.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (window.confirm(`Discard ${sessionCaptures.length} captured photo(s) and close camera?`)) {
+                      setSessionCaptures([]);
+                      onClose();
+                    }
+                  }}
+                  className="w-7 h-7 rounded-full bg-black/60 flex items-center justify-center text-slate-300 border border-white/15 hover:bg-red-500/50 hover:text-white transition active:scale-95"
+                  title="Discard All & Close"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
             ) : (
               <button
                 type="button"
@@ -895,9 +949,11 @@ export default function CameraCapture({
           {/* Left Slot: Thumbnail Preview of Recent Shot */}
           <div className="w-12 h-12 flex items-center justify-center">
             {sessionCaptures.length > 0 ? (
-              <div 
-                className="relative w-11 h-11 rounded-xl border-2 border-emerald-400 overflow-hidden shadow-lg animate-scale-in"
-                title={`${sessionCaptures.length} photos captured`}
+              <button 
+                type="button"
+                onClick={handleDoneCapturing}
+                className="relative w-11 h-11 rounded-xl border-2 border-emerald-400 overflow-hidden shadow-lg animate-scale-in active:scale-95 transition hover:ring-2 hover:ring-emerald-300"
+                title={`${sessionCaptures.length} photos captured - Tap to review & finish`}
               >
                 <img 
                   src={sessionCaptures[sessionCaptures.length - 1].dataUrl} 
@@ -907,7 +963,7 @@ export default function CameraCapture({
                 <div className="absolute top-0 right-0 bg-emerald-600 text-white text-[9px] font-black px-1 rounded-bl">
                   {sessionCaptures.length}
                 </div>
-              </div>
+              </button>
             ) : (
               <span className="text-[9px] text-slate-500 font-extrabold uppercase tracking-wider text-center">
                 Tap to Focus

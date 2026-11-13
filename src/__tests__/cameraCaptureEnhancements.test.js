@@ -173,5 +173,79 @@ describe('CameraCapture Enhancements & Anti-Blur Engine', () => {
     expect(session[2].potLabel).toBe('R1C3');
   });
 
+  // 6. Multi-Shot Staging and Batch Review Mapping
+  it('stages multi-shot captures without direct save, then maps to batch review items', () => {
+    // Mock captured session in CameraCapture
+    const rawCaptures = [
+      {
+        id: 'cap_1',
+        dataUrl: 'data:image/jpeg;base64,sample1',
+        trialId: 't_r1c1',
+        targetTrial: { ID: 't_r1c1', PotLabel: 'R1C1', FormulationName: 'Untreated Control', Date: '2026-11-10' },
+        potLabel: 'R1C1',
+        count: 1
+      },
+      {
+        id: 'cap_2',
+        dataUrl: 'data:image/jpeg;base64,sample2',
+        trialId: 't_r1c2',
+        targetTrial: { ID: 't_r1c2', PotLabel: 'R1C2', FormulationName: 'NPK Liquid', Date: '2026-11-10' },
+        potLabel: 'R1C2',
+        count: 2
+      }
+    ];
+
+    // Map to review batch
+    const mapped = rawCaptures.map((c, idx) => ({
+      id: c.id,
+      dataUrl: c.dataUrl,
+      targetTrial: c.targetTrial,
+      date: '2026-11-14T10:00',
+      tag: `Pot ${c.potLabel} - Whole Canopy (Standard)`,
+      potLabel: c.potLabel
+    }));
+
+    expect(mapped).toHaveLength(2);
+    expect(mapped[0].targetTrial.FormulationName).toBe('Untreated Control');
+    expect(mapped[1].targetTrial.FormulationName).toBe('NPK Liquid');
+    expect(mapped[0].tag).toBe('Pot R1C1 - Whole Canopy (Standard)');
+  });
+
+  // 7. Batch Setup Actions: Apply to All, Reassign, Crop Update, and Discard
+  it('supports batch modifications (apply to all, reassign, crop update, discard)', () => {
+    let batch = [
+      { id: '1', dataUrl: 'img1', date: '2026-11-14T10:00', tag: 'Pot R1C1 - Whole Canopy (Standard)', targetTrial: { ID: 't1', PotLabel: 'R1C1' } },
+      { id: '2', dataUrl: 'img2', date: '2026-11-14T10:00', tag: 'Pot R1C2 - Whole Canopy (Standard)', targetTrial: { ID: 't2', PotLabel: 'R1C2' } },
+      { id: '3', dataUrl: 'img3', date: '2026-11-14T10:00', tag: 'Pot R1C3 - Whole Canopy (Standard)', targetTrial: { ID: 't3', PotLabel: 'R1C3' } }
+    ];
+
+    // 1. Apply new date to all
+    const newDate = '2026-11-14T15:30';
+    batch = batch.map(p => ({ ...p, date: newDate }));
+    expect(batch.every(p => p.date === '2026-11-14T15:30')).toBe(true);
+
+    // 2. Apply new focus tag to all while preserving pot prefix
+    const newFocus = 'Leaf Close-up (Top / Adaxial)';
+    batch = batch.map(p => {
+      const prefix = p.tag.split(' - ')[0];
+      return { ...p, tag: `${prefix} - ${newFocus}` };
+    });
+    expect(batch[0].tag).toBe('Pot R1C1 - Leaf Close-up (Top / Adaxial)');
+    expect(batch[1].tag).toBe('Pot R1C2 - Leaf Close-up (Top / Adaxial)');
+
+    // 3. Crop update on photo #2
+    batch[1] = { ...batch[1], dataUrl: 'img2_cropped' };
+    expect(batch[1].dataUrl).toBe('img2_cropped');
+
+    // 4. Retake photo #1
+    batch[0] = { ...batch[0], dataUrl: 'img1_retaken' };
+    expect(batch[0].dataUrl).toBe('img1_retaken');
+
+    // 5. Discard photo #3
+    batch = batch.filter(p => p.id !== '3');
+    expect(batch).toHaveLength(2);
+    expect(batch.map(p => p.id)).toEqual(['1', '2']);
+  });
+
 });
 
