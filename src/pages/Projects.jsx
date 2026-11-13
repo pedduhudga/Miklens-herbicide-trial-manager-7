@@ -4669,6 +4669,14 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
         }
       }
 
+      // Sanitize: Firestore does not allow undefined values — replace with null or omit
+      const sanitizedColumnOrder = Array.isArray(customColumnOrder)
+        ? customColumnOrder.map(v => (v === undefined ? null : v))
+        : null;
+      const sanitizedLockedColumns = lockedColumns && typeof lockedColumns === 'object'
+        ? Object.fromEntries(Object.entries(lockedColumns).filter(([, v]) => v !== undefined))
+        : null;
+
       await updateProject({
         ID: activeProject.ID,
         Design: 'PotTrial',
@@ -4681,8 +4689,8 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
         PotFields: randomizeForm.potFields || ['Plant Height', 'Branches', 'Flowers', 'Fruit Count', 'Yield'],
         PotIdentifierFormat: randomizeForm.potIdentifierFormat || 'row-col',
         PotAllocationMode: randomizeForm.potAllocationMode || 'randomly',
-        PotColumnAssignments: customColumnOrder,
-        PotLockedColumns: lockedColumns
+        ...(sanitizedColumnOrder && sanitizedColumnOrder.length > 0 ? { PotColumnAssignments: sanitizedColumnOrder } : {}),
+        ...(sanitizedLockedColumns && Object.keys(sanitizedLockedColumns).length > 0 ? { PotLockedColumns: sanitizedLockedColumns } : {})
       }, getAppState);
 
     } else {
