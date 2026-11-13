@@ -670,10 +670,10 @@ const TrialCard = memo(function TrialCard({
         </div>
       )}
 
-      <div className={`p-4 ${isPotTrial || blockInfo ? 'pt-3' : 'pt-10'} flex-1 flex flex-col`}>
-        <div className="flex items-start justify-between gap-3 mb-2">
-          <div className="min-w-0">
-            <h3 className="font-bold text-slate-800 truncate" title={isRcbdPot && blockInfo ? `Block ${blockInfo.blockNum} - ${trial.FormulationName}` : (trial.TrialName || trial.FormulationName)}>
+      <div className={`p-3.5 sm:p-4 ${isPotTrial || blockInfo ? 'pt-2.5 sm:pt-3' : 'pt-8 sm:pt-10'} flex-1 flex flex-col`}>
+        <div className="flex items-start justify-between gap-2 sm:gap-3 mb-1.5 sm:mb-2">
+          <div className="min-w-0 flex-1">
+            <h3 className="font-bold text-slate-800 text-xs sm:text-sm leading-snug break-words line-clamp-2" title={isRcbdPot && blockInfo ? `Block ${blockInfo.blockNum} - ${trial.FormulationName}` : (trial.TrialName || trial.FormulationName)}>
               {subTrialLabel && (
                 <span className="bg-emerald-600 text-white text-[10px] font-extrabold px-1.5 py-0.5 rounded-md mr-1.5 align-middle shadow-sm">
                   {subTrialLabel}
@@ -687,8 +687,8 @@ const TrialCard = memo(function TrialCard({
               <span className="align-middle">{trial.TrialName || trial.FormulationName || 'Untitled'}</span>
             </h3>
             {trial.FormulationName && (
-              <p className="text-[11px] font-semibold text-slate-500 truncate flex items-center gap-1 mt-0.5">
-                Product:
+              <p className="text-[11px] font-semibold text-slate-500 leading-tight mt-0.5 flex items-center gap-1 flex-wrap">
+                <span className="text-slate-400 font-medium">Product:</span>
                 <button
                   type="button"
                   onClick={(e) => {
@@ -697,11 +697,11 @@ const TrialCard = memo(function TrialCard({
                       onQuickPeekFormulation(trial.FormulationID, trial.FormulationName);
                     }
                   }}
-                  className="text-emerald-700 dark:text-emerald-400 font-bold hover:underline inline-flex items-center gap-0.5 group cursor-pointer"
+                  className="text-emerald-700 dark:text-emerald-400 font-bold hover:underline inline-flex items-center gap-0.5 group cursor-pointer break-words line-clamp-1 text-left"
                   title="Quick peek formulation recipe and performance"
                 >
-                  <span>{trial.FormulationName}</span>
-                  <Eye className="w-3 h-3 text-emerald-500 opacity-60 group-hover:opacity-100 transition" />
+                  <span className="break-words">{trial.FormulationName}</span>
+                  <Eye className="w-3 h-3 text-emerald-500 shrink-0 opacity-60 group-hover:opacity-100 transition" />
                 </button>
               </p>
             )}
