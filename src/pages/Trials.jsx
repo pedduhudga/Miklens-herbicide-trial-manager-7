@@ -13378,16 +13378,39 @@ If none are present, write "None".`;
         const currentTrial = quickActionTrialRef.current || activeTrial;
         const liveSettings = currentTrial ? safeJsonParse(currentTrial.LiveQRSettings, {}) : {};
         const initialAspect = liveSettings.cameraAspectRatio || '3:4';
+
+        // Find and sort project trials so user can seamlessly navigate pots inside the camera
+        const projectTrials = currentTrial?.ProjectID
+          ? (state.trials || []).filter(t => String(t.ProjectID) === String(currentTrial.ProjectID))
+          : [];
+
+        const sortedProjectTrials = [...projectTrials].sort((a, b) => {
+          const colA = a.PotCol != null ? parseInt(a.PotCol, 10) : 999;
+          const colB = b.PotCol != null ? parseInt(b.PotCol, 10) : 999;
+          if (colA !== colB) return colA - colB;
+          const rowA = a.PotRow != null ? parseInt(a.PotRow, 10) : (parseInt(a.PlotNumber, 10) || 0);
+          const rowB = b.PotRow != null ? parseInt(b.PotRow, 10) : (parseInt(b.PlotNumber, 10) || 0);
+          return rowA - rowB;
+        });
+
         return (
           <CameraCapture
+            trial={currentTrial}
+            trials={sortedProjectTrials}
+            onSelectTrial={(nextTrial) => {
+              quickActionTrialRef.current = nextTrial;
+              setActiveTrial(nextTrial);
+            }}
             onCapture={handleCapturePhoto}
             onClose={() => setIsCameraOpen(false)}
             initialAspectRatio={initialAspect}
             allowBurst={true}
-            onBurstCapture={(burstDataUrl, count) => {
-              window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `Burst photo #${count} saved!`, type: 'info' } }));
+            onBurstCapture={(burstDataUrl, count, targetTrial) => {
+              const trialToSave = targetTrial || currentTrial;
+              const label = trialToSave?.PotLabel || trialToSave?.PlotNumber ? `Pot ${trialToSave?.PotLabel || trialToSave?.PlotNumber}` : `Photo #${count}`;
+              window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `${label} captured!`, type: 'info' } }));
               const now = new Date().toISOString();
-              saveAndAnalyzePhoto(burstDataUrl, now, currentTrial, `Burst Plot Plant ${count}`);
+              saveAndAnalyzePhoto(burstDataUrl, now, trialToSave, `Plot Plant ${count}`);
             }}
             onAspectChange={async (ratio) => {
               if (currentTrial) {
