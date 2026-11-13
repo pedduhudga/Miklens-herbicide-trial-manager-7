@@ -271,8 +271,11 @@ export default function ProjectBatchObservationModal({
               {trialsList.map((trial, idx) => {
                 const isControl = trial.IsControl === true || trial.IsControl === 'true';
                 const entry = plotEntries[trial.ID] || { metricValue: '', rating: '', notes: '' };
-                const plotLabel = trial.PlotNumber || trial.Plot || `Plot ${idx + 1}`;
-                const repLabel = trial.Replication ? `Rep ${trial.Replication}` : '';
+                const isPot = !!trial.PotLabel || trial.TrialDesign === 'PotTrial' || trial.TrialDesign === 'rcbd-pot';
+                const plotLabel = isPot ? (trial.PotLabel || `Pot ${trial.PlotNumber}`) : (trial.PlotNumber || trial.Plot || `Plot ${idx + 1}`);
+                const repLabel = isPot && trial.PotCol
+                  ? `Col ${trial.PotCol} · Rep ${trial.PotRow || trial.Replication}`
+                  : (trial.Replication && !String(trial.Replication).match(/^[1-9]\d{2,}$/) ? `Rep ${trial.Replication}` : '');
 
                 return (
                   <tr

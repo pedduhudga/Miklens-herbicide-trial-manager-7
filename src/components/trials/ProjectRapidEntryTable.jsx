@@ -10,6 +10,7 @@ import { resolvePhotoSrc } from '../../utils/photoUtils.js';
 
 export default function ProjectRapidEntryTable({
   trialsList = [],
+  trials = [],
   project = {},
   activeCategory = 'herbicide',
   catConfig = {},
@@ -18,13 +19,23 @@ export default function ProjectRapidEntryTable({
   onQuickGalleryUpload,
   onViewDetails,
   onEdit,
+  onEditPlot,
   onOpenObsModal,
+  onOpenBatchModal,
   onOpenBatchAppModal,
   onSaveInlineObservation,
+  onInlineObservation,
   selectedForBulk = new Set(),
   onToggleBulk,
 }) {
+  const actualTrials = (trialsList && trialsList.length) ? trialsList : (trials || []);
+  const saveFn = onSaveInlineObservation || onInlineObservation;
+  const editPlotFn = onEdit || onEditPlot;
+  const isPotTrial = project?.Design === 'PotTrial' || actualTrials.some(t => t.TrialDesign === 'PotTrial' || !!t.PotLabel);
+  const potFields = isPotTrial ? (project?.PotFields || ['Plant Height', 'Branches', 'Flowers', 'Fruit Count', 'Yield']) : [];
+
   const [editingPlotId, setEditingPlotId] = useState(null);
+  const [editingFieldKey, setEditingFieldKey] = useState(null);
   const [inlineValue, setInlineValue] = useState('');
   const [savingPlotId, setSavingPlotId] = useState(null);
   const [tableSearch, setTableSearch] = useState('');
@@ -38,23 +49,39 @@ export default function ProjectRapidEntryTable({
   );
   const primaryMetricUnit = catConfig.primaryMetric?.unit || '%';
 
-  const filteredTrials = trialsList.filter(t => {
+  const filteredTrials = actualTrials.filter(t => {
     if (!tableSearch.trim()) return true;
     const q = tableSearch.toLowerCase();
-    const plotCode = (t.PlotNumber || t.Plot || '').toLowerCase();
+    const plotCode = (t.PlotNumber || t.Plot || t.PotLabel || '').toLowerCase();
     const trt = (t.FormulationName || '').toLowerCase();
     const rep = String(t.Replication || '').toLowerCase();
-    return plotCode.includes(q) || trt.includes(q) || rep.includes(q);
+    const colStr = t.PotCol != null ? `col ${t.PotCol}` : '';
+    const rowStr = t.PotRow != null ? `row ${t.PotRow}` : '';
+    return plotCode.includes(q) || trt.includes(q) || rep.includes(q) || colStr.includes(q) || rowStr.includes(q);
   });
 
-  const handleStartInlineEdit = (trial, currentVal) => {
+  // Sort Pot Trials primarily by Column then Row so pots down each column are grouped together
+  if (isPotTrial) {
+    filteredTrials.sort((a, b) => {
+      const colA = a.PotCol != null ? parseInt(a.PotCol, 10) : 999;
+      const colB = b.PotCol != null ? parseInt(b.PotCol, 10) : 999;
+      if (colA !== colB) return colA - colB;
+      const rowA = a.PotRow != null ? parseInt(a.PotRow, 10) : (parseInt(a.PlotNumber, 10) || 0);
+      const rowB = b.PotRow != null ? parseInt(b.PotRow, 10) : (parseInt(b.PlotNumber, 10) || 0);
+      return rowA - rowB;
+    });
+  }
+
+  const handleStartInlineEdit = (trial, currentVal, fieldKey = primaryField) => {
     setEditingPlotId(trial.ID);
+    setEditingFieldKey(fieldKey);
     setInlineValue(currentVal != null ? String(currentVal) : '');
   };
 
   const handleCommitInlineEdit = async (trial) => {
     if (inlineValue === '') {
       setEditingPlotId(null);
+      setEditingFieldKey(null);
       return;
     }
     const num = parseFloat(inlineValue);
@@ -64,12 +91,13 @@ export default function ProjectRapidEntryTable({
     }
     setSavingPlotId(trial.ID);
     try {
-      if (onSaveInlineObservation) {
-        await onSaveInlineObservation(trial, num, primaryField);
+      if (saveFn) {
+        await saveFn(trial, num, editingFieldKey || primaryField);
       }
     } finally {
       setSavingPlotId(null);
       setEditingPlotId(null);
+      setEditingFieldKey(null);
     }
   };
 
@@ -139,169 +167,240 @@ export default function ProjectRapidEntryTable({
               <th className="py-2.5 px-3 w-44 font-bold">
                 {primaryMetricLabel} {primaryMetricUnit ? `(${primaryMetricUnit})` : ''}
               </th>
+              {isPotTrial && potFields.map(f => (
+                <th key={f} className="py-2.5 px-3 w-28 font-bold text-center text-emerald-800 dark:text-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/20">
+                  {f}
+                </th>
+              ))}
               <th className="py-2.5 px-3 w-28 text-center font-bold">Photos</th>
               <th className="py-2.5 px-3 w-28 font-bold">Yield</th>
               <th className="py-2.5 px-3 w-24 text-right font-bold">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 text-slate-700 dark:text-slate-300">
-            {filteredTrials.map((trial, idx) => {
-              const isSelected = selectedForBulk.has(trial.ID);
-              const isControl = trial.IsControl === true || trial.IsControl === 'true';
-              const efficacy = validateEfficacyData(safeJsonParse(trial.EfficacyDataJSON, []), trial.Category || activeCategory, true);
-              const latestObs = efficacy.length > 0 ? efficacy[efficacy.length - 1] : null;
-              const currentMetricVal = latestObs ? (latestObs[primaryField] ?? latestObs.weedCover ?? null) : null;
-              const photos = safeJsonParse(trial.PhotoURLs, []).filter(p => !p.deleted);
-              const latestPhoto = photos.length > 0 ? photos[photos.length - 1] : null;
-              const photoThumb = latestPhoto ? resolvePhotoSrc(latestPhoto) : null;
-              const isInlineEditing = editingPlotId === trial.ID;
-              const isSaving = savingPlotId === trial.ID;
+            {(() => {
+              let lastCol = null;
+              return filteredTrials.map((trial, idx) => {
+                const isSelected = selectedForBulk.has(trial.ID);
+                const isControl = trial.IsControl === true || trial.IsControl === 'true';
+                const efficacy = validateEfficacyData(safeJsonParse(trial.EfficacyDataJSON, []), trial.Category || activeCategory, true);
+                const latestObs = efficacy.length > 0 ? efficacy[efficacy.length - 1] : null;
+                const currentMetricVal = latestObs ? (latestObs[primaryField] ?? latestObs.weedCover ?? null) : null;
+                const photos = safeJsonParse(trial.PhotoURLs, []).filter(p => !p.deleted);
+                const latestPhoto = photos.length > 0 ? photos[photos.length - 1] : null;
+                const photoThumb = latestPhoto ? resolvePhotoSrc(latestPhoto) : null;
+                const isInlineEditing = editingPlotId === trial.ID;
+                const isSaving = savingPlotId === trial.ID;
 
-              const plotLabel = trial.PlotNumber || trial.Plot || `Unit ${idx + 1}`;
-              const repLabel = trial.Replication ? `R${trial.Replication}` : '';
+                const plotLabel = trial.PotLabel || (trial.PotRow && trial.PotCol ? `R${trial.PotRow}C${trial.PotCol}` : null) || trial.PlotNumber || trial.Plot || `Unit ${idx + 1}`;
+                const repLabel = trial.Replication && parseInt(trial.Replication, 10) <= 50 ? `Rep ${trial.Replication}` : (trial.PotRow ? `Rep ${trial.PotRow}` : '');
 
-              return (
-                <tr
-                  key={trial.ID}
-                  className={`transition-colors hover:bg-emerald-50/30 dark:hover:bg-slate-800/40 ${
-                    isSelected ? 'bg-emerald-50/60 dark:bg-emerald-950/20' : idx % 2 === 0 ? 'bg-white dark:bg-slate-900' : 'bg-slate-50/30 dark:bg-slate-900/60'
-                  }`}
-                >
-                  {/* Bulk Checkbox */}
-                  <td className="py-2.5 px-3 text-center">
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      onChange={() => onToggleBulk && onToggleBulk(trial.ID)}
-                      className="rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
-                    />
-                  </td>
+                const currentCol = trial.PotCol != null ? String(trial.PotCol) : null;
+                const showColHeader = isPotTrial && currentCol != null && currentCol !== lastCol;
+                if (showColHeader) lastCol = currentCol;
 
-                  {/* Plot / Pot ID */}
-                  <td className="py-2.5 px-3">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="font-bold text-slate-900 dark:text-white bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded text-xs">
-                        {plotLabel}
-                      </span>
-                      {repLabel && (
-                        <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 bg-slate-200/60 dark:bg-slate-800/80 px-1.5 py-0.2 rounded">
-                          {repLabel}
-                        </span>
-                      )}
-                    </div>
-                  </td>
-
-                  {/* Treatment / Product */}
-                  <td className="py-2.5 px-3">
-                    <div className="flex flex-col min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          className={`w-2 h-2 rounded-full shrink-0 ${
-                            isControl ? 'bg-slate-400' : 'bg-emerald-500'
-                          }`}
+                return (
+                  <React.Fragment key={trial.ID}>
+                    {showColHeader && (
+                      <tr className="bg-emerald-50/80 dark:bg-emerald-950/40 border-y border-emerald-200 dark:border-emerald-800">
+                        <td colSpan={isPotTrial ? (8 + potFields.length) : 8} className="py-2 px-3">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-extrabold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider flex items-center gap-1.5">
+                              <span>🪴</span> Column {currentCol}: {trial.FormulationName || 'Treatment'}
+                            </span>
+                            <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold bg-white/70 dark:bg-slate-800 px-2 py-0.5 rounded-full border border-emerald-200/50">
+                              Treatment Stripe Lane
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    <tr
+                      className={`transition-colors hover:bg-emerald-50/30 dark:hover:bg-slate-800/40 ${
+                        isSelected ? 'bg-emerald-50/60 dark:bg-emerald-950/20' : idx % 2 === 0 ? 'bg-white dark:bg-slate-900' : 'bg-slate-50/30 dark:bg-slate-900/60'
+                      }`}
+                    >
+                      {/* Bulk Checkbox */}
+                      <td className="py-2.5 px-3 text-center">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => onToggleBulk && onToggleBulk(trial.ID)}
+                          className="rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
                         />
-                        <span className="font-semibold text-slate-800 dark:text-slate-200 truncate">
-                          {trial.FormulationName || 'Untitled Treatment'}
-                        </span>
-                        {isControl && (
-                          <span className="text-[10px] uppercase font-bold px-1.5 py-0.2 rounded bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300 shrink-0">
-                            Check
-                          </span>
-                        )}
-                      </div>
-                      {trial.Dosage && (
-                        <span className="text-[11px] text-slate-400 ml-3.5">
-                          Rate: {trial.Dosage}
-                        </span>
-                      )}
-                    </div>
-                  </td>
+                      </td>
 
-                  {/* 1-Click Quick Rating Buttons */}
-                  <td className="py-2.5 px-3">
-                    <div className="flex items-center justify-center gap-1">
-                      {[
-                        { key: 'Excellent', label: 'E', title: 'Excellent', activeBg: 'bg-emerald-600 text-white shadow-xs' },
-                        { key: 'Good', label: 'G', title: 'Good', activeBg: 'bg-blue-600 text-white shadow-xs' },
-                        { key: 'Fair', label: 'F', title: 'Fair', activeBg: 'bg-amber-600 text-white shadow-xs' },
-                        { key: 'Poor', label: 'P', title: 'Poor', activeBg: 'bg-red-600 text-white shadow-xs' },
-                        { key: 'Control', label: 'X', title: 'Check / Control', activeBg: 'bg-slate-700 text-white shadow-xs' }
-                      ].map(r => {
-                        const isActive = trial.Result === r.key;
-                        return (
-                          <button
-                            key={r.key}
-                            type="button"
-                            title={r.title}
-                            onClick={() => onQuickRate && onQuickRate(trial, r.key)}
-                            className={`w-6 h-6 rounded-md text-[11px] font-bold transition-all flex items-center justify-center active:scale-90 ${
-                              isActive
-                                ? r.activeBg
-                                : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300'
-                            }`}
+                      {/* Plot / Pot ID */}
+                      <td className="py-2.5 px-3">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-bold text-slate-900 dark:text-white bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded text-xs">
+                            {plotLabel}
+                          </span>
+                          {repLabel && (
+                            <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 bg-slate-200/60 dark:bg-slate-800/80 px-1.5 py-0.2 rounded">
+                              {repLabel}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* Treatment / Product */}
+                      <td className="py-2.5 px-3">
+                        <div className="flex flex-col min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={`w-2 h-2 rounded-full shrink-0 ${
+                                isControl ? 'bg-slate-400' : 'bg-emerald-500'
+                              }`}
+                            />
+                            <span className="font-semibold text-slate-800 dark:text-slate-200 truncate">
+                              {trial.FormulationName || 'Untitled Treatment'}
+                            </span>
+                            {isControl && (
+                              <span className="text-[10px] uppercase font-bold px-1.5 py-0.2 rounded bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300 shrink-0">
+                                Check
+                              </span>
+                            )}
+                          </div>
+                          {trial.Dosage && (
+                            <span className="text-[11px] text-slate-400 ml-3.5">
+                              Rate: {trial.Dosage}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* 1-Click Quick Rating Buttons */}
+                      <td className="py-2.5 px-3">
+                        <div className="flex items-center justify-center gap-1">
+                          {[
+                            { key: 'Excellent', label: 'E', title: 'Excellent', activeBg: 'bg-emerald-600 text-white shadow-xs' },
+                            { key: 'Good', label: 'G', title: 'Good', activeBg: 'bg-blue-600 text-white shadow-xs' },
+                            { key: 'Fair', label: 'F', title: 'Fair', activeBg: 'bg-amber-600 text-white shadow-xs' },
+                            { key: 'Poor', label: 'P', title: 'Poor', activeBg: 'bg-red-600 text-white shadow-xs' },
+                            { key: 'Control', label: 'X', title: 'Check / Control', activeBg: 'bg-slate-700 text-white shadow-xs' }
+                          ].map(r => {
+                            const isActive = trial.Result === r.key;
+                            return (
+                              <button
+                                key={r.key}
+                                type="button"
+                                title={r.title}
+                                onClick={() => onQuickRate && onQuickRate(trial, r.key)}
+                                className={`w-6 h-6 rounded-md text-[11px] font-bold transition-all flex items-center justify-center active:scale-90 ${
+                                  isActive
+                                    ? r.activeBg
+                                    : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300'
+                                }`}
+                              >
+                                {r.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </td>
+
+                      {/* Primary Observation / Metric with Inline Edit */}
+                      <td className="py-2.5 px-3">
+                        {isInlineEditing && editingFieldKey === primaryField ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              step="any"
+                              autoFocus
+                              value={inlineValue}
+                              onChange={e => setInlineValue(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') handleCommitInlineEdit(trial);
+                                if (e.key === 'Escape') { setEditingPlotId(null); setEditingFieldKey(null); }
+                              }}
+                              className="w-20 px-2 py-1 text-xs border border-emerald-400 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-white dark:bg-slate-800 font-bold"
+                              placeholder="Value"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleCommitInlineEdit(trial)}
+                              disabled={isSaving}
+                              className="p-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 transition"
+                              title="Save value"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setEditingPlotId(null); setEditingFieldKey(null); }}
+                              className="p-1 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 transition"
+                              title="Cancel"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          <div
+                            onClick={() => handleStartInlineEdit(trial, currentMetricVal, primaryField)}
+                            className="group flex items-center gap-2 cursor-pointer p-1 -m-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                            title="Click to quickly edit value"
                           >
-                            {r.label}
-                          </button>
+                            <span className="font-bold text-slate-900 dark:text-white">
+                              {currentMetricVal != null ? `${currentMetricVal} ${primaryMetricUnit}` : '–'}
+                            </span>
+                            {latestObs && latestObs.daa != null && (
+                              <span className="text-[10px] text-slate-400">
+                                (DAA {latestObs.daa})
+                              </span>
+                            )}
+                            <span className="opacity-0 group-hover:opacity-100 text-emerald-600 dark:text-emerald-400 text-[10px] font-semibold underline">
+                              edit
+                            </span>
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Pot Observation Fields Columns */}
+                      {isPotTrial && potFields.map(field => {
+                        const isFieldEditing = isInlineEditing && editingFieldKey === field;
+                        const fieldVal = latestObs ? latestObs[field] : null;
+
+                        return (
+                          <td key={field} className="py-2.5 px-3 text-center">
+                            {isFieldEditing ? (
+                              <div className="flex items-center justify-center gap-1">
+                                <input
+                                  type="number"
+                                  step="any"
+                                  autoFocus
+                                  value={inlineValue}
+                                  onChange={e => setInlineValue(e.target.value)}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') handleCommitInlineEdit(trial);
+                                    if (e.key === 'Escape') { setEditingPlotId(null); setEditingFieldKey(null); }
+                                  }}
+                                  className="w-16 px-1.5 py-0.5 text-xs border border-emerald-400 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-white dark:bg-slate-800 font-bold text-center"
+                                  placeholder="Val"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleCommitInlineEdit(trial)}
+                                  disabled={isSaving}
+                                  className="p-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 transition"
+                                  title="Save"
+                                >
+                                  <Check className="w-3 h-3" />
+                                </button>
+                              </div>
+                            ) : (
+                              <div
+                                onClick={() => handleStartInlineEdit(trial, fieldVal, field)}
+                                className="group cursor-pointer p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition inline-flex items-center justify-center gap-1 font-bold text-slate-800 dark:text-slate-200"
+                                title={`Click to edit ${field}`}
+                              >
+                                <span>{fieldVal != null && fieldVal !== '' ? fieldVal : '–'}</span>
+                                <span className="opacity-0 group-hover:opacity-100 text-emerald-600 text-[9px] underline">✎</span>
+                              </div>
+                            )}
+                          </td>
                         );
                       })}
-                    </div>
-                  </td>
-
-                  {/* Primary Observation / Metric with Inline Edit */}
-                  <td className="py-2.5 px-3">
-                    {isInlineEditing ? (
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="number"
-                          step="any"
-                          autoFocus
-                          value={inlineValue}
-                          onChange={e => setInlineValue(e.target.value)}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') handleCommitInlineEdit(trial);
-                            if (e.key === 'Escape') setEditingPlotId(null);
-                          }}
-                          className="w-20 px-2 py-1 text-xs border border-emerald-400 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-white dark:bg-slate-800 font-bold"
-                          placeholder="Value"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleCommitInlineEdit(trial)}
-                          disabled={isSaving}
-                          className="p-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 transition"
-                          title="Save value"
-                        >
-                          <Check className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditingPlotId(null)}
-                          className="p-1 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 transition"
-                          title="Cancel"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ) : (
-                      <div
-                        onClick={() => handleStartInlineEdit(trial, currentMetricVal)}
-                        className="group flex items-center gap-2 cursor-pointer p-1 -m-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-                        title="Click to quickly edit value"
-                      >
-                        <span className="font-bold text-slate-900 dark:text-white">
-                          {currentMetricVal != null ? `${currentMetricVal} ${primaryMetricUnit}` : '–'}
-                        </span>
-                        {latestObs && latestObs.daa != null && (
-                          <span className="text-[10px] text-slate-400">
-                            (DAA {latestObs.daa})
-                          </span>
-                        )}
-                        <span className="opacity-0 group-hover:opacity-100 text-emerald-600 dark:text-emerald-400 text-[10px] font-semibold underline">
-                          edit
-                        </span>
-                      </div>
-                    )}
-                  </td>
 
                   {/* Photo Thumbnail & Capture Button */}
                   <td className="py-2.5 px-3 text-center">
@@ -360,7 +459,7 @@ export default function ProjectRapidEntryTable({
                       </button>
                       <button
                         type="button"
-                        onClick={() => onEdit && onEdit(trial)}
+                        onClick={() => (editPlotFn || onEdit) && (editPlotFn || onEdit)(trial)}
                         className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition"
                         title="Edit Plot Trial"
                       >
@@ -369,9 +468,11 @@ export default function ProjectRapidEntryTable({
                     </div>
                   </td>
                 </tr>
-              );
-            })}
-          </tbody>
+              </React.Fragment>
+            );
+          });
+        })()}
+      </tbody>
         </table>
       </div>
     </div>

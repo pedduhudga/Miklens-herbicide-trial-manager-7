@@ -781,6 +781,8 @@ export default function Projects({ onMenuClick }) {
   });
   const [selectedTreatments, setSelectedTreatments] = useState({});
   const [randomizeTreatments, setRandomizeTreatments] = useState([]);
+  const [customColumnOrder, setCustomColumnOrder] = useState([]);
+  const [lockedColumns, setLockedColumns] = useState({});
   const [customiseReportModalOpen, setCustomiseReportModalOpen] = useState(false);
   const [reportFieldSelection, setReportFieldSelection] = useState({});
   const [pendingReportExport, setPendingReportExport] = useState(null);
@@ -832,7 +834,14 @@ export default function Projects({ onMenuClick }) {
           let cCount = 0;
           if (potLayout === 'stripe') {
             for (let c = 0; c < potCols; c++) {
-              if (trtList[c % trtList.length] === tName) cCount++;
+              if (customColumnOrder && customColumnOrder[c]) {
+                const assigned = customColumnOrder[c];
+                const matchedTrt = randomizeTreatments.find(t => t.id === assigned || t.name === assigned);
+                const mName = matchedTrt ? (matchedTrt.name.trim() || activeFormulations.find(f => String(f.ID) === String(matchedTrt.formulationId))?.Name || 'Unnamed') : trtList[c % trtList.length];
+                if (mName === tName) cCount++;
+              } else if (trtList[c % trtList.length] === tName) {
+                cCount++;
+              }
             }
           } else {
             const baseList = [];
@@ -920,7 +929,7 @@ export default function Projects({ onMenuClick }) {
       potBlocks: parseInt(randomizeForm.potBlocks) || 3,
       trtCount: trtList.length
     };
-  }, [randomizeForm, randomizeTreatments, activeFormulations]);
+  }, [randomizeForm, randomizeTreatments, activeFormulations, customColumnOrder]);
 
   const projects = useMemo(() => {
     return (state.projects || []).filter(p => p.Category === activeCategory || (!p.Category && activeCategory === 'herbicide'));
@@ -1927,7 +1936,22 @@ export default function Projects({ onMenuClick }) {
     if (potLayout === 'stripe') {
       const numUnits = isHorizontal ? potRows : potCols;
       for (let i = 0; i < numUnits; i++) {
-        const t = trts[i % trts.length];
+        let t;
+        if (!isHorizontal && customColumnOrder && customColumnOrder[i]) {
+          const assignedId = customColumnOrder[i];
+          const matchedTrt = randomizeTreatments.find(item => item.id === assignedId || item.name === assignedId);
+          if (matchedTrt) {
+            const form = activeFormulations.find(f => String(f.ID) === String(matchedTrt.formulationId));
+            t = {
+              name: matchedTrt.name.trim() || form?.Name || 'Unnamed',
+              role: matchedTrt.role || 'experimental'
+            };
+          } else {
+            t = trts[i % trts.length];
+          }
+        } else {
+          t = trts[i % trts.length];
+        }
         if (isHorizontal) {
           for (let c = 0; c < potCols; c++) matrix[i][c] = t;
         } else {
@@ -2130,6 +2154,134 @@ export default function Projects({ onMenuClick }) {
             {potRows} Rows × {potCols} Cols ({potRows * potCols} Pots)
           </span>
         </div>
+
+        {/* Column Reordering, Assignment & Lock Control Bar */}
+        {!isHorizontal && (
+          <div className="bg-white rounded-xl border border-emerald-200 p-3 space-y-2 shadow-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                  <span>🔄</span> Reorder & Lock Columns
+                </span>
+                <span className="text-[10px] text-slate-500 font-medium hidden sm:inline">
+                  (Move columns with ← / →, lock columns 🔒 to freeze their positions)
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={randomizeUnlockedColumns}
+                  className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition flex items-center gap-1"
+                  title="Randomize unlocked columns while keeping locked columns intact"
+                >
+                  <span>🎲</span>
+                  <span>Shuffle Unlocked</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={unlockAllColumns}
+                  className="px-2 py-1 text-[11px] font-medium rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition"
+                  title="Unlock all columns"
+                >
+                  Unlock All
+                </button>
+              </div>
+            </div>
+
+            {/* Horizontal scrollable columns controls */}
+            <div className="overflow-x-auto pb-1">
+              <div className="flex gap-2 min-w-max">
+                {Array.from({ length: potCols }).map((_, cIdx) => {
+                  const isLocked = !!lockedColumns[cIdx];
+                  const assignedId = customColumnOrder[cIdx];
+                  const assignedTrt = randomizeTreatments.find(t => t.id === assignedId || t.name === assignedId) || randomizeTreatments[cIdx % (randomizeTreatments.length || 1)];
+                  const form = activeFormulations.find(f => String(f.ID) === String(assignedTrt?.formulationId));
+                  const trtName = assignedTrt?.name.trim() || form?.Name || `Col ${cIdx + 1}`;
+                  const colorCls = getTreatmentColor(trtName, uniqueTrts);
+
+                  return (
+                    <div
+                      key={cIdx}
+                      className={`w-36 border-2 rounded-xl p-2 flex flex-col gap-1.5 transition-all shadow-2xs ${
+                        isLocked 
+                          ? 'border-amber-400 bg-amber-50/60 ring-2 ring-amber-200/50' 
+                          : 'border-slate-200 bg-slate-50 hover:border-emerald-300'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-extrabold text-slate-800">
+                          Col {cIdx + 1}
+                        </span>
+                        <div className="flex items-center gap-0.5">
+                          <button
+                            type="button"
+                            onClick={() => moveColumn(cIdx, 'left')}
+                            disabled={cIdx === 0}
+                            className="p-1 rounded hover:bg-slate-200 disabled:opacity-20 text-slate-700 font-bold text-xs"
+                            title="Move Column Left"
+                          >
+                            ←
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => moveColumn(cIdx, 'right')}
+                            disabled={cIdx === potCols - 1}
+                            className="p-1 rounded hover:bg-slate-200 disabled:opacity-20 text-slate-700 font-bold text-xs"
+                            title="Move Column Right"
+                          >
+                            →
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => toggleLockColumn(cIdx)}
+                            className={`p-1 rounded text-xs font-bold transition flex items-center justify-center ${
+                              isLocked ? 'bg-amber-500 text-white shadow-xs' : 'bg-white hover:bg-slate-200 text-slate-600 border border-slate-200'
+                            }`}
+                            title={isLocked ? "Column Locked (click to unlock)" : "Lock Column (click to lock)"}
+                          >
+                            {isLocked ? '🔒' : '🔓'}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Treatment selector */}
+                      <select
+                        value={assignedId || assignedTrt?.id || ''}
+                        onChange={e => assignColumnTreatment(cIdx, e.target.value)}
+                        disabled={isLocked}
+                        className={`w-full text-[10px] font-bold py-1 px-1.5 border rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 truncate ${
+                          isLocked ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : 'bg-white text-slate-800'
+                        }`}
+                      >
+                        {randomizeTreatments.map((t, tIdx) => (
+                          <option key={t.id || tIdx} value={t.id || t.name}>
+                            {t.name || `Treatment ${tIdx + 1}`}
+                          </option>
+                        ))}
+                      </select>
+
+                      <div className="flex items-center justify-between text-[9px] pt-0.5">
+                        <span className={`px-1.5 py-0.5 rounded font-bold truncate max-w-[80px] ${colorCls}`}>
+                          {trtName}
+                        </span>
+                        {isLocked ? (
+                          <span className="text-amber-800 font-extrabold uppercase text-[8px] bg-amber-100 px-1 py-0.2 rounded">
+                            Locked
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 font-semibold text-[8px]">
+                            {potRows} Pots
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="max-h-[300px] overflow-auto p-3 bg-white rounded-lg border shadow-inner">
           <div className="flex flex-col gap-1 items-center justify-center min-w-max">
             {gridElements}
@@ -2359,7 +2511,7 @@ export default function Projects({ onMenuClick }) {
               <>
                 {trial && (
                   <span className="text-[8px] opacity-75 font-semibold mt-0.5 truncate max-w-full">
-                    Block {trial.Replication || '1'}
+                    {potLayout === 'rcbd-pot' ? `Block ${trial.Replication && parseInt(trial.Replication) <= 50 ? trial.Replication : (trial.PotRow || '1')}` : `Col ${c} · Rep ${trial.PotRow || (trial.Replication && parseInt(trial.Replication) <= 50 ? trial.Replication : r)}`}
                   </span>
                 )}
                 {trial && (
@@ -2469,11 +2621,23 @@ export default function Projects({ onMenuClick }) {
         </div>
 
         <div className="flex gap-2 items-center">
-          <div className="w-12" />
+          <div className="w-12 text-[10px] font-bold text-slate-400 uppercase text-right pr-2">Col</div>
           <div className="flex-1 flex gap-2">
-            {Array.from({ length: potCols }).map((_, idx) => (
-              <div key={idx} className="flex-1 text-center text-[10px] font-bold text-slate-400 uppercase">C{idx + 1}</div>
-            ))}
+            {Array.from({ length: potCols }).map((_, idx) => {
+              const colNum = idx + 1;
+              const colTrial = projectTrials.find(t => String(t.PotCol) === String(colNum));
+              const colTrtName = colTrial?.FormulationName;
+              return (
+                <div key={idx} className="flex-1 text-center bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg py-1 px-1 flex flex-col items-center shadow-2xs">
+                  <span className="text-[10px] font-extrabold text-slate-700 dark:text-slate-200">C{colNum}</span>
+                  {colTrtName && (
+                    <span className="text-[8px] font-semibold text-emerald-700 dark:text-emerald-400 truncate max-w-full">
+                      {colTrtName}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
 
@@ -3328,6 +3492,36 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
     
     setRandomizeTreatments(initialTreatments);
     
+    const potColsCount = parseInt(activeProject.PotCols || 4);
+    let initialColOrder = [];
+    if (activeProject.PotColumnAssignments) {
+      try {
+        initialColOrder = typeof activeProject.PotColumnAssignments === 'string'
+          ? JSON.parse(activeProject.PotColumnAssignments)
+          : [...activeProject.PotColumnAssignments];
+      } catch (e) {
+        initialColOrder = [];
+      }
+    }
+    if (!initialColOrder.length || initialColOrder.length !== potColsCount) {
+      initialColOrder = Array.from({ length: potColsCount }).map((_, c) => {
+        return initialTreatments[c % initialTreatments.length]?.id || `trt_${c}`;
+      });
+    }
+    setCustomColumnOrder(initialColOrder);
+
+    let initialLockedCols = {};
+    if (activeProject.PotLockedColumns) {
+      try {
+        initialLockedCols = typeof activeProject.PotLockedColumns === 'string'
+          ? JSON.parse(activeProject.PotLockedColumns)
+          : { ...activeProject.PotLockedColumns };
+      } catch (e) {
+        initialLockedCols = {};
+      }
+    }
+    setLockedColumns(initialLockedCols);
+
     setRandomizeForm({
       investigatorName: activeProject.Investigator || '',
       dosage: '',
@@ -3338,8 +3532,8 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       potRows: String(activeProject.PotRows || 9),
       potCols: String(activeProject.PotCols || 4),
       potLayout: activeProject.PotLayout || 'stripe',
-      potStripeDirection: activeProject.PotStripeDirection || 'Horizontal Rows',
-      potObsMode: activeProject.PotObsMode || 'row-wise',
+      potStripeDirection: activeProject.PotStripeDirection || 'Vertical Columns',
+      potObsMode: activeProject.PotObsMode || 'plant-wise',
       potDataMethod: activeProject.PotDataMethod || 'total',
       potFields: activeProject.PotFields || ['Plant Height', 'Branches', 'Flowers', 'Fruit Count', 'Yield'],
       potIdentifierFormat: activeProject.PotIdentifierFormat || 'row-col',
@@ -3348,6 +3542,71 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
     });
     
     setIsRandomizeModalOpen(true);
+  };
+
+  const moveColumn = (cIdx, direction) => {
+    const targetIdx = direction === 'left' ? cIdx - 1 : cIdx + 1;
+    if (targetIdx < 0 || targetIdx >= customColumnOrder.length) return;
+    setCustomColumnOrder(prev => {
+      const copy = [...prev];
+      const temp = copy[cIdx];
+      copy[cIdx] = copy[targetIdx];
+      copy[targetIdx] = temp;
+      return copy;
+    });
+    setLockedColumns(prev => {
+      const copy = { ...prev };
+      const currentLocked = !!copy[cIdx];
+      const targetLocked = !!copy[targetIdx];
+      if (currentLocked) copy[targetIdx] = true; else delete copy[targetIdx];
+      if (targetLocked) copy[cIdx] = true; else delete copy[cIdx];
+      return copy;
+    });
+  };
+
+  const toggleLockColumn = (cIdx) => {
+    setLockedColumns(prev => {
+      const copy = { ...prev };
+      if (copy[cIdx]) {
+        delete copy[cIdx];
+      } else {
+        copy[cIdx] = true;
+      }
+      return copy;
+    });
+  };
+
+  const assignColumnTreatment = (cIdx, trtIdOrName) => {
+    setCustomColumnOrder(prev => {
+      const copy = [...prev];
+      copy[cIdx] = trtIdOrName;
+      return copy;
+    });
+  };
+
+  const randomizeUnlockedColumns = () => {
+    const availableTrts = randomizeTreatments.map(t => t.id);
+    if (!availableTrts.length) return;
+    setCustomColumnOrder(prev => {
+      const copy = [...prev];
+      const unlockedIndices = [];
+      for (let i = 0; i < copy.length; i++) {
+        if (!lockedColumns[i]) unlockedIndices.push(i);
+      }
+      const shuffled = [...availableTrts];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      unlockedIndices.forEach((cIdx, i) => {
+        copy[cIdx] = shuffled[i % shuffled.length];
+      });
+      return copy;
+    });
+  };
+
+  const unlockAllColumns = () => {
+    setLockedColumns({});
   };
 
   const addTreatmentRow = () => {
@@ -4312,7 +4571,13 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
             if (potLayout === 'stripe') {
               const numUnits = isHorizontal ? potRows : potCols;
               for (let i = 1; i <= numUnits; i++) {
-                rowColAssignments[i] = trtList[(i - 1) % trtList.length];
+                if (!isHorizontal && customColumnOrder && customColumnOrder[i - 1]) {
+                  const assigned = customColumnOrder[i - 1];
+                  const matched = trtList.find(t => t.id === assigned || t.name === assigned);
+                  rowColAssignments[i] = matched || trtList[(i - 1) % trtList.length];
+                } else {
+                  rowColAssignments[i] = trtList[(i - 1) % trtList.length];
+                }
               }
             } else if (potLayout === 'randomized-row') {
               const numUnits = isHorizontal ? potRows : potCols;
@@ -4378,7 +4643,7 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
                   InvestigatorName: randomizeForm.investigatorName || '',
                   Dosage: t.dosage || randomizeForm.dosage || '',
                   Date: randomizeForm.date || new Date().toISOString().split('T')[0],
-                  Replication: String(plotNum),
+                  Replication: isHorizontal ? String(c) : String(r),
                   RandomizationOrder: plotIndex,
                   IsControl: t.role === 'control',
                   IsStandardCheck: t.role === 'standard',
@@ -4415,7 +4680,9 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
         PotDataMethod: potDataMethod,
         PotFields: randomizeForm.potFields || ['Plant Height', 'Branches', 'Flowers', 'Fruit Count', 'Yield'],
         PotIdentifierFormat: randomizeForm.potIdentifierFormat || 'row-col',
-        PotAllocationMode: randomizeForm.potAllocationMode || 'randomly'
+        PotAllocationMode: randomizeForm.potAllocationMode || 'randomly',
+        PotColumnAssignments: customColumnOrder,
+        PotLockedColumns: lockedColumns
       }, getAppState);
 
     } else {
@@ -4503,7 +4770,9 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
             PotFields: randomizeForm.potFields || ['Plant Height', 'Branches', 'Flowers', 'Fruit Count', 'Yield'],
             PotIdentifierFormat: randomizeForm.potIdentifierFormat || 'row-col',
             PotBlocks: parseInt(randomizeForm.potBlocks) || 3,
-            PotAllocationMode: randomizeForm.potAllocationMode || 'randomly'
+            PotAllocationMode: randomizeForm.potAllocationMode || 'randomly',
+            PotColumnAssignments: customColumnOrder,
+            PotLockedColumns: lockedColumns
           };
         } else {
           return {

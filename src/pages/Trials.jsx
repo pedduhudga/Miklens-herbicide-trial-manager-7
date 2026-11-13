@@ -17,7 +17,7 @@ import {
   Navigation, FolderOpen, Lock, Unlock,
   FileDown, Share2, MoreVertical, FileSpreadsheet,
   FileCode, MonitorPlay, Archive, Pencil, ScanLine, Crop, Clock, Calculator, Loader2, ShieldCheck,
-  Table, Zap, Layers, Target, Check
+  Table, Zap, Layers, Target, Check, Columns3
 } from 'lucide-react';
 import { safeJsonParse } from '../utils/helpers.js';
 import { resolvePhotoSrc, getPhotoThumbnailSrc, isPhotoBroken, getDriveFileId, compressImage, deduplicatePhotoList } from '../utils/photoUtils.js';
@@ -259,7 +259,8 @@ export default function Trials({ onMenuClick }) {
   });
   const [focusedProjectId, setFocusedProjectId] = useState(null);
   const [accordionSoloMode, setAccordionSoloMode] = useState(true);
-  const [projectPlotsViewMode, setProjectPlotsViewMode] = useState({}); // { [pid]: 'cards' | 'table' }
+  const [projectPlotsViewMode, setProjectPlotsViewMode] = useState({}); // { [pid]: 'cards' | 'table' | 'columns' }
+  const [projectPlotsSortMode, setProjectPlotsSortMode] = useState({}); // { [pid]: 'column' | 'row' }
   const [projectDesignTab, setProjectDesignTab] = useState('all');
   const [batchObsModalProject, setBatchObsModalProject] = useState(null);
   const [batchAppModalData, setBatchAppModalData] = useState(null); // { trials: [], project: null }
@@ -2701,6 +2702,17 @@ export default function Trials({ onMenuClick }) {
     catConfig.observationFields?.forEach(f => {
       const val = obsForm[f.key];
       newObs[f.key] = (val === '' || val === undefined || val === null) ? null : Number(val);
+    });
+
+    // Persist custom pot observation fields for pot trials
+    const trialProj = activeTrial ? projects.find(p => String(p.ID) === String(activeTrial.ProjectID)) : null;
+    const potFieldsList = trialProj?.PotFields || ['Plant Height', 'Branches', 'Flowers', 'Fruit Count', 'Yield'];
+    potFieldsList.forEach(pf => {
+      const fieldKey = typeof pf === 'object' ? (pf.key || pf.label) : String(pf);
+      if (obsForm[fieldKey] !== undefined && obsForm[fieldKey] !== '') {
+        const num = parseFloat(obsForm[fieldKey]);
+        newObs[fieldKey] = isNaN(num) ? obsForm[fieldKey] : num;
+      }
     });
 
     // Normalize observation to category-aware fields
@@ -7686,7 +7698,7 @@ If none are present, write "None".`;
 
                               {/* Action Toolbar */}
                               <div className="flex flex-wrap items-center gap-2">
-                                {/* Visual Cards vs Rapid Spreadsheet Table Toggle */}
+                                {/* Visual Cards vs By Column vs Rapid Spreadsheet Table Toggle */}
                                 <div className="flex items-center p-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xs">
                                   <button
                                     type="button"
@@ -7701,6 +7713,21 @@ If none are present, write "None".`;
                                     <Grid className="w-3.5 h-3.5" />
                                     <span>Cards</span>
                                   </button>
+                                  {isPot && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setProjectPlotsViewMode(prev => ({ ...prev, [activeProjId]: 'columns' }))}
+                                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                                        viewFormat === 'columns'
+                                          ? 'bg-emerald-600 text-white shadow-xs'
+                                          : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
+                                      }`}
+                                      title="Greenhouse Column lanes layout for fast sequential plant entry"
+                                    >
+                                      <Columns3 className="w-3.5 h-3.5" />
+                                      <span>By Column</span>
+                                    </button>
+                                  )}
                                   <button
                                     type="button"
                                     onClick={() => setProjectPlotsViewMode(prev => ({ ...prev, [activeProjId]: 'table' }))}
@@ -7776,63 +7803,233 @@ If none are present, write "None".`;
 
                             {/* Plots Content Area */}
                             <div className="p-4 sm:p-5">
-                              {viewFormat === 'table' ? (
-                                <ProjectRapidEntryTable
-                                  trials={trialsList}
-                                  project={proj}
-                                  activeCategory={activeCategory}
-                                  onInlineObservation={handleSaveInlineObservation}
-                                  onQuickRate={handleQuickRate}
-                                  onQuickPhoto={handleQuickPhoto}
-                                  onViewDetails={handleViewDetails}
-                                  onEditPlot={handleOpenModal}
-                                  onOpenBatchModal={() => setBatchObsModalProject({ project: proj, trials: trialsList })}
-                                  onOpenBatchAppModal={() => setBatchAppModalData({ trials: trialsList, project: proj })}
-                                  selectedForBulk={selectedForBulk}
-                                  onToggleBulk={toggleBulk}
-                                />
-                              ) : (
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                                  {trialsList.map(t => (
-                                    <TrialCard
-                                      key={t.ID}
-                                      trial={t}
+                              {(() => {
+                                const potSortOrder = projectPlotsSortMode[activeProjId] || 'column';
+                                const getPotColNum = (t) => t.PotCol != null && t.PotCol !== '' ? Number(t.PotCol) : (parseInt(t.PotLabel?.match(/C(\d+)/i)?.[1], 10) || 1);
+                                const getPotRowNum = (t) => t.PotRow != null && t.PotRow !== '' ? Number(t.PotRow) : (parseInt(t.PotLabel?.match(/R(\d+)/i)?.[1], 10) || parseInt(t.Replication, 10) || 1);
+
+                                const sortedTrialsList = isPot
+                                  ? [...trialsList].sort((a, b) => {
+                                      const colA = getPotColNum(a);
+                                      const colB = getPotColNum(b);
+                                      const rowA = getPotRowNum(a);
+                                      const rowB = getPotRowNum(b);
+                                      if (potSortOrder === 'row') {
+                                        return rowA !== rowB ? rowA - rowB : colA - colB;
+                                      }
+                                      return colA !== colB ? colA - colB : rowA - rowB;
+                                    })
+                                  : trialsList;
+
+                                const potColumnLanes = {};
+                                if (isPot) {
+                                  trialsList.forEach(t => {
+                                    const c = getPotColNum(t);
+                                    if (!potColumnLanes[c]) potColumnLanes[c] = [];
+                                    potColumnLanes[c].push(t);
+                                  });
+                                  Object.keys(potColumnLanes).forEach(c => {
+                                    potColumnLanes[c].sort((a, b) => getPotRowNum(a) - getPotRowNum(b));
+                                  });
+                                }
+
+                                if (viewFormat === 'table') {
+                                  return (
+                                    <ProjectRapidEntryTable
+                                      trials={trialsList}
                                       project={proj}
-                                      isSelected={selectedForBulk.has(t.ID)}
-                                      isHighlighted={state.highlightTrialId === t.ID}
-                                      isPendingSync={isTrialPendingSync(t)}
-                                      isMenuOpen={openCardMenu === t.ID}
-                                      onToggleBulk={toggleBulk}
-                                      onToggleMenu={handleToggleMenu}
-                                      onViewDetails={handleViewDetails}
-                                      onEdit={handleOpenModal}
-                                      onDuplicate={handleDuplicate}
-                                      onMoveToProject={handleMoveToProject}
-                                      onExportPdf={handleExportPdf}
-                                      onExportSciPdf={handleExportSciPdf}
-                                      onExportInstitutionalDossier={handleExportInstitutionalDossier}
-                                      onExportPpt={handleExportPpt}
-                                      onExportHtml={exportHtmlSlide}
-                                      onExportTxt={exportTxtReport}
-                                      onExportCsv={exportCsv}
-                                      onExportJson={exportJson}
-                                      onShare={shareTrial}
-                                      onAppSharing={handleOpenShareModal}
-                                      onAiGenerate={handleAiSingleGenerate}
-                                      onDelete={handleDelete}
-                                      onActivateToggle={handleActivateToggle}
+                                      activeCategory={activeCategory}
+                                      onInlineObservation={handleSaveInlineObservation}
                                       onQuickRate={handleQuickRate}
                                       onQuickPhoto={handleQuickPhoto}
-                                      onQuickGalleryUpload={handleQuickGalleryUpload}
-                                      onMarkComplete={handleMarkComplete}
-                                      onEditControlDays={handleEditControlDays}
-                                      onRecordWeather={handleRecordWeather}
-                                      onQuickPeekFormulation={handleQuickPeekFormulation}
-                                      onComparePhotos={handleOpenPhotoComparison}
+                                      onViewDetails={handleViewDetails}
+                                      onEditPlot={handleOpenModal}
+                                      onOpenBatchModal={() => setBatchObsModalProject({ project: proj, trials: trialsList })}
+                                      onOpenBatchAppModal={() => setBatchAppModalData({ trials: trialsList, project: proj })}
+                                      selectedForBulk={selectedForBulk}
+                                      onToggleBulk={toggleBulk}
                                     />
-                                  ))}
-                                </div>
-                              )}
+                                  );
+                                }
+
+                                if (viewFormat === 'columns' && isPot) {
+                                  return (
+                                    <div className="space-y-4">
+                                      <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-slate-500 font-semibold">
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-emerald-700 dark:text-emerald-400 font-bold">🪴 Greenhouse Column Lanes</span>
+                                          <span>({Object.keys(potColumnLanes).length} Columns · {trialsList.length} Total Pots)</span>
+                                        </div>
+                                        <span className="text-[11px] text-slate-400">Pots arranged sequentially down each physical column</span>
+                                      </div>
+
+                                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 items-start">
+                                        {Object.entries(potColumnLanes).sort(([a], [b]) => Number(a) - Number(b)).map(([cNum, cTrials]) => {
+                                          const repTrial = cTrials[0] || {};
+                                          const isCtrl = repTrial.IsControl === true || repTrial.IsControl === 'true';
+                                          const trtName = repTrial.FormulationName || (isCtrl ? 'Untreated Control' : `Treatment C${cNum}`);
+                                          return (
+                                            <div
+                                              key={cNum}
+                                              className="bg-slate-50/90 dark:bg-slate-800/40 rounded-2xl p-3 border-2 border-slate-200/90 dark:border-slate-700/80 space-y-3 shadow-xs"
+                                            >
+                                              {/* Column Lane Header */}
+                                              <div className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-200/80 dark:border-slate-700 shadow-xs space-y-2">
+                                                <div className="flex items-center justify-between">
+                                                  <div className="flex items-center gap-1.5">
+                                                    <span className="w-6 h-6 rounded-lg bg-emerald-600 text-white font-black text-xs flex items-center justify-center shadow-xs">
+                                                      C{cNum}
+                                                    </span>
+                                                    <span className="font-black text-sm text-slate-900 dark:text-white">
+                                                      Column {cNum}
+                                                    </span>
+                                                  </div>
+                                                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                                                    {cTrials.length} Pots
+                                                  </span>
+                                                </div>
+
+                                                <div className="flex items-center justify-between gap-2 pt-0.5">
+                                                  <span
+                                                    className={`text-xs font-bold px-2.5 py-1 rounded-lg truncate max-w-[170px] ${
+                                                      isCtrl
+                                                        ? 'bg-rose-100 text-rose-800 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-300'
+                                                        : 'bg-emerald-100 text-emerald-800 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300'
+                                                    }`}
+                                                    title={trtName}
+                                                  >
+                                                    {trtName}
+                                                  </span>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => setBatchObsModalProject({ project: proj, trials: cTrials })}
+                                                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-amber-800 bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/50 dark:text-amber-300 rounded-lg transition shadow-xs shrink-0"
+                                                    title={`Record observation notes/ratings for all pots in Column ${cNum}`}
+                                                  >
+                                                    <Zap className="w-3 h-3 fill-amber-600 text-amber-600" />
+                                                    <span>Log Col</span>
+                                                  </button>
+                                                </div>
+                                              </div>
+
+                                              {/* Column's Pots stacked vertically */}
+                                              <div className="space-y-3">
+                                                {cTrials.map(t => (
+                                                  <TrialCard
+                                                    key={t.ID}
+                                                    trial={t}
+                                                    project={proj}
+                                                    isSelected={selectedForBulk.has(t.ID)}
+                                                    isHighlighted={state.highlightTrialId === t.ID}
+                                                    isPendingSync={isTrialPendingSync(t)}
+                                                    isMenuOpen={openCardMenu === t.ID}
+                                                    onToggleBulk={toggleBulk}
+                                                    onToggleMenu={handleToggleMenu}
+                                                    onViewDetails={handleViewDetails}
+                                                    onEdit={handleOpenModal}
+                                                    onDuplicate={handleDuplicate}
+                                                    onMoveToProject={handleMoveToProject}
+                                                    onExportPdf={handleExportPdf}
+                                                    onExportSciPdf={handleExportSciPdf}
+                                                    onExportInstitutionalDossier={handleExportInstitutionalDossier}
+                                                    onExportPpt={handleExportPpt}
+                                                    onExportHtml={exportHtmlSlide}
+                                                    onExportTxt={exportTxtReport}
+                                                    onExportCsv={exportCsv}
+                                                    onExportJson={exportJson}
+                                                    onShare={shareTrial}
+                                                    onAppSharing={handleOpenShareModal}
+                                                    onAiGenerate={handleAiSingleGenerate}
+                                                    onDelete={handleDelete}
+                                                    onActivateToggle={handleActivateToggle}
+                                                    onQuickRate={handleQuickRate}
+                                                    onQuickPhoto={handleQuickPhoto}
+                                                    onQuickGalleryUpload={handleQuickGalleryUpload}
+                                                    onMarkComplete={handleMarkComplete}
+                                                    onEditControlDays={handleEditControlDays}
+                                                    onRecordWeather={handleRecordWeather}
+                                                    onQuickPeekFormulation={handleQuickPeekFormulation}
+                                                    onComparePhotos={handleOpenPhotoComparison}
+                                                  />
+                                                ))}
+                                              </div>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  );
+                                }
+
+                                return (
+                                  <div className="space-y-3">
+                                    {isPot && (
+                                      <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs">
+                                        <span className="text-slate-500 font-semibold">
+                                          Showing {sortedTrialsList.length} pots ordered {potSortOrder === 'column' ? 'by Column (C1 → C4)' : 'by Row (R1 → R5)'}
+                                        </span>
+                                        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 text-[11px]">
+                                          <span className="px-1.5 text-slate-400 font-medium">Order:</span>
+                                          <button
+                                            type="button"
+                                            onClick={() => setProjectPlotsSortMode(prev => ({ ...prev, [activeProjId]: 'column' }))}
+                                            className={`px-2 py-0.5 rounded font-bold transition ${potSortOrder === 'column' ? 'bg-white dark:bg-slate-700 text-emerald-700 dark:text-emerald-300 shadow-xs' : 'text-slate-600 dark:text-slate-400'}`}
+                                          >
+                                            By Column
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => setProjectPlotsSortMode(prev => ({ ...prev, [activeProjId]: 'row' }))}
+                                            className={`px-2 py-0.5 rounded font-bold transition ${potSortOrder === 'row' ? 'bg-white dark:bg-slate-700 text-emerald-700 dark:text-emerald-300 shadow-xs' : 'text-slate-600 dark:text-slate-400'}`}
+                                          >
+                                            By Row
+                                          </button>
+                                        </div>
+                                      </div>
+                                    )}
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                                      {sortedTrialsList.map(t => (
+                                        <TrialCard
+                                          key={t.ID}
+                                          trial={t}
+                                          project={proj}
+                                          isSelected={selectedForBulk.has(t.ID)}
+                                          isHighlighted={state.highlightTrialId === t.ID}
+                                          isPendingSync={isTrialPendingSync(t)}
+                                          isMenuOpen={openCardMenu === t.ID}
+                                          onToggleBulk={toggleBulk}
+                                          onToggleMenu={handleToggleMenu}
+                                          onViewDetails={handleViewDetails}
+                                          onEdit={handleOpenModal}
+                                          onDuplicate={handleDuplicate}
+                                          onMoveToProject={handleMoveToProject}
+                                          onExportPdf={handleExportPdf}
+                                          onExportSciPdf={handleExportSciPdf}
+                                          onExportInstitutionalDossier={handleExportInstitutionalDossier}
+                                          onExportPpt={handleExportPpt}
+                                          onExportHtml={exportHtmlSlide}
+                                          onExportTxt={exportTxtReport}
+                                          onExportCsv={exportCsv}
+                                          onExportJson={exportJson}
+                                          onShare={shareTrial}
+                                          onAppSharing={handleOpenShareModal}
+                                          onAiGenerate={handleAiSingleGenerate}
+                                          onDelete={handleDelete}
+                                          onActivateToggle={handleActivateToggle}
+                                          onQuickRate={handleQuickRate}
+                                          onQuickPhoto={handleQuickPhoto}
+                                          onQuickGalleryUpload={handleQuickGalleryUpload}
+                                          onMarkComplete={handleMarkComplete}
+                                          onEditControlDays={handleEditControlDays}
+                                          onRecordWeather={handleRecordWeather}
+                                          onQuickPeekFormulation={handleQuickPeekFormulation}
+                                          onComparePhotos={handleOpenPhotoComparison}
+                                        />
+                                      ))}
+                                    </div>
+                                  </div>
+                                );
+                              })()}
                             </div>
 
                             {/* Bottom Quick Switcher Navigation Bar */}
@@ -8043,6 +8240,16 @@ If none are present, write "None".`;
                                   >
                                     <Grid className="w-3.5 h-3.5" />
                                   </button>
+                                  {isPot && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setProjectPlotsViewMode(prev => ({ ...prev, [pid]: 'columns' }))}
+                                      className={`p-1 rounded text-xs ${viewFormat === 'columns' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:text-slate-900'}`}
+                                      title="By Column"
+                                    >
+                                      <Columns3 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
                                   <button
                                     type="button"
                                     onClick={() => setProjectPlotsViewMode(prev => ({ ...prev, [pid]: 'table' }))}
@@ -8124,65 +8331,235 @@ If none are present, write "None".`;
                             </div>
                           </div>
 
-                          {!isCollapsed && (
+                           {!isCollapsed && (
                             <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/20 dark:bg-slate-900/20">
-                              {viewFormat === 'table' ? (
-                                <ProjectRapidEntryTable
-                                  trials={trialsList}
-                                  project={proj}
-                                  activeCategory={activeCategory}
-                                  onInlineObservation={handleSaveInlineObservation}
-                                  onQuickRate={handleQuickRate}
-                                  onQuickPhoto={handleQuickPhoto}
-                                  onViewDetails={handleViewDetails}
-                                  onEditPlot={handleOpenModal}
-                                  onOpenBatchModal={() => setBatchObsModalProject({ project: proj, trials: trialsList })}
-                                  onOpenBatchAppModal={() => setBatchAppModalData({ trials: trialsList, project: proj })}
-                                  selectedForBulk={selectedForBulk}
-                                  onToggleBulk={toggleBulk}
-                                />
-                              ) : (
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                                  {trialsList.map(t => (
-                                    <TrialCard
-                                      key={t.ID}
-                                      trial={t}
+                              {(() => {
+                                const potSortOrder = projectPlotsSortMode[pid] || 'column';
+                                const getPotColNum = (t) => t.PotCol != null && t.PotCol !== '' ? Number(t.PotCol) : (parseInt(t.PotLabel?.match(/C(\d+)/i)?.[1], 10) || 1);
+                                const getPotRowNum = (t) => t.PotRow != null && t.PotRow !== '' ? Number(t.PotRow) : (parseInt(t.PotLabel?.match(/R(\d+)/i)?.[1], 10) || parseInt(t.Replication, 10) || 1);
+
+                                const sortedTrialsList = isPot
+                                  ? [...trialsList].sort((a, b) => {
+                                      const colA = getPotColNum(a);
+                                      const colB = getPotColNum(b);
+                                      const rowA = getPotRowNum(a);
+                                      const rowB = getPotRowNum(b);
+                                      if (potSortOrder === 'row') {
+                                        return rowA !== rowB ? rowA - rowB : colA - colB;
+                                      }
+                                      return colA !== colB ? colA - colB : rowA - rowB;
+                                    })
+                                  : trialsList;
+
+                                const potColumnLanes = {};
+                                if (isPot) {
+                                  trialsList.forEach(t => {
+                                    const c = getPotColNum(t);
+                                    if (!potColumnLanes[c]) potColumnLanes[c] = [];
+                                    potColumnLanes[c].push(t);
+                                  });
+                                  Object.keys(potColumnLanes).forEach(c => {
+                                    potColumnLanes[c].sort((a, b) => getPotRowNum(a) - getPotRowNum(b));
+                                  });
+                                }
+
+                                if (viewFormat === 'table') {
+                                  return (
+                                    <ProjectRapidEntryTable
+                                      trials={trialsList}
                                       project={proj}
-                                      isSelected={selectedForBulk.has(t.ID)}
-                                      isHighlighted={state.highlightTrialId === t.ID}
-                                      isPendingSync={isTrialPendingSync(t)}
-                                      isMenuOpen={openCardMenu === t.ID}
-                                      onToggleBulk={toggleBulk}
-                                      onToggleMenu={handleToggleMenu}
-                                      onViewDetails={handleViewDetails}
-                                      onEdit={handleOpenModal}
-                                      onDuplicate={handleDuplicate}
-                                      onMoveToProject={handleMoveToProject}
-                                      onExportPdf={handleExportPdf}
-                                      onExportSciPdf={handleExportSciPdf}
-                                      onExportInstitutionalDossier={handleExportInstitutionalDossier}
-                                      onExportPpt={handleExportPpt}
-                                      onExportHtml={exportHtmlSlide}
-                                      onExportTxt={exportTxtReport}
-                                      onExportCsv={exportCsv}
-                                      onExportJson={exportJson}
-                                      onShare={shareTrial}
-                                      onAppSharing={handleOpenShareModal}
-                                      onAiGenerate={handleAiSingleGenerate}
-                                      onDelete={handleDelete}
-                                      onActivateToggle={handleActivateToggle}
+                                      activeCategory={activeCategory}
+                                      onInlineObservation={handleSaveInlineObservation}
                                       onQuickRate={handleQuickRate}
                                       onQuickPhoto={handleQuickPhoto}
-                                      onQuickGalleryUpload={handleQuickGalleryUpload}
-                                      onMarkComplete={handleMarkComplete}
-                                      onEditControlDays={handleEditControlDays}
-                                      onRecordWeather={handleRecordWeather}
-                                      onQuickPeekFormulation={handleQuickPeekFormulation}
-                                      onComparePhotos={handleOpenPhotoComparison}
+                                      onViewDetails={handleViewDetails}
+                                      onEditPlot={handleOpenModal}
+                                      onOpenBatchModal={() => setBatchObsModalProject({ project: proj, trials: trialsList })}
+                                      onOpenBatchAppModal={() => setBatchAppModalData({ trials: trialsList, project: proj })}
+                                      selectedForBulk={selectedForBulk}
+                                      onToggleBulk={toggleBulk}
                                     />
-                                  ))}
-                                </div>
-                              )}
+                                  );
+                                }
+
+                                if (viewFormat === 'columns' && isPot) {
+                                  return (
+                                    <div className="space-y-4">
+                                      <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-slate-500 font-semibold">
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-emerald-700 dark:text-emerald-400 font-bold">🪴 Greenhouse Column Lanes</span>
+                                          <span>({Object.keys(potColumnLanes).length} Columns · {trialsList.length} Total Pots)</span>
+                                        </div>
+                                        <span className="text-[11px] text-slate-400">Pots arranged sequentially down each physical column</span>
+                                      </div>
+
+                                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 items-start">
+                                        {Object.entries(potColumnLanes).sort(([a], [b]) => Number(a) - Number(b)).map(([cNum, cTrials]) => {
+                                          const repTrial = cTrials[0] || {};
+                                          const isCtrl = repTrial.IsControl === true || repTrial.IsControl === 'true';
+                                          const trtName = repTrial.FormulationName || (isCtrl ? 'Untreated Control' : `Treatment C${cNum}`);
+                                          return (
+                                            <div
+                                              key={cNum}
+                                              className="bg-slate-50/90 dark:bg-slate-800/40 rounded-2xl p-3 border-2 border-slate-200/90 dark:border-slate-700/80 space-y-3 shadow-xs"
+                                            >
+                                              {/* Column Lane Header */}
+                                              <div className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-200/80 dark:border-slate-700 shadow-xs space-y-2">
+                                                <div className="flex items-center justify-between">
+                                                  <div className="flex items-center gap-1.5">
+                                                    <span className="w-6 h-6 rounded-lg bg-emerald-600 text-white font-black text-xs flex items-center justify-center shadow-xs">
+                                                      C{cNum}
+                                                    </span>
+                                                    <span className="font-black text-sm text-slate-900 dark:text-white">
+                                                      Column {cNum}
+                                                    </span>
+                                                  </div>
+                                                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                                                    {cTrials.length} Pots
+                                                  </span>
+                                                </div>
+
+                                                <div className="flex items-center justify-between gap-2 pt-0.5">
+                                                  <span
+                                                    className={`text-xs font-bold px-2.5 py-1 rounded-lg truncate max-w-[170px] ${
+                                                      isCtrl
+                                                        ? 'bg-rose-100 text-rose-800 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-300'
+                                                        : 'bg-emerald-100 text-emerald-800 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300'
+                                                    }`}
+                                                    title={trtName}
+                                                  >
+                                                    {trtName}
+                                                  </span>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => setBatchObsModalProject({ project: proj, trials: cTrials })}
+                                                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-amber-800 bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/50 dark:text-amber-300 rounded-lg transition shadow-xs shrink-0"
+                                                    title={`Record observation notes/ratings for all pots in Column ${cNum}`}
+                                                  >
+                                                    <Zap className="w-3 h-3 fill-amber-600 text-amber-600" />
+                                                    <span>Log Col</span>
+                                                  </button>
+                                                </div>
+                                              </div>
+
+                                              {/* Column's Pots stacked vertically */}
+                                              <div className="space-y-3">
+                                                {cTrials.map(t => (
+                                                  <TrialCard
+                                                    key={t.ID}
+                                                    trial={t}
+                                                    project={proj}
+                                                    isSelected={selectedForBulk.has(t.ID)}
+                                                    isHighlighted={state.highlightTrialId === t.ID}
+                                                    isPendingSync={isTrialPendingSync(t)}
+                                                    isMenuOpen={openCardMenu === t.ID}
+                                                    onToggleBulk={toggleBulk}
+                                                    onToggleMenu={handleToggleMenu}
+                                                    onViewDetails={handleViewDetails}
+                                                    onEdit={handleOpenModal}
+                                                    onDuplicate={handleDuplicate}
+                                                    onMoveToProject={handleMoveToProject}
+                                                    onExportPdf={handleExportPdf}
+                                                    onExportSciPdf={handleExportSciPdf}
+                                                    onExportInstitutionalDossier={handleExportInstitutionalDossier}
+                                                    onExportPpt={handleExportPpt}
+                                                    onExportHtml={exportHtmlSlide}
+                                                    onExportTxt={exportTxtReport}
+                                                    onExportCsv={exportCsv}
+                                                    onExportJson={exportJson}
+                                                    onShare={shareTrial}
+                                                    onAppSharing={handleOpenShareModal}
+                                                    onAiGenerate={handleAiSingleGenerate}
+                                                    onDelete={handleDelete}
+                                                    onActivateToggle={handleActivateToggle}
+                                                    onQuickRate={handleQuickRate}
+                                                    onQuickPhoto={handleQuickPhoto}
+                                                    onQuickGalleryUpload={handleQuickGalleryUpload}
+                                                    onMarkComplete={handleMarkComplete}
+                                                    onEditControlDays={handleEditControlDays}
+                                                    onRecordWeather={handleRecordWeather}
+                                                    onQuickPeekFormulation={handleQuickPeekFormulation}
+                                                    onComparePhotos={handleOpenPhotoComparison}
+                                                  />
+                                                ))}
+                                              </div>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  );
+                                }
+
+                                return (
+                                  <div className="space-y-3">
+                                    {isPot && (
+                                      <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs">
+                                        <span className="text-slate-500 font-semibold">
+                                          Showing {sortedTrialsList.length} pots ordered {potSortOrder === 'column' ? 'by Column (C1 → C4)' : 'by Row (R1 → R5)'}
+                                        </span>
+                                        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 text-[11px]">
+                                          <span className="px-1.5 text-slate-400 font-medium">Order:</span>
+                                          <button
+                                            type="button"
+                                            onClick={() => setProjectPlotsSortMode(prev => ({ ...prev, [pid]: 'column' }))}
+                                            className={`px-2 py-0.5 rounded font-bold transition ${potSortOrder === 'column' ? 'bg-white dark:bg-slate-700 text-emerald-700 dark:text-emerald-300 shadow-xs' : 'text-slate-600 dark:text-slate-400'}`}
+                                          >
+                                            By Column
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => setProjectPlotsSortMode(prev => ({ ...prev, [pid]: 'row' }))}
+                                            className={`px-2 py-0.5 rounded font-bold transition ${potSortOrder === 'row' ? 'bg-white dark:bg-slate-700 text-emerald-700 dark:text-emerald-300 shadow-xs' : 'text-slate-600 dark:text-slate-400'}`}
+                                          >
+                                            By Row
+                                          </button>
+                                        </div>
+                                      </div>
+                                    )}
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                                      {sortedTrialsList.map(t => (
+                                        <TrialCard
+                                          key={t.ID}
+                                          trial={t}
+                                          project={proj}
+                                          isSelected={selectedForBulk.has(t.ID)}
+                                          isHighlighted={state.highlightTrialId === t.ID}
+                                          isPendingSync={isTrialPendingSync(t)}
+                                          isMenuOpen={openCardMenu === t.ID}
+                                          onToggleBulk={toggleBulk}
+                                          onToggleMenu={handleToggleMenu}
+                                          onViewDetails={handleViewDetails}
+                                          onEdit={handleOpenModal}
+                                          onDuplicate={handleDuplicate}
+                                          onMoveToProject={handleMoveToProject}
+                                          onExportPdf={handleExportPdf}
+                                          onExportSciPdf={handleExportSciPdf}
+                                          onExportInstitutionalDossier={handleExportInstitutionalDossier}
+                                          onExportPpt={handleExportPpt}
+                                          onExportHtml={exportHtmlSlide}
+                                          onExportTxt={exportTxtReport}
+                                          onExportCsv={exportCsv}
+                                          onExportJson={exportJson}
+                                          onShare={shareTrial}
+                                          onAppSharing={handleOpenShareModal}
+                                          onAiGenerate={handleAiSingleGenerate}
+                                          onDelete={handleDelete}
+                                          onActivateToggle={handleActivateToggle}
+                                          onQuickRate={handleQuickRate}
+                                          onQuickPhoto={handleQuickPhoto}
+                                          onQuickGalleryUpload={handleQuickGalleryUpload}
+                                          onMarkComplete={handleMarkComplete}
+                                          onEditControlDays={handleEditControlDays}
+                                          onRecordWeather={handleRecordWeather}
+                                          onQuickPeekFormulation={handleQuickPeekFormulation}
+                                          onComparePhotos={handleOpenPhotoComparison}
+                                        />
+                                      ))}
+                                    </div>
+                                  </div>
+                                );
+                              })()}
                             </div>
                           )}
                         </div>
@@ -12194,13 +12571,65 @@ If none are present, write "None".`;
             })}
           </div>
 
-          {/* ── Pot-wise Plant Heights (for row-wise pot trials) ── */}
+          {/* ── Pot Trial Observation Fields ── */}
           {(() => {
             const currentProj = activeTrial ? projects.find(p => String(p.ID) === String(activeTrial.ProjectID)) : null;
             const isPotTrial = (activeTrial?.TrialDesign === 'PotTrial' || activeTrial?.TrialDesign === 'rcbd-pot' || !!activeTrial?.PotLabel) || (currentProj?.Design === 'PotTrial' || currentProj?.Design === 'rcbd-pot');
-            const potObsMode = currentProj?.PotObsMode || activeTrial?.PotObsMode || 'row-wise';
-            if (!isPotTrial || potObsMode === 'pot-wise') return null;
+            const potObsMode = currentProj?.PotObsMode || activeTrial?.PotObsMode || 'plant-wise';
+            if (!isPotTrial) return null;
 
+            // Individual Plant / Pot Entry
+            if (potObsMode === 'pot-wise' || potObsMode === 'plant-wise') {
+              const potFields = currentProj?.PotFields || ['Plant Height', 'Branches', 'Flowers', 'Fruit Count', 'Yield'];
+              const col = activeTrial?.PotCol || (activeTrial?.PotLabel?.match(/C(\d+)/i)?.[1]) || '1';
+              const row = activeTrial?.PotRow || (activeTrial?.PotLabel?.match(/R(\d+)/i)?.[1]) || activeTrial?.Replication || '1';
+              const potName = activeTrial?.PotLabel || `Col ${col} · Row ${row}`;
+
+              return (
+                <div className="bg-emerald-50/80 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800 rounded-xl p-3.5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-emerald-800 dark:text-emerald-300 uppercase flex items-center gap-1.5">
+                      🪴 Pot Plant Metrics ({potName})
+                    </label>
+                    <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/60 px-2.5 py-0.5 rounded-full">
+                      Col {col} · Row {row} (Rep {row})
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                    {potFields.map((field, fIdx) => {
+                      const fieldKey = typeof field === 'object' ? (field.key || field.label) : String(field);
+                      const fieldLabel = typeof field === 'object' ? field.label : String(field);
+                      return (
+                        <div key={fIdx}>
+                          <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                            {fieldLabel}
+                          </label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={obsForm[fieldKey] ?? ''}
+                            onChange={e => {
+                              const val = e.target.value;
+                              setObsForm(prev => {
+                                const next = { ...prev, [fieldKey]: val };
+                                if (activeTrial) {
+                                  localStorage.setItem(`obs_draft_${activeTrial.ID}`, JSON.stringify(next));
+                                }
+                                return next;
+                              });
+                            }}
+                            placeholder="e.g. 15.5"
+                            className="w-full px-2.5 py-1.5 text-xs border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100"
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            }
+
+            // Multi-pot composite plots (row-wise or column-wise)
             let potCount = null;
             if (activeTrial?.PotLabel) {
               const m = activeTrial.PotLabel.match(/(\d+)\s*Pots?/i);
@@ -12217,7 +12646,6 @@ If none are present, write "None".`;
             if (!potCount || isNaN(potCount) || potCount < 1) potCount = 3;
 
             const currentHeights = obsForm.potHeights || Array(potCount).fill('');
-            // Ensure array length matches pot count
             const heights = [...currentHeights];
             while (heights.length < potCount) heights.push('');
 
