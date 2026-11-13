@@ -4778,6 +4778,7 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
                   const unitKey = isHorizontal ? r : c;
                   t = rowColAssignments[unitKey];
                 }
+                t = t || trtList[0] || { fid: '', name: 'Untreated Control', role: 'control', dosage: '' };
 
                 const trialId = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
                 const targetField = config.targetField || 'WeedSpecies';

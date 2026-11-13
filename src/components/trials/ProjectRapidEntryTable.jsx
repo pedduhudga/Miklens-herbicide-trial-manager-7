@@ -123,7 +123,7 @@ export default function ProjectRapidEntryTable({
             </button>
           )}
           <span className="text-slate-400 font-medium">
-            Showing {filteredTrials.length} of {trialsList.length} units
+            Showing {filteredTrials.length} of {actualTrials.length} units
           </span>
         </div>
 

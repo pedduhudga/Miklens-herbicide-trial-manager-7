@@ -665,7 +665,7 @@ const TrialCard = memo(function TrialCard({
           }`}>
             {trial.PotCol ? `Col ${trial.PotCol}` : ''}
             {trial.PotRow ? ` · Row ${trial.PotRow}` : ''}
-            {blockInfo?.blockNum ? ` · Rep ${blockInfo.blockNum}` : ''}
+            {blockInfo?.blockNum && (!trial.PotRow || String(blockInfo.blockNum) !== String(trial.PotRow)) ? ` · Rep ${blockInfo.blockNum}` : ''}
           </span>
         </div>
       )}
