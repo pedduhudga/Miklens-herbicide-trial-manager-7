@@ -2164,18 +2164,36 @@ export default function Projects({ onMenuClick }) {
                   <span>🔄</span> Reorder & Lock Columns
                 </span>
                 <span className="text-[10px] text-slate-500 font-medium hidden sm:inline">
-                  (Move columns with ← / →, lock columns 🔒 to freeze their positions)
+                  (Move ← / →, lock 🔒, delete 🗑️, or assign treatments)
                 </span>
               </div>
-              <div className="flex items-center gap-1.5">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={autoAssign1to1}
+                  className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 transition flex items-center gap-1"
+                  title="Synchronize columns 1:1 with Treatments Setup order"
+                >
+                  <span>⚡</span>
+                  <span>Map 1:1</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={addColumn}
+                  className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition flex items-center gap-1"
+                  title="Add a new column to greenhouse layout"
+                >
+                  <Plus className="w-3 h-3" />
+                  <span>Add Col</span>
+                </button>
                 <button
                   type="button"
                   onClick={randomizeUnlockedColumns}
-                  className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition flex items-center gap-1"
+                  className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 transition flex items-center gap-1"
                   title="Randomize unlocked columns while keeping locked columns intact"
                 >
                   <span>🎲</span>
-                  <span>Shuffle Unlocked</span>
+                  <span>Shuffle</span>
                 </button>
                 <button
                   type="button"
@@ -2241,6 +2259,15 @@ export default function Projects({ onMenuClick }) {
                           >
                             {isLocked ? '🔒' : '🔓'}
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteColumn(cIdx)}
+                            disabled={potCols <= 1}
+                            className="p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-600 disabled:opacity-20 transition"
+                            title="Delete this column from greenhouse layout"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </div>
 
@@ -2254,7 +2281,7 @@ export default function Projects({ onMenuClick }) {
                         }`}
                       >
                         {randomizeTreatments.map((t, tIdx) => (
-                          <option key={t.id || tIdx} value={t.id || t.name}>
+                          <option key={t.id || tIdx} value={t.id}>
                             {t.name || `Treatment ${tIdx + 1}`}
                           </option>
                         ))}
@@ -3470,7 +3497,7 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
           seen.add(key);
           const isCtrl = String(t.IsControl).toLowerCase() === 'true';
           initialTreatments.push({
-            id: `trt_${Date.now()}_${idx}`,
+            id: t.FormulationID ? `trt_${t.FormulationID}` : `trt_${idx}`,
             name: t.FormulationName || (isCtrl ? 'Untreated Control' : 'Unnamed'),
             formulationId: t.FormulationID || '',
             dosage: t.Dosage || '',
@@ -3482,7 +3509,7 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
     
     if (initialTreatments.length === 0) {
       initialTreatments.push({
-        id: 'control_' + Date.now(),
+        id: 'trt_control',
         name: 'Untreated Control',
         formulationId: '',
         dosage: '',
@@ -3492,7 +3519,7 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
     
     setRandomizeTreatments(initialTreatments);
     
-    const potColsCount = parseInt(activeProject.PotCols || 4);
+    const potColsCount = parseInt(activeProject.PotCols || initialTreatments.length || 4);
     let initialColOrder = [];
     if (activeProject.PotColumnAssignments) {
       try {
@@ -3503,11 +3530,14 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
         initialColOrder = [];
       }
     }
-    if (!initialColOrder.length || initialColOrder.length !== potColsCount) {
-      initialColOrder = Array.from({ length: potColsCount }).map((_, c) => {
-        return initialTreatments[c % initialTreatments.length]?.id || `trt_${c}`;
-      });
-    }
+    
+    // Resolve column order ensuring valid treatment IDs and avoiding ghost IDs
+    initialColOrder = Array.from({ length: potColsCount }).map((_, c) => {
+      const stored = initialColOrder && initialColOrder[c];
+      const matched = initialTreatments.find(t => t.id === stored || t.name === stored);
+      if (matched) return matched.id;
+      return initialTreatments[c % initialTreatments.length]?.id || `trt_${c}`;
+    });
     setCustomColumnOrder(initialColOrder);
 
     let initialLockedCols = {};
@@ -3542,6 +3572,82 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
     });
     
     setIsRandomizeModalOpen(true);
+  };
+
+  // ── Sync customColumnOrder whenever treatments change or potCols changes ──────
+  // Keeps the Reorder & Lock bar always up-to-date with Treatment Setup:
+  //   • When treatments are added to an initial single-treatment state, auto-distributes 1:1.
+  //   • When a treatment is deleted, re-maps any affected columns.
+  //   • Preserves locked columns and manual custom assignments.
+  useEffect(() => {
+    if (!isRandomizeModalOpen) return;
+    const potColsCount = parseInt(randomizeForm.potCols) || 4;
+    const trtIds = randomizeTreatments.map(t => t.id);
+    if (!trtIds.length) return;
+
+    setCustomColumnOrder(prev => {
+      const adjusted = Array.from({ length: potColsCount }, (_, i) => prev[i] ?? null);
+      const validPrev = prev.filter(Boolean);
+      const allSame = validPrev.length > 1 && validPrev.every(id => id === validPrev[0]);
+
+      return adjusted.map((colId, i) => {
+        if (lockedColumns[i] && trtIds.includes(colId)) return colId;
+        // If all columns were stuck on a single treatment and user now has multiple treatments, auto-distribute 1:1!
+        if (allSame && trtIds.length > 1) {
+          return trtIds[i % trtIds.length];
+        }
+        if (trtIds.includes(colId)) return colId;
+        return trtIds[i % trtIds.length];
+      });
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [randomizeTreatments, randomizeForm.potCols, isRandomizeModalOpen]);
+
+  const addColumn = () => {
+    const currentCols = parseInt(randomizeForm.potCols) || 4;
+    const newCols = currentCols + 1;
+    setRandomizeForm(p => ({ ...p, potCols: String(newCols) }));
+    const nextTrt = randomizeTreatments[currentCols % (randomizeTreatments.length || 1)];
+    setCustomColumnOrder(prev => [...prev, nextTrt?.id || '']);
+    toast(`Column ${newCols} added to greenhouse layout`, 'info');
+  };
+
+  const deleteColumn = (cIdx) => {
+    const currentCols = parseInt(randomizeForm.potCols) || 4;
+    if (currentCols <= 1) {
+      toast('Greenhouse layout must have at least 1 column', 'error');
+      return;
+    }
+    const newCols = currentCols - 1;
+    setRandomizeForm(p => ({ ...p, potCols: String(newCols) }));
+    setCustomColumnOrder(prev => {
+      const copy = [...prev];
+      copy.splice(cIdx, 1);
+      return copy;
+    });
+    setLockedColumns(prev => {
+      const copy = {};
+      Object.keys(prev).forEach(key => {
+        const idx = parseInt(key);
+        if (idx < cIdx) copy[idx] = true;
+        else if (idx > cIdx) copy[idx - 1] = true;
+      });
+      return copy;
+    });
+    toast(`Column ${cIdx + 1} removed from greenhouse layout`, 'info');
+  };
+
+  const autoAssign1to1 = () => {
+    const potColsCount = parseInt(randomizeForm.potCols) || 4;
+    const trtIds = randomizeTreatments.map(t => t.id);
+    if (!trtIds.length) return;
+    setCustomColumnOrder(prev => {
+      return Array.from({ length: potColsCount }, (_, i) => {
+        if (lockedColumns[i] && trtIds.includes(prev[i])) return prev[i];
+        return trtIds[i % trtIds.length];
+      });
+    });
+    toast('Columns mapped 1:1 with Treatments Setup', 'success');
   };
 
   const moveColumn = (cIdx, direction) => {
@@ -3610,16 +3716,26 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
   };
 
   const addTreatmentRow = () => {
-    setRandomizeTreatments(prev => [
-      ...prev,
-      {
-        id: 'trt_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-        name: '',
-        formulationId: '',
-        dosage: '',
-        role: 'experimental'
-      }
-    ]);
+    const newTrtId = 'trt_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+    const newTrtNumber = randomizeTreatments.length + 1;
+    const newTrt = {
+      id: newTrtId,
+      name: `Treatment ${newTrtNumber}`,
+      formulationId: '',
+      dosage: '',
+      role: 'experimental'
+    };
+    
+    // For Pot Trials with vertical columns: if columns matched treatments 1:1, auto-expand column too!
+    const isVerticalPot = randomizeForm.trialDesign === 'PotTrial' && !String(randomizeForm.potStripeDirection).toLowerCase().includes('horizontal');
+    const currentCols = parseInt(randomizeForm.potCols) || 4;
+    if (isVerticalPot && currentCols === randomizeTreatments.length) {
+      setRandomizeForm(p => ({ ...p, potCols: String(currentCols + 1) }));
+      setCustomColumnOrder(prev => [...prev, newTrtId]);
+    }
+
+    setRandomizeTreatments(prev => [...prev, newTrt]);
+    toast(`Added Treatment ${newTrtNumber}`, 'info');
   };
 
   const updateTreatmentRow = (id, field, value) => {
@@ -3642,10 +3758,45 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
   };
 
   const deleteTreatmentRow = (id) => {
+    if (randomizeTreatments.length <= 1) {
+      toast('Trial must have at least one treatment', 'error');
+      return;
+    }
     const row = randomizeTreatments.find(t => t.id === id);
-    const rowName = row && row.name ? `"${row.name}"` : 'this row';
-    if (!window.confirm(`Delete ${rowName}?`)) return;
-    setRandomizeTreatments(prev => prev.filter(t => t.id !== id));
+    const deletedName = row?.name || 'Treatment';
+    const remaining = randomizeTreatments.filter(t => t.id !== id);
+
+    const isVerticalPot = randomizeForm.trialDesign === 'PotTrial' && !String(randomizeForm.potStripeDirection).toLowerCase().includes('horizontal');
+    const currentCols = parseInt(randomizeForm.potCols) || 4;
+
+    // If columns matched treatments 1:1, also remove one column
+    if (isVerticalPot && currentCols === randomizeTreatments.length && currentCols > 1) {
+      setRandomizeForm(p => ({ ...p, potCols: String(currentCols - 1) }));
+      setCustomColumnOrder(prev => {
+        const foundIdx = prev.indexOf(id);
+        const copy = [...prev];
+        if (foundIdx !== -1) copy.splice(foundIdx, 1);
+        else copy.pop();
+        return copy;
+      });
+      setLockedColumns(prev => {
+        const copy = {};
+        Object.keys(prev).forEach(k => {
+          const idx = parseInt(k);
+          if (idx < currentCols - 1) copy[idx] = true;
+        });
+        return copy;
+      });
+    } else {
+      // Replace references to deleted treatment with remaining[0].id
+      setCustomColumnOrder(prev => {
+        const fallback = remaining[0]?.id || null;
+        return prev.map(colId => (colId === id ? fallback : colId));
+      });
+    }
+
+    setRandomizeTreatments(remaining);
+    toast(`Deleted ${deletedName}`, 'info');
   };
 
   const handleAddPotField = (newField) => {
@@ -3736,6 +3887,7 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
     const trtList = randomizeTreatments.map(t => {
       const f = activeFormulations.find(form => String(form.ID) === String(t.formulationId));
       return {
+        id: t.id,
         fid: t.formulationId || '',
         name: t.name.trim() || f?.Name || 'Unnamed Treatment',
         role: t.role,
@@ -7710,55 +7862,128 @@ ${photosHtml}
           </div>
         )}
 
-        {/* Custom Pot Observation Fields Setup */}
-        {randomizeForm.trialDesign === 'PotTrial' && (
-          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-            <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Pot Observation Fields Setup</h4>
-            <p className="text-[11px] text-slate-500">Configure the variables recorded for each experimental unit (e.g. height, flowers, yield). These will appear as observation columns in the data entry sheets.</p>
-            
-            <div className="flex flex-wrap gap-2 items-center bg-white p-2.5 rounded-lg border">
-              {(randomizeForm.potFields || []).map((field, idx) => (
-                <span key={field} className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-1 rounded text-xs font-medium">
-                  {field}
-                  <div className="flex items-center gap-0.5 border-l border-emerald-200 pl-1.5 ml-1">
-                    <button type="button" onClick={() => handleMovePotField(idx, 'up')} disabled={idx === 0} className="hover:text-emerald-900 disabled:opacity-30">▲</button>
-                    <button type="button" onClick={() => handleMovePotField(idx, 'down')} disabled={idx === (randomizeForm.potFields || []).length - 1} className="hover:text-emerald-900 disabled:opacity-30">▼</button>
-                    <button type="button" onClick={() => handleRemovePotField(field)} className="text-red-600 hover:text-red-900 ml-1">×</button>
-                  </div>
-                </span>
-              ))}
+        {/* Tabular Treatments Setup */}
+        <div className="space-y-3 bg-white p-3.5 rounded-xl border border-slate-200">
+          <div className="flex justify-between items-center">
+            <div className="flex items-center gap-2">
+              <label className="block text-sm font-bold text-slate-800">Treatments Setup</label>
+              <span className="text-[11px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full font-bold">
+                {randomizeTreatments.length} {randomizeTreatments.length === 1 ? 'Treatment' : 'Treatments'}
+              </span>
             </div>
-
-            <div className="flex gap-2">
-              <input 
-                type="text" 
-                id="new_pot_field_input_2" 
-                placeholder="Add Custom Field (e.g., Shoot weight)" 
-                className={`${INPUT} max-w-xs`} 
-                onKeyDown={e => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    handleAddPotField(e.target.value);
-                    e.target.value = '';
-                  }
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  const input = document.getElementById('new_pot_field_input_2');
-                  if (input) {
-                    handleAddPotField(input.value);
-                    input.value = '';
-                  }
-                }}
-                className="bg-slate-700 hover:bg-slate-800 text-white text-xs font-bold px-3 py-1.5 rounded-lg"
-              >
-                Add Field
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={addTreatmentRow}
+              className={`flex items-center gap-1.5 text-xs ${theme.bg} text-white px-3 py-1.5 rounded-lg font-bold transition shadow-xs`}
+            >
+              <Plus className="w-3.5 h-3.5" /> Add Treatment Row
+            </button>
           </div>
-        )}
+          
+          <div className="overflow-x-auto border rounded-xl bg-slate-50">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-slate-100 text-slate-600 font-bold uppercase border-b border-slate-200">
+                <tr>
+                  <th className="p-3">Treatment Name *</th>
+                  <th className="p-3">Active Formulation</th>
+                  <th className="p-3">Dosage / Rate</th>
+                  <th className="p-3">Role</th>
+                  {randomizeForm.trialDesign === 'PotTrial' && (
+                    <th className="p-3">Assigned Column</th>
+                  )}
+                  <th className="p-3 text-center">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 bg-white">
+                {randomizeTreatments.map((t) => {
+                  const assignedCols = customColumnOrder
+                    .map((colId, cIdx) => (colId === t.id ? cIdx + 1 : null))
+                    .filter(Boolean);
+
+                  return (
+                    <tr key={t.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="p-2">
+                        <input
+                          required
+                          type="text"
+                          placeholder="Treatment Name (e.g. UTC, T1, T2)"
+                          value={t.name}
+                          onChange={e => updateTreatmentRow(t.id, 'name', e.target.value)}
+                          className={`w-full px-2 py-1.5 border rounded-lg focus:outline-none focus:ring-1 ${theme.ringFocus} bg-white`}
+                        />
+                      </td>
+                      <td className="p-2">
+                        <select
+                          value={t.formulationId}
+                          onChange={e => updateTreatmentRow(t.id, 'formulationId', e.target.value)}
+                          className={`w-full px-2 py-1.5 border rounded-lg focus:outline-none focus:ring-1 ${theme.ringFocus} bg-white`}
+                        >
+                          <option value="">None (Untreated Control)</option>
+                          {activeFormulations.map(f => (
+                            <option key={f.ID} value={f.ID}>{f.Name}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="p-2">
+                        <input
+                          type="text"
+                          placeholder="e.g. 100 mL/ha"
+                          value={t.dosage}
+                          onChange={e => updateTreatmentRow(t.id, 'dosage', e.target.value)}
+                          className={`w-full px-2 py-1.5 border rounded-lg focus:outline-none focus:ring-1 ${theme.ringFocus} bg-white`}
+                        />
+                      </td>
+                      <td className="p-2">
+                        <select
+                          value={t.role}
+                          onChange={e => updateTreatmentRow(t.id, 'role', e.target.value)}
+                          className={`w-full px-2 py-1.5 border rounded-lg focus:outline-none focus:ring-1 ${theme.ringFocus} bg-white`}
+                        >
+                          <option value="experimental">Experimental</option>
+                          <option value="standard">Standard Check</option>
+                          <option value="control">Untreated Control</option>
+                        </select>
+                      </td>
+                      {randomizeForm.trialDesign === 'PotTrial' && (
+                        <td className="p-2 whitespace-nowrap">
+                          {assignedCols.length > 0 ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-md">
+                              Col {assignedCols.join(', ')}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-slate-400 italic">Unassigned</span>
+                          )}
+                        </td>
+                      )}
+                      <td className="p-2 text-center">
+                        <button
+                          type="button"
+                          onClick={() => deleteTreatmentRow(t.id)}
+                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
+                          title="Delete row"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {randomizeTreatments.length === 0 && (
+                  <tr>
+                    <td colSpan={randomizeForm.trialDesign === 'PotTrial' ? 6 : 5} className="text-center py-6 text-slate-400 italic bg-white animate-pulse">
+                      No treatments added yet. Click "+ Add Treatment Row" to begin.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Layout Preview for all designs */}
+        <div className="mt-4">
+          {renderLayoutPreview()}
+        </div>
 
         {/* Treatment Allocation Preview */}
         {allocationPreview && (
@@ -7849,103 +8074,55 @@ ${photosHtml}
           </div>
         )}
 
-        {/* Layout Preview for all designs */}
-        <div className="mt-4">
-          {renderLayoutPreview()}
-        </div>
+        {/* Custom Pot Observation Fields Setup */}
+        {randomizeForm.trialDesign === 'PotTrial' && (
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+            <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Pot Observation Fields Setup</h4>
+            <p className="text-[11px] text-slate-500">Configure the variables recorded for each experimental unit (e.g. height, flowers, yield). These will appear as observation columns in the data entry sheets.</p>
+            
+            <div className="flex flex-wrap gap-2 items-center bg-white p-2.5 rounded-lg border">
+              {(randomizeForm.potFields || []).map((field, idx) => (
+                <span key={field} className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-1 rounded text-xs font-medium">
+                  {field}
+                  <div className="flex items-center gap-0.5 border-l border-emerald-200 pl-1.5 ml-1">
+                    <button type="button" onClick={() => handleMovePotField(idx, 'up')} disabled={idx === 0} className="hover:text-emerald-900 disabled:opacity-30">▲</button>
+                    <button type="button" onClick={() => handleMovePotField(idx, 'down')} disabled={idx === (randomizeForm.potFields || []).length - 1} className="hover:text-emerald-900 disabled:opacity-30">▼</button>
+                    <button type="button" onClick={() => handleRemovePotField(field)} className="text-red-600 hover:text-red-900 ml-1">×</button>
+                  </div>
+                </span>
+              ))}
+            </div>
 
-          {/* Tabular Treatments Setup */}
-          <div className="space-y-3">
-            <div className="flex justify-between items-center">
-              <label className="block text-sm font-semibold text-slate-700">Treatments Setup</label>
+            <div className="flex gap-2">
+              <input 
+                type="text" 
+                id="new_pot_field_input_2" 
+                placeholder="Add Custom Field (e.g., Shoot weight)" 
+                className={`${INPUT} max-w-xs`} 
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleAddPotField(e.target.value);
+                    e.target.value = '';
+                  }
+                }}
+              />
               <button
                 type="button"
-                onClick={addTreatmentRow}
-                className={`flex items-center gap-1.5 text-xs ${theme.bg} text-white px-3 py-1.5 rounded-lg font-bold transition`}
+                onClick={() => {
+                  const input = document.getElementById('new_pot_field_input_2');
+                  if (input) {
+                    handleAddPotField(input.value);
+                    input.value = '';
+                  }
+                }}
+                className="bg-slate-700 hover:bg-slate-800 text-white text-xs font-bold px-3 py-1.5 rounded-lg"
               >
-                <Plus className="w-3.5 h-3.5" /> Add Treatment Row
+                Add Field
               </button>
             </div>
-            
-            <div className="overflow-x-auto border rounded-xl bg-slate-50">
-              <table className="w-full text-xs text-left">
-                <thead className="bg-slate-100 text-slate-600 font-bold uppercase border-b border-slate-200">
-                  <tr>
-                    <th className="p-3">Treatment Name *</th>
-                    <th className="p-3">Active Formulation</th>
-                    <th className="p-3">Dosage / Rate</th>
-                    <th className="p-3">Role</th>
-                    <th className="p-3 text-center">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200 bg-white">
-                  {randomizeTreatments.map((t) => (
-                    <tr key={t.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="p-2">
-                        <input
-                          required
-                          type="text"
-                          placeholder="Treatment Name (e.g. UTC, T1, T2)"
-                          value={t.name}
-                          onChange={e => updateTreatmentRow(t.id, 'name', e.target.value)}
-                          className={`w-full px-2 py-1.5 border rounded-lg focus:outline-none focus:ring-1 ${theme.ringFocus} bg-white`}
-                        />
-                      </td>
-                      <td className="p-2">
-                        <select
-                          value={t.formulationId}
-                          onChange={e => updateTreatmentRow(t.id, 'formulationId', e.target.value)}
-                          className={`w-full px-2 py-1.5 border rounded-lg focus:outline-none focus:ring-1 ${theme.ringFocus} bg-white`}
-                        >
-                          <option value="">None (Untreated Control)</option>
-                          {activeFormulations.map(f => (
-                            <option key={f.ID} value={f.ID}>{f.Name}</option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="p-2">
-                        <input
-                          type="text"
-                          placeholder="e.g. 100 mL/ha"
-                          value={t.dosage}
-                          onChange={e => updateTreatmentRow(t.id, 'dosage', e.target.value)}
-                          className={`w-full px-2 py-1.5 border rounded-lg focus:outline-none focus:ring-1 ${theme.ringFocus} bg-white`}
-                        />
-                      </td>
-                      <td className="p-2">
-                        <select
-                          value={t.role}
-                          onChange={e => updateTreatmentRow(t.id, 'role', e.target.value)}
-                          className={`w-full px-2 py-1.5 border rounded-lg focus:outline-none focus:ring-1 ${theme.ringFocus} bg-white`}
-                        >
-                          <option value="experimental">Experimental</option>
-                          <option value="standard">Standard Check</option>
-                          <option value="control">Untreated Control</option>
-                        </select>
-                      </td>
-                      <td className="p-2 text-center">
-                        <button
-                          type="button"
-                          onClick={() => deleteTreatmentRow(t.id)}
-                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
-                          title="Delete row"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {randomizeTreatments.length === 0 && (
-                    <tr>
-                      <td colSpan="5" className="text-center py-6 text-slate-400 italic bg-white animate-pulse">
-                        No treatments added yet. Click "+ Add Treatment Row" to begin.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
           </div>
+        )}
           
           <div className="bg-amber-50 border border-amber-100 rounded-lg p-3 text-xs text-amber-800">
             <strong>Warning:</strong> Generating a new randomized layout will replace any existing plots/trials for this project.
