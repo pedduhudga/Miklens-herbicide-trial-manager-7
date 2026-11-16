@@ -146,7 +146,9 @@ export async function fbUpdate(collectionName, data) {
   const record = cleanForFirestore({ ...data, _updatedAt: serverTimestamp() });
   delete record.ID;
   delete record.id;
-  await updateDoc(doc(db, collectionName, id), record);
+  // Use setDoc with merge: true to safely upsert (update if exists, create if not)
+  // preventing FirebaseError: No document to update
+  await setDoc(doc(db, collectionName, id), record, { merge: true });
   return { success: true, ID: id };
 }
 

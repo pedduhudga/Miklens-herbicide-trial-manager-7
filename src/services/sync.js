@@ -216,6 +216,26 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                             updateAppState({ syncQueue: getAppState().syncQueue });
                             renderSyncStatus();
 
+                            let itemCat = item.payload?.Category || item.payload?.category || item.category;
+                            if (!itemCat && item.payload?.ID) {
+                                const allTrials = getAppState()?.trials || [];
+                                const found = allTrials.find(t => t.ID === item.payload.ID || t.id === item.payload.ID);
+                                if (found?.Category || found?.category) {
+                                    itemCat = found.Category || found.category;
+                                }
+                            }
+                            if (!itemCat) {
+                                itemCat = getAppState()?.activeCategory || 'herbicide';
+                            }
+                            if (item.payload && typeof item.payload === 'object' && !item.payload.Category) {
+                                item.payload.Category = itemCat;
+                            }
+
+                            const syncItemAppState = () => ({
+                                ...getAppState(),
+                                activeCategory: itemCat
+                            });
+
                             if (item.action === 'updateTrialRecord' && item.payload.ID) {
                                 console.log('[HighTechSync] Checking conflict for trial:', item.payload.ID);
                                 const curSettings = getAppState()?.settings || {};
@@ -225,15 +245,14 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                                     try {
                                         const { getCategoryCollection } = await import('./firebase.js');
                                         const { fbGetById } = await import('./firebaseDB.js');
-                                        const cat = item.payload.Category || getAppState()?.activeCategory || 'herbicide';
-                                        const colName = getCategoryCollection(cat, 'trials');
+                                        const colName = getCategoryCollection(itemCat, 'trials');
                                         cloudRecord = await fbGetById(colName, item.payload.ID);
                                     } catch (fbErr) {
                                         console.warn('[HighTechSync] Firestore conflict lookup failed:', fbErr.message);
                                     }
                                 } else if (curSettings.scriptUrl) {
                                     try {
-                                        const cloudTrials = await apiCall('getTrials', { ID: item.payload.ID }, false, getAppState);
+                                        const cloudTrials = await apiCall('getTrials', { ID: item.payload.ID }, false, syncItemAppState);
                                         cloudRecord = Array.isArray(cloudTrials) ? cloudTrials.find(t => String(t.ID) === String(item.payload.ID)) : null;
                                     } catch (gasErr) {
                                         console.warn('[HighTechSync] GAS conflict lookup failed:', gasErr.message);
@@ -267,54 +286,54 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                                 switch (item.action) {
                                     case 'addTrial':
                                     case 'createTrialRecord':
-                                        result = await dataLayer.addTrial(item.payload, getAppState);
+                                        result = await dataLayer.addTrial(item.payload, syncItemAppState);
                                         break;
                                     case 'updateTrial':
                                     case 'updateTrialRecord':
                                     case 'updateTrialStatus':
                                     case 'finalizeTrial':
-                                        result = await dataLayer.updateTrial(item.payload, getAppState);
+                                        result = await dataLayer.updateTrial(item.payload, syncItemAppState);
                                         break;
                                     case 'deleteTrial':
                                     case 'deleteTrialRecord':
-                                        result = await dataLayer.deleteTrial(item.payload, getAppState);
+                                        result = await dataLayer.deleteTrial(item.payload, syncItemAppState);
                                         break;
                                     case 'addFormulation':
-                                        result = await dataLayer.addFormulation(item.payload, getAppState);
+                                        result = await dataLayer.addFormulation(item.payload, syncItemAppState);
                                         break;
                                     case 'updateFormulation':
-                                        result = await dataLayer.updateFormulation(item.payload, getAppState);
+                                        result = await dataLayer.updateFormulation(item.payload, syncItemAppState);
                                         break;
                                     case 'deleteFormulation':
-                                        result = await dataLayer.deleteFormulation(item.payload, getAppState);
+                                        result = await dataLayer.deleteFormulation(item.payload, syncItemAppState);
                                         break;
                                     case 'addProject':
-                                        result = await dataLayer.addProject(item.payload, getAppState);
+                                        result = await dataLayer.addProject(item.payload, syncItemAppState);
                                         break;
                                     case 'updateProject':
-                                        result = await dataLayer.updateProject(item.payload, getAppState);
+                                        result = await dataLayer.updateProject(item.payload, syncItemAppState);
                                         break;
                                     case 'deleteProject':
-                                        result = await dataLayer.deleteProject(item.payload, getAppState);
+                                        result = await dataLayer.deleteProject(item.payload, syncItemAppState);
                                         break;
                                     case 'addIngredient':
-                                        result = await dataLayer.addIngredient(item.payload, getAppState);
+                                        result = await dataLayer.addIngredient(item.payload, syncItemAppState);
                                         break;
                                     case 'deleteIngredient':
-                                        result = await dataLayer.deleteIngredient(item.payload, getAppState);
+                                        result = await dataLayer.deleteIngredient(item.payload, syncItemAppState);
                                         break;
                                     case 'addBlock':
-                                        result = await dataLayer.addBlock(item.payload, getAppState);
+                                        result = await dataLayer.addBlock(item.payload, syncItemAppState);
                                         break;
                                     case 'deleteBlock':
-                                        result = await dataLayer.deleteBlock(item.payload, getAppState);
+                                        result = await dataLayer.deleteBlock(item.payload, syncItemAppState);
                                         break;
                                     default:
-                                        result = await apiCall(item.action, item.payload, false, getAppState);
+                                        result = await apiCall(item.action, item.payload, false, syncItemAppState);
                                         break;
                                 }
                             } else {
-                                result = await apiCall(item.action, item.payload, false, getAppState);
+                                result = await apiCall(item.action, item.payload, false, syncItemAppState);
                             }
 
                             if (item.cancelRequested) {
@@ -336,6 +355,8 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                                 errMsg.includes('Record not found') || 
                                 errMsg.includes('not found to delete') || 
                                 errMsg.includes('already exists') ||
+                                errMsg.includes('No document to update') ||
+                                (item.attempts && item.attempts >= 4) ||
                                 (item.action === 'deleteTrialRecord' && errMsg.includes('not found'));
                             
                             if (isNonRetryable) {
