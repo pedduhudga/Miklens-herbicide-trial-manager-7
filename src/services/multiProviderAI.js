@@ -787,7 +787,7 @@ async function callGemini(provider, imageData, context, apiKey) {
   const imagePart = { inlineData: { mimeType: 'image/jpeg', data: base64 } };
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000);
+  const timeoutId = setTimeout(() => controller.abort(), 60000);
 
   try {
     const response = await fetch(`${provider.endpoint}?key=${apiKey}`, {
@@ -834,7 +834,7 @@ async function callGroq(provider, imageData, context, apiKey) {
     ? imageData
     : await imageToBase64(imageData);
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000);
+  const timeoutId = setTimeout(() => controller.abort(), 60000);
 
   try {
     const response = await fetch(provider.endpoint, {
@@ -879,7 +879,7 @@ async function callMistral(provider, imageData, context, apiKey) {
     ? imageData
     : await imageToBase64(imageData);
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000);
+  const timeoutId = setTimeout(() => controller.abort(), 60000);
 
   try {
     const response = await fetch(provider.endpoint, {
@@ -1027,8 +1027,8 @@ export async function analyzePhoto(imageData, context = {}, onProgress = null) {
 
           // 1. Model-level overload/outage (503/404) — NEVER retry remaining keys for this dead model!
           if (isModelOutage(err)) {
-            console.warn(`[AI] ${provider.name} is experiencing service outage/overload (503/404). Cooling down for 180s and falling back to next provider.`);
-            providerBlockedUntil[provider.id] = Date.now() + 180000;
+            console.warn(`[AI] ${provider.name} is experiencing service outage/overload (503/404). Cooling down for 300s and falling back to next provider.`);
+            providerBlockedUntil[provider.id] = Date.now() + 300000;
             skipProvider = true;
             break;
           }
@@ -1043,9 +1043,18 @@ export async function analyzePhoto(imageData, context = {}, onProgress = null) {
 
           if (isQuotaError(err)) {
             // Google AI Studio limits apply per-project, not per-key.
-            // When 429 hits, cool down this model for 30s and immediately try next fallback model (e.g. flash-lite / Groq).
-            console.warn(`[AI] ${provider.name} reached quota/rate limit. Cooling down model for 30s and rotating to next provider...`);
-            providerBlockedUntil[provider.id] = Date.now() + 30000;
+            // When 429 hits, cool down this model for 180s and immediately try next fallback model (e.g. flash-lite / Groq).
+            console.warn(`[AI] ${provider.name} reached quota/rate limit. Cooling down model for 180s and rotating to next provider...`);
+            providerBlockedUntil[provider.id] = Date.now() + 180000;
+            skipProvider = true;
+            break;
+          }
+
+          // Abort / timeout handling — don't retry, cool down and skip to next provider immediately
+          const isAbort = err.name === 'AbortError' || (err.message || '').includes('aborted') || (err.message || '').includes('signal is aborted');
+          if (isAbort) {
+            console.warn(`[AI] ${provider.name} request timed out (>60s). Cooling down model for 180s and skipping to next provider.`);
+            providerBlockedUntil[provider.id] = Date.now() + 180000;
             skipProvider = true;
             break;
           }
@@ -1301,11 +1310,19 @@ export async function generateTextWithAI(prompt, systemInstruction = '', onProgr
             if (systemInstruction) {
               body.systemInstruction = { parts: [{ text: systemInstruction }] };
             }
-            const resp = await fetch(`${provider.endpoint}?key=${apiKey}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(body)
-            });
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 45000);
+            let resp;
+            try {
+              resp = await fetch(`${provider.endpoint}?key=${apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+                signal: controller.signal
+              });
+            } finally {
+              clearTimeout(timeoutId);
+            }
             if (!resp.ok) {
               const err = await resp.text();
               const e = new Error(`Gemini ${resp.status}: ${err.slice(0, 200)}`);
@@ -1320,19 +1337,27 @@ export async function generateTextWithAI(prompt, systemInstruction = '', onProgr
               messages.push({ role: 'system', content: systemInstruction });
             }
             messages.push({ role: 'user', content: prompt });
-            const resp = await fetch(provider.endpoint, {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${apiKey}`,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                model: provider.model,
-                messages: messages,
-                temperature: 0.2,
-                max_tokens: 4096
-              })
-            });
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 45000);
+            let resp;
+            try {
+              resp = await fetch(provider.endpoint, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${apiKey}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  model: provider.model,
+                  messages: messages,
+                  temperature: 0.2,
+                  max_tokens: 4096
+                }),
+                signal: controller.signal
+              });
+            } finally {
+              clearTimeout(timeoutId);
+            }
             if (!resp.ok) {
               const err = await resp.text();
               const e = new Error(`${provider.name} ${resp.status}: ${err.slice(0, 200)}`);
@@ -1350,13 +1375,19 @@ export async function generateTextWithAI(prompt, systemInstruction = '', onProgr
         } catch (err) {
           console.warn(`[AI Text] ${provider.name} key ${ki + 1} attempt ${attempt} failed:`, err.message);
           if (isModelOutage(err)) {
-            providerBlockedUntil[provider.id] = Date.now() + 180000;
+            providerBlockedUntil[provider.id] = Date.now() + 300000;
             skipProvider = true;
             break;
           }
           if (isNonRetryable(err)) break;
           if (isQuotaError(err)) {
-            providerBlockedUntil[provider.id] = Date.now() + 30000;
+            providerBlockedUntil[provider.id] = Date.now() + 180000;
+            skipProvider = true;
+            break;
+          }
+          const isAbort = err.name === 'AbortError' || (err.message || '').includes('aborted') || (err.message || '').includes('signal is aborted');
+          if (isAbort) {
+            providerBlockedUntil[provider.id] = Date.now() + 180000;
             skipProvider = true;
             break;
           }
