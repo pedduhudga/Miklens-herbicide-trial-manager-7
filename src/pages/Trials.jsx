@@ -756,6 +756,7 @@ export default function Trials({ onMenuClick }) {
   const [qrCardSize, setQrCardSize] = useState(
     state.settings?.cardSize === 'A4' ? 'a4' : state.settings?.cardSize === 'A6' ? 'a6' : 'id-card'
   );
+  const [qrPrintOrder, setQrPrintOrder] = useState('column'); // 'column' (By Column / Treatment) | 'row' | 'plot'
   const [qrFields, setQrFields] = useState({
     formulationName: true,
     investigator: true,
@@ -5479,9 +5480,120 @@ Rules:
     window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: `${ids.length} trial(s) finalized`, type: 'success' } }));
   };
 
+  // ── TRIAL CARD SORTING FOR PRINTING ──────────────────────────────
+  const getTrialColNumber = (t) => {
+    if (t.PotCol != null && t.PotCol !== '') {
+      const m = String(t.PotCol).match(/(\d+)/);
+      if (m) return parseInt(m[1], 10);
+    }
+    if (t.PotLabel) {
+      const m = String(t.PotLabel).match(/C(\d+)/i) || String(t.PotLabel).match(/Col\s*(\d+)/i);
+      if (m) return parseInt(m[1], 10);
+    }
+    if (t.PlotNumber) {
+      const m = String(t.PlotNumber).match(/C(\d+)/i) || String(t.PlotNumber).match(/Col\s*(\d+)/i);
+      if (m) return parseInt(m[1], 10);
+    }
+    return null;
+  };
+
+  const getTrialRowNumber = (t) => {
+    if (t.PotRow != null && t.PotRow !== '') {
+      const m = String(t.PotRow).match(/(\d+)/);
+      if (m) return parseInt(m[1], 10);
+    }
+    if (t.PotLabel) {
+      const m = String(t.PotLabel).match(/R(\d+)/i) || String(t.PotLabel).match(/Row\s*(\d+)/i);
+      if (m) return parseInt(m[1], 10);
+    }
+    if (t.PlotNumber) {
+      const m = String(t.PlotNumber).match(/R(\d+)/i) || String(t.PlotNumber).match(/Row\s*(\d+)/i);
+      if (m) return parseInt(m[1], 10);
+      const num = parseInt(String(t.PlotNumber).replace(/\D+/g, ''), 10);
+      if (!isNaN(num)) return num;
+    }
+    if (t.Replication != null && t.Replication !== '') {
+      const m = String(t.Replication).match(/(\d+)/);
+      if (m) return parseInt(m[1], 10);
+    }
+    return null;
+  };
+
+  const getTrialRepNumber = (t) => {
+    if (t.Replication != null && t.Replication !== '') {
+      const m = String(t.Replication).match(/(\d+)/);
+      if (m) return parseInt(m[1], 10);
+    }
+    return null;
+  };
+
+  const sortTrialsForCardPrinting = (list, mode = 'column', projects = []) => {
+    return [...list].sort((a, b) => {
+      // 1. Group by project if trials across multiple projects are selected
+      if (String(a.ProjectID || '') !== String(b.ProjectID || '')) {
+        const projA = projects.find(p => String(p.ID) === String(a.ProjectID))?.Name || String(a.ProjectID || '');
+        const projB = projects.find(p => String(p.ID) === String(b.ProjectID))?.Name || String(b.ProjectID || '');
+        const pCmp = projA.localeCompare(projB);
+        if (pCmp !== 0) return pCmp;
+      }
+
+      const colA = getTrialColNumber(a);
+      const colB = getTrialColNumber(b);
+      const rowA = getTrialRowNumber(a);
+      const rowB = getTrialRowNumber(b);
+      const repA = getTrialRepNumber(a);
+      const repB = getTrialRepNumber(b);
+
+      if (mode === 'row') {
+        // By Row: Row first, then Column
+        if (rowA !== null && rowB !== null && rowA !== rowB) return rowA - rowB;
+        if (colA !== null && colB !== null && colA !== colB) return colA - colB;
+        if (repA !== null && repB !== null && repA !== repB) return repA - repB;
+      } else if (mode === 'plot') {
+        // By Plot Number
+        const pNumA = parseInt(String(a.PlotNumber || '').replace(/\D+/g, ''), 10);
+        const pNumB = parseInt(String(b.PlotNumber || '').replace(/\D+/g, ''), 10);
+        if (!isNaN(pNumA) && !isNaN(pNumB) && pNumA !== pNumB) return pNumA - pNumB;
+      } else {
+        // mode === 'column' (DEFAULT & RECOMMENDED): Column first, then Row/Rep
+        if (colA !== null && colB !== null && colA !== colB) return colA - colB;
+
+        // If neither has a numeric column, group by Treatment/Formulation (Controls first)
+        if (colA === null && colB === null) {
+          const isCtrlA = a.IsControl === true || a.IsControl === 'true' || /control/i.test(a.FormulationName || '');
+          const isCtrlB = b.IsControl === true || b.IsControl === 'true' || /control/i.test(b.FormulationName || '');
+          if (isCtrlA !== isCtrlB) return isCtrlA ? -1 : 1;
+          const trtA = String(a.FormulationName || a.TrialName || '');
+          const trtB = String(b.FormulationName || b.TrialName || '');
+          const tCmp = trtA.localeCompare(trtB);
+          if (tCmp !== 0) return tCmp;
+        } else if (colA !== null && colB === null) {
+          return -1;
+        } else if (colA === null && colB !== null) {
+          return 1;
+        }
+
+        // Within the same column / treatment: sort sequentially by row or replication
+        if (rowA !== null && rowB !== null && rowA !== rowB) return rowA - rowB;
+        if (repA !== null && repB !== null && repA !== repB) return repA - repB;
+      }
+
+      // Tie-breakers
+      const plotA = parseInt(String(a.PlotNumber || '').replace(/\D+/g, ''), 10);
+      const plotB = parseInt(String(b.PlotNumber || '').replace(/\D+/g, ''), 10);
+      if (!isNaN(plotA) && !isNaN(plotB) && plotA !== plotB) return plotA - plotB;
+
+      const labelA = String(a.PotLabel || a.TrialName || a.ID || '');
+      const labelB = String(b.PotLabel || b.TrialName || b.ID || '');
+      return labelA.localeCompare(labelB);
+    });
+  };
+
   // ── BULK QR CARD PRINT ────────────────────────────────────────────
   const generateBulkQrCards = () => {
-    const selectedTrials = trials.filter(t => selectedForBulk.has(t.ID));
+    const rawSelectedTrials = trials.filter(t => selectedForBulk.has(t.ID));
+    if (rawSelectedTrials.length === 0) return;
+    const selectedTrials = sortTrialsForCardPrinting(rawSelectedTrials, qrPrintOrder, state.projects || []);
     if (selectedTrials.length === 0) return;
 
     const sizeConfig = {
@@ -5903,8 +6015,11 @@ Rules:
   }, [buildPrintableTrialUrl, generateQrCodeDataUrl, sanitizePrintHtml]);
 
   const generateBulkQrCardsLegacy = useCallback(async () => {
-    const selectedTrials = trials.filter(t => selectedForBulk.has(t.ID));
-    if (selectedTrials.length === 0) return;
+    const rawSelectedTrials = trials.filter(t => selectedForBulk.has(t.ID));
+    if (rawSelectedTrials.length === 0) return;
+
+    // Order trials sequentially (e.g. Column 1 all pots/reps -> Column 2 -> Column 3)
+    const selectedTrials = sortTrialsForCardPrinting(rawSelectedTrials, qrPrintOrder, state.projects || []);
 
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
@@ -5912,7 +6027,7 @@ Rules:
       return;
     }
 
-    window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Generating print layout...', type: 'info' } }));
+    window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Generating print layout in sequential lane order...', type: 'info' } }));
 
     const firstTrial = selectedTrials[0];
     const proj = state.projects?.find(p => p.ID === firstTrial?.ProjectID);
@@ -5925,6 +6040,7 @@ Rules:
     const companyLogo = state.settings?.logoBase64 || '';
     const cardsMarkup = await buildTrialCardsMarkup(selectedTrials, companyLogo, qrFields, state.blocks);
     const cardsCss = buildTrialCardsCss(cardWidth, cardHeight);
+    const orderTitle = qrPrintOrder === 'row' ? 'By Row / Replication' : qrPrintOrder === 'plot' ? 'By Plot Number' : 'By Column / Treatment (Lane Order)';
 
     printWindow.document.write(`<!DOCTYPE html>
 <html lang="en">
@@ -5936,7 +6052,7 @@ Rules:
 <body>
   <div class="print-header no-print">
     <h2>Trial Cards</h2>
-    <p>${selectedTrials.length} card${selectedTrials.length > 1 ? 's' : ''} • Size ${label}</p>
+    <p>${selectedTrials.length} card${selectedTrials.length > 1 ? 's' : ''} • Size ${label} • Sequence: <b>${orderTitle}</b></p>
   </div>
   ${cardsMarkup}
 </body>
@@ -5947,7 +6063,7 @@ Rules:
       printWindow.print();
       printWindow.close();
     }, 500);
-  }, [buildTrialCardsCss, buildTrialCardsMarkup, getTrialCardPrintSettings, selectedForBulk, state.settings?.logoBase64, trials, qrFields, state.blocks, state.projects]);
+  }, [buildTrialCardsCss, buildTrialCardsMarkup, getTrialCardPrintSettings, selectedForBulk, state.settings?.logoBase64, trials, qrFields, state.blocks, state.projects, qrPrintOrder]);
 
   const ResultBadge = ({ result }) => {
     if (!result) return null;
@@ -13890,6 +14006,45 @@ If none are present, write "None".`;
                     >
                       <div className="font-semibold text-sm text-slate-700">{opt.label}</div>
                       <div className="text-xs text-slate-500">{opt.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 uppercase mb-2">Print Sequence / Order</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {[
+                    { 
+                      value: 'column', 
+                      label: 'By Column / Treatment (Lane Order)', 
+                      desc: 'Col 1 (All Pots/Reps) → Col 2 → Col 3 (Recommended)',
+                      icon: '🪴'
+                    },
+                    { 
+                      value: 'row', 
+                      label: 'By Row / Replication (Cross-Lane)', 
+                      desc: 'Row 1 (All Cols) → Row 2 (All Cols)...',
+                      icon: '📐'
+                    },
+                    { 
+                      value: 'plot', 
+                      label: 'By Plot Number', 
+                      desc: 'Plot 1 → Plot 2 → Plot 3...',
+                      icon: '🔢'
+                    },
+                  ].map(opt => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setQrPrintOrder(opt.value)}
+                      className={`p-2.5 rounded-lg border text-left transition ${qrPrintOrder === opt.value ? 'border-emerald-500 bg-emerald-50 ring-1 ring-emerald-500' : 'border-slate-200 hover:border-emerald-300 bg-white'}`}
+                    >
+                      <div className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
+                        <span>{opt.icon}</span>
+                        <span>{opt.label}</span>
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">{opt.desc}</div>
                     </button>
                   ))}
                 </div>
