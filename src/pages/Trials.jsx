@@ -5345,8 +5345,11 @@ Rules:
   const analyzeTrialPhoto = useCallback(async (trial, photo) => {
     const photoSrc = resolvePhotoSrc(photo);
     if (!trial || !photoSrc) return { success: false, error: 'No photo source' };
-    const photoDate = photo.date || trial.Date || toDatetimeLocal(new Date());
-    const daa = calculateDAA(photoDate, trial.Date);
+    const effectiveTrialDate = trial.Date || trial.StartDate || trial.CreatedAt || (trial.ProjectID ? (getAppState().projects?.find(p => p.ID === trial.ProjectID)?.StartDate || getAppState().projects?.find(p => p.ID === trial.ProjectID)?.Date) : null);
+    const photoDate = photo.date || effectiveTrialDate || toDatetimeLocal(new Date());
+    const daa = (photo.daa !== undefined && photo.daa !== null && !isNaN(Number(photo.daa)))
+      ? Number(photo.daa)
+      : calculateDAA(photoDate, effectiveTrialDate);
 
     await updatePhotoAiStatus(trial.ID, photoSrc, 'processing');
     try {
@@ -5361,7 +5364,7 @@ Rules:
       if (result.success && result.data) {
         let singleWx = null;
         if (trial.Lat && trial.Lon) {
-          singleWx = await fetchObservationWeather(trial.Lat, trial.Lon, photoDate, trial.Date, getAppState).catch(() => null);
+          singleWx = await fetchObservationWeather(trial.Lat, trial.Lon, photoDate, effectiveTrialDate || photoDate, getAppState).catch(() => null);
         }
         await createObservationFromAI(trial, daa, result.data, photoDate, photoSrc, singleWx);
         await updatePhotoAiStatus(trial.ID, photoSrc, 'completed', '', result.data, singleWx);
@@ -5402,7 +5405,10 @@ Rules:
 
         const pDriveId = pObj.driveId || pObj.fileId || getDriveFileId(pObj.url || pObj.src || src);
         const pDateKey = pObj.date ? toDateKey(pObj.date) : null;
-        const pDaa = (pObj.date && trial.Date) ? calculateDAA(pObj.date, trial.Date) : (pObj.daa !== undefined && pObj.daa !== null ? Number(pObj.daa) : null);
+        const effectiveTrialDate = trial.Date || trial.StartDate || trial.CreatedAt || (trial.ProjectID ? (getAppState().projects?.find(p => p.ID === trial.ProjectID)?.StartDate || getAppState().projects?.find(p => p.ID === trial.ProjectID)?.Date) : null);
+        const pDaa = (pObj.daa !== undefined && pObj.daa !== null && !isNaN(Number(pObj.daa)))
+          ? Number(pObj.daa)
+          : ((pObj.date && effectiveTrialDate) ? calculateDAA(pObj.date, effectiveTrialDate) : null);
 
         // Check if an observation is already linked to or matching this photo
         const hasMatchingObs = efficacyData.some(obs => {
@@ -5493,7 +5499,10 @@ Rules:
       // Re-verify if observation was already added by another process
       const freshEffData = validateEfficacyData(safeJsonParse(freshTrial.EfficacyDataJSON, []), freshTrial.Category || activeCategory, true);
       const freshDateKey = photo.date ? toDateKey(photo.date) : null;
-      const freshDaa = (photo.date && freshTrial.Date) ? calculateDAA(photo.date, freshTrial.Date) : (photo.daa !== undefined ? Number(photo.daa) : null);
+      const effectiveFreshDate = freshTrial.Date || freshTrial.StartDate || freshTrial.CreatedAt || (freshTrial.ProjectID ? (getAppState().projects?.find(p => p.ID === freshTrial.ProjectID)?.StartDate || getAppState().projects?.find(p => p.ID === freshTrial.ProjectID)?.Date) : null);
+      const freshDaa = (photo.daa !== undefined && photo.daa !== null && !isNaN(Number(photo.daa)))
+        ? Number(photo.daa)
+        : ((photo.date && effectiveFreshDate) ? calculateDAA(photo.date, effectiveFreshDate) : null);
       const alreadyHasObs = freshEffData.some(obs => {
         if (obs.isInvalid) return false;
         const obsUrls = String(obs.photoUrl || '');

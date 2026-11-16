@@ -100,10 +100,12 @@ export function toDateKey (value) {
  */
 export function calculateDAA (photoDate, trialDate) {
     try {
+        if (!photoDate || !trialDate) {
+            return 0;
+        }
         const pKey = toDateKey(photoDate);
         const tKey = toDateKey(trialDate);
         if (!pKey || !tKey) {
-            console.warn('[DAA] Invalid date provided:', { photoDate, trialDate });
             return 0;
         }
 
@@ -115,7 +117,6 @@ export function calculateDAA (photoDate, trialDate) {
         const daa = Math.floor((pUTC - tUTC) / (1000 * 60 * 60 * 24));
         return Math.max(0, daa);
     } catch (e) {
-        console.error('[DAA] Calculation failed:', e);
         return 0;
     }
 }
