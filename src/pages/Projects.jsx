@@ -814,7 +814,7 @@ export default function Projects({ onMenuClick }) {
   };
 
   const getPotRowAssignments = useCallback((potRowsCount, treatmentsList) => {
-    const pTrials = (state.trials || []).filter(t => String(t.ProjectID) === String(activeProject?.ID));
+    const pTrials = (state.trials || []).filter(t => activeProjectId && String(t.ProjectID) === String(activeProjectId));
     const assignments = {};
     for (let r = 1; r <= potRowsCount; r++) {
       let matched = null;
@@ -848,7 +848,7 @@ export default function Projects({ onMenuClick }) {
       assignments[r] = matched?.id || treatmentsList[0]?.id;
     }
     return assignments;
-  }, [state.trials, activeProject?.ID]);
+  }, [state.trials, activeProjectId]);
 
   const allocationPreview = useMemo(() => {
     if (randomizeForm.trialDesign !== 'PotTrial') return null;
