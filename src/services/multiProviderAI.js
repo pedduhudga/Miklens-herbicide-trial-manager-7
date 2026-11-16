@@ -90,6 +90,27 @@ const providerBlockedUntil = new Proxy({}, {
   }
 });
 
+// Track key-level cooldowns (e.g. 429 quota exhaustion per project/account)
+const keyBlockedUntil = {};
+
+function getKeyBlockKey(providerId, apiKey, ki) {
+  const shortKey = typeof apiKey === 'string' ? apiKey.slice(-6) : `k${ki}`;
+  return `${providerId}_k${ki}_${shortKey}`;
+}
+
+function isKeyBlocked(providerId, apiKey, ki) {
+  const bk = getKeyBlockKey(providerId, apiKey, ki);
+  return keyBlockedUntil[bk] && Date.now() < keyBlockedUntil[bk];
+}
+
+function blockKey(providerId, apiKey, ki, durationMs = 60000) {
+  const bk = getKeyBlockKey(providerId, apiKey, ki);
+  keyBlockedUntil[bk] = Date.now() + durationMs;
+}
+
+// Track active/working key cursor per provider for smooth round-robin / persistent key selection
+const activeKeyIndex = {};
+
 function getOrderedProviders() {
   const settings = getSettings();
   const selectedModelId = settings.selectedModel || settings.apiModel || DEFAULT_GEMINI_MODEL;
@@ -100,6 +121,17 @@ function getOrderedProviders() {
     const [selected] = providers.splice(idx, 1);
     providers.unshift(selected);
   }
+
+  // Ensure all Gemini models and their keys across all projects/accounts are fully exhausted
+  // before falling back to non-Gemini providers (Groq/Mistral),
+  // unless the user explicitly chose an external model (e.g. Groq) as their primary in Settings.
+  const isExplicitExternal = selectedModelId.startsWith('groq') || selectedModelId === 'mistral' || selectedModelId === 'pixtral';
+  if (!isExplicitExternal) {
+    const geminiModels = providers.filter(p => p.id.startsWith('gemini'));
+    const externalModels = providers.filter(p => !p.id.startsWith('gemini'));
+    return [...geminiModels, ...externalModels];
+  }
+
   return providers;
 }
 
@@ -1007,60 +1039,97 @@ export async function analyzePhoto(imageData, context = {}, onProgress = null) {
     if (!keys.length) continue;
 
     let skipProvider = false;
+    const startIdx = (activeKeyIndex[provider.id] || 0) % keys.length;
+    const keyIndices = [];
+    for (let i = 0; i < keys.length; i++) {
+      keyIndices.push((startIdx + i) % keys.length);
+    }
 
-    for (let ki = 0; ki < keys.length; ki++) {
+    for (const ki of keyIndices) {
       if (skipProvider) break;
+      if (isKeyBlocked(provider.id, keys[ki], ki)) continue;
       if (!hasQuota(provider, ki, usage)) continue;
 
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
-          if (onProgress) onProgress(`Trying ${provider.name}${attempt > 1 ? ' (retry)' : ''}...`);
+          if (onProgress) onProgress(`Trying ${provider.name} (Key ${ki + 1}/${keys.length})${attempt > 1 ? ' (retry)' : ''}...`);
           providersAttempted++;
           const result = await callProvider(provider, imageData, context, keys[ki]);
           usage = incrementUsage(provider, ki, usage);
+          activeKeyIndex[provider.id] = ki;
           if (providersAttempted > 1) {
-            console.log(`[AI] Succeeded with fallback provider: ${provider.name}`);
+            console.log(`[AI] Succeeded with ${provider.name} (Key ${ki + 1}/${keys.length})`);
           }
           return { success: true, provider: provider.name, data: result };
         } catch (err) {
-          console.warn(`[AI] ${provider.name} key ${ki + 1} attempt ${attempt} failed (${err.status || 'net'}): ${err.message?.slice(0, 120)}`);
+          console.warn(`[AI] ${provider.name} key ${ki + 1}/${keys.length} attempt ${attempt} failed (${err.status || 'net'}): ${err.message?.slice(0, 120)}`);
 
-          // 1. Model-level overload/outage (503/404) — NEVER retry remaining keys for this dead model!
+          // 1. Model-level overload/outage (503/404)
           if (isModelOutage(err)) {
-            console.warn(`[AI] ${provider.name} is experiencing service outage/overload (503/404). Cooling down for 300s and falling back to next provider.`);
-            providerBlockedUntil[provider.id] = Date.now() + 300000;
-            skipProvider = true;
-            break;
+            blockKey(provider.id, keys[ki], ki, 180000);
+            const otherUnblockedKeys = keyIndices.filter(idx => idx !== ki && !isKeyBlocked(provider.id, keys[idx], idx));
+            if (otherUnblockedKeys.length > 0 && attempt === 1) {
+              console.warn(`[AI] ${provider.name} key ${ki + 1} experienced 503 spike. Trying next key from different account...`);
+              break; // Try next key
+            } else {
+              console.warn(`[AI] ${provider.name} is experiencing service outage/overload (503/404). Cooling down for 300s and rotating to next Gemini model...`);
+              providerBlockedUntil[provider.id] = Date.now() + 300000;
+              skipProvider = true;
+              break;
+            }
           }
 
+          // 2. Auth error on specific key (401, 403, invalid API key) — skip this key and try next key!
+          const isAuthError = err.status === 401 || err.status === 403 || (err.message || '').includes('Invalid API Key') || (err.message || '').includes('invalid_api_key');
+          if (isAuthError) {
+            console.warn(`[AI] ${provider.name} key ${ki + 1} is invalid or unauthorized. Cooling down this key and trying next key...`);
+            blockKey(provider.id, keys[ki], ki, 86400000);
+            break; // next key
+          }
+
+          // 3. Bad image errors — count them; auth/model errors — just skip
           if (isNonRetryable(err)) {
-            // Bad image errors — count them; auth/model errors — just skip
             if (!isDriveSkip(err) && (err.status === 400 || (err.message || '').includes('Unable to process input image'))) {
               imageErrorCount++;
             }
             break; // next key
           }
 
+          // 4. Rate / Quota Limit (429) — cool down this specific key and rotate to next key from different project/account!
           if (isQuotaError(err)) {
-            // Google AI Studio limits apply per-project, not per-key.
-            // When 429 hits, cool down this model for 180s and immediately try next fallback model (e.g. flash-lite / Groq).
-            console.warn(`[AI] ${provider.name} reached quota/rate limit. Cooling down model for 180s and rotating to next provider...`);
-            providerBlockedUntil[provider.id] = Date.now() + 180000;
-            skipProvider = true;
-            break;
+            blockKey(provider.id, keys[ki], ki, 60000); // 60s cooldown for this key
+            const otherUnblockedKeys = keyIndices.filter(idx => idx !== ki && !isKeyBlocked(provider.id, keys[idx], idx));
+            if (otherUnblockedKeys.length > 0) {
+              console.warn(`[AI] ${provider.name} key ${ki + 1} reached quota/rate limit. Rotating to key ${otherUnblockedKeys[0] + 1} of ${keys.length} (different project/account)...`);
+              activeKeyIndex[provider.id] = otherUnblockedKeys[0];
+              break; // break attempt loop, try next ki in keyIndices
+            } else {
+              console.warn(`[AI] All ${keys.length} API keys for ${provider.name} reached quota/rate limit. Cooling down model for 120s and rotating to next Gemini model...`);
+              providerBlockedUntil[provider.id] = Date.now() + 120000;
+              skipProvider = true;
+              break;
+            }
           }
 
-          // Abort / timeout handling — don't retry, cool down and skip to next provider immediately
+          // 5. Abort / timeout handling (>60s)
           const isAbort = err.name === 'AbortError' || (err.message || '').includes('aborted') || (err.message || '').includes('signal is aborted');
           if (isAbort) {
-            console.warn(`[AI] ${provider.name} request timed out (>60s). Cooling down model for 180s and skipping to next provider.`);
-            providerBlockedUntil[provider.id] = Date.now() + 180000;
-            skipProvider = true;
-            break;
+            blockKey(provider.id, keys[ki], ki, 120000);
+            const otherUnblockedKeys = keyIndices.filter(idx => idx !== ki && !isKeyBlocked(provider.id, keys[idx], idx));
+            if (otherUnblockedKeys.length > 0) {
+              console.warn(`[AI] ${provider.name} key ${ki + 1} timed out (>60s). Rotating to key ${otherUnblockedKeys[0] + 1} of ${keys.length}...`);
+              activeKeyIndex[provider.id] = otherUnblockedKeys[0];
+              break;
+            } else {
+              console.warn(`[AI] ${provider.name} requests timed out across all keys. Cooling down model for 120s and rotating to next Gemini model...`);
+              providerBlockedUntil[provider.id] = Date.now() + 120000;
+              skipProvider = true;
+              break;
+            }
           }
 
           // Transient network error — wait before the one allowed retry
-          if (attempt < 2) await delay(2000);
+          if (attempt < 2) await delay(1500);
         }
       }
     }
@@ -1289,14 +1358,20 @@ export async function generateTextWithAI(prompt, systemInstruction = '', onProgr
     if (!keys.length) continue;
 
     let skipProvider = false;
+    const startIdx = (activeKeyIndex[provider.id] || 0) % keys.length;
+    const keyIndices = [];
+    for (let i = 0; i < keys.length; i++) {
+      keyIndices.push((startIdx + i) % keys.length);
+    }
 
-    for (let ki = 0; ki < keys.length; ki++) {
+    for (const ki of keyIndices) {
       if (skipProvider) break;
+      if (isKeyBlocked(provider.id, keys[ki], ki)) continue;
       if (!hasQuota(provider, ki, usage)) continue;
 
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
-          if (onProgress) onProgress(`Trying ${provider.name}${attempt > 1 ? ' (retry)' : ''}...`);
+          if (onProgress) onProgress(`Trying ${provider.name} (Key ${ki + 1}/${keys.length})${attempt > 1 ? ' (retry)' : ''}...`);
           let responseText = '';
           const apiKey = keys[ki];
 
@@ -1373,25 +1448,59 @@ export async function generateTextWithAI(prompt, systemInstruction = '', onProgr
             return responseText;
           }
         } catch (err) {
-          console.warn(`[AI Text] ${provider.name} key ${ki + 1} attempt ${attempt} failed:`, err.message);
+          console.warn(`[AI Text] ${provider.name} key ${ki + 1}/${keys.length} attempt ${attempt} failed:`, err.message);
+          
           if (isModelOutage(err)) {
-            providerBlockedUntil[provider.id] = Date.now() + 300000;
-            skipProvider = true;
+            blockKey(provider.id, keys[ki], ki, 180000);
+            const otherUnblockedKeys = keyIndices.filter(idx => idx !== ki && !isKeyBlocked(provider.id, keys[idx], idx));
+            if (otherUnblockedKeys.length > 0 && attempt === 1) {
+              break; // Try next key
+            } else {
+              providerBlockedUntil[provider.id] = Date.now() + 300000;
+              skipProvider = true;
+              break;
+            }
+          }
+
+          const isAuthError = err.status === 401 || err.status === 403 || (err.message || '').includes('Invalid API Key') || (err.message || '').includes('invalid_api_key');
+          if (isAuthError) {
+            console.warn(`[AI Text] ${provider.name} key ${ki + 1} is invalid or unauthorized. Cooling down this key and trying next key...`);
+            blockKey(provider.id, keys[ki], ki, 86400000);
             break;
           }
+
           if (isNonRetryable(err)) break;
+
           if (isQuotaError(err)) {
-            providerBlockedUntil[provider.id] = Date.now() + 180000;
-            skipProvider = true;
-            break;
+            blockKey(provider.id, keys[ki], ki, 60000);
+            const otherUnblockedKeys = keyIndices.filter(idx => idx !== ki && !isKeyBlocked(provider.id, keys[idx], idx));
+            if (otherUnblockedKeys.length > 0) {
+              console.warn(`[AI Text] ${provider.name} key ${ki + 1} reached quota/rate limit. Rotating to key ${otherUnblockedKeys[0] + 1} of ${keys.length} (different project/account)...`);
+              activeKeyIndex[provider.id] = otherUnblockedKeys[0];
+              break;
+            } else {
+              console.warn(`[AI Text] All ${keys.length} API keys for ${provider.name} reached quota/rate limit. Cooling down model for 120s and rotating to next Gemini model...`);
+              providerBlockedUntil[provider.id] = Date.now() + 120000;
+              skipProvider = true;
+              break;
+            }
           }
+
           const isAbort = err.name === 'AbortError' || (err.message || '').includes('aborted') || (err.message || '').includes('signal is aborted');
           if (isAbort) {
-            providerBlockedUntil[provider.id] = Date.now() + 180000;
-            skipProvider = true;
-            break;
+            blockKey(provider.id, keys[ki], ki, 120000);
+            const otherUnblockedKeys = keyIndices.filter(idx => idx !== ki && !isKeyBlocked(provider.id, keys[idx], idx));
+            if (otherUnblockedKeys.length > 0) {
+              activeKeyIndex[provider.id] = otherUnblockedKeys[0];
+              break;
+            } else {
+              providerBlockedUntil[provider.id] = Date.now() + 120000;
+              skipProvider = true;
+              break;
+            }
           }
-          if (attempt < 2) await delay(2000);
+
+          if (attempt < 2) await delay(1500);
         }
       }
     }

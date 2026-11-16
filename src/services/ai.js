@@ -163,8 +163,8 @@ export async function _callGeminiApiWithRetries(apiCallFunction, getAppState, re
   const blockedModels = (typeof window !== 'undefined' ? window._geminiBlockedModels : {}) || {};
 
   if (blockedModels[currentBlockKey] && Date.now() < blockedModels[currentBlockKey]) {
-    console.warn(`[AI] Model ${currentModel} is temporarily blocked due to rate limiting. Rotating...`);
-    if (rotateApiModel(getAppState)) {
+    console.warn(`[AI] Model ${currentModel} (key ${currentBlockKey}) is temporarily blocked due to rate limiting. Rotating...`);
+    if (rotateApiKey(getAppState) || rotateApiModel(getAppState)) {
       return _callGeminiApiWithRetries(apiCallFunction, getAppState, retries + 1);
     }
   }
@@ -177,7 +177,7 @@ export async function _callGeminiApiWithRetries(apiCallFunction, getAppState, re
 
     // Handle Quota / Rate Limiting (429)
     if (status === 429 || errorMsg.includes('quota') || errorMsg.includes('resource_exhausted')) {
-      console.warn(`[AI] Rate limit hit on ${currentModel}. Backing off and rotating...`);
+      console.warn(`[AI] Rate limit hit on ${currentModel} (key ${currentBlockKey}). Backing off and rotating...`);
       blockedModels[currentBlockKey] = Date.now() + 60000;
       if (typeof window !== 'undefined') {
         window._geminiBlockedModels = blockedModels;
@@ -186,12 +186,19 @@ export async function _callGeminiApiWithRetries(apiCallFunction, getAppState, re
         } catch (e) {}
       }
 
-      if (retries < 4) {
-        // Crucial: Google limits apply per-project, so rotating keys on the same project does not clear 429.
-        // We must rotate the model to a higher-capacity free model (e.g. flash-lite) as well as rotating keys.
-        rotateApiModel(getAppState);
-        rotateApiKey(getAppState);
-        await new Promise(res => setTimeout(res, 1500));
+      const settings = getAppState ? (getAppState().settings || {}) : {};
+      const keys = settings.apiKeys || [];
+      const maxRetries = Math.max(6, (keys.length || 1) * 3);
+
+      if (retries < maxRetries) {
+        // Rotate API key first to try next project/account
+        const rotatedKey = rotateApiKey(getAppState);
+        const currentIdx = settings.currentApiKeyIndex || 0;
+        // If no more keys or wrapped around, rotate to next Gemini model
+        if (!rotatedKey || currentIdx === 0) {
+          rotateApiModel(getAppState);
+        }
+        await new Promise(res => setTimeout(res, 1000));
         return _callGeminiApiWithRetries(apiCallFunction, getAppState, retries + 1);
       }
       throw new Error('QUOTA_EXCEEDED: All Gemini models and API keys have reached rate limits. Please try again in a few moments.');
@@ -288,7 +295,7 @@ export async function callGeminiApiStream({ contents, config, onChunk, getAppSta
 
     // Handle Quota / Rate Limiting (429)
     if (status === 429 || errorMsg.includes('quota') || errorMsg.includes('resource_exhausted')) {
-      console.warn(`[AI Stream] Rate limit hit on ${currentModel}. Backing off and rotating...`);
+      console.warn(`[AI Stream] Rate limit hit on ${currentModel} (key ${currentBlockKey}). Backing off and rotating...`);
       blockedModels[currentBlockKey] = Date.now() + 60000;
       if (typeof window !== 'undefined') {
         window._geminiBlockedModels = blockedModels;
@@ -297,10 +304,17 @@ export async function callGeminiApiStream({ contents, config, onChunk, getAppSta
         } catch (e) {}
       }
 
-      if (retries < 4) {
-        rotateApiModel(getAppState);
-        rotateApiKey(getAppState);
-        await new Promise(res => setTimeout(res, 1500));
+      const settings = getAppState ? (getAppState().settings || {}) : {};
+      const keys = settings.apiKeys || [];
+      const maxRetries = Math.max(6, (keys.length || 1) * 3);
+
+      if (retries < maxRetries) {
+        const rotatedKey = rotateApiKey(getAppState);
+        const currentIdx = settings.currentApiKeyIndex || 0;
+        if (!rotatedKey || currentIdx === 0) {
+          rotateApiModel(getAppState);
+        }
+        await new Promise(res => setTimeout(res, 1000));
         return callGeminiApiStream({ contents, config, onChunk, getAppState, retries: retries + 1 });
       }
       throw new Error('QUOTA_EXCEEDED: All Gemini models and API keys have reached rate limits. Please try again in a few moments.');
