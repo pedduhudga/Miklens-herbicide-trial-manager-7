@@ -312,8 +312,17 @@ export function getTrialLifecycleStatus(trial) {
     return { status: 'finalized', daysSince: 0, lastActivityDate: getTrialLastActivityDate(trial) };
   }
 
+  const category = (trial.Category || 'herbicide').toLowerCase();
+  const isHerbicide = category === 'herbicide';
+
   const lastActivityDate = getTrialLastActivityDate(trial);
   const daysSince = getDaysSinceDate(lastActivityDate);
+
+  // Photo-inactivity auto-finalization (3+ days, 7+ days) and 2-day reminders apply ONLY to herbicide trials.
+  // Nutrition, fungicide, pesticide, and biostimulant trials have distinct crop cycles and must never auto-finalize.
+  if (!isHerbicide) {
+    return { status: 'healthy', daysSince, lastActivityDate };
+  }
 
   if (daysSince >= 7) {
     return { status: 'stale_bulk', daysSince, lastActivityDate };
@@ -338,6 +347,12 @@ export function partitionTrialsByLifecycle(trials, userEmail = null, isAdmin = f
   const list = Array.isArray(trials) ? trials : [];
 
   for (const trial of list) {
+    // Strictly skip non-herbicide trials: photo inactivity auto-finalization is exclusive to herbicide
+    const category = (trial.Category || 'herbicide').toLowerCase();
+    if (category !== 'herbicide') {
+      continue;
+    }
+
     const isCompleted = trial.IsCompleted === true || trial.IsCompleted === 'true' || trial.ControlFinalized === true;
     if (isCompleted) continue;
 

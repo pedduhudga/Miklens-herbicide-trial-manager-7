@@ -336,6 +336,11 @@ function AppLayout() {
           organisations: Array.isArray(result?.organisations) ? result.organisations : [],
           blocks: Array.isArray(result?.blocks) ? result.blocks : [],
         });
+
+        // Trigger lifecycle check / self-correction for loaded category
+        import('./services/trialAutoFinalize.js').then(({ runDailyLifecycleCheck }) => {
+          runDailyLifecycleCheck(result.trials, user, getAppState);
+        }).catch(err => console.error('[AutoFinalize] Failed to run lifecycle check on category change:', err));
       } catch (error) {
         console.error('Category reload failed:', error);
       } finally {
