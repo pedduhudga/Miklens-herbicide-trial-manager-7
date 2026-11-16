@@ -794,6 +794,62 @@ export default function Projects({ onMenuClick }) {
     return (state.formulations || []).filter(f => f.Category === activeCategory || (!f.Category && activeCategory === 'herbicide'));
   }, [state.formulations, activeCategory]);
 
+  const formatRowRanges = (rows) => {
+    if (!rows || !rows.length) return '';
+    const sorted = [...new Set(rows)].sort((a, b) => a - b);
+    const ranges = [];
+    let start = sorted[0];
+    let prev = sorted[0];
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i] === prev + 1) {
+        prev = sorted[i];
+      } else {
+        ranges.push(start === prev ? `Row ${start}` : `Row ${start}–${prev}`);
+        start = sorted[i];
+        prev = sorted[i];
+      }
+    }
+    ranges.push(start === prev ? `Row ${start}` : `Row ${start}–${prev}`);
+    return ranges.join(', ');
+  };
+
+  const getPotRowAssignments = useCallback((potRowsCount, treatmentsList) => {
+    const pTrials = (state.trials || []).filter(t => String(t.ProjectID) === String(activeProject?.ID));
+    const assignments = {};
+    for (let r = 1; r <= potRowsCount; r++) {
+      let matched = null;
+      if (pTrials.length > 0) {
+        const rowTrial = pTrials.find(t => String(t.PotRow) === String(r));
+        if (rowTrial) {
+          matched = treatmentsList.find(item => 
+            (rowTrial.FormulationID && String(item.formulationId) === String(rowTrial.FormulationID)) ||
+            item.name.trim().toLowerCase() === (rowTrial.FormulationName || '').trim().toLowerCase() ||
+            (item.role === 'control' && (String(rowTrial.IsControl).toLowerCase() === 'true' || (rowTrial.FormulationName && rowTrial.FormulationName.toLowerCase().includes('control'))))
+          );
+        }
+      }
+      if (!matched && treatmentsList.length > 0) {
+        const ctrlTrt = treatmentsList.find(t => t.role === 'control');
+        const expTrts = treatmentsList.filter(t => t.role !== 'control');
+        if (ctrlTrt && expTrts.length > 0 && potRowsCount >= 4 && (r === 1 || r === potRowsCount)) {
+          matched = ctrlTrt;
+        } else if (ctrlTrt && expTrts.length > 0 && potRowsCount >= 4) {
+          const innerRows = potRowsCount - 2;
+          const innerR = r - 2;
+          const rowsPerExp = Math.max(1, Math.floor(innerRows / expTrts.length));
+          const expIdx = Math.min(Math.floor(innerR / rowsPerExp), expTrts.length - 1);
+          matched = expTrts[expIdx];
+        } else {
+          const rowsPerTrt = Math.max(1, Math.floor(potRowsCount / treatmentsList.length));
+          const trtIdx = Math.min(Math.floor((r - 1) / rowsPerTrt), treatmentsList.length - 1);
+          matched = treatmentsList[trtIdx];
+        }
+      }
+      assignments[r] = matched?.id || treatmentsList[0]?.id;
+    }
+    return assignments;
+  }, [state.trials, activeProject?.ID]);
+
   const allocationPreview = useMemo(() => {
     if (randomizeForm.trialDesign !== 'PotTrial') return null;
     const potRows = parseInt(randomizeForm.potRows) || 9;
@@ -820,8 +876,12 @@ export default function Projects({ onMenuClick }) {
         if (String(potStripeDirection).toLowerCase().includes('horizontal')) {
           let rCount = 0;
           if (potLayout === 'stripe') {
-            for (let r = 0; r < potRows; r++) {
-              if (trtList[r % trtList.length] === tName) rCount++;
+            const rowAssignments = getPotRowAssignments(potRows, randomizeTreatments);
+            for (let r = 1; r <= potRows; r++) {
+              const trtId = rowAssignments[r];
+              const matchedTrt = randomizeTreatments.find(t => t.id === trtId);
+              const mName = matchedTrt ? (matchedTrt.name.trim() || activeFormulations.find(f => String(f.ID) === String(matchedTrt.formulationId))?.Name || 'Unnamed Treatment') : null;
+              if (mName === tName) rCount++;
             }
           } else {
             const baseList = [];
@@ -932,7 +992,7 @@ export default function Projects({ onMenuClick }) {
       potBlocks: parseInt(randomizeForm.potBlocks) || 3,
       trtCount: trtList.length
     };
-  }, [randomizeForm, randomizeTreatments, activeFormulations, customColumnOrder]);
+  }, [randomizeForm, randomizeTreatments, activeFormulations, customColumnOrder, getPotRowAssignments]);
 
   const projects = useMemo(() => {
     return (state.projects || []).filter(p => p.Category === activeCategory || (!p.Category && activeCategory === 'herbicide'));
@@ -2031,28 +2091,46 @@ export default function Projects({ onMenuClick }) {
     }
 
     if (potLayout === 'stripe') {
-      const numUnits = isHorizontal ? potRows : potCols;
-      for (let i = 0; i < numUnits; i++) {
-        let t;
-        if (!isHorizontal && customColumnOrder && customColumnOrder[i]) {
-          const assignedId = customColumnOrder[i];
-          const matchedTrt = randomizeTreatments.find(item => item.id === assignedId || item.name === assignedId);
+      if (isHorizontal) {
+        const rowAssignments = getPotRowAssignments(potRows, randomizeTreatments);
+        for (let r = 0; r < potRows; r++) {
+          const trtId = rowAssignments[r + 1];
+          const matchedTrt = randomizeTreatments.find(item => item.id === trtId);
+          let rowTrt;
           if (matchedTrt) {
             const form = activeFormulations.find(f => String(f.ID) === String(matchedTrt.formulationId));
-            t = {
+            rowTrt = {
               name: matchedTrt.name.trim() || form?.Name || 'Unnamed',
               role: matchedTrt.role || 'experimental'
             };
           } else {
-            t = trts[i % trts.length];
+            rowTrt = trts[r % trts.length];
           }
-        } else {
-          t = trts[i % trts.length];
+          for (let c = 0; c < potCols; c++) {
+            matrix[r][c] = rowTrt;
+          }
         }
-        if (isHorizontal) {
-          for (let c = 0; c < potCols; c++) matrix[i][c] = t;
-        } else {
-          for (let r = 0; r < potRows; r++) matrix[r][i] = t;
+      } else {
+        for (let c = 0; c < potCols; c++) {
+          let colTrt;
+          if (customColumnOrder && customColumnOrder[c]) {
+            const assignedId = customColumnOrder[c];
+            const matchedTrt = randomizeTreatments.find(item => item.id === assignedId || item.name === assignedId);
+            if (matchedTrt) {
+              const form = activeFormulations.find(f => String(f.ID) === String(matchedTrt.formulationId));
+              colTrt = {
+                name: matchedTrt.name.trim() || form?.Name || 'Unnamed',
+                role: matchedTrt.role || 'experimental'
+              };
+            } else {
+              colTrt = trts[c % trts.length];
+            }
+          } else {
+            colTrt = trts[c % trts.length];
+          }
+          for (let r = 0; r < potRows; r++) {
+            matrix[r][c] = colTrt;
+          }
         }
       }
     } else if (potLayout === 'randomized-row') {
@@ -2749,8 +2827,9 @@ export default function Projects({ onMenuClick }) {
           <div className="flex-1 flex gap-2">
             {Array.from({ length: potCols }).map((_, idx) => {
               const colNum = idx + 1;
-              const colTrial = projectTrials.find(t => String(t.PotCol) === String(colNum));
-              const colTrtName = colTrial?.FormulationName;
+              const colTrials = projectTrials.filter(t => String(t.PotCol) === String(colNum));
+              const allSameTrt = colTrials.length > 0 && colTrials.every(t => t.FormulationName === colTrials[0].FormulationName);
+              const colTrtName = allSameTrt ? colTrials[0].FormulationName : null;
               return (
                 <div key={idx} className="flex-1 text-center bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg py-1 px-1 flex flex-col items-center shadow-2xs">
                   <span className="text-[10px] font-extrabold text-slate-700 dark:text-slate-200">C{colNum}</span>
@@ -3588,14 +3667,22 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
     
     if (pTrials.length > 0) {
       const seen = new Set();
+      let hasControl = false;
       pTrials.forEach((t, idx) => {
-        const key = `${t.FormulationID || ''}_${t.FormulationName || ''}_${t.Dosage || ''}`;
+        const isCtrl = String(t.IsControl).toLowerCase() === 'true' || 
+          (t.FormulationName && /^(untreated\s*control|control|utc)$/i.test(t.FormulationName.trim()));
+
+        if (isCtrl && hasControl) {
+          return;
+        }
+
+        const key = isCtrl ? '__control__' : `${t.FormulationID || ''}_${t.FormulationName || ''}_${t.Dosage || ''}`;
         if (!seen.has(key)) {
           seen.add(key);
-          const isCtrl = String(t.IsControl).toLowerCase() === 'true';
+          if (isCtrl) hasControl = true;
           initialTreatments.push({
-            id: t.FormulationID ? `trt_${t.FormulationID}` : `trt_${idx}`,
-            name: t.FormulationName || (isCtrl ? 'Untreated Control' : 'Unnamed'),
+            id: isCtrl ? 'trt_control' : (t.FormulationID ? `trt_${t.FormulationID}` : `trt_${idx}`),
+            name: isCtrl ? (t.FormulationName || 'Untreated Control') : (t.FormulationName || 'Unnamed'),
             formulationId: t.FormulationID || '',
             dosage: t.Dosage || '',
             role: isCtrl ? 'control' : (String(t.IsStandardCheck).toLowerCase() === 'true' ? 'standard' : 'experimental')
@@ -3628,11 +3715,22 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       }
     }
     
-    // Resolve column order ensuring valid treatment IDs and avoiding ghost IDs
+    // Resolve column order ensuring valid treatment IDs, avoiding ghost IDs, and checking project trials
     initialColOrder = Array.from({ length: potColsCount }).map((_, c) => {
       const stored = initialColOrder && initialColOrder[c];
-      const matched = initialTreatments.find(t => t.id === stored || t.name === stored);
-      if (matched) return matched.id;
+      const matchedStored = initialTreatments.find(t => t.id === stored || t.name === stored);
+      if (matchedStored) return matchedStored.id;
+
+      const colTrial = pTrials.find(t => String(t.PotCol) === String(c + 1));
+      if (colTrial) {
+        const matchedColTrt = initialTreatments.find(t =>
+          (colTrial.FormulationID && String(t.formulationId) === String(colTrial.FormulationID)) ||
+          t.name.trim().toLowerCase() === (colTrial.FormulationName || '').trim().toLowerCase() ||
+          (t.role === 'control' && (String(colTrial.IsControl).toLowerCase() === 'true' || (colTrial.FormulationName && colTrial.FormulationName.toLowerCase().includes('control'))))
+        );
+        if (matchedColTrt) return matchedColTrt.id;
+      }
+
       return initialTreatments[c % initialTreatments.length]?.id || `trt_${c}`;
     });
     setCustomColumnOrder(initialColOrder);
@@ -4694,8 +4792,23 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
 
           let assignedTreatments = [];
           if (potLayout === 'stripe') {
-            for (let i = 0; i < numUnits; i++) {
-              assignedTreatments.push(trtList[i % trtList.length]);
+            if (isHorizontal) {
+              const rowAssignments = getPotRowAssignments(potRows, randomizeTreatments);
+              for (let i = 1; i <= potRows; i++) {
+                const trtId = rowAssignments[i];
+                const matched = trtList.find(t => t.id === trtId) || trtList[0];
+                assignedTreatments.push(matched);
+              }
+            } else {
+              for (let i = 0; i < potCols; i++) {
+                if (customColumnOrder && customColumnOrder[i]) {
+                  const assigned = customColumnOrder[i];
+                  const matched = trtList.find(t => t.id === assigned || t.name === assigned);
+                  assignedTreatments.push(matched || trtList[i % trtList.length]);
+                } else {
+                  assignedTreatments.push(trtList[i % trtList.length]);
+                }
+              }
             }
           } else {
             const baseList = [];
@@ -4819,13 +4932,22 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
 
             if (potLayout === 'stripe') {
               const numUnits = isHorizontal ? potRows : potCols;
-              for (let i = 1; i <= numUnits; i++) {
-                if (!isHorizontal && customColumnOrder && customColumnOrder[i - 1]) {
-                  const assigned = customColumnOrder[i - 1];
-                  const matched = trtList.find(t => t.id === assigned || t.name === assigned);
-                  rowColAssignments[i] = matched || trtList[(i - 1) % trtList.length];
-                } else {
-                  rowColAssignments[i] = trtList[(i - 1) % trtList.length];
+              if (isHorizontal) {
+                const rowAssignments = getPotRowAssignments(potRows, randomizeTreatments);
+                for (let i = 1; i <= potRows; i++) {
+                  const trtId = rowAssignments[i];
+                  const matched = trtList.find(t => t.id === trtId) || trtList[0];
+                  rowColAssignments[i] = matched;
+                }
+              } else {
+                for (let i = 1; i <= potCols; i++) {
+                  if (customColumnOrder && customColumnOrder[i - 1]) {
+                    const assigned = customColumnOrder[i - 1];
+                    const matched = trtList.find(t => t.id === assigned || t.name === assigned);
+                    rowColAssignments[i] = matched || trtList[(i - 1) % trtList.length];
+                  } else {
+                    rowColAssignments[i] = trtList[(i - 1) % trtList.length];
+                  }
                 }
               }
             } else if (potLayout === 'randomized-row') {
@@ -8009,7 +8131,9 @@ ${photosHtml}
                   <th className="p-3">Dosage / Rate</th>
                   <th className="p-3">Role</th>
                   {randomizeForm.trialDesign === 'PotTrial' && (
-                    <th className="p-3">Assigned Column</th>
+                    <th className="p-3">
+                      {String(randomizeForm.potStripeDirection).toLowerCase().includes('horizontal') ? 'Assigned Rows' : 'Assigned Column'}
+                    </th>
                   )}
                   <th className="p-3 text-center">Action</th>
                 </tr>
@@ -8066,12 +8190,28 @@ ${photosHtml}
                       </td>
                       {randomizeForm.trialDesign === 'PotTrial' && (
                         <td className="p-2 whitespace-nowrap">
-                          {assignedCols.length > 0 ? (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-md">
-                              Col {assignedCols.join(', ')}
-                            </span>
+                          {String(randomizeForm.potStripeDirection).toLowerCase().includes('horizontal') ? (
+                            (() => {
+                              const rowAssignments = getPotRowAssignments(parseInt(randomizeForm.potRows) || 9, randomizeTreatments);
+                              const assignedRows = Object.entries(rowAssignments)
+                                .filter(([, trtId]) => trtId === t.id)
+                                .map(([r]) => parseInt(r));
+                              return assignedRows.length > 0 ? (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-md">
+                                  {formatRowRanges(assignedRows)}
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-slate-400 italic">Unassigned</span>
+                              );
+                            })()
                           ) : (
-                            <span className="text-[10px] text-slate-400 italic">Unassigned</span>
+                            assignedCols.length > 0 ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-md">
+                                Col {assignedCols.join(', ')}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-slate-400 italic">Unassigned</span>
+                            )
                           )}
                         </td>
                       )}

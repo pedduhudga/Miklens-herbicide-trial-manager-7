@@ -217,5 +217,86 @@ describe('Pot Trial Column Reordering, Locking and Layout', () => {
     expect(potCols).toBe(4);
     expect(customColumnOrder).toEqual(['t2', 't3', 't4', 't5']);
   });
+
+  it('correctly maps horizontal stripe layout preserving project row assignments without alternating row scrambling', () => {
+    // 8 rows x 4 columns with Untreated Control on rows 1 & 8, and 3 treatments on rows 2-3, 4-5, 6-7
+    const treatments = [
+      { id: 'trt_control', name: 'Untreated Control', role: 'control' },
+      { id: 'trt_new_u', name: 'NPK POWDER NEW (with U)', role: 'experimental' },
+      { id: 'trt_old', name: 'NPK POWDER OLD', role: 'experimental' },
+      { id: 'trt_new_no_u', name: 'NPK POWDER NEW (without U)', role: 'experimental' }
+    ];
+
+    const projectTrials = [
+      { PotRow: 1, FormulationName: 'Untreated Control', IsControl: true },
+      { PotRow: 2, FormulationName: 'NPK POWDER NEW (with U)', IsControl: false },
+      { PotRow: 3, FormulationName: 'NPK POWDER NEW (with U)', IsControl: false },
+      { PotRow: 4, FormulationName: 'NPK POWDER OLD', IsControl: false },
+      { PotRow: 5, FormulationName: 'NPK POWDER OLD', IsControl: false },
+      { PotRow: 6, FormulationName: 'NPK POWDER NEW (without U)', IsControl: false },
+      { PotRow: 7, FormulationName: 'NPK POWDER NEW (without U)', IsControl: false },
+      { PotRow: 8, FormulationName: 'Untreated Control', IsControl: true }
+    ];
+
+    const getPotRowAssignments = (potRowsCount, treatmentsList, pTrials) => {
+      const assignments = {};
+      for (let r = 1; r <= potRowsCount; r++) {
+        let matched = null;
+        if (pTrials.length > 0) {
+          const rowTrial = pTrials.find(t => String(t.PotRow) === String(r));
+          if (rowTrial) {
+            matched = treatmentsList.find(item => 
+              item.name.trim().toLowerCase() === (rowTrial.FormulationName || '').trim().toLowerCase() ||
+              (item.role === 'control' && String(rowTrial.IsControl).toLowerCase() === 'true')
+            );
+          }
+        }
+        assignments[r] = matched?.id || treatmentsList[0]?.id;
+      }
+      return assignments;
+    };
+
+    const rowAssignments = getPotRowAssignments(8, treatments, projectTrials);
+
+    // Verify row assignments match the project cards
+    expect(rowAssignments[1]).toBe('trt_control');
+    expect(rowAssignments[2]).toBe('trt_new_u');
+    expect(rowAssignments[3]).toBe('trt_new_u');
+    expect(rowAssignments[4]).toBe('trt_old');
+    expect(rowAssignments[5]).toBe('trt_old');
+    expect(rowAssignments[6]).toBe('trt_new_no_u');
+    expect(rowAssignments[7]).toBe('trt_new_no_u');
+    expect(rowAssignments[8]).toBe('trt_control');
+
+    // Format row ranges
+    const formatRowRanges = (rows) => {
+      if (!rows || !rows.length) return '';
+      const sorted = [...new Set(rows)].sort((a, b) => a - b);
+      const ranges = [];
+      let start = sorted[0];
+      let prev = sorted[0];
+      for (let i = 1; i < sorted.length; i++) {
+        if (sorted[i] === prev + 1) {
+          prev = sorted[i];
+        } else {
+          ranges.push(start === prev ? `Row ${start}` : `Row ${start}–${prev}`);
+          start = sorted[i];
+          prev = sorted[i];
+        }
+      }
+      ranges.push(start === prev ? `Row ${start}` : `Row ${start}–${prev}`);
+      return ranges.join(', ');
+    };
+
+    const ctrlRows = Object.entries(rowAssignments).filter(([, id]) => id === 'trt_control').map(([r]) => parseInt(r));
+    const newURows = Object.entries(rowAssignments).filter(([, id]) => id === 'trt_new_u').map(([r]) => parseInt(r));
+    const oldRows = Object.entries(rowAssignments).filter(([, id]) => id === 'trt_old').map(([r]) => parseInt(r));
+    const newNoURows = Object.entries(rowAssignments).filter(([, id]) => id === 'trt_new_no_u').map(([r]) => parseInt(r));
+
+    expect(formatRowRanges(ctrlRows)).toBe('Row 1, Row 8');
+    expect(formatRowRanges(newURows)).toBe('Row 2–3');
+    expect(formatRowRanges(oldRows)).toBe('Row 4–5');
+    expect(formatRowRanges(newNoURows)).toBe('Row 6–7');
+  });
 });
 
