@@ -6,6 +6,7 @@ import { buildAiObservationPayload } from '../utils/categoryObservationUtils.js'
 import { getPrimaryObservationField } from '../utils/categoryConfig.js';
 import { analyzeWeedCover } from '../utils/imageAnalysis.js';
 import { saveSyncQueueOffline } from './offlineStorage.js';
+import { autoMergeConflict } from './syncManager.js';
 
 function safeRefreshRelevantUI(trialId, type) {
     if (typeof refreshRelevantUI === 'function') {
@@ -263,17 +264,12 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                                     const localObs = safeJsonParse(item.payload.EfficacyDataJSON, []);
                                     const cloudObs = safeJsonParse(cloudRecord.EfficacyDataJSON, []);
                                     if (cloudObs.length > 0 && localObs.length > 0 && cloudObs.length !== localObs.length) {
-                                        console.warn('[HighTechSync] Conflict detected on trial:', item.payload.ID);
-                                        item.status = 'failed';
-                                        item.lastError = 'Conflict detected';
-                                        updateAppState({
-                                            activeConflict: {
-                                                localItem: item.payload,
-                                                cloudItem: cloudRecord,
-                                                syncItem: item
-                                            }
-                                        });
-                                        break;
+                                        console.log('[HighTechSync] Observation discrepancy detected on trial:', item.payload.ID, '- Auto-merging timelines without data loss');
+                                        try {
+                                            item.payload = autoMergeConflict(item.payload, cloudRecord);
+                                        } catch (mergeErr) {
+                                            console.warn('[HighTechSync] Auto-merge failed, proceeding with local record:', mergeErr);
+                                        }
                                     }
                                 }
                             }

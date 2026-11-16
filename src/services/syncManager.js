@@ -274,6 +274,24 @@ export function autoMergeConflict(localData, serverData) {
     }
   }
 
+  if (localData.PhotoURLs || serverData.PhotoURLs) {
+    try {
+      const mergedPhotos = mergePhotos(localData.PhotoURLs, serverData.PhotoURLs);
+      merged.PhotoURLs = JSON.stringify(mergedPhotos);
+    } catch (err) {
+      console.warn('[SyncManager] Failed to merge PhotoURLs:', err);
+    }
+  }
+
+  if (localData.WeedPhotosJSON || serverData.WeedPhotosJSON) {
+    try {
+      const mergedWeeds = mergePhotos(localData.WeedPhotosJSON, serverData.WeedPhotosJSON);
+      merged.WeedPhotosJSON = JSON.stringify(mergedWeeds);
+    } catch (err) {
+      console.warn('[SyncManager] Failed to merge WeedPhotosJSON:', err);
+    }
+  }
+
   merged.LastModified = new Date().toISOString();
   return merged;
 }
