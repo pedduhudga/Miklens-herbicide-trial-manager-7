@@ -8925,146 +8925,134 @@ If none are present, write "None".`;
 
       {/* ── BULK SELECTION DOCK (Elevated above mobile BottomNav) ── */}
       {selectedForBulk.size > 0 && (
-        <div className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom,8px))] md:bottom-6 left-1/2 -translate-x-1/2 w-[calc(100vw-20px)] sm:w-auto max-w-2xl bg-slate-900/95 backdrop-blur-md text-white px-3 sm:px-5 py-2 sm:py-3 rounded-2xl shadow-2xl border border-slate-700/90 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 z-[55] animate-slide-up select-none">
-          {(() => {
-            const crossCategoryCount = Array.from(selectedForBulk).filter(id => {
-              const trial = trials.find(t => t.ID === id);
-              return trial && (trial.Category || 'herbicide') !== activeCategory;
-            }).length;
-            const validCount = selectedForBulk.size - crossCategoryCount;
-            
-            return (
-              <div className="flex items-center justify-between sm:justify-start gap-2">
-                <span className="font-bold text-xs sm:text-sm flex items-center shrink-0">
-                  <span className="bg-[#154734] border border-emerald-400/40 text-white px-2 py-0.5 rounded-full mr-1.5 text-xs font-extrabold">
+        <div className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom,8px))] md:bottom-6 left-1/2 -translate-x-1/2 w-max max-w-[calc(100vw-16px)] md:max-w-6xl bg-slate-900/95 backdrop-blur-md text-white px-3 sm:px-4 py-2 sm:py-2.5 rounded-2xl shadow-2xl border border-slate-700/90 z-[55] animate-slide-up select-none">
+          {/* Single scrollable row: count badge + all action buttons */}
+          <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar scroll-smooth touch-pan-x overscroll-x-contain py-0.5 px-0.5">
+            {(() => {
+              const crossCategoryCount = Array.from(selectedForBulk).filter(id => {
+                const trial = trials.find(t => t.ID === id);
+                return trial && (trial.Category || 'herbicide') !== activeCategory;
+              }).length;
+              return (
+                <span className="font-bold text-xs flex items-center shrink-0 gap-1.5 whitespace-nowrap">
+                  <span className="bg-emerald-700 border border-emerald-500/50 text-white px-2 py-0.5 rounded-full text-xs font-extrabold shrink-0">
                     {selectedForBulk.size}
                   </span>
-                  <span>Selected</span>
+                  <span className="shrink-0">Selected</span>
                   {crossCategoryCount > 0 && (
-                    <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full ml-1.5 text-[10px]">
-                      {crossCategoryCount} diff category
+                    <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 px-1.5 py-0.5 rounded-full text-[10px] shrink-0">
+                      {crossCategoryCount} diff cat
                     </span>
                   )}
                 </span>
-                <button
-                  type="button"
-                  onClick={clearBulk}
-                  className="sm:hidden text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition active:scale-95"
-                  title="Clear selection"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            );
-          })()}
+              );
+            })()}
 
-          {/* Action Buttons Strip - Horizontally scrollable on mobile */}
-          <div className="relative min-w-0 flex-1">
-            <div className="flex items-center gap-1 sm:gap-2 overflow-x-auto no-scrollbar scroll-smooth py-0.5 -mx-1 px-1 touch-pan-x overscroll-x-contain">
-              {(() => {
-                const crossCategoryCount = Array.from(selectedForBulk).filter(id => {
-                  const trial = trials.find(t => t.ID === id);
-                  return trial && (trial.Category || 'herbicide') !== activeCategory;
-                }).length;
-                const validCount = selectedForBulk.size - crossCategoryCount;
+            <div className="w-px h-5 bg-slate-700 shrink-0 mx-0.5" />
 
-                return (
-                  <button 
-                    type="button"
-                    onClick={navigateToCompare} 
-                    disabled={validCount < 2}
-                    className={`px-2.5 sm:px-3 py-1.5 rounded-xl font-bold text-[11px] sm:text-xs flex items-center gap-1.5 transition shrink-0 active:scale-95 touch-manipulation ${
-                      validCount < 2 
-                        ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed' 
-                        : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs'
-                    }`}
-                    title={validCount < 2 ? `Need at least 2 ${activeCategory} trials to compare` : ''}
-                  >
-                    <BarChart3 className="w-3.5 h-3.5" />
-                    <span>Compare {validCount > 0 ? `(${validCount})` : ''}</span>
-                  </button>
-                );
-              })()}
+            {(() => {
+              const crossCategoryCount = Array.from(selectedForBulk).filter(id => {
+                const trial = trials.find(t => t.ID === id);
+                return trial && (trial.Category || 'herbicide') !== activeCategory;
+              }).length;
+              const validCount = selectedForBulk.size - crossCategoryCount;
 
-              {!isViewer && (
+              return (
                 <button 
                   type="button"
-                  onClick={() => {
-                    const selectedTrialsList = trials.filter(t => selectedForBulk.has(t.ID));
-                    setBatchAppModalData({ trials: selectedTrialsList, project: null });
-                  }} 
-                  className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-[11px] sm:text-xs flex items-center gap-1.5 transition shrink-0 active:scale-95 shadow-xs"
-                  title="Apply the same fertilizer, spray, or agronomic input to all selected plots/plants"
+                  onClick={navigateToCompare} 
+                  disabled={validCount < 2}
+                  className={`px-2.5 sm:px-3 py-1.5 rounded-xl font-bold text-[11px] sm:text-xs flex items-center gap-1.5 transition shrink-0 whitespace-nowrap active:scale-95 touch-manipulation ${
+                    validCount < 2 
+                      ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed' 
+                      : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs'
+                  }`}
+                  title={validCount < 2 ? `Need at least 2 ${activeCategory} trials to compare` : ''}
                 >
-                  <Leaf className="w-3.5 h-3.5 text-emerald-200" />
-                  <span>Batch Input ({selectedForBulk.size})</span>
+                  <BarChart3 className="w-3.5 h-3.5 shrink-0" />
+                  <span>Compare {validCount > 0 ? `(${validCount})` : ''}</span>
                 </button>
-              )}
+              );
+            })()}
 
-              {!isViewer && (
-                <button 
-                  type="button"
-                  onClick={() => setIsBulkEditOpen(true)} 
-                  className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-[11px] sm:text-xs flex items-center gap-1.5 transition shrink-0 active:scale-95 touch-manipulation"
-                >
-                  <Edit className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Bulk Edit</span>
-                </button>
-              )}
-
-              {!isViewer && (
-                <button 
-                  type="button"
-                  onClick={handleBulkFinalize} 
-                  className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-[11px] sm:text-xs flex items-center gap-1.5 transition shrink-0 active:scale-95 touch-manipulation"
-                >
-                  <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Finalize</span>
-                </button>
-              )}
-
-              {!isViewer && (
-                <button 
-                  type="button"
-                  onClick={() => setIsBulkQrModalOpen(true)} 
-                  className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-[11px] sm:text-xs flex items-center gap-1.5 transition shrink-0 active:scale-95 touch-manipulation"
-                >
-                  <Printer className="w-3.5 h-3.5 text-blue-400" />
-                  <span>Print Cards</span>
-                </button>
-              )}
-
-              {canDownload && (
-                <button 
-                  type="button"
-                  onClick={() => { const sel = trials.filter(t => selectedForBulk.has(t.ID)); exportMultipleTrialsToCSV(sel, activeCategory); }} 
-                  className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-[11px] sm:text-xs flex items-center gap-1.5 transition shrink-0 active:scale-95 touch-manipulation"
-                >
-                  <FileSpreadsheet className="w-3.5 h-3.5 text-teal-400" />
-                  <span>Export CSV</span>
-                </button>
-              )}
-
-              {!isViewer && (
-                <button 
-                  type="button"
-                  onClick={handleBulkDelete} 
-                  className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-800/80 font-semibold text-[11px] sm:text-xs flex items-center gap-1.5 transition shrink-0 active:scale-95 touch-manipulation"
-                >
-                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-                  <span>Delete</span>
-                </button>
-              )}
-
+            {!isViewer && (
               <button 
                 type="button"
-                onClick={clearBulk} 
-                className="hidden sm:flex text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition ml-1"
-                title="Clear selection"
+                onClick={() => {
+                  const selectedTrialsList = trials.filter(t => selectedForBulk.has(t.ID));
+                  setBatchAppModalData({ trials: selectedTrialsList, project: null });
+                }} 
+                className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-[11px] sm:text-xs flex items-center gap-1.5 transition shrink-0 whitespace-nowrap active:scale-95 shadow-xs"
+                title="Apply the same fertilizer, spray, or agronomic input to all selected plots/plants"
               >
-                <X className="w-4 h-4" />
+                <Leaf className="w-3.5 h-3.5 text-emerald-200 shrink-0" />
+                <span>Batch Input ({selectedForBulk.size})</span>
               </button>
-            </div>
+            )}
+
+            {!isViewer && (
+              <button 
+                type="button"
+                onClick={() => setIsBulkEditOpen(true)} 
+                className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-[11px] sm:text-xs flex items-center gap-1.5 transition shrink-0 whitespace-nowrap active:scale-95 touch-manipulation"
+              >
+                <Edit className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>Bulk Edit</span>
+              </button>
+            )}
+
+            {!isViewer && (
+              <button 
+                type="button"
+                onClick={handleBulkFinalize} 
+                className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-[11px] sm:text-xs flex items-center gap-1.5 transition shrink-0 whitespace-nowrap active:scale-95 touch-manipulation"
+              >
+                <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span>Finalize</span>
+              </button>
+            )}
+
+            {!isViewer && (
+              <button 
+                type="button"
+                onClick={() => setIsBulkQrModalOpen(true)} 
+                className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-[11px] sm:text-xs flex items-center gap-1.5 transition shrink-0 whitespace-nowrap active:scale-95 touch-manipulation"
+              >
+                <Printer className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                <span>Print Cards</span>
+              </button>
+            )}
+
+            {canDownload && (
+              <button 
+                type="button"
+                onClick={() => { const sel = trials.filter(t => selectedForBulk.has(t.ID)); exportMultipleTrialsToCSV(sel, activeCategory); }} 
+                className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-[11px] sm:text-xs flex items-center gap-1.5 transition shrink-0 whitespace-nowrap active:scale-95 touch-manipulation"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-teal-400 shrink-0" />
+                <span>Export CSV</span>
+              </button>
+            )}
+
+            {!isViewer && (
+              <button 
+                type="button"
+                onClick={handleBulkDelete} 
+                className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-800/80 font-semibold text-[11px] sm:text-xs flex items-center gap-1.5 transition shrink-0 whitespace-nowrap active:scale-95 touch-manipulation"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                <span>Delete</span>
+              </button>
+            )}
+
+            <button 
+              type="button"
+              onClick={clearBulk} 
+              className="flex text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition shrink-0 ml-1 active:scale-95"
+              title="Clear selection"
+            >
+              <X className="w-4 h-4 shrink-0" />
+            </button>
           </div>
         </div>
       )}
