@@ -1,4 +1,4 @@
-﻿import React, { useState, useMemo, useRef, useEffect, useCallback, useDeferredValue } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback, useDeferredValue } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppState } from '../hooks/useAppState.jsx';
 import { useAuth } from '../hooks/useAuth.js';
@@ -17,7 +17,7 @@ import {
   Navigation, FolderOpen, Lock, Unlock,
   FileDown, Share2, MoreVertical, FileSpreadsheet,
   FileCode, MonitorPlay, Archive, Pencil, ScanLine, Crop, Clock, Calculator, Loader2, ShieldCheck,
-  Table, Zap, Layers, Target, Check, Columns3, Ruler
+  Table, Zap, Layers, Target, Check, Columns3, Ruler, Play, Pause
 } from 'lucide-react';
 import { safeJsonParse } from '../utils/helpers.js';
 import { resolvePhotoSrc, getPhotoThumbnailSrc, isPhotoBroken, getDriveFileId, compressImage, deduplicatePhotoList } from '../utils/photoUtils.js';
@@ -5214,11 +5214,12 @@ Rules:
     const targetDriveId = getDriveFileId(photoSrc);
     let matched = false;
     const updatedPhotos = photos.map(p => {
-      const src = resolvePhotoSrc(p);
-      const pDriveId = p.driveId || p.fileId || getDriveFileId(p.url || p.src || src);
+      const pObj = typeof p === 'string' ? { url: p } : p;
+      const src = resolvePhotoSrc(pObj);
+      const pDriveId = pObj.driveId || pObj.fileId || getDriveFileId(pObj.url || pObj.src || src);
       const isMatch = (
         (photoSrc && src === photoSrc) ||
-        (p.tempId && p.tempId === photoSrc) ||
+        (pObj.tempId && pObj.tempId === photoSrc) ||
         (targetDriveId && pDriveId && targetDriveId === pDriveId) ||
         (photoSrc && src && typeof photoSrc === 'string' && typeof src === 'string' && (photoSrc.includes(src) || src.includes(photoSrc)))
       );
@@ -5234,13 +5235,37 @@ Rules:
           };
         }
         return {
-          ...p,
+          ...pObj,
           aiStatus: status,
           aiError: errorMsg || '',
           ...(compactAiData ? { aiData: compactAiData } : {})
         };
       }
-      return p;
+      return pObj;
+    });
+
+    // Also check WeedPhotosJSON in case photo belongs to weed gallery
+    let weedPhotosUpdated = false;
+    const weedPhotos = safeJsonParse(trial.WeedPhotosJSON, []);
+    const updatedWeedPhotos = weedPhotos.map(p => {
+      const pObj = typeof p === 'string' ? { url: p } : p;
+      const src = resolvePhotoSrc(pObj);
+      const pDriveId = pObj.driveId || pObj.fileId || getDriveFileId(pObj.url || pObj.src || src);
+      const isMatch = (
+        (photoSrc && src === photoSrc) ||
+        (pObj.tempId && pObj.tempId === photoSrc) ||
+        (targetDriveId && pDriveId && targetDriveId === pDriveId) ||
+        (photoSrc && src && typeof photoSrc === 'string' && typeof src === 'string' && (photoSrc.includes(src) || src.includes(photoSrc)))
+      );
+      if (isMatch) {
+        weedPhotosUpdated = true;
+        return {
+          ...pObj,
+          aiStatus: status,
+          aiError: errorMsg || ''
+        };
+      }
+      return pObj;
     });
 
     // Fallback: If no exact match found and status is resolved, update the last photo that was processing/pending
@@ -5258,6 +5283,9 @@ Rules:
     }
 
     const patch = { ID: trial.ID, PhotoURLs: JSON.stringify(updatedPhotos) };
+    if (weedPhotosUpdated) {
+      patch.WeedPhotosJSON = JSON.stringify(updatedWeedPhotos);
+    }
     const updatedTrial = { ...trial, ...patch };
     updateState({ trials: currentTrials.map(t => t.ID === trialId ? updatedTrial : t) });
     if (getAppState().activeTrial?.ID === trialId || activeTrial?.ID === trialId) {
@@ -5309,12 +5337,15 @@ Rules:
 
   // ── AUTOMATIC BACKGROUND PHOTO AI HEALER ─────────────────────────
   const isAutoHealingRef = useRef(false);
+  const isPausedRef = useRef(false);
+  const isCancelledRef = useRef(false);
   const [autoHealProgress, setAutoHealProgress] = useState(null);
+  const [isAutoHealingPaused, setIsAutoHealingPaused] = useState(false);
 
   const analyzeTrialPhoto = useCallback(async (trial, photo) => {
     const photoSrc = resolvePhotoSrc(photo);
     if (!trial || !photoSrc) return { success: false, error: 'No photo source' };
-    const photoDate = photo.date || toDatetimeLocal(new Date());
+    const photoDate = photo.date || trial.Date || toDatetimeLocal(new Date());
     const daa = calculateDAA(photoDate, trial.Date);
 
     await updatePhotoAiStatus(trial.ID, photoSrc, 'processing');
@@ -5345,42 +5376,112 @@ Rules:
     }
   }, [activeCategory, getAppState, createObservationFromAI, updatePhotoAiStatus]);
 
-  const findPendingOrFailedPhotos = useCallback(() => {
+  const findPhotosNeedingObservation = useCallback(() => {
     const trials = getAppState().trials || [];
     const candidates = [];
+    const seen = new Set();
+
     for (const trial of trials) {
-      const photos = safeJsonParse(trial.PhotoURLs, []);
-      for (const p of photos) {
-        if (p.aiStatus === 'failed' || p.aiStatus === 'pending') {
-          candidates.push({ trial, photo: p });
+      const trialCat = trial.Category || activeCategory;
+      const p1 = safeJsonParse(trial.PhotoURLs, []);
+      const p2 = safeJsonParse(trial.WeedPhotosJSON, []);
+      const allPhotos = [
+        ...(Array.isArray(p1) ? p1 : []),
+        ...(Array.isArray(p2) ? p2 : [])
+      ];
+
+      const efficacyData = validateEfficacyData(safeJsonParse(trial.EfficacyDataJSON, []), trialCat, true);
+
+      for (const p of allPhotos) {
+        const pObj = typeof p === 'string' ? { url: p } : p;
+        const src = resolvePhotoSrc(pObj);
+        if (!src) continue;
+
+        const uniqueKey = `${trial.ID}_${src}`;
+        if (seen.has(uniqueKey)) continue;
+
+        const pDriveId = pObj.driveId || pObj.fileId || getDriveFileId(pObj.url || pObj.src || src);
+        const pDateKey = pObj.date ? toDateKey(pObj.date) : null;
+        const pDaa = (pObj.date && trial.Date) ? calculateDAA(pObj.date, trial.Date) : (pObj.daa !== undefined && pObj.daa !== null ? Number(pObj.daa) : null);
+
+        // Check if an observation is already linked to or matching this photo
+        const hasMatchingObs = efficacyData.some(obs => {
+          if (obs.isInvalid) return false;
+          const obsUrls = String(obs.photoUrl || '');
+          if (src && (obsUrls.includes(src) || src.includes(obsUrls))) return true;
+          if (pDriveId && obsUrls.includes(pDriveId)) return true;
+          const obsDateKey = obs.date ? toDateKey(obs.date) : null;
+          if (pDateKey && obsDateKey && pDateKey === obsDateKey) return true;
+          if (pDaa !== null && Number(obs.daa) === Number(pDaa)) return true;
+          return false;
+        });
+
+        const isFailedOrPending = pObj.aiStatus === 'failed' || pObj.aiStatus === 'pending';
+        // Old photos captured before AI status or never processed
+        const isOldUnprocessedPhoto = !pObj.aiStatus || pObj.aiStatus !== 'completed';
+        // Photos whose observation is missing from EfficacyDataJSON
+        const isMissingObservation = !hasMatchingObs;
+
+        if (isFailedOrPending || isOldUnprocessedPhoto || isMissingObservation) {
+          seen.add(uniqueKey);
+          candidates.push({
+            trial,
+            photo: pObj,
+            hasMatchingObs,
+            reason: isFailedOrPending ? pObj.aiStatus : (isOldUnprocessedPhoto ? 'unprocessed' : 'missing_observation')
+          });
         }
       }
     }
+
+    // Sort: most recent photo dates first so latest trials get observations right away
+    candidates.sort((a, b) => {
+      const dateA = new Date(a.photo?.date || a.trial?.Date || 0).getTime();
+      const dateB = new Date(b.photo?.date || b.trial?.Date || 0).getTime();
+      return dateB - dateA;
+    });
+
     return candidates;
-  }, [getAppState]);
+  }, [activeCategory, getAppState]);
 
   const runAutoPhotoHealer = useCallback(async (manual = false) => {
     if (isAutoHealingRef.current) return;
-    const candidates = findPendingOrFailedPhotos();
+    const candidates = findPhotosNeedingObservation();
     if (candidates.length === 0) {
       if (manual) {
         window.dispatchEvent(new CustomEvent('app:toast', {
-          detail: { msg: '✓ All photos are already analyzed!', type: 'success' }
+          detail: { msg: '✓ All captured photos already have observations!', type: 'success' }
         }));
       }
       return;
     }
 
     isAutoHealingRef.current = true;
+    isCancelledRef.current = false;
+    isPausedRef.current = false;
+    setIsAutoHealingPaused(false);
     setAutoHealProgress({ current: 0, total: candidates.length });
     console.log(`[AutoPhotoHealer] Starting background auto-analysis for ${candidates.length} photo(s)...`);
     let completed = 0;
 
     for (let i = 0; i < candidates.length; i++) {
+      if (isCancelledRef.current) {
+        console.log('[AutoPhotoHealer] Stopped by user.');
+        break;
+      }
+
+      while (isPausedRef.current && !isCancelledRef.current) {
+        await new Promise(r => setTimeout(r, 1000));
+      }
+      if (isCancelledRef.current) break;
+
       const currentTrials = getAppState().trials || [];
       const { trial, photo } = candidates[i];
       const freshTrial = currentTrials.find(t => t.ID === trial.ID) || trial;
-      const freshPhotos = safeJsonParse(freshTrial.PhotoURLs, []);
+      const freshPhotos = [
+        ...safeJsonParse(freshTrial.PhotoURLs, []),
+        ...safeJsonParse(freshTrial.WeedPhotosJSON, [])
+      ];
       const pSrc = resolvePhotoSrc(photo);
       const targetDriveId = getDriveFileId(pSrc);
       const freshP = freshPhotos.find(p => {
@@ -5389,7 +5490,22 @@ Rules:
         return (pSrc && s === pSrc) || (targetDriveId && pDriveId && targetDriveId === pDriveId);
       });
 
-      if (freshP && freshP.aiStatus === 'completed') {
+      // Re-verify if observation was already added by another process
+      const freshEffData = validateEfficacyData(safeJsonParse(freshTrial.EfficacyDataJSON, []), freshTrial.Category || activeCategory, true);
+      const freshDateKey = photo.date ? toDateKey(photo.date) : null;
+      const freshDaa = (photo.date && freshTrial.Date) ? calculateDAA(photo.date, freshTrial.Date) : (photo.daa !== undefined ? Number(photo.daa) : null);
+      const alreadyHasObs = freshEffData.some(obs => {
+        if (obs.isInvalid) return false;
+        const obsUrls = String(obs.photoUrl || '');
+        if (pSrc && (obsUrls.includes(pSrc) || pSrc.includes(obsUrls))) return true;
+        if (targetDriveId && obsUrls.includes(targetDriveId)) return true;
+        const obsDateKey = obs.date ? toDateKey(obs.date) : null;
+        if (freshDateKey && obsDateKey && freshDateKey === obsDateKey) return true;
+        if (freshDaa !== null && Number(obs.daa) === Number(freshDaa)) return true;
+        return false;
+      });
+
+      if (freshP && freshP.aiStatus === 'completed' && alreadyHasObs) {
         completed++;
         setAutoHealProgress({ current: completed, total: candidates.length });
         continue;
@@ -5418,19 +5534,20 @@ Rules:
 
     isAutoHealingRef.current = false;
     setAutoHealProgress(null);
+    setIsAutoHealingPaused(false);
 
     if (completed > 0) {
       window.dispatchEvent(new CustomEvent('app:toast', {
         detail: {
-          msg: `✓ Auto-Analysis Complete! ${completed} photo(s) analyzed & observations logged.`,
+          msg: `✓ Auto-Analysis Complete! Added observations for ${completed} photo(s).`,
           type: 'success'
         }
       }));
     }
-  }, [findPendingOrFailedPhotos, analyzeTrialPhoto, getAppState]);
+  }, [findPhotosNeedingObservation, analyzeTrialPhoto, getAppState, activeCategory]);
 
   useEffect(() => {
-    // 3 seconds after page loads, check if any failed photos exist and auto-heal them silently!
+    // 3 seconds after page loads, check if any failed or non-observation photos exist and auto-heal them!
     const timer = setTimeout(() => {
       runAutoPhotoHealer(false);
     }, 3000);
@@ -5440,14 +5557,14 @@ Rules:
   useEffect(() => {
     const interval = setInterval(() => {
       if (!isAutoHealingRef.current && navigator.onLine) {
-        const candidates = findPendingOrFailedPhotos();
+        const candidates = findPhotosNeedingObservation();
         if (candidates.length > 0) {
           runAutoPhotoHealer(false);
         }
       }
     }, 60000);
     return () => clearInterval(interval);
-  }, [findPendingOrFailedPhotos, runAutoPhotoHealer]);
+  }, [findPhotosNeedingObservation, runAutoPhotoHealer]);
 
   useEffect(() => {
     window.autoHealTrialPhotos = () => runAutoPhotoHealer(true);
@@ -14582,10 +14699,12 @@ If none are present, write "None".`;
       {/* ── AUTOMATIC BACKGROUND PHOTO AI HEALER STATUS ── */}
       {autoHealProgress && (
         <div className="fixed bottom-6 right-6 z-50 bg-slate-900/95 backdrop-blur-md text-white px-4 py-3 rounded-2xl shadow-2xl border border-violet-500/40 flex items-center gap-3 animate-fade-in text-xs pointer-events-auto">
-          <Sparkles className="w-5 h-5 text-violet-400 animate-spin shrink-0" />
+          <Sparkles className={`w-5 h-5 text-violet-400 shrink-0 ${isAutoHealingPaused ? '' : 'animate-spin'}`} />
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-extrabold text-slate-100">Auto-Analyzing Photos</span>
+              <span className="font-extrabold text-slate-100">
+                {isAutoHealingPaused ? 'Auto-Analysis Paused' : 'Auto-Analyzing Photos'}
+              </span>
               <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-500/20 text-violet-300 border border-violet-500/30">
                 {autoHealProgress.current} / {autoHealProgress.total}
               </span>
@@ -14593,6 +14712,28 @@ If none are present, write "None".`;
             <p className="text-[11px] text-slate-400 mt-0.5 truncate max-w-[200px]">
               {autoHealProgress.trialName ? `Analyzing ${autoHealProgress.trialName}...` : 'Auto-logging observations...'}
             </p>
+          </div>
+          <div className="flex items-center gap-1.5 ml-2">
+            <button
+              onClick={() => {
+                isPausedRef.current = !isPausedRef.current;
+                setIsAutoHealingPaused(isPausedRef.current);
+              }}
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
+              title={isAutoHealingPaused ? 'Resume auto-analysis' : 'Pause auto-analysis'}
+            >
+              {isAutoHealingPaused ? <Play className="w-3.5 h-3.5 text-emerald-400" /> : <Pause className="w-3.5 h-3.5 text-amber-400" />}
+            </button>
+            <button
+              onClick={() => {
+                isCancelledRef.current = true;
+                setAutoHealProgress(null);
+              }}
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-red-400 transition"
+              title="Stop auto-analysis"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
       )}
