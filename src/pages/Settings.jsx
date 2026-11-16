@@ -631,9 +631,7 @@ export default function Settings({ onMenuClick }) {
                 </optgroup>
               </select>
               <p className="text-xs text-gray-500 mt-1">
-                Recommended: <b>Gemini 3.5 Flash</b> (most reliable, zero demand spikes),{" "}
-                <b>Gemini Flash (Latest Stable)</b>, or{" "}
-                <b>Gemini 3.5 Flash-Lite</b> (high free throughput, 1000 RPD).
+                Recommended for heavy usage &amp; 100+ batch photos: <b>Gemini 3.5 Flash-Lite</b> or <b>Gemini 3.1 Flash-Lite</b> (1,000 RPD free). For balanced reporting: <b>Gemini 3.5 Flash</b> (500 RPD).
               </p>
             </div>
             <div>
@@ -976,7 +974,7 @@ export default function Settings({ onMenuClick }) {
 
           <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
             <p className="text-xs text-amber-800">
-              <strong>Priority Order:</strong> Gemini 3 Generation (3.8 Flash → 3.5 Flash → 3.5 Flash-Lite) → Gemini 2.5 Flash (Legacy) → Groq (Qwen 3.8 Vision) → Mistral (Medium 3.5). The app automatically rotates to the next provider if one fails or hits quota.
+              <strong>Priority &amp; Quota Order:</strong> Gemini 3.5 Flash → Gemini 3.5 Flash-Lite (1000 RPD) → Gemini 3.1 Flash-Lite (1000 RPD) → Gemini Flash Latest → Groq (Qwen 3.8 Vision) → Mistral (Medium 3.5). The app automatically rotates models and providers if one hits rate limits.
             </p>
           </div>
         </div>

@@ -186,11 +186,13 @@ export async function _callGeminiApiWithRetries(apiCallFunction, getAppState, re
         } catch (e) {}
       }
 
-      if (retries < 3) {
-        if (rotateApiKey(getAppState) || rotateApiModel(getAppState)) {
-          await new Promise(res => setTimeout(res, 1000));
-          return _callGeminiApiWithRetries(apiCallFunction, getAppState, retries + 1);
-        }
+      if (retries < 4) {
+        // Crucial: Google limits apply per-project, so rotating keys on the same project does not clear 429.
+        // We must rotate the model to a higher-capacity free model (e.g. flash-lite) as well as rotating keys.
+        rotateApiModel(getAppState);
+        rotateApiKey(getAppState);
+        await new Promise(res => setTimeout(res, 1500));
+        return _callGeminiApiWithRetries(apiCallFunction, getAppState, retries + 1);
       }
       throw new Error('QUOTA_EXCEEDED: All Gemini models and API keys have reached rate limits. Please try again in a few moments.');
     }
@@ -295,11 +297,11 @@ export async function callGeminiApiStream({ contents, config, onChunk, getAppSta
         } catch (e) {}
       }
 
-      if (retries < 3) {
-        if (rotateApiKey(getAppState) || rotateApiModel(getAppState)) {
-          await new Promise(res => setTimeout(res, 1000));
-          return callGeminiApiStream({ contents, config, onChunk, getAppState, retries: retries + 1 });
-        }
+      if (retries < 4) {
+        rotateApiModel(getAppState);
+        rotateApiKey(getAppState);
+        await new Promise(res => setTimeout(res, 1500));
+        return callGeminiApiStream({ contents, config, onChunk, getAppState, retries: retries + 1 });
       }
       throw new Error('QUOTA_EXCEEDED: All Gemini models and API keys have reached rate limits. Please try again in a few moments.');
     }

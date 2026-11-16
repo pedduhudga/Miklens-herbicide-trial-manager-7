@@ -3817,7 +3817,7 @@ export default function Trials({ onMenuClick }) {
       const photoKeyToUpdate = driveUrl || dataUrl;
       await updatePhotoAiStatus(targetTrial.ID, photoKeyToUpdate, 'processing', '', null, photoWeather);
       
-      // Safety timeout for photo analysis (max 30s) so UI doesn't hang in "Analyzing"
+      // Safety timeout for photo analysis (max 60s) so UI doesn't hang in "Analyzing"
       const analyzePromise = analyzePhoto(dataUrl, {
         category: targetTrial.Category || activeCategory,
         treatment: targetTrial.FormulationName,
@@ -3828,7 +3828,7 @@ export default function Trials({ onMenuClick }) {
         console.log(`[AI Status] ${msg}`);
       });
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('AI analysis timed out after 30s')), 30000)
+        setTimeout(() => reject(new Error('AI analysis timed out after 60s')), 60000)
       );
 
       let result;
@@ -5306,6 +5306,153 @@ Rules:
       setAiGenRunning(false);
     }
   };
+
+  // ── AUTOMATIC BACKGROUND PHOTO AI HEALER ─────────────────────────
+  const isAutoHealingRef = useRef(false);
+  const [autoHealProgress, setAutoHealProgress] = useState(null);
+
+  const analyzeTrialPhoto = useCallback(async (trial, photo) => {
+    const photoSrc = resolvePhotoSrc(photo);
+    if (!trial || !photoSrc) return { success: false, error: 'No photo source' };
+    const photoDate = photo.date || toDatetimeLocal(new Date());
+    const daa = calculateDAA(photoDate, trial.Date);
+
+    await updatePhotoAiStatus(trial.ID, photoSrc, 'processing');
+    try {
+      const result = await analyzePhoto(photoSrc, {
+        category: trial.Category || activeCategory,
+        treatment: trial.FormulationName,
+        daa,
+        rep: trial.Replication || 1,
+        photoTag: photo.tag || ''
+      });
+
+      if (result.success && result.data) {
+        let singleWx = null;
+        if (trial.Lat && trial.Lon) {
+          singleWx = await fetchObservationWeather(trial.Lat, trial.Lon, photoDate, trial.Date, getAppState).catch(() => null);
+        }
+        await createObservationFromAI(trial, daa, result.data, photoDate, photoSrc, singleWx);
+        await updatePhotoAiStatus(trial.ID, photoSrc, 'completed', '', result.data, singleWx);
+        return { success: true };
+      } else {
+        await updatePhotoAiStatus(trial.ID, photoSrc, 'failed', result.error || 'AI analysis skipped');
+        return { success: false, error: result.error };
+      }
+    } catch (e) {
+      await updatePhotoAiStatus(trial.ID, photoSrc, 'failed', e.message);
+      return { success: false, error: e.message };
+    }
+  }, [activeCategory, getAppState, createObservationFromAI, updatePhotoAiStatus]);
+
+  const findPendingOrFailedPhotos = useCallback(() => {
+    const trials = getAppState().trials || [];
+    const candidates = [];
+    for (const trial of trials) {
+      const photos = safeJsonParse(trial.PhotoURLs, []);
+      for (const p of photos) {
+        if (p.aiStatus === 'failed' || p.aiStatus === 'pending') {
+          candidates.push({ trial, photo: p });
+        }
+      }
+    }
+    return candidates;
+  }, [getAppState]);
+
+  const runAutoPhotoHealer = useCallback(async (manual = false) => {
+    if (isAutoHealingRef.current) return;
+    const candidates = findPendingOrFailedPhotos();
+    if (candidates.length === 0) {
+      if (manual) {
+        window.dispatchEvent(new CustomEvent('app:toast', {
+          detail: { msg: '✓ All photos are already analyzed!', type: 'success' }
+        }));
+      }
+      return;
+    }
+
+    isAutoHealingRef.current = true;
+    setAutoHealProgress({ current: 0, total: candidates.length });
+    console.log(`[AutoPhotoHealer] Starting background auto-analysis for ${candidates.length} photo(s)...`);
+    let completed = 0;
+
+    for (let i = 0; i < candidates.length; i++) {
+      const currentTrials = getAppState().trials || [];
+      const { trial, photo } = candidates[i];
+      const freshTrial = currentTrials.find(t => t.ID === trial.ID) || trial;
+      const freshPhotos = safeJsonParse(freshTrial.PhotoURLs, []);
+      const pSrc = resolvePhotoSrc(photo);
+      const targetDriveId = getDriveFileId(pSrc);
+      const freshP = freshPhotos.find(p => {
+        const s = resolvePhotoSrc(p);
+        const pDriveId = p.driveId || p.fileId || getDriveFileId(p.url || p.src || s);
+        return (pSrc && s === pSrc) || (targetDriveId && pDriveId && targetDriveId === pDriveId);
+      });
+
+      if (freshP && freshP.aiStatus === 'completed') {
+        completed++;
+        setAutoHealProgress({ current: completed, total: candidates.length });
+        continue;
+      }
+
+      setAutoHealProgress({
+        current: completed + 1,
+        total: candidates.length,
+        trialName: freshTrial.FormulationName || 'Trial'
+      });
+
+      const res = await analyzeTrialPhoto(freshTrial, freshP || photo);
+      if (res.success) {
+        completed++;
+      } else {
+        if (res.error && (res.error.includes('429') || res.error.includes('quota'))) {
+          console.warn('[AutoPhotoHealer] Rate limit encountered, backing off 8s...');
+          await new Promise(r => setTimeout(r, 8000));
+        }
+      }
+
+      if (i < candidates.length - 1) {
+        await new Promise(r => setTimeout(r, 3500));
+      }
+    }
+
+    isAutoHealingRef.current = false;
+    setAutoHealProgress(null);
+
+    if (completed > 0) {
+      window.dispatchEvent(new CustomEvent('app:toast', {
+        detail: {
+          msg: `✓ Auto-Analysis Complete! ${completed} photo(s) analyzed & observations logged.`,
+          type: 'success'
+        }
+      }));
+    }
+  }, [findPendingOrFailedPhotos, analyzeTrialPhoto, getAppState]);
+
+  useEffect(() => {
+    // 3 seconds after page loads, check if any failed photos exist and auto-heal them silently!
+    const timer = setTimeout(() => {
+      runAutoPhotoHealer(false);
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [runAutoPhotoHealer]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!isAutoHealingRef.current && navigator.onLine) {
+        const candidates = findPendingOrFailedPhotos();
+        if (candidates.length > 0) {
+          runAutoPhotoHealer(false);
+        }
+      }
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [findPendingOrFailedPhotos, runAutoPhotoHealer]);
+
+  useEffect(() => {
+    window.autoHealTrialPhotos = () => runAutoPhotoHealer(true);
+    return () => { delete window.autoHealTrialPhotos; };
+  }, [runAutoPhotoHealer]);
 
   // ── AI SUMMARY GENERATION ─────────────────────────────────────────
   const generateAISummary = async (trial = activeTrial) => {
@@ -13612,14 +13759,23 @@ If none are present, write "None".`;
           for (let i = 0; i < batch.length; i++) {
             const item = batch[i];
             await saveAndAnalyzePhoto(item.dataUrl, item.date, item.targetTrial, item.tag);
+            if (i < batch.length - 1) {
+              // Intelligent pacing between photo uploads to respect Google 15 RPM free-tier limit
+              await new Promise(r => setTimeout(r, 2000));
+            }
           }
 
           window.dispatchEvent(new CustomEvent('app:toast', {
             detail: {
-              msg: `All ${batch.length} photos saved successfully!`,
+              msg: `All ${batch.length} photos saved! Background auto-healer active.`,
               type: 'success'
             }
           }));
+
+          // Trigger auto-healer to clean up any photos that timed out or hit temporary rate limits
+          setTimeout(() => {
+            runAutoPhotoHealer(false);
+          }, 1500);
         };
 
         return (
@@ -14421,6 +14577,24 @@ If none are present, write "None".`;
           activeCategory={activeCategory}
           onSaveBatchApplication={handleSaveBatchApplication}
         />
+      )}
+
+      {/* ── AUTOMATIC BACKGROUND PHOTO AI HEALER STATUS ── */}
+      {autoHealProgress && (
+        <div className="fixed bottom-6 right-6 z-50 bg-slate-900/95 backdrop-blur-md text-white px-4 py-3 rounded-2xl shadow-2xl border border-violet-500/40 flex items-center gap-3 animate-fade-in text-xs pointer-events-auto">
+          <Sparkles className="w-5 h-5 text-violet-400 animate-spin shrink-0" />
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-extrabold text-slate-100">Auto-Analyzing Photos</span>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-500/20 text-violet-300 border border-violet-500/30">
+                {autoHealProgress.current} / {autoHealProgress.total}
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-0.5 truncate max-w-[200px]">
+              {autoHealProgress.trialName ? `Analyzing ${autoHealProgress.trialName}...` : 'Auto-logging observations...'}
+            </p>
+          </div>
+        </div>
       )}
 
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />

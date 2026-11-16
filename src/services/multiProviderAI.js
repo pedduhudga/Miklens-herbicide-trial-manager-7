@@ -17,6 +17,20 @@ const PROVIDERS = [
     dailyLimit: 500,
   },
   {
+    // High free-tier throughput — 15 RPM / 1000 RPD free — rock-solid availability for batch photos
+    id: 'gemini-3.5-flash-lite',
+    name: 'Gemini 3.5 Flash-Lite',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent',
+    dailyLimit: 1000,
+  },
+  {
+    // High-capacity lightweight fallback — 15 RPM / 1000 RPD free — multi-user resilience
+    id: 'gemini-3.1-flash-lite',
+    name: 'Gemini 3.1 Flash-Lite',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent',
+    dailyLimit: 1000,
+  },
+  {
     // Canonical alias: always routes to the highest-availability production flash model
     id: 'gemini-flash-latest',
     name: 'Gemini Flash (Latest Stable)',
@@ -24,25 +38,18 @@ const PROVIDERS = [
     dailyLimit: 500,
   },
   {
-    // High free-tier throughput — 15 RPM / 1000 RPD free — rock-solid availability
-    id: 'gemini-3.5-flash-lite',
-    name: 'Gemini 3.5 Flash-Lite',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent',
-    dailyLimit: 1000,
-  },
-  {
-    // GA since Sept 2, 2026 — 5 RPM / 20 RPD free — frontier reasoning & vision
-    id: 'gemini-3.8-flash',
-    name: 'Gemini 3.8 Flash',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent',
-    dailyLimit: 20,
-  },
-  {
     // Oct 2026 GA — available as option, but not forced over stable models
     id: 'gemini-3.6-flash',
     name: 'Gemini 3.6 Flash',
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent',
     dailyLimit: 500,
+  },
+  {
+    // GA since Sept 2, 2026 — frontier reasoning & vision (Strict Free Tier: 5 RPM / 20 RPD)
+    id: 'gemini-3.8-flash',
+    name: 'Gemini 3.8 Flash',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent',
+    dailyLimit: 20,
   },
   // ── Groq (Active vision model: qwen3.8-27b) ────
   {
@@ -1035,8 +1042,11 @@ export async function analyzePhoto(imageData, context = {}, onProgress = null) {
           }
 
           if (isQuotaError(err)) {
-            // Brief pause before skipping to the next key (rate limit)
-            await delay(500);
+            // Google AI Studio limits apply per-project, not per-key.
+            // When 429 hits, cool down this model for 30s and immediately try next fallback model (e.g. flash-lite / Groq).
+            console.warn(`[AI] ${provider.name} reached quota/rate limit. Cooling down model for 30s and rotating to next provider...`);
+            providerBlockedUntil[provider.id] = Date.now() + 30000;
+            skipProvider = true;
             break;
           }
 
@@ -1345,7 +1355,11 @@ export async function generateTextWithAI(prompt, systemInstruction = '', onProgr
             break;
           }
           if (isNonRetryable(err)) break;
-          if (isQuotaError(err)) break;
+          if (isQuotaError(err)) {
+            providerBlockedUntil[provider.id] = Date.now() + 30000;
+            skipProvider = true;
+            break;
+          }
           if (attempt < 2) await delay(2000);
         }
       }

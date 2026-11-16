@@ -776,11 +776,11 @@ export class AnalysisEngine {
                     }
                     try {
                         const fetchPromise = apiCall('getProjectAnalysisData', { projectId: this.projectId }, false, this.getAppState);
-                        const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve({ _timeout: true }), 800));
+                        const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve({ _timeout: true }), 3500));
                         
                         const result = await Promise.race([fetchPromise, timeoutPromise]);
                         if (result && result._timeout) {
-                            console.warn('[AnalysisEngine] Backend fetch timed out (800ms limit), falling back to local data');
+                            console.warn('[AnalysisEngine] Backend fetch timed out (3.5s limit), falling back to local data');
                             return null;
                         }
 
