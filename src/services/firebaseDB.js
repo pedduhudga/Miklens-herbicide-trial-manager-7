@@ -27,7 +27,8 @@ function cleanForFirestore(obj) {
   if (obj === null || obj === undefined) return obj;
   if (obj instanceof Date) return obj;
   if (Array.isArray(obj)) {
-    return obj.map(cleanForFirestore);
+    // Replace undefined array elements with null — Firestore rejects undefined inside arrays
+    return obj.map(item => (item === undefined ? null : cleanForFirestore(item)));
   }
   if (typeof obj !== "object") return obj;
   const out = {};

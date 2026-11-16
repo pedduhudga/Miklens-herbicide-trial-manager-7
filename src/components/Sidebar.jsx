@@ -204,7 +204,7 @@ export default function Sidebar({ isOpen, onClose }) {
 
   const filteredBottomItems = bottomItems;
 
-  const sidebarClass = `sidebar bg-white/95 backdrop-blur-xl w-[280px] md:w-72 flex-shrink-0 border-r border-slate-200/50 shadow-[4px_0_32px_rgba(0,0,0,0.08)] flex flex-col fixed inset-y-0 left-0 z-50 md:z-30 md:relative md:translate-x-0 transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+  const sidebarClass = `sidebar bg-white/95 backdrop-blur-xl w-[280px] md:w-72 flex-shrink-0 border-r border-slate-200/50 shadow-[4px_0_32px_rgba(0,0,0,0.08)] flex flex-col fixed inset-y-0 left-0 z-[100] md:z-30 md:relative md:translate-x-0 transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] h-full h-[100dvh] overflow-hidden ${
     isOpen ? 'translate-x-0' : '-translate-x-full'
   }`;
 
@@ -213,7 +213,7 @@ export default function Sidebar({ isOpen, onClose }) {
       {/* Mobile Backdrop */}
       {isOpen && (
         <div
-          className="fixed inset-0 bg-black/40 backdrop-blur-xs z-40 md:hidden animate-fade-in"
+          className="fixed inset-0 bg-black/50 backdrop-blur-xs z-[95] md:hidden animate-fade-in"
           onClick={onClose}
         />
       )}
@@ -221,7 +221,7 @@ export default function Sidebar({ isOpen, onClose }) {
       <aside className={sidebarClass}>
         {/* Category-themed header */}
         <div 
-          className="px-5 py-4 border-b border-white/50"
+          className="px-5 py-4 border-b border-white/50 shrink-0"
           style={{ paddingTop: 'calc(1rem + env(safe-area-inset-top, 0px))' }}
         >
           <div className="flex justify-between items-center mb-2">
@@ -229,6 +229,15 @@ export default function Sidebar({ isOpen, onClose }) {
               <CatIcon className="h-5 w-5" />
               {catConfig.name} Trials
             </h2>
+            <button
+              type="button"
+              onClick={onClose}
+              className="md:hidden p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition active:scale-90"
+              title="Close Menu"
+              aria-label="Close menu"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
 
           {/* Category Switcher Dropdown */}
@@ -274,27 +283,10 @@ export default function Sidebar({ isOpen, onClose }) {
           </div>
         </div>
 
-        <nav className="flex-grow overflow-y-auto p-4 space-y-1">
-          {filteredNavItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              onClick={() => window.innerWidth < 768 && onClose()}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-4 py-2.5 rounded-xl font-medium transition-all duration-200 ${
-                  isActive
-                    ? `${accent.activeBg} shadow-sm`
-                    : `text-slate-600 ${accent.hoverBg} hover:translate-x-1`
-                }`
-              }
-            >
-              {item.icon}
-              <span>{item.label}</span>
-            </NavLink>
-          ))}
-
-          <div className="pt-4 mt-8 border-t border-slate-200/50">
-            {filteredBottomItems.map((item) => (
+        {/* Scrollable Container for Navigation & User Profile / Logout */}
+        <div className="flex-1 overflow-y-auto min-h-0 flex flex-col justify-between">
+          <nav className="p-4 space-y-1">
+            {filteredNavItems.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
@@ -312,10 +304,11 @@ export default function Sidebar({ isOpen, onClose }) {
               </NavLink>
             ))}
 
-            {isAdmin && (
-              <div className="border-t border-slate-200/50 mt-4 pt-4 space-y-1">
+            <div className="pt-4 mt-8 border-t border-slate-200/50">
+              {filteredBottomItems.map((item) => (
                 <NavLink
-                  to="/users"
+                  key={item.to}
+                  to={item.to}
                   onClick={() => window.innerWidth < 768 && onClose()}
                   className={({ isActive }) =>
                     `flex items-center gap-3 px-4 py-2.5 rounded-xl font-medium transition-all duration-200 ${
@@ -325,102 +318,121 @@ export default function Sidebar({ isOpen, onClose }) {
                     }`
                   }
                 >
-                  <Users className="w-5 h-5" />
-                  <span>User Management</span>
+                  {item.icon}
+                  <span>{item.label}</span>
                 </NavLink>
-                <NavLink
-                  to="/migration"
-                  onClick={() => window.innerWidth < 768 && onClose()}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 px-4 py-2.5 rounded-xl font-medium transition-all duration-200 ${
-                      isActive
-                        ? 'bg-orange-100 text-orange-800 shadow-sm'
-                        : 'text-slate-600 hover:bg-orange-50 hover:text-orange-700 hover:translate-x-1'
-                    }`
-                  }
-                >
-                  <Flame className="w-5 h-5" />
-                  <span className="flex items-center gap-1.5">
-                    Firebase Migration
-                    {firebaseEnabled && <span className="text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded-full font-bold">ON</span>}
-                  </span>
-                </NavLink>
-              </div>
-            )}
-          </div>
-        </nav>
+              ))}
 
-        {user && (
-          <div 
-            className="mt-auto p-4 border-t border-slate-200/50 bg-white/50"
-            style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}
-          >
-            {state.syncQueue && state.syncQueue.length > 0 && (
-              <div className="mb-4 p-3 bg-slate-50 border border-slate-100 rounded-xl space-y-1.5">
-                <div className="flex justify-between items-center text-[10px]">
-                  <span className="font-semibold text-slate-600 flex items-center gap-1">
-                    <RefreshCw className="w-3 h-3 animate-spin text-emerald-500" />
-                    {maxQueueLength > 0 ? `Syncing ${Math.min(maxQueueLength, maxQueueLength - queueLength + 1)}/${maxQueueLength}...` : 'Syncing...'}
-                  </span>
-                  <span className="text-slate-400 font-bold">
-                    {Math.round(maxQueueLength > 0 ? ((maxQueueLength - queueLength) / maxQueueLength) * 100 : 0)}%
-                  </span>
+              {isAdmin && (
+                <div className="border-t border-slate-200/50 mt-4 pt-4 space-y-1">
+                  <NavLink
+                    to="/users"
+                    onClick={() => window.innerWidth < 768 && onClose()}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 px-4 py-2.5 rounded-xl font-medium transition-all duration-200 ${
+                        isActive
+                          ? `${accent.activeBg} shadow-sm`
+                          : `text-slate-600 ${accent.hoverBg} hover:translate-x-1`
+                      }`
+                    }
+                  >
+                    <Users className="w-5 h-5" />
+                    <span>User Management</span>
+                  </NavLink>
+                  <NavLink
+                    to="/migration"
+                    onClick={() => window.innerWidth < 768 && onClose()}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 px-4 py-2.5 rounded-xl font-medium transition-all duration-200 ${
+                        isActive
+                          ? 'bg-orange-100 text-orange-800 shadow-sm'
+                          : 'text-slate-600 hover:bg-orange-50 hover:text-orange-700 hover:translate-x-1'
+                      }`
+                    }
+                  >
+                    <Flame className="w-5 h-5" />
+                    <span className="flex items-center gap-1.5">
+                      Firebase Migration
+                      {firebaseEnabled && <span className="text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded-full font-bold">ON</span>}
+                    </span>
+                  </NavLink>
                 </div>
-                <div className="w-full bg-slate-200 rounded-full h-1 overflow-hidden">
-                  <div
-                    className="bg-emerald-500 h-1 rounded-full transition-all duration-300"
-                    style={{ width: `${maxQueueLength > 0 ? ((maxQueueLength - queueLength) / maxQueueLength) * 100 : 0}%` }}
-                  />
-                </div>
-              </div>
-            )}
-            <div className="flex items-center gap-3 mb-4 px-2">
-              <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold uppercase" style={{ background: catConfig.color.hexLight, color: catConfig.color.hex }}>
-                {displayUname[0] || 'U'}
-              </div>
-              <div className="flex flex-col overflow-hidden">
-                <span className="text-sm font-bold text-slate-800 truncate">{displayUname}</span>
-                <span className="text-xs text-slate-500 uppercase tracking-wider font-semibold">{user.role || user.Role}</span>
-              </div>
+              )}
             </div>
-            
-            {canInstall && (
-              <button
-                onClick={() => {
-                  triggerHaptic('selection');
-                  window.dispatchEvent(new CustomEvent('pwa-show-install'));
-                }}
-                className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl bg-emerald-50 text-emerald-800 hover:bg-emerald-100 transition-all duration-200 font-bold mb-1 shadow-2xs border border-emerald-200/60"
-                title="Install Miklens Trial Manager PWA to home screen"
-              >
-                <Download className="w-5 h-5 text-emerald-600" />
-                <span>Install PWA App</span>
-              </button>
-            )}
+          </nav>
 
-            {firebaseEnabled && (
-              <button
-                onClick={() => {
-                  setChangeError('');
-                  setChangeSuccess('');
-                  setShowChangePasswordModal(true);
-                }}
-                className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-slate-600 hover:bg-slate-50 transition-all duration-200 font-medium mb-1"
-              >
-                <Key className="w-5 h-5" />
-                <span>Change Password</span>
-              </button>
-            )}
-
-            <button
-              onClick={logout}
-              className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-red-600 hover:bg-red-50 transition-all duration-200 font-medium"
+          {user && (
+            <div 
+              className="mt-auto p-4 border-t border-slate-200/50 bg-white/70 backdrop-blur-sm shrink-0 pb-24 md:pb-6"
+              style={{ paddingBottom: 'max(5.5rem, calc(2rem + env(safe-area-inset-bottom, 20px)))' }}
             >
-              <LogOut className="w-5 h-5" />
-              <span>Sign Out</span>
-            </button>
-          </div>
-        )}
+              {state.syncQueue && state.syncQueue.length > 0 && (
+                <div className="mb-4 p-3 bg-slate-50 border border-slate-100 rounded-xl space-y-1.5">
+                  <div className="flex justify-between items-center text-[10px]">
+                    <span className="font-semibold text-slate-600 flex items-center gap-1">
+                      <RefreshCw className="w-3 h-3 animate-spin text-emerald-500" />
+                      {maxQueueLength > 0 ? `Syncing ${Math.min(maxQueueLength, maxQueueLength - queueLength + 1)}/${maxQueueLength}...` : 'Syncing...'}
+                    </span>
+                    <span className="text-slate-400 font-bold">
+                      {Math.round(maxQueueLength > 0 ? ((maxQueueLength - queueLength) / maxQueueLength) * 100 : 0)}%
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-200 rounded-full h-1 overflow-hidden">
+                    <div
+                      className="bg-emerald-500 h-1 rounded-full transition-all duration-300"
+                      style={{ width: `${maxQueueLength > 0 ? ((maxQueueLength - queueLength) / maxQueueLength) * 100 : 0}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+              <div className="flex items-center gap-3 mb-4 px-2">
+                <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold uppercase shadow-xs shrink-0" style={{ background: catConfig.color.hexLight, color: catConfig.color.hex }}>
+                  {displayUname[0] || 'U'}
+                </div>
+                <div className="flex flex-col overflow-hidden">
+                  <span className="text-sm font-bold text-slate-800 truncate">{displayUname}</span>
+                  <span className="text-xs text-slate-500 uppercase tracking-wider font-semibold">{user.role || user.Role}</span>
+                </div>
+              </div>
+              
+              {canInstall && (
+                <button
+                  onClick={() => {
+                    triggerHaptic('selection');
+                    window.dispatchEvent(new CustomEvent('pwa-show-install'));
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl bg-emerald-50 text-emerald-800 hover:bg-emerald-100 transition-all duration-200 font-bold mb-1 shadow-2xs border border-emerald-200/60"
+                  title="Install Miklens Trial Manager PWA to home screen"
+                >
+                  <Download className="w-5 h-5 text-emerald-600" />
+                  <span>Install PWA App</span>
+                </button>
+              )}
+
+              {firebaseEnabled && (
+                <button
+                  onClick={() => {
+                    setChangeError('');
+                    setChangeSuccess('');
+                    setShowChangePasswordModal(true);
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-slate-600 hover:bg-slate-50 transition-all duration-200 font-medium mb-1"
+                >
+                  <Key className="w-5 h-5" />
+                  <span>Change Password</span>
+                </button>
+              )}
+
+              <button
+                onClick={logout}
+                className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-red-600 hover:bg-red-50 hover:text-red-700 transition-all duration-200 font-bold active:scale-95"
+              >
+                <LogOut className="w-5 h-5" />
+                <span>Sign Out</span>
+              </button>
+            </div>
+          )}
+        </div>
       </aside>
 
       {/* Change Password Modal */}

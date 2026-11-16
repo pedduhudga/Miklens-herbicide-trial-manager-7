@@ -277,11 +277,21 @@ const TrialCard = memo(function TrialCard({
   const isLive = String(trial.IsLive) !== 'false';
   const isCompleted = trial.IsCompleted === true || trial.IsCompleted === 'true';
 
-  // Block badge info for RCBD Pot Trials
+  // Block badge info for RCBD Pot Trials & Pot Identification
+  const isPotTrial = trial.TrialDesign === 'PotTrial' || trial.TrialDesign === 'rcbd-pot' || !!trial.PotLabel;
+  const isRcbdPot = (project?.PotLayout === 'rcbd-pot' || trial.TrialDesign === 'rcbd-pot') && trial.TrialDesign !== 'stripe';
+
   const blockInfo = useMemo(() => {
-    if (trial.TrialDesign !== 'PotTrial' || !trial.Replication) return null;
-    const blockNum = parseInt(trial.Replication, 10);
+    if (!isPotTrial || !trial.Replication) return null;
+    let blockNum = parseInt(trial.Replication, 10);
     if (isNaN(blockNum) || blockNum < 1) return null;
+
+    // Sanitize accidental plotNum as replication (e.g. 101, 102, 201...)
+    if (blockNum > 50) {
+      blockNum = trial.PotRow ? parseInt(trial.PotRow, 10) : Math.floor(blockNum / 100);
+      if (isNaN(blockNum) || blockNum < 1) blockNum = 1;
+    }
+
     const colorIdx = (blockNum - 1) % BLOCK_COLORS.length;
     const colors = BLOCK_COLORS[colorIdx];
     // Calculate represented pots from project data
@@ -295,8 +305,14 @@ const TrialCard = memo(function TrialCard({
       const m = trial.PotLabel.match(/(\d+)\s*Pots?/i);
       if (m) potsPerColumn = parseInt(m[1], 10);
     }
-    return { blockNum, colors, potsPerColumn, isColumnWise: project?.PotObsMode === 'column-wise' || (trial.PotRow === null && trial.PotCol != null) };
-  }, [trial.TrialDesign, trial.Replication, trial.PotLabel, trial.PotRow, trial.PotCol, project]);
+    return { 
+      blockNum, 
+      colors, 
+      potsPerColumn, 
+      isRcbd: isRcbdPot,
+      isColumnWise: project?.PotObsMode === 'column-wise' || (trial.PotRow === null && trial.PotCol != null) 
+    };
+  }, [isPotTrial, isRcbdPot, trial.Replication, trial.PotRow, trial.PotLabel, trial.PotCol, project]);
 
   const posVal = useMemo(() => {
     if (trial.TrialDesign !== 'PotTrial') return '';
@@ -633,33 +649,37 @@ const TrialCard = memo(function TrialCard({
         </div>
       )}
 
-      {/* Block Badge for RCBD Pot Trial */}
-      {blockInfo && (
-        <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-t-xl ${blockInfo.colors.bg} border-b ${blockInfo.colors.border}`}>
-          <span className="text-sm leading-none">{blockInfo.colors.emoji}</span>
-          <span className={`text-[11px] font-extrabold uppercase tracking-wide ${blockInfo.colors.text}`}>
-            Block {blockInfo.blockNum}
+      {/* Top Banner: Pot Information or RCBD Block Banner */}
+      {isPotTrial && (
+        <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-t-xl ${
+          isRcbdPot && blockInfo ? `${blockInfo.colors.bg} border-b ${blockInfo.colors.border}` : 'bg-emerald-50 text-emerald-900 border-b border-emerald-200'
+        }`}>
+          <span className="text-sm leading-none">{isRcbdPot && blockInfo ? blockInfo.colors.emoji : '🪴'}</span>
+          <span className={`text-[11px] font-extrabold uppercase tracking-wide ${
+            isRcbdPot && blockInfo ? blockInfo.colors.text : 'text-emerald-800'
+          }`}>
+            {isRcbdPot && blockInfo ? `Block ${blockInfo.blockNum}` : `Pot ${trial.PotLabel || (trial.PotRow && trial.PotCol ? `R${trial.PotRow}C${trial.PotCol}` : '') || posVal || trial.PlotNumber}`}
           </span>
-          {trial.PotLabel && (
-            <span className={`ml-auto text-[10px] font-semibold ${blockInfo.colors.text} opacity-70`}>
-              Pot: {trial.PotLabel} {posVal && posVal !== trial.PotLabel ? ` | Pos: ${posVal}` : ''}
-            </span>
-          )}
+          <span className={`ml-auto text-[10px] font-semibold ${
+            isRcbdPot && blockInfo ? `${blockInfo.colors.text} opacity-75` : 'text-emerald-700'
+          }`}>
+            {trial.PotCol ? `Col ${trial.PotCol}` : ''}
+            {trial.PotRow ? ` · Row ${trial.PotRow}` : ''}
+            {blockInfo?.blockNum ? ` · Rep ${blockInfo.blockNum}` : ''}
+          </span>
         </div>
       )}
 
-
-
-      <div className={`p-4 ${blockInfo ? 'pt-3' : 'pt-10'} flex-1 flex flex-col`}>
-        <div className="flex items-start justify-between gap-3 mb-2">
-          <div className="min-w-0">
-            <h3 className="font-bold text-slate-800 truncate" title={blockInfo ? `Block ${blockInfo.blockNum} - ${trial.FormulationName}` : trial.FormulationName}>
+      <div className={`p-3.5 sm:p-4 ${isPotTrial || blockInfo ? 'pt-2.5 sm:pt-3' : 'pt-8 sm:pt-10'} flex-1 flex flex-col`}>
+        <div className="flex items-start justify-between gap-2 sm:gap-3 mb-1.5 sm:mb-2">
+          <div className="min-w-0 flex-1">
+            <h3 className="font-bold text-slate-800 text-xs sm:text-sm leading-snug break-words line-clamp-2" title={isRcbdPot && blockInfo ? `Block ${blockInfo.blockNum} - ${trial.FormulationName}` : (trial.TrialName || trial.FormulationName)}>
               {subTrialLabel && (
                 <span className="bg-emerald-600 text-white text-[10px] font-extrabold px-1.5 py-0.5 rounded-md mr-1.5 align-middle shadow-sm">
                   {subTrialLabel}
                 </span>
               )}
-              {blockInfo && (
+              {isRcbdPot && blockInfo && (
                 <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded-md mr-1.5 align-middle shadow-sm ${blockInfo.colors.bg} ${blockInfo.colors.text} border ${blockInfo.colors.border}`}>
                   B{blockInfo.blockNum}
                 </span>
@@ -667,8 +687,8 @@ const TrialCard = memo(function TrialCard({
               <span className="align-middle">{trial.TrialName || trial.FormulationName || 'Untitled'}</span>
             </h3>
             {trial.FormulationName && (
-              <p className="text-[11px] font-semibold text-slate-500 truncate flex items-center gap-1 mt-0.5">
-                Product:
+              <p className="text-[11px] font-semibold text-slate-500 leading-tight mt-0.5 flex items-center gap-1 flex-wrap">
+                <span className="text-slate-400 font-medium">Product:</span>
                 <button
                   type="button"
                   onClick={(e) => {
@@ -677,11 +697,11 @@ const TrialCard = memo(function TrialCard({
                       onQuickPeekFormulation(trial.FormulationID, trial.FormulationName);
                     }
                   }}
-                  className="text-emerald-700 dark:text-emerald-400 font-bold hover:underline inline-flex items-center gap-0.5 group cursor-pointer"
+                  className="text-emerald-700 dark:text-emerald-400 font-bold hover:underline inline-flex items-center gap-0.5 group cursor-pointer break-words line-clamp-1 text-left"
                   title="Quick peek formulation recipe and performance"
                 >
-                  <span>{trial.FormulationName}</span>
-                  <Eye className="w-3 h-3 text-emerald-500 opacity-60 group-hover:opacity-100 transition" />
+                  <span className="break-words">{trial.FormulationName}</span>
+                  <Eye className="w-3 h-3 text-emerald-500 shrink-0 opacity-60 group-hover:opacity-100 transition" />
                 </button>
               </p>
             )}
