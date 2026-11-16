@@ -90,57 +90,76 @@ export async function runDailyLifecycleCheck(trials, user, getAppState) {
 
   // 1. SELF-CORRECTION & RESTORATION:
   // Non-herbicide categories (nutrition, fungicide, pesticide, biostimulant) must NEVER be auto-finalized
-  // by herbicide photo-inactivity logic. If any non-herbicide trial was previously auto-finalized,
-  // immediately restore it to live active status!
+  // by herbicide photo-inactivity logic. Only restore trials that are ACTUALLY marked finalized or completed.
+  const nonHerbicideTrialsToRestore = [];
   for (const trial of trials) {
     const trialCat = (trial.Category || activeCategory).toLowerCase();
     if (trialCat !== 'herbicide') {
+      const isCompleted = trial.IsCompleted === true || trial.IsCompleted === 'true';
+      const isCtrlFin = trial.ControlFinalized === true || trial.ControlFinalized === 'true';
       const isAutoFin = trial.AutoFinalized === true || trial.AutoFinalized === 'true';
-      const hasAutoReason = !!trial.AutoFinalizedReason;
-      if (isAutoFin || hasAutoReason) {
-        console.log(`[AutoFinalize] Restoring mistakenly auto-finalized ${trialCat} trial: ${trial.ID} ("${trial.FormulationName || trial.TreatmentName || 'Trial'}"). Reactivating to Live/Active status...`);
-        const restorePayload = {
-          ID: trial.ID,
-          id: trial.ID,
-          Category: trial.Category || activeCategory,
-          IsCompleted: false,
-          ControlFinalized: false,
-          FinalizationDate: '',
-          FinalControlDuration: '',
-          AutoFinalized: false,
-          AutoFinalizedReason: '',
-          AutoFinalizedAt: '',
-          IsLive: true
-        };
+      const hasAutoReason = typeof trial.AutoFinalizedReason === 'string' && trial.AutoFinalizedReason.trim().length > 0;
 
-        try {
-          await fbCatUpdateTrial(trial.Category || activeCategory, restorePayload);
-
-          // Update the trial reference in-place and memory state
-          Object.assign(trial, restorePayload);
-          if (state.trials) {
-            state.trials = state.trials.map(t => String(t.ID) === String(trial.ID) ? {
-              ...t,
-              ...restorePayload
-            } : t);
-            if (typeof window !== 'undefined' && window.appState) {
-              window.appState.trials = state.trials;
-            }
-          }
-
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('app:toast', {
-              detail: {
-                msg: `Restored ${trialCat} trial "${trial.FormulationName || 'Trial'}" to active status`,
-                type: 'info',
-                trialId: trial.ID
-              }
-            }));
-          }
-        } catch (err) {
-          console.error(`[AutoFinalize] Failed to restore non-herbicide trial ${trial.ID}:`, err);
-        }
+      // Only restore if the trial is non-herbicide and is actually in a finalized/auto-finalized state
+      if ((isCompleted || isCtrlFin || isAutoFin) && (isAutoFin || hasAutoReason)) {
+        nonHerbicideTrialsToRestore.push(trial);
       }
+    }
+  }
+
+  if (nonHerbicideTrialsToRestore.length > 0) {
+    console.log(`[AutoFinalize] Restoring ${nonHerbicideTrialsToRestore.length} mistakenly auto-finalized ${activeCategory} trial(s) to live active status...`);
+
+    const restorePayloads = nonHerbicideTrialsToRestore.map(trial => ({
+      ID: trial.ID,
+      id: trial.ID,
+      Category: trial.Category || activeCategory,
+      IsCompleted: false,
+      ControlFinalized: false,
+      FinalizationDate: '',
+      FinalControlDuration: '',
+      AutoFinalized: false,
+      AutoFinalizedReason: '',
+      AutoFinalizedAt: '',
+      IsLive: true
+    }));
+
+    // Update in-memory trial objects immediately so UI updates in real-time
+    restorePayloads.forEach((payload, idx) => {
+      Object.assign(nonHerbicideTrialsToRestore[idx], payload);
+    });
+
+    if (state.trials) {
+      const payloadMap = new Map(restorePayloads.map(p => [String(p.ID), p]));
+      const nextTrials = state.trials.map(t => payloadMap.has(String(t.ID)) ? { ...t, ...payloadMap.get(String(t.ID)) } : t);
+      state.trials = nextTrials;
+      if (typeof window !== 'undefined' && window.appState) {
+        window.appState.trials = nextTrials;
+      }
+      if (typeof window !== 'undefined' && typeof window.updateState === 'function') {
+        window.updateState({ trials: nextTrials });
+      }
+    }
+
+    // Persist all restorations to backend in parallel
+    try {
+      await Promise.all(
+        restorePayloads.map(payload => fbCatUpdateTrial(payload.Category, payload).catch(err => {
+          console.warn(`[AutoFinalize] Failed to persist restoration for trial ${payload.ID}:`, err);
+        }))
+      );
+    } catch (batchErr) {
+      console.error('[AutoFinalize] Batch restoration error:', batchErr);
+    }
+
+    // Single unified toast notification instead of spamming 40+ toasts
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('app:toast', {
+        detail: {
+          msg: `Restored ${nonHerbicideTrialsToRestore.length} ${activeCategory} trial(s) to active status`,
+          type: 'info'
+        }
+      }));
     }
   }
 

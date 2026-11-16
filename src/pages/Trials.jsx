@@ -4406,60 +4406,14 @@ export default function Trials({ onMenuClick }) {
         });
       }
 
-      // Synthesize notes with AI
+      // Deduplicate and synthesize notes locally without burning API quota
       if (newObs.notes || existing.notes) {
-        const combined = [existing.notes, newObs.notes].filter(Boolean).join(' | ');
-        try {
-          const prompt = `You are a professional agricultural scientist.
-We are merging observations from multiple plant scans/samples at DAA ${daa} for Treatment: ${latestTrial.FormulationName || latestTrial.FormulationId || 'Unknown'} (Category: ${trialCat}, Crop: ${latestTrial.CropCrop || latestTrial.Crop || 'Crop'}).
-Here are the plant-level raw notes:
-${combined}
-
-Please synthesize these raw notes into a single, cohesive, publication-grade scientific summary of 1-2 sentences.
-Rules:
-1. Deduplicate similar observations.
-2. Reconcile any contradictions (e.g. if some plants have minor pests but others are healthy, state 'Minor pest activity was observed on some plants, while the majority of foliage appeared healthy').
-3. Keep it strictly factual, professional, and concise. Do NOT give advice, recommendations, or monitoring schedules.
-4. Do NOT include markdown headers or bullet points.`;
-          
-          const synth = await generateTextWithAI(prompt, 'You are a professional agronomist.');
-          if (synth && synth.trim()) {
-            mergedObs.notes = synth.trim();
-          } else {
-            mergedObs.notes = deduplicateText(existing.notes, newObs.notes);
-          }
-        } catch (e) {
-          console.warn('Failed to synthesize notes:', e);
-          mergedObs.notes = deduplicateText(existing.notes, newObs.notes);
-        }
+        mergedObs.notes = deduplicateText(existing.notes, newObs.notes);
       }
 
-      // Synthesize efficacy assessment with AI
+      // Deduplicate efficacy assessments locally without burning API quota
       if (newObs.aiEfficacyAssessment || existing.aiEfficacyAssessment) {
-        const combined = [existing.aiEfficacyAssessment, newObs.aiEfficacyAssessment].filter(Boolean).join(' | ');
-        try {
-          const prompt = `You are a professional agricultural scientist.
-We are merging observations from multiple plant scans/samples at DAA ${daa} for Treatment: ${latestTrial.FormulationName || latestTrial.FormulationId || 'Unknown'} (Category: ${trialCat}, Crop: ${latestTrial.CropCrop || latestTrial.Crop || 'Crop'}).
-Here are the plant-level efficacy assessments:
-${combined}
-
-Please synthesize these assessments into a single, cohesive, publication-grade scientific summary of 1-2 sentences.
-Rules:
-1. Deduplicate similar observations.
-2. Reconcile any contradictions.
-3. Keep it strictly factual, professional, and concise. Do NOT give advice, recommendations, or monitoring schedules.
-4. Do NOT include markdown headers or bullet points.`;
-          
-          const synth = await generateTextWithAI(prompt, 'You are a professional agronomist.');
-          if (synth && synth.trim()) {
-            mergedObs.aiEfficacyAssessment = synth.trim();
-          } else {
-            mergedObs.aiEfficacyAssessment = deduplicateText(existing.aiEfficacyAssessment, newObs.aiEfficacyAssessment);
-          }
-        } catch (e) {
-          console.warn('Failed to synthesize efficacy assessment:', e);
-          mergedObs.aiEfficacyAssessment = deduplicateText(existing.aiEfficacyAssessment, newObs.aiEfficacyAssessment);
-        }
+        mergedObs.aiEfficacyAssessment = deduplicateText(existing.aiEfficacyAssessment, newObs.aiEfficacyAssessment);
       }
 
       // Merge photoUrls (comma separated list)
@@ -5238,6 +5192,7 @@ Rules:
           ...pObj,
           aiStatus: status,
           aiError: errorMsg || '',
+          ...(status === 'failed' ? { aiFailedAt: Date.now() } : {}),
           ...(compactAiData ? { aiData: compactAiData } : {})
         };
       }
@@ -5422,19 +5377,25 @@ Rules:
           return false;
         });
 
-        const isFailedOrPending = pObj.aiStatus === 'failed' || pObj.aiStatus === 'pending';
+        const isFailed = pObj.aiStatus === 'failed';
+        // Avoid auto-retrying photos that failed recently (within 10 minutes) during background scans
+        if (isFailed && pObj.aiFailedAt && (Date.now() - pObj.aiFailedAt) < 600000) {
+          continue;
+        }
+
+        const isPending = pObj.aiStatus === 'pending';
         // Old photos captured before AI status or never processed
-        const isOldUnprocessedPhoto = !pObj.aiStatus || pObj.aiStatus !== 'completed';
+        const isOldUnprocessedPhoto = !pObj.aiStatus && !hasMatchingObs;
         // Photos whose observation is missing from EfficacyDataJSON
         const isMissingObservation = !hasMatchingObs;
 
-        if (isFailedOrPending || isOldUnprocessedPhoto || isMissingObservation) {
+        if (isMissingObservation || isOldUnprocessedPhoto || isPending) {
           seen.add(uniqueKey);
           candidates.push({
             trial,
             photo: pObj,
             hasMatchingObs,
-            reason: isFailedOrPending ? pObj.aiStatus : (isOldUnprocessedPhoto ? 'unprocessed' : 'missing_observation')
+            reason: isFailed ? 'failed' : (isPending ? 'pending' : (isOldUnprocessedPhoto ? 'unprocessed' : 'missing_observation'))
           });
         }
       }
@@ -5530,14 +5491,15 @@ Rules:
       if (res.success) {
         completed++;
       } else {
-        if (res.error && (res.error.includes('429') || res.error.includes('quota'))) {
-          console.warn('[AutoPhotoHealer] Rate limit encountered, backing off 8s...');
-          await new Promise(r => setTimeout(r, 8000));
+        const errStr = String(res.error || '').toLowerCase();
+        if (errStr.includes('429') || errStr.includes('quota') || errStr.includes('exhausted') || errStr.includes('high demand') || errStr.includes('unavailable')) {
+          console.warn('[AutoPhotoHealer] AI rate limit, quota, or service demand reached. Pausing background auto-analysis.');
+          break;
         }
       }
 
       if (i < candidates.length - 1) {
-        await new Promise(r => setTimeout(r, 3500));
+        await new Promise(r => setTimeout(r, 4500));
       }
     }
 
@@ -5556,10 +5518,10 @@ Rules:
   }, [findPhotosNeedingObservation, analyzeTrialPhoto, getAppState, activeCategory]);
 
   useEffect(() => {
-    // 3 seconds after page loads, check if any failed or non-observation photos exist and auto-heal them!
+    // 6 seconds after page loads, check if any failed or non-observation photos exist and auto-heal them!
     const timer = setTimeout(() => {
       runAutoPhotoHealer(false);
-    }, 3000);
+    }, 6000);
     return () => clearTimeout(timer);
   }, [runAutoPhotoHealer]);
 
@@ -5571,7 +5533,7 @@ Rules:
           runAutoPhotoHealer(false);
         }
       }
-    }, 60000);
+    }, 300000);
     return () => clearInterval(interval);
   }, [findPhotosNeedingObservation, runAutoPhotoHealer]);
 

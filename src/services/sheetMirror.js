@@ -221,7 +221,7 @@ export async function flushMirrorQueue(getAppState) {
       const payload = sanitizePayload(item.payload);
 
       try {
-        const result = await apiCall(item.action, payload, false, getAppState);
+        const result = await apiCall(item.action, payload, false, getAppState, true);
         if (result?._errType) {
           const isNotFoundError = String(result.message || '').toLowerCase().includes('not found');
           const isDeleteAction = String(item.action).toLowerCase().includes('delete');

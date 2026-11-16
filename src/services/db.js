@@ -9,7 +9,7 @@ const OFFLINE_ACTIONS = [
     'deleteOrganisation', 'deleteIngredient'
 ];
 
-export async function apiCall(action, payload = {}, showOverlay = true, getAppState) {
+export async function apiCall(action, payload = {}, showOverlay = true, getAppState, skipQueueOnFailure = false) {
     const state = getAppState ? getAppState() : null;
 
     if (!state || !state.settings || !state.settings.scriptUrl) {
@@ -18,7 +18,7 @@ export async function apiCall(action, payload = {}, showOverlay = true, getAppSt
     }
 
     const queueItem = async (errType, msg) => {
-        if (OFFLINE_ACTIONS.includes(action)) {
+        if (!skipQueueOnFailure && OFFLINE_ACTIONS.includes(action)) {
             const queuedAction = {
                 id: `sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                 action: action,
