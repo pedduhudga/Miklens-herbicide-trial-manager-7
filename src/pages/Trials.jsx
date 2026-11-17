@@ -5377,6 +5377,12 @@ export default function Trials({ onMenuClick }) {
           return false;
         });
 
+        const isCompleted = pObj.aiStatus === 'completed';
+        if (isCompleted) {
+          // Photo has already been successfully analyzed by AI — do not re-process!
+          continue;
+        }
+
         const isFailed = pObj.aiStatus === 'failed';
         // Avoid auto-retrying photos that failed recently (within 10 minutes) during background scans
         if (isFailed && pObj.aiFailedAt && (Date.now() - pObj.aiFailedAt) < 600000) {
@@ -5386,16 +5392,14 @@ export default function Trials({ onMenuClick }) {
         const isPending = pObj.aiStatus === 'pending';
         // Old photos captured before AI status or never processed
         const isOldUnprocessedPhoto = !pObj.aiStatus && !hasMatchingObs;
-        // Photos whose observation is missing from EfficacyDataJSON
-        const isMissingObservation = !hasMatchingObs;
 
-        if (isMissingObservation || isOldUnprocessedPhoto || isPending) {
+        if (isPending || isOldUnprocessedPhoto || isFailed) {
           seen.add(uniqueKey);
           candidates.push({
             trial,
             photo: pObj,
             hasMatchingObs,
-            reason: isFailed ? 'failed' : (isPending ? 'pending' : (isOldUnprocessedPhoto ? 'unprocessed' : 'missing_observation'))
+            reason: isFailed ? 'failed' : (isPending ? 'pending' : 'unprocessed')
           });
         }
       }
@@ -5517,25 +5521,30 @@ export default function Trials({ onMenuClick }) {
     }
   }, [findPhotosNeedingObservation, analyzeTrialPhoto, getAppState, activeCategory]);
 
+  const runAutoPhotoHealerRef = useRef(runAutoPhotoHealer);
+  runAutoPhotoHealerRef.current = runAutoPhotoHealer;
+
   useEffect(() => {
-    // 6 seconds after page loads, check if any failed or non-observation photos exist and auto-heal them!
+    // Only run once on page mount after initial data load has settled
     const timer = setTimeout(() => {
-      runAutoPhotoHealer(false);
+      if (runAutoPhotoHealerRef.current) {
+        runAutoPhotoHealerRef.current(false);
+      }
     }, 6000);
     return () => clearTimeout(timer);
-  }, [runAutoPhotoHealer]);
+  }, []);
 
   useEffect(() => {
     const interval = setInterval(() => {
       if (!isAutoHealingRef.current && navigator.onLine) {
         const candidates = findPhotosNeedingObservation();
-        if (candidates.length > 0) {
-          runAutoPhotoHealer(false);
+        if (candidates.length > 0 && runAutoPhotoHealerRef.current) {
+          runAutoPhotoHealerRef.current(false);
         }
       }
     }, 300000);
     return () => clearInterval(interval);
-  }, [findPhotosNeedingObservation, runAutoPhotoHealer]);
+  }, [findPhotosNeedingObservation]);
 
   useEffect(() => {
     window.autoHealTrialPhotos = () => runAutoPhotoHealer(true);
