@@ -445,6 +445,10 @@ Respond ONLY with a single minified JSON object in this format: {"identification
  * Determine if general photo should be automatically analyzed for weeds.
  */
 export function shouldAutoIdentifyGeneralPhotoWeeds(trial, photoLocator = {}) {
+  // Agronomic Category Isolation: Weed identification is strictly exclusive to herbicide trials
+  const category = (trial?.Category || 'herbicide').toLowerCase();
+  if (category !== 'herbicide') return false;
+
   let photos = [];
   try {
     photos = typeof trial?.PhotoURLs === 'string' ? JSON.parse(trial.PhotoURLs) : (trial?.PhotoURLs || []);
@@ -476,6 +480,10 @@ export async function analyzeGeneralPhotoWeeds(trialId, photoLocator = {}, optio
   const state = typeof window !== 'undefined' && window.appState ? window.appState : {};
   const trial = (state.trials || []).find(t => t.ID === trialId);
   if (!trial) return [];
+
+  // Agronomic Category Isolation: Weed identification is strictly exclusive to herbicide trials
+  const category = (trial.Category || 'herbicide').toLowerCase();
+  if (category !== 'herbicide') return [];
 
   let photos = [];
   try {

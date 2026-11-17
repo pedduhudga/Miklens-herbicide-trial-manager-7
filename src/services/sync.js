@@ -374,7 +374,7 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                     // --- PHOTO UPLOAD SYNC PATH ---
                     // CRITICAL FIX: Dedup check - MUST work even if URL is empty (first upload attempt)
                     const trial = state.trials.find(t => t.ID === item.trialId);
-                    if (trial && item.photo.tempId) {
+                    if (trial && item.photo?.tempId) {
                         const isWeed = item.type === 'weed_upload';
                         let photos = isWeed ? safeJsonParse(trial.WeedPhotosJSON) : safeJsonParse(trial.PhotoURLs);
 
@@ -391,7 +391,7 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
 
                         // Check if another sync item for the same photo is already uploading
                         const otherUploadingItem = getAppState().syncQueue.find(s =>
-                            s.photo.tempId === item.photo.tempId &&
+                            s.photo?.tempId === item.photo.tempId &&
                             s.id !== item.id &&
                             s.status === 'uploading'
                         );
@@ -563,76 +563,82 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                                             }
                                         }
                                     } else {
-                                        // 1. Proactive Weed ID (If missing species or first photo)
-                                        const shouldRunFirstPhotoCheck = typeof window.shouldAutoIdentifyGeneralPhotoWeeds === 'function' ? window.shouldAutoIdentifyGeneralPhotoWeeds(trial, {
-                                            tempId: item.photo.tempId,
-                                            url: publicUrl
-                                        }) : false;
+                                        const trialCategory = (trial?.Category || 'herbicide').toLowerCase();
 
-                                        if (shouldRunFirstPhotoCheck) {
-                                            console.log('[AI Background] Triggering proactive Weed ID for general photo...');
-                                            const ids = typeof window.analyzeGeneralPhotoWeeds === 'function' ? await window.analyzeGeneralPhotoWeeds(item.trialId, {
+                                        // 1. Proactive Weed ID (Only for herbicide category, if missing species or first photo)
+                                        if (trialCategory === 'herbicide') {
+                                            const shouldRunFirstPhotoCheck = typeof window.shouldAutoIdentifyGeneralPhotoWeeds === 'function' ? window.shouldAutoIdentifyGeneralPhotoWeeds(trial, {
                                                 tempId: item.photo.tempId,
                                                 url: publicUrl
-                                            }, {
-                                                showToast: false,
-                                                sourceFileData: item.photo.fileData,
-                                                sourceMimeType: item.photo.mimeType
-                                            }) : [];
-                                            if (ids && ids.length > 0) {
-                                                const common = ids.flatMap(i => i.commonNames || []).join(', ');
-                                                if (common) showToast(`Identified potential weeds: ${common}`, 'info');
+                                            }) : false;
+
+                                            if (shouldRunFirstPhotoCheck) {
+                                                console.log('[AI Background] Triggering proactive Weed ID for general photo...');
+                                                const ids = typeof window.analyzeGeneralPhotoWeeds === 'function' ? await window.analyzeGeneralPhotoWeeds(item.trialId, {
+                                                    tempId: item.photo.tempId,
+                                                    url: publicUrl
+                                                }, {
+                                                    showToast: false,
+                                                    sourceFileData: item.photo.fileData,
+                                                    sourceMimeType: item.photo.mimeType
+                                                }) : [];
+                                                if (ids && ids.length > 0) {
+                                                    const common = ids.flatMap(i => i.commonNames || []).join(', ');
+                                                    if (common) showToast(`Identified potential weeds: ${common}`, 'info');
+                                                }
                                             }
                                         }
 
-                                        // 2. Weed Cover Analysis (ALWAYS RUN & SAVE)
-                                        console.log('%c[AI Background] [INFO] Running weed cover detection...', 'color: #10b981; font-weight: bold;');
-                                        let coverResult = null;
-                                        try {
-                                            const greenOnly = true;
-                                            coverResult = await analyzeWeedCover(item.photo.fileData, greenOnly);
-                                            console.log(`%c[Weed Cover] [INFO] ${coverResult.cover}% coverage detected (${coverResult.mode})`,
-                                                "color: #10b981; font-weight: bold; font-size: 1.2em;");
-                                            console.log('[Weed Cover] Breakdown:', coverResult.breakdown);
-                                            console.log('[Weed Cover] Details:', coverResult.details);
+                                        // 2. Weed Cover Analysis (Exclusively for herbicide category)
+                                        if (trialCategory === 'herbicide') {
+                                            console.log('%c[AI Background] [INFO] Running weed cover detection...', 'color: #10b981; font-weight: bold;');
+                                            let coverResult = null;
+                                            try {
+                                                const greenOnly = true;
+                                                coverResult = await analyzeWeedCover(item.photo.fileData, greenOnly);
+                                                console.log(`%c[Weed Cover] [INFO] ${coverResult.cover}% coverage detected (${coverResult.mode})`,
+                                                    "color: #10b981; font-weight: bold; font-size: 1.2em;");
+                                                console.log('[Weed Cover] Breakdown:', coverResult.breakdown);
+                                                console.log('[Weed Cover] Details:', coverResult.details);
 
-                                            // SAVE WEED COVER IMMEDIATELY (even if autoAnalyze is off)
-                                            const trial = state.trials.find(x => x.ID === item.trialId);
-                                            if (trial && trial.Category === 'herbicide' && coverResult.cover > 0) {
-                                                let eData = safeJsonParse(trial.EfficacyDataJSON);
-                                                const daa = window.calculateDAA(item.photo.date, trial.Date);
-                                                const photoDateStr = window.toDateKey(item.photo.date);
+                                                // SAVE WEED COVER IMMEDIATELY (even if autoAnalyze is off)
+                                                const curTrial = state.trials.find(x => x.ID === item.trialId);
+                                                if (curTrial && coverResult.cover > 0) {
+                                                    let eData = safeJsonParse(curTrial.EfficacyDataJSON);
+                                                    const daa = window.calculateDAA(item.photo.date, curTrial.Date);
+                                                    const photoDateStr = window.toDateKey(item.photo.date);
 
-                                                // Check if observation for this date already exists
-                                                const existingIdx = eData.findIndex(obs => window.toDateKey(obs.date) === photoDateStr);
-                                                if (existingIdx >= 0) {
-                                                    // Update existing observation
-                                                    eData[existingIdx].weedCover = coverResult.cover;
-                                                    eData[existingIdx].vari = coverResult.vari;
-                                                    eData[existingIdx].weedCoverMode = 'auto';
-                                                    eData[existingIdx].photoUrl = publicUrl;
-                                                    console.log(`[Weed Cover] Updated existing obs with ${coverResult.cover}%`);
-                                                } else {
-                                                    // Create new observation with weed cover
-                                                    eData.push({
-                                                        date: photoDateStr,
-                                                        daa: daa,
-                                                        notes: 'Weed cover detected from photo',
-                                                        photoUrl: publicUrl,
-                                                        weedCover: coverResult.cover,
-                                                        weedCoverMode: 'auto',
-                                                        weedDetails: []
-                                                    });
-                                                    console.log(`[Weed Cover] Created new obs with ${coverResult.cover}%`);
+                                                    // Check if observation for this date already exists
+                                                    const existingIdx = eData.findIndex(obs => window.toDateKey(obs.date) === photoDateStr);
+                                                    if (existingIdx >= 0) {
+                                                        // Update existing observation
+                                                        eData[existingIdx].weedCover = coverResult.cover;
+                                                        eData[existingIdx].vari = coverResult.vari;
+                                                        eData[existingIdx].weedCoverMode = 'auto';
+                                                        eData[existingIdx].photoUrl = publicUrl;
+                                                        console.log(`[Weed Cover] Updated existing obs with ${coverResult.cover}%`);
+                                                    } else {
+                                                        // Create new observation with weed cover
+                                                        eData.push({
+                                                            date: photoDateStr,
+                                                            daa: daa,
+                                                            notes: 'Weed cover detected from photo',
+                                                            photoUrl: publicUrl,
+                                                            weedCover: coverResult.cover,
+                                                            weedCoverMode: 'auto',
+                                                            weedDetails: []
+                                                        });
+                                                        console.log(`[Weed Cover] Created new obs with ${coverResult.cover}%`);
+                                                    }
+
+                                                    curTrial.EfficacyDataJSON = JSON.stringify(eData);
+                                                    await updateTrial({ ID: curTrial.ID, EfficacyDataJSON: curTrial.EfficacyDataJSON }, getAppState);
+                                                    safeRefreshRelevantUI(item.trialId, 'general_upload');
+                                                    console.log(`? WEED COVER SAVED: ${coverResult.cover}%`);
                                                 }
-
-                                                trial.EfficacyDataJSON = JSON.stringify(eData);
-                                                await updateTrial({ ID: trial.ID, EfficacyDataJSON: trial.EfficacyDataJSON }, getAppState);
-                                                safeRefreshRelevantUI(item.trialId, 'general_upload');
-                                                console.log(`? WEED COVER SAVED: ${coverResult.cover}%`);
+                                            } catch (wcErr) {
+                                                console.error('[Weed Cover] Analysis failed:', wcErr);
                                             }
-                                        } catch (wcErr) {
-                                            console.error('[Weed Cover] Analysis failed:', wcErr);
                                         }
 
                                         // 3. Full Efficacy Analysis (If enabled)

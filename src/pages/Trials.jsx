@@ -5188,10 +5188,16 @@ export default function Trials({ onMenuClick }) {
             notes: String(aiData.notes || aiData.efficacyAssessment || '').slice(0, 500)
           };
         }
+        const isNonPlot = Boolean(
+          aiData?.isValidPlotPhoto === false || 
+          aiData?.isInvalidPlotPhoto === true ||
+          (aiData?.efficacyAssessment && String(aiData.efficacyAssessment).toLowerCase().includes('precluded'))
+        );
         return {
           ...pObj,
           aiStatus: status,
           aiError: errorMsg || '',
+          ...(isNonPlot ? { isNonPlot: true } : {}),
           ...(status === 'failed' ? { aiFailedAt: Date.now() } : {}),
           ...(compactAiData ? { aiData: compactAiData } : {})
         };
@@ -5214,10 +5220,16 @@ export default function Trials({ onMenuClick }) {
       );
       if (isMatch) {
         weedPhotosUpdated = true;
+        const isNonPlot = Boolean(
+          aiData?.isValidPlotPhoto === false || 
+          aiData?.isInvalidPlotPhoto === true ||
+          (aiData?.efficacyAssessment && String(aiData.efficacyAssessment).toLowerCase().includes('precluded'))
+        );
         return {
           ...pObj,
           aiStatus: status,
-          aiError: errorMsg || ''
+          aiError: errorMsg || '',
+          ...(isNonPlot ? { isNonPlot: true } : {})
         };
       }
       return pObj;
@@ -5227,10 +5239,16 @@ export default function Trials({ onMenuClick }) {
     if (!matched && updatedPhotos.length > 0 && (status === 'completed' || status === 'failed')) {
       for (let i = updatedPhotos.length - 1; i >= 0; i--) {
         if (updatedPhotos[i].aiStatus === 'processing' || updatedPhotos[i].aiStatus === 'pending') {
+          const isNonPlot = Boolean(
+            aiData?.isValidPlotPhoto === false || 
+            aiData?.isInvalidPlotPhoto === true ||
+            (aiData?.efficacyAssessment && String(aiData.efficacyAssessment).toLowerCase().includes('precluded'))
+          );
           updatedPhotos[i] = {
             ...updatedPhotos[i],
             aiStatus: status,
-            aiError: errorMsg || ''
+            aiError: errorMsg || '',
+            ...(isNonPlot ? { isNonPlot: true } : {})
           };
           break;
         }
@@ -5479,7 +5497,7 @@ export default function Trials({ onMenuClick }) {
         return false;
       });
 
-      if (freshP && freshP.aiStatus === 'completed' && alreadyHasObs) {
+      if (freshP && freshP.aiStatus === 'completed') {
         completed++;
         setAutoHealProgress({ current: completed, total: candidates.length });
         continue;
@@ -11178,10 +11196,12 @@ If none are present, write "None".`;
                                 onError={e => { e.target.onerror = null; e.target.src = rawSrc; }}
                               />
                               {/* Status Indicators */}
-                              <div className="absolute bottom-1 left-1 flex gap-1">
-                                {photo.aiStatus === 'completed' && (
+                              <div className="absolute bottom-1 left-1 flex gap-1 flex-wrap">
+                                {photo.isNonPlot ? (
+                                  <span className="text-[9px] font-bold bg-amber-600/90 backdrop-blur text-white px-1.5 py-0.5 rounded shadow" title="Product/packaging image (excluded from crop metrics)">Product</span>
+                                ) : photo.aiStatus === 'completed' ? (
                                   <span className="text-[9px] font-bold bg-green-500/90 backdrop-blur text-white px-1.5 py-0.5 rounded shadow">AI OK</span>
-                                )}
+                                ) : null}
                                 {photo.aiStatus === 'processing' && (
                                   <span className="text-[9px] font-bold bg-blue-500/90 backdrop-blur text-white px-1.5 py-0.5 rounded shadow animate-pulse">Analyzing</span>
                                 )}

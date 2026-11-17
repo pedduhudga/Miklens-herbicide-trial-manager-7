@@ -27,14 +27,19 @@ export default function SyncStatus() {
   const [status, setStatus] = useState(SYNC_STATUS.ONLINE);
   const [details, setDetails] = useState(null);
   const [showConflicts, setShowConflicts] = useState(false);
+  const [showQueueDetails, setShowQueueDetails] = useState(false);
   const [conflicts, setConflicts] = useState([]);
   const [isExpanded, setIsExpanded] = useState(false);
   const [browserOnline, setBrowserOnline] = useState(() => typeof navigator !== 'undefined' ? navigator.onLine : true);
 
   let appSyncQueue = [];
+  let dispatch = null;
+  let trialsList = [];
   try {
-    const { state } = useAppState();
-    appSyncQueue = state?.syncQueue || [];
+    const app = useAppState();
+    appSyncQueue = app.state?.syncQueue || [];
+    dispatch = app.dispatch;
+    trialsList = app.state?.trials || [];
   } catch {
     // Graceful fallback if rendered outside AppStateProvider in unit tests
   }
@@ -245,6 +250,110 @@ export default function SyncStatus() {
                 <RefreshCw className="w-4 h-4" />
                 Force Sync Now
               </button>
+            )}
+
+            {/* Sync Queue Manager */}
+            {appSyncQueue && appSyncQueue.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-slate-100">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-slate-700">
+                    Queue Items ({appSyncQueue.length})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowQueueDetails(!showQueueDetails)}
+                    className="text-[11px] text-blue-600 hover:text-blue-800 font-semibold"
+                  >
+                    {showQueueDetails ? 'Hide' : 'View'}
+                  </button>
+                </div>
+
+                {showQueueDetails && (
+                  <div className="space-y-1.5 max-h-44 overflow-y-auto mb-2 pr-0.5">
+                    {appSyncQueue.slice(0, 8).map((item, idx) => {
+                      const actionText = item.action || item.type || (item.photo ? 'Photo Upload' : 'Data Action');
+                      const trialId = item.trialId || item.payload?.ID || item.payload?.id;
+                      const relatedTrial = trialId ? (trialsList || []).find(t => String(t.ID) === String(trialId)) : null;
+                      const trialLabel = relatedTrial?.FormulationName || relatedTrial?.Name || (trialId ? `Trial ${String(trialId).slice(0, 8)}…` : '');
+                      const isFailed = item.status === 'failed' || item.noRetry;
+                      const isUploading = item.status === 'uploading';
+
+                      return (
+                        <div key={item.id || idx} className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs flex items-center justify-between gap-1.5">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${
+                                isFailed ? 'bg-red-100 text-red-700' : isUploading ? 'bg-blue-100 text-blue-700 animate-pulse' : 'bg-amber-100 text-amber-700'
+                              }`}>
+                                {isFailed ? 'Failed' : isUploading ? 'Syncing' : 'Queued'}
+                              </span>
+                              <span className="font-semibold text-slate-700 truncate">{actionText}</span>
+                            </div>
+                            {trialLabel && <p className="text-[10px] text-slate-500 truncate mt-0.5">{trialLabel}</p>}
+                            {item.lastError && (
+                              <p className="text-[9px] text-red-600 truncate mt-0.5" title={item.lastError}>
+                                {item.lastError}
+                              </p>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (dispatch) {
+                                const next = appSyncQueue.filter((_, i) => i !== idx);
+                                dispatch({ type: 'SET_SYNC_QUEUE', payload: next });
+                              }
+                            }}
+                            className="p-1 text-slate-400 hover:text-red-600 hover:bg-slate-200 rounded transition shrink-0"
+                            title="Dismiss item from queue"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                    {appSyncQueue.length > 8 && (
+                      <p className="text-[10px] text-slate-400 text-center">+{appSyncQueue.length - 8} more items in queue</p>
+                    )}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-1.5 mt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (dispatch) {
+                        const retried = appSyncQueue.map(i => ({
+                          ...i,
+                          status: 'pending',
+                          attempts: 0,
+                          noRetry: false,
+                          lastError: null
+                        }));
+                        dispatch({ type: 'SET_SYNC_QUEUE', payload: retried });
+                        handleForceSync();
+                      }
+                    }}
+                    className="px-2 py-1.5 text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg border border-blue-200 transition text-center"
+                    title="Reset retry attempts and process immediately"
+                  >
+                    Retry Failed
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (dispatch) {
+                        const cleaned = appSyncQueue.filter(i => !(i.noRetry || (i.attempts && i.attempts >= 4) || i.status === 'failed'));
+                        dispatch({ type: 'SET_SYNC_QUEUE', payload: cleaned });
+                      }
+                    }}
+                    className="px-2 py-1.5 text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg border border-slate-200 transition text-center"
+                    title="Remove blocked or permanently failed items"
+                  >
+                    Clear Stale
+                  </button>
+                </div>
+              </div>
             )}
 
             {/* Offline Fail-Safe Export */}
