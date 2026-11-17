@@ -217,7 +217,7 @@
     --surface-border: rgba(226, 232, 240, 0.9);
     --surface-blur: 16px;
     --card-bg: #ffffff;
-    --card-text-muted: #64748b;
+    --card-text-muted: #475569;
 }
 
 /* High-performance content visibility & rendering optimization */
@@ -318,8 +318,11 @@ body {
         radial-gradient(at 0% 100%, var(--bg-gradient-4) 0px, transparent 50%);
     background-attachment: fixed;
     color: var(--text-color);
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
+    /* Use subpixel antialiasing for sharper text on non-Retina displays;
+       antialiased looks washed out at small sizes on Windows/low-DPI screens */
+    -webkit-font-smoothing: subpixel-antialiased;
+    -moz-osx-font-smoothing: auto;
+    text-rendering: optimizeLegibility;
     letter-spacing: -0.01em;
 
     /* PWA Mobile Native App Optimizations */
@@ -408,21 +411,27 @@ input, textarea, select, [contenteditable="true"], .selectable-text, table, td, 
     border-radius: 1.25rem !important;
     box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.03), 0 8px 10px -6px rgba(0, 0, 0, 0.01) !important;
     border: 1px solid rgba(255, 255, 255, 0.6);
-    background-color: rgba(255, 255, 255, 0.85);
-    backdrop-filter: blur(16px);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    background-color: rgba(255, 255, 255, 0.95);
+    /* Removed backdrop-filter blur: it creates a GPU compositing layer that blurs
+       the text inside the card on Windows/Chrome. Use a solid-ish bg instead. */
+    transition: box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.3s ease;
     animation: contentFadeIn 0.5s ease-out forwards;
     opacity: 0;
+    /* Snap text to pixel grid to prevent subpixel blurring */
+    transform: translateZ(0);
+    backface-visibility: hidden;
 }
 
 .dashboard-card:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.01) !important;
+    /* Use integer-pixel margin shift via box-shadow depth instead of transform
+       so text never lands on fractional pixels */
+    box-shadow: 0 14px 30px -6px rgba(0, 0, 0, 0.09), 0 6px 12px -4px rgba(0, 0, 0, 0.05) !important;
+    border-color: rgba(255, 255, 255, 0.8);
 }
 
 @keyframes contentFadeIn {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
+    from { opacity: 0; }
+    to { opacity: 1; }
 }
 
 .spinner {
@@ -498,17 +507,18 @@ input, textarea, select, [contenteditable="true"], .selectable-text, table, td, 
 
 .animate-page-enter {
   animation: pageEnter 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  will-change: opacity, transform;
+  /* will-change: auto keeps text crisp; we still get GPU accel via opacity */
+  will-change: opacity;
 }
 
 .animate-slide-down {
   animation: slideDown 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  will-change: opacity, transform;
+  will-change: opacity;
 }
 
 .animate-slide-up {
   animation: slideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  will-change: opacity, transform;
+  will-change: opacity;
 }
 
 .animate-fade-in {
@@ -564,17 +574,17 @@ body.dark .skeleton-shimmer {
 }
 
 .card-interactive {
-  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease, border-color 0.2s ease;
+  transition: box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease;
   touch-action: manipulation;
 }
 
 .card-interactive:hover {
-  transform: translate3d(0, -2px, 0);
-  box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.06), 0 4px 6px -2px rgba(0, 0, 0, 0.03);
+  box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.09), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
 }
 
 .card-interactive:active {
-  transform: translate3d(0, 0, 0) scale(0.985);
+  /* Keep scale but pin to half-pixel steps so text stays crisp */
+  transform: scale(0.98);
 }
 
 /* Accessibility & Battery Saver: Respect Reduced Motion Preferences */
@@ -587,4 +597,42 @@ body.dark .skeleton-shimmer {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* ==========================================================================
+   Global Text Sharpness Fix
+   Backdrop-filter, will-change:transform and GPU-promoted layers cause
+   Chrome/Edge on Windows to render text on fractional pixel boundaries,
+   producing blurry / "smeared" text in tabs, cards, badges and labels.
+   These rules force pixel-grid snapping for ALL text-bearing elements.
+   ========================================================================== */
+
+/* Prevent text blurring inside backdrop-blur containers */
+[class*="backdrop-blur"] *,
+[class*="backdrop-filter"] * {
+  -webkit-font-smoothing: subpixel-antialiased;
+  -moz-osx-font-smoothing: auto;
+  text-rendering: optimizeLegibility;
+}
+
+/* Any element that uses a GPU compositing trick: pin its text to pixel grid */
+[style*="transform"],
+[style*="will-change"] {
+  -webkit-font-smoothing: subpixel-antialiased;
+}
+
+/* Tailwind text-xs (12px) and text-[9px] / text-[11px] labels need extra weight
+   so strokes are thick enough to survive low DPI rendering */
+.text-xs, [class*="text-[9px]"], [class*="text-[10px]"], [class*="text-[11px]"] {
+  font-weight: 500;
+  letter-spacing: 0em;
+}
+
+/* Force crisp pixel snapping on all table cells, badges and tag labels
+   that frequently show blurry text on composited parents */
+td, th, [class*="badge"], [class*="tag"], [class*="chip"],
+[class*="pill"], [class*="label"], span[class*="font-bold"],
+span[class*="font-semibold"], span[class*="font-black"] {
+  -webkit-font-smoothing: subpixel-antialiased;
+  -moz-osx-font-smoothing: auto;
 }
