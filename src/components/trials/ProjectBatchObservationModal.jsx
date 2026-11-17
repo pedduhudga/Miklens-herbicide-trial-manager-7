@@ -276,7 +276,7 @@ export default function ProjectBatchObservationModal({
       isOpen={isOpen}
       onClose={onClose}
       title={`⚡ Mass Observation & Plant Height Entry — ${project?.Name || 'Project Trials'}`}
-      size="max-w-4xl"
+      maxWidth="max-w-5xl"
     >
       <div className="space-y-4">
         
@@ -493,12 +493,12 @@ export default function ProjectBatchObservationModal({
         </div>
 
         {/* Plots Data Entry Table */}
-        <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden max-h-[420px] overflow-y-auto">
-          <table className="w-full text-left text-xs border-collapse">
+        <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden max-h-[420px] overflow-y-auto overflow-x-auto">
+          <table className="w-full min-w-[700px] text-left text-xs border-collapse">
             <thead className="sticky top-0 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700 text-[11px] uppercase tracking-wider z-10">
               <tr>
                 <th className="py-2.5 px-3 w-28">Plot / Pot</th>
-                <th className="py-2.5 px-3 min-w-[160px]">Treatment</th>
+                <th className="py-2.5 px-3 min-w-[140px] max-w-[180px]">Treatment</th>
 
                 {/* Plant Height Column */}
                 {(entryMode === 'plantHeight' || entryMode === 'both') && (
@@ -515,7 +515,7 @@ export default function ProjectBatchObservationModal({
                 )}
 
                 <th className="py-2.5 px-3 w-36 text-center">Rating</th>
-                <th className="py-2.5 px-3 min-w-[150px]">Plot Observation Note</th>
+                <th className="py-2.5 px-3 w-40">Plot Observation Note</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-800 dark:text-slate-200">
@@ -554,7 +554,7 @@ export default function ProjectBatchObservationModal({
                     </td>
 
                     {/* Treatment Name */}
-                    <td className="py-2 px-3">
+                    <td className="py-2 px-3 max-w-[180px]">
                       <div className="flex items-center gap-1.5">
                         <span className={`w-2 h-2 rounded-full shrink-0 ${isControl ? 'bg-slate-400' : 'bg-emerald-500'}`} />
                         <span className="font-semibold text-slate-800 dark:text-slate-200 truncate">
