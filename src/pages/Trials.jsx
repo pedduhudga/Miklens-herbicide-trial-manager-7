@@ -50,6 +50,7 @@ import TrialApplicationModal from '../components/trials/TrialApplicationModal.js
 import TrialHarvestPickingModal from '../components/trials/TrialHarvestPickingModal.jsx';
 import TrialReportColumnsModal from '../components/trials/TrialReportColumnsModal.jsx';
 import { prefetchTrialPhotos } from '../services/photoCacheService.js';
+import { saveSyncQueueOffline } from '../services/offlineStorage.js';
 import { GEMINI_FALLBACK_MODELS } from '../utils/aiConstants.js';
 import {
   generateComprehensivePdf,
@@ -195,6 +196,9 @@ const fuzzyMatch = (text, query) => {
     return true;
   });
 };
+
+// Global lock to serialize direct photo uploads to Google Apps Script and prevent concurrency limits
+let _directUploadLock = Promise.resolve();
 
 export default function Trials({ onMenuClick }) {
   const { state, updateState, getAppState, dispatch } = useAppState();
@@ -3676,7 +3680,7 @@ export default function Trials({ onMenuClick }) {
 
     // ONLINE PATH: Temporarily show in the Sync Queue UI as uploading
     const onlineSyncItem = {
-      id: `sync_${tempId}`,
+      id: `online_${tempId}`,
       action: `Upload Photo for ${targetTrial.FormulationName || 'Trial'}${dosageSuffix}`,
       status: 'uploading',
       trialId: targetTrial.ID,
@@ -3693,44 +3697,62 @@ export default function Trials({ onMenuClick }) {
     let driveFileId = null;
 
     try {
-      // 1. Upload photo to Google Drive via dataLayer (works in Firebase + Sheet modes)
-      const uploadResult = await uploadPhoto({
-        trialId: targetTrial.ID,
-        fileData: dataUrl,
-        mimeType: 'image/jpeg',
-        fileName,
-        isWeed: cameraMode === 'weed',
-        label: photoEntry.label,
-        date: photoDate,
-        folderPath,
-      }, getAppState);
+      // 1. Upload photo to Google Drive via dataLayer (serialized to prevent Apps Script concurrency collisions)
+      const uploadResult = await (_directUploadLock = _directUploadLock.catch(() => {}).then(async () => {
+        return await uploadPhoto({
+          trialId: targetTrial.ID,
+          fileData: dataUrl,
+          mimeType: 'image/jpeg',
+          fileName,
+          isWeed: cameraMode === 'weed',
+          label: photoEntry.label,
+          date: photoDate,
+          folderPath,
+        }, getAppState);
+      }));
 
       if (uploadResult?._errType) {
-        // Remove the optimistic placeholder from UI since upload failed
-        const freshTrial = getAppState().trials.find(t => t.ID === targetTrial.ID) || targetTrial;
-        const rollback = safeJsonParse(freshTrial.PhotoURLs, []).filter(p => p.tempId !== tempId);
-        const rolledBack = { ...freshTrial, PhotoURLs: JSON.stringify(rollback) };
-        updateState({ trials: getAppState().trials.map(t => t.ID === rolledBack.ID ? rolledBack : t) });
-        if (activeTrial?.ID === targetTrial.ID) setActiveTrial(rolledBack);
-        const isConfig = uploadResult._errType === 'config';
-        window.dispatchEvent(new CustomEvent('app:toast', { detail: {
-          msg: isConfig
-            ? '⚙️ Script URL not set — go to Settings and add your Apps Script URL to enable Drive photo uploads.'
-            : (uploadResult.message || 'Drive upload failed'),
-          type: 'error'
-        }}));
-        return;
-      }
+        console.warn(`[Trials] Direct photo upload encountered ${uploadResult._errType}: ${uploadResult.message}. Auto-queuing into persistent background sync queue...`);
+        const fallbackSyncItem = {
+          id: `sync_${tempId}`,
+          type: cameraMode === 'weed' ? 'weed_upload' : 'general_upload',
+          status: 'pending',
+          trialId: targetTrial.ID,
+          timestamp: Date.now(),
+          photo: {
+            tempId: tempId,
+            fileData: dataUrl,
+            mimeType: 'image/jpeg',
+            fileName: fileName,
+            date: photoDate,
+            label: photoEntry.label
+          },
+          attempts: 0
+        };
+        dispatch({ type: 'ADD_SYNC_ITEM', payload: fallbackSyncItem });
+        saveSyncQueueOffline([...(getAppState().syncQueue || []), fallbackSyncItem]).catch(console.error);
 
-      driveUrl = uploadResult?.url || uploadResult?.fileUrl || null;
-      driveFileId = uploadResult?.id || (driveUrl ? getDriveFileId(driveUrl) : null);
+        window.dispatchEvent(new CustomEvent('app:toast', { detail: {
+          msg: uploadResult._errType === 'config'
+            ? '⚙️ Script URL not set. Photo safely saved locally; add Script URL in Settings to sync to Drive.'
+            : 'Photo saved! Queued for Google Drive upload in background.',
+          type: 'info'
+        }}));
+
+        if (typeof window !== 'undefined' && typeof window.processSyncQueue === 'function') {
+          setTimeout(() => window.processSyncQueue(), 500);
+        }
+      } else {
+        driveUrl = uploadResult?.url || uploadResult?.fileUrl || null;
+        driveFileId = uploadResult?.id || (driveUrl ? getDriveFileId(driveUrl) : null);
+      }
 
       // 2. CRITICAL: Fetch the fresh latest trial from state! Do NOT use stale closure targetTrial!
       const latestTrial = getAppState().trials.find(t => t.ID === targetTrial.ID) || targetTrial;
       const currentPhotos = safeJsonParse(latestTrial.PhotoURLs, []).filter(p => p.tempId !== tempId);
       const finalEntry = driveUrl
         ? { url: driveUrl, driveId: driveFileId, date: photoDate, label: photoEntry.label, tag: photoTag, identifications: [], aiStatus: 'processing', ...photoTagFields }
-        : { ...photoEntry, tempId: undefined, aiStatus: 'processing' };
+        : { ...photoEntry, tempId: tempId, aiStatus: 'pending' };
       
       const isAlreadyPresent = currentPhotos.some(p => 
         (driveUrl && p.url === driveUrl) ||
@@ -3753,19 +3775,21 @@ export default function Trials({ onMenuClick }) {
       updateState({ trials: getAppState().trials.map(t => t.ID === updatedTrial.ID ? updatedTrial : t) });
       if (activeTrial?.ID === targetTrial.ID) setActiveTrial(updatedTrial);
 
-      try {
-        await updateTrial({
-          ID: updatedTrial.ID,
-          PhotoURLs: updatedTrial.PhotoURLs,
-          IsCompleted: false,
-          ControlFinalized: false,
-          FinalizationDate: '',
-          FinalControlDuration: '',
-          AutoFinalized: false,
-          IsLive: true
-        }, getAppState);
-      } catch (saveErr) {
-        console.warn('Initial photo link save to backend:', saveErr);
+      if (driveUrl) {
+        try {
+          await updateTrial({
+            ID: updatedTrial.ID,
+            PhotoURLs: updatedTrial.PhotoURLs,
+            IsCompleted: false,
+            ControlFinalized: false,
+            FinalizationDate: '',
+            FinalControlDuration: '',
+            AutoFinalized: false,
+            IsLive: true
+          }, getAppState);
+        } catch (saveErr) {
+          console.warn('Initial photo link save to backend:', saveErr);
+        }
       }
 
       const daa = calculateDAA(photoDate, targetTrial.Date);
@@ -3854,11 +3878,35 @@ export default function Trials({ onMenuClick }) {
         window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'AI analysis: ' + (result.error || 'Skipped'), type: 'warning' } }));
       }
     } catch (e) {
+      console.error('[Trials] Photo process error:', e);
+      if (!driveUrl) {
+        const fallbackSyncItem = {
+          id: `sync_${tempId}`,
+          type: cameraMode === 'weed' ? 'weed_upload' : 'general_upload',
+          status: 'pending',
+          trialId: targetTrial.ID,
+          timestamp: Date.now(),
+          photo: {
+            tempId: tempId,
+            fileData: dataUrl,
+            mimeType: 'image/jpeg',
+            fileName: fileName,
+            date: photoDate,
+            label: photoEntry.label
+          },
+          attempts: 0
+        };
+        dispatch({ type: 'ADD_SYNC_ITEM', payload: fallbackSyncItem });
+        saveSyncQueueOffline([...(getAppState().syncQueue || []), fallbackSyncItem]).catch(console.error);
+        if (typeof window !== 'undefined' && typeof window.processSyncQueue === 'function') {
+          setTimeout(() => window.processSyncQueue(), 500);
+        }
+      }
       await updatePhotoAiStatus(targetTrial.ID, driveUrl || dataUrl, 'failed', e.message);
-      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Photo upload error: ' + e.message, type: 'error' } }));
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Photo saved locally! Queued for Google Drive upload in background.', type: 'info' } }));
     } finally {
       setAiGenRunning(false);
-      updateState({ syncQueue: getAppState().syncQueue.filter(item => item.id !== `sync_${tempId}`) });
+      updateState({ syncQueue: getAppState().syncQueue.filter(item => item.id !== `online_${tempId}`) });
     }
   };
 
@@ -5568,6 +5616,86 @@ export default function Trials({ onMenuClick }) {
     window.autoHealTrialPhotos = () => runAutoPhotoHealer(true);
     return () => { delete window.autoHealTrialPhotos; };
   }, [runAutoPhotoHealer]);
+
+  // ── AUTOMATIC DRIVE PHOTO RECONCILER (Fail-safe for continuous clicking) ──
+  const reconcileUnuploadedPhotos = useCallback(() => {
+    const trials = getAppState().trials || [];
+    const currentQueue = getAppState().syncQueue || [];
+    const queuedTempIds = new Set(
+      currentQueue.map(q => q.photo?.tempId || q.id).filter(Boolean)
+    );
+    const newQueueItems = [];
+
+    trials.forEach(trial => {
+      ['PhotoURLs', 'WeedPhotosJSON'].forEach(field => {
+        const pList = safeJsonParse(trial[field], []);
+        pList.forEach(p => {
+          const pObj = typeof p === 'string' ? { url: p } : p;
+          const urlStr = String(pObj.url || '');
+          const hasDriveUrl = (
+            urlStr.includes('drive.google.com') ||
+            urlStr.includes('googleusercontent.com') ||
+            pObj.driveId ||
+            pObj.fileId ||
+            (urlStr.startsWith('http') && !urlStr.includes('localhost'))
+          );
+          const hasLocalData = (pObj.fileData && pObj.fileData.length > 50) || (urlStr.startsWith('data:image'));
+
+          if (!hasDriveUrl && hasLocalData) {
+            const tempId = pObj.tempId || `heal_${trial.ID}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+            if (!queuedTempIds.has(tempId) && !queuedTempIds.has(`sync_${tempId}`)) {
+              queuedTempIds.add(tempId);
+              queuedTempIds.add(`sync_${tempId}`);
+              const syncItem = {
+                id: `sync_${tempId}`,
+                type: field === 'WeedPhotosJSON' ? 'weed_upload' : 'general_upload',
+                status: 'pending',
+                trialId: trial.ID,
+                timestamp: Date.now(),
+                photo: {
+                  tempId: tempId,
+                  fileData: pObj.fileData || pObj.url,
+                  mimeType: 'image/jpeg',
+                  fileName: `reconciled_${trial.ID}_${Date.now()}.jpg`,
+                  date: pObj.date || trial.Date || new Date().toISOString().split('T')[0],
+                  label: pObj.label || 'Recovered Field Photo'
+                },
+                attempts: 0
+              };
+              newQueueItems.push(syncItem);
+            }
+          }
+        });
+      });
+    });
+
+    if (newQueueItems.length > 0) {
+      console.log(`[DriveReconciler] Auto-healed ${newQueueItems.length} photo(s) missing Drive URLs. Queuing for upload...`);
+      const updatedQueue = [...currentQueue, ...newQueueItems];
+      updateState({ syncQueue: updatedQueue });
+      saveSyncQueueOffline(updatedQueue).catch(console.error);
+      if (typeof window !== 'undefined' && typeof window.processSyncQueue === 'function') {
+        setTimeout(() => window.processSyncQueue(), 500);
+      }
+    }
+  }, [getAppState, updateState]);
+
+  useEffect(() => {
+    // Reconcile and heal any photos that previously failed to upload to Google Drive
+    const timer = setTimeout(() => {
+      reconcileUnuploadedPhotos();
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, [reconcileUnuploadedPhotos]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (navigator.onLine) {
+        reconcileUnuploadedPhotos();
+      }
+    }, 180000); // Check every 3 minutes
+    return () => clearInterval(interval);
+  }, [reconcileUnuploadedPhotos]);
 
   // ── AI SUMMARY GENERATION ─────────────────────────────────────────
   const generateAISummary = async (trial = activeTrial) => {

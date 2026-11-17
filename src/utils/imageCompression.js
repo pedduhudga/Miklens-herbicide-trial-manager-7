@@ -6,11 +6,11 @@
 /**
  * Compress an image using canvas
  * @param {string} base64 - Base64 image string
- * @param {number} maxDimension - Maximum width or height (default 1600)
- * @param {number} quality - JPEG quality 0-1 (default 0.82)
+ * @param {number} maxDimension - Maximum width or height (default 1920)
+ * @param {number} quality - JPEG quality 0-1 (default 0.95)
  * @returns {Promise<string>} Compressed base64 string
  */
-export async function compressImage(base64, maxDimension = 1600, quality = 0.82) {
+export async function compressImage(base64, maxDimension = 1920, quality = 0.95) {
   return new Promise((resolve, reject) => {
     if (!base64 || !base64.startsWith('data:image/')) {
       resolve(base64);

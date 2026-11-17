@@ -953,7 +953,28 @@ export async function uploadPhoto(payload, getAppState) {
 
   console.log(`[DataLayer] Uploading photo for category: ${category} (category-aware trial association)`);
 
-  return sheetDB.apiCall('uploadPhoto', photoData, false, getAppState);
+  // Resilient retry loop: retry up to 3 times on transient network/timeout/503 errors
+  let lastResult = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const res = await sheetDB.apiCall('uploadPhoto', photoData, false, getAppState);
+      if (res && (res.url || res.fileUrl || res.id)) {
+        return res;
+      }
+      if (res?._errType === 'config') {
+        return res; // Configuration error should not be retried
+      }
+      lastResult = res;
+    } catch (err) {
+      lastResult = { _errType: 'fetch', message: err.message };
+    }
+    if (attempt < 3) {
+      console.warn(`[DataLayer] uploadPhoto attempt ${attempt} failed. Retrying in ${attempt * 1200}ms...`);
+      await new Promise(r => setTimeout(r, attempt * 1200));
+    }
+  }
+
+  return lastResult || { _errType: 'network', message: 'Upload failed after 3 attempts' };
 }
 
 // ─── Re-export apiCall for anything that still needs raw access ───────────────

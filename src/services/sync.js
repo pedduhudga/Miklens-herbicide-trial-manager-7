@@ -511,30 +511,47 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                         console.log(`Cloud URL: ${publicUrl}`);
 
                         // 2. INTERNAL STATE & BACKGROUND AI
-                        if (trial) {
-                            let photos = isWeed ? safeJsonParse(trial.WeedPhotosJSON) : safeJsonParse(trial.PhotoURLs);
-                            const idx = photos.findIndex(p => p.tempId === item.photo.tempId);
+                        const currentTrials = (getAppState && getAppState().trials) ? getAppState().trials : (state.trials || []);
+                        const freshTrial = currentTrials.find(t => t.ID === item.trialId) || trial;
+
+                        if (freshTrial) {
+                            let photos = isWeed ? safeJsonParse(freshTrial.WeedPhotosJSON, []) : safeJsonParse(freshTrial.PhotoURLs, []);
+                            const idx = photos.findIndex(p => 
+                                (item.photo?.tempId && p.tempId === item.photo.tempId) ||
+                                (p.fileData && item.photo?.fileData && p.fileData === item.photo.fileData) ||
+                                (item.photo?.date && p.date === item.photo.date && p.label === item.photo.label)
+                            );
 
                             if (idx > -1) {
                                 photos[idx].url = publicUrl;
+                                if (result?.id) photos[idx].driveId = result.id;
                                 if (!photos[idx].label || photos[idx].label === "Processing...") {
-                                    photos[idx].label = item.photo.label || `Photo: ${item.photo.date || new Date().toLocaleDateString()}`;
+                                    photos[idx].label = item.photo?.label || `Photo: ${item.photo?.date || new Date().toLocaleDateString()}`;
                                 }
                                 delete photos[idx].fileData;
                             } else {
-                                photos.push({ url: publicUrl, date: item.photo.date, label: item.photo.label || '', tempId: item.photo.tempId });
+                                photos.push({ 
+                                    url: publicUrl, 
+                                    driveId: result?.id, 
+                                    date: item.photo?.date, 
+                                    label: item.photo?.label || '', 
+                                    tempId: item.photo?.tempId 
+                                });
                             }
 
-                            if (isWeed) trial.WeedPhotosJSON = JSON.stringify(photos); else trial.PhotoURLs = JSON.stringify(photos);
-                            updateAppState({ trials: [...state.trials] });
+                            const updatedTrial = {
+                                ...freshTrial,
+                                [isWeed ? 'WeedPhotosJSON' : 'PhotoURLs']: JSON.stringify(photos)
+                            };
+                            updateAppState({ trials: currentTrials.map(t => t.ID === updatedTrial.ID ? updatedTrial : t) });
 
-                            // 3. PERSIST PHOTO LINK TO SHEET
+                            // 3. PERSIST PHOTO LINK TO SHEET & FIREBASE
                             const handshakeStart = Date.now();
                             console.log(`[Step 2/3] Updating Spreadsheet...`);
 
                             await updateTrial({
-                                ID: trial.ID,
-                                [isWeed ? 'WeedPhotosJSON' : 'PhotoURLs']: trial[isWeed ? 'WeedPhotosJSON' : 'PhotoURLs']
+                                ID: updatedTrial.ID,
+                                [isWeed ? 'WeedPhotosJSON' : 'PhotoURLs']: updatedTrial[isWeed ? 'WeedPhotosJSON' : 'PhotoURLs']
                             }, getAppState);
 
                             const handshakeTime = ((Date.now() - handshakeStart) / 1000).toFixed(2);
