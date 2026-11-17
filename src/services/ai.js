@@ -69,7 +69,11 @@ export function getActiveApiModel(getAppState) {
       if (saved) settings = JSON.parse(saved) || {};
     } catch (e) {}
   }
-  return settings.apiModel || settings.selectedModel || DEFAULT_GEMINI_MODEL;
+  const model = settings.apiModel || settings.selectedModel || DEFAULT_GEMINI_MODEL;
+  if (model === 'gemini-3.6-flash') {
+    return DEFAULT_GEMINI_MODEL;
+  }
+  return model;
 }
 
 

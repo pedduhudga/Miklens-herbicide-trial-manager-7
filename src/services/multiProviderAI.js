@@ -10,14 +10,7 @@ import { apiCall } from './db.js';
 const PROVIDERS = [
   // ── Gemini Production Lineup (Google AI Studio Free Tier) ──
   {
-    // Most reliable production model — fast, accurate agronomic vision without demand spikes
-    id: 'gemini-3.5-flash',
-    name: 'Gemini 3.5 Flash',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent',
-    dailyLimit: 500,
-  },
-  {
-    // High free-tier throughput — 15 RPM / 1000 RPD free — rock-solid availability for batch photos
+    // High free-tier throughput — 15 RPM / 1000 RPD free — rock-solid availability & instant vision for batch photos
     id: 'gemini-3.5-flash-lite',
     name: 'Gemini 3.5 Flash-Lite',
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent',
@@ -38,7 +31,14 @@ const PROVIDERS = [
     dailyLimit: 500,
   },
   {
-    // Oct 2026 GA — available as option, but not forced over stable models
+    // Production model — fast, accurate agronomic vision (500 RPD free)
+    id: 'gemini-3.5-flash',
+    name: 'Gemini 3.5 Flash',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent',
+    dailyLimit: 500,
+  },
+  {
+    // Oct 2026 GA — available as option, but strict free tier quota
     id: 'gemini-3.6-flash',
     name: 'Gemini 3.6 Flash',
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent',
@@ -85,6 +85,9 @@ const providerBlockedUntil = new Proxy({}, {
     if (typeof window !== 'undefined') {
       window._geminiBlockedModels = window._geminiBlockedModels || {};
       window._geminiBlockedModels[prop] = value;
+      try {
+        localStorage.setItem('ai_blocked_models', JSON.stringify(window._geminiBlockedModels));
+      } catch (_) {}
     }
     return true;
   }
@@ -113,8 +116,13 @@ const activeKeyIndex = {};
 
 function getOrderedProviders() {
   const settings = getSettings();
-  const selectedModelId = settings.selectedModel || settings.apiModel || DEFAULT_GEMINI_MODEL;
+  let selectedModelId = settings.selectedModel || settings.apiModel || DEFAULT_GEMINI_MODEL;
   
+  // If the selected model is blocked/exhausted across all keys, automatically fall back to DEFAULT_GEMINI_MODEL
+  if (providerBlockedUntil[selectedModelId] && Date.now() < providerBlockedUntil[selectedModelId]) {
+    selectedModelId = DEFAULT_GEMINI_MODEL;
+  }
+
   const providers = [...PROVIDERS];
   const idx = providers.findIndex(p => p.id === selectedModelId);
   if (idx > 0) {
@@ -139,7 +147,16 @@ function getOrderedProviders() {
 function getSettings() {
   try {
     const raw = localStorage.getItem('appSettings');
-    return raw ? JSON.parse(raw) : {};
+    const settings = raw ? JSON.parse(raw) : {};
+    // Auto-migrate to high-throughput gemini-3.5-flash-lite if previous model was gemini-3.6-flash or unset
+    if (settings.selectedModel === 'gemini-3.6-flash' || settings.apiModel === 'gemini-3.6-flash' || !settings.selectedModel) {
+      settings.selectedModel = DEFAULT_GEMINI_MODEL;
+      settings.apiModel = DEFAULT_GEMINI_MODEL;
+      try {
+        localStorage.setItem('appSettings', JSON.stringify(settings));
+      } catch (_) {}
+    }
+    return settings;
   } catch { return {}; }
 }
 
@@ -819,7 +836,14 @@ async function callGemini(provider, imageData, context, apiKey) {
   const imagePart = { inlineData: { mimeType: 'image/jpeg', data: base64 } };
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 60000);
+  const timeoutMs = 30000;
+  const timeoutId = setTimeout(() => {
+    try {
+      controller.abort(new Error(`Gemini request timed out after ${timeoutMs / 1000}s`));
+    } catch (_) {
+      controller.abort();
+    }
+  }, timeoutMs);
 
   try {
     const response = await fetch(`${provider.endpoint}?key=${apiKey}`, {
@@ -866,7 +890,14 @@ async function callGroq(provider, imageData, context, apiKey) {
     ? imageData
     : await imageToBase64(imageData);
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 60000);
+  const timeoutMs = 30000;
+  const timeoutId = setTimeout(() => {
+    try {
+      controller.abort(new Error(`Gemini request timed out after ${timeoutMs / 1000}s`));
+    } catch (_) {
+      controller.abort();
+    }
+  }, timeoutMs);
 
   try {
     const response = await fetch(provider.endpoint, {
@@ -911,7 +942,14 @@ async function callMistral(provider, imageData, context, apiKey) {
     ? imageData
     : await imageToBase64(imageData);
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 60000);
+  const timeoutMs = 30000;
+  const timeoutId = setTimeout(() => {
+    try {
+      controller.abort(new Error(`Gemini request timed out after ${timeoutMs / 1000}s`));
+    } catch (_) {
+      controller.abort();
+    }
+  }, timeoutMs);
 
   try {
     const response = await fetch(provider.endpoint, {
@@ -1097,32 +1135,32 @@ export async function analyzePhoto(imageData, context = {}, onProgress = null) {
 
           // 4. Rate / Quota Limit (429) — cool down this specific key and rotate to next key from different project/account!
           if (isQuotaError(err)) {
-            blockKey(provider.id, keys[ki], ki, 60000); // 60s cooldown for this key
+            blockKey(provider.id, keys[ki], ki, 300000); // 5 min cooldown for this specific key
             const otherUnblockedKeys = keyIndices.filter(idx => idx !== ki && !isKeyBlocked(provider.id, keys[idx], idx));
             if (otherUnblockedKeys.length > 0) {
               console.warn(`[AI] ${provider.name} key ${ki + 1} reached quota/rate limit. Rotating to key ${otherUnblockedKeys[0] + 1} of ${keys.length} (different project/account)...`);
               activeKeyIndex[provider.id] = otherUnblockedKeys[0];
               break; // break attempt loop, try next ki in keyIndices
             } else {
-              console.warn(`[AI] All ${keys.length} API keys for ${provider.name} reached quota/rate limit. Cooling down model for 120s and rotating to next Gemini model...`);
-              providerBlockedUntil[provider.id] = Date.now() + 120000;
+              console.warn(`[AI] All ${keys.length} API keys for ${provider.name} reached quota/rate limit. Cooling down model for 600s (10 min) and rotating to next Gemini model...`);
+              providerBlockedUntil[provider.id] = Date.now() + 600000;
               skipProvider = true;
               break;
             }
           }
 
-          // 5. Abort / timeout handling (>60s)
-          const isAbort = err.name === 'AbortError' || (err.message || '').includes('aborted') || (err.message || '').includes('signal is aborted');
+          // 5. Abort / timeout handling (>30s)
+          const isAbort = err.name === 'AbortError' || (err.message || '').includes('aborted') || (err.message || '').includes('signal is aborted') || (err.message || '').includes('timed out');
           if (isAbort) {
             blockKey(provider.id, keys[ki], ki, 120000);
             const otherUnblockedKeys = keyIndices.filter(idx => idx !== ki && !isKeyBlocked(provider.id, keys[idx], idx));
             if (otherUnblockedKeys.length > 0) {
-              console.warn(`[AI] ${provider.name} key ${ki + 1} timed out (>60s). Rotating to key ${otherUnblockedKeys[0] + 1} of ${keys.length}...`);
+              console.warn(`[AI] ${provider.name} key ${ki + 1} timed out (>30s). Rotating immediately to key ${otherUnblockedKeys[0] + 1} of ${keys.length}...`);
               activeKeyIndex[provider.id] = otherUnblockedKeys[0];
               break;
             } else {
-              console.warn(`[AI] ${provider.name} requests timed out across all keys. Cooling down model for 120s and rotating to next Gemini model...`);
-              providerBlockedUntil[provider.id] = Date.now() + 120000;
+              console.warn(`[AI] ${provider.name} requests timed out across all keys. Cooling down model for 180s and rotating to next Gemini model...`);
+              providerBlockedUntil[provider.id] = Date.now() + 180000;
               skipProvider = true;
               break;
             }
@@ -1472,21 +1510,21 @@ export async function generateTextWithAI(prompt, systemInstruction = '', onProgr
           if (isNonRetryable(err)) break;
 
           if (isQuotaError(err)) {
-            blockKey(provider.id, keys[ki], ki, 60000);
+            blockKey(provider.id, keys[ki], ki, 300000);
             const otherUnblockedKeys = keyIndices.filter(idx => idx !== ki && !isKeyBlocked(provider.id, keys[idx], idx));
             if (otherUnblockedKeys.length > 0) {
               console.warn(`[AI Text] ${provider.name} key ${ki + 1} reached quota/rate limit. Rotating to key ${otherUnblockedKeys[0] + 1} of ${keys.length} (different project/account)...`);
               activeKeyIndex[provider.id] = otherUnblockedKeys[0];
               break;
             } else {
-              console.warn(`[AI Text] All ${keys.length} API keys for ${provider.name} reached quota/rate limit. Cooling down model for 120s and rotating to next Gemini model...`);
-              providerBlockedUntil[provider.id] = Date.now() + 120000;
+              console.warn(`[AI Text] All ${keys.length} API keys for ${provider.name} reached quota/rate limit. Cooling down model for 600s (10 min) and rotating to next Gemini model...`);
+              providerBlockedUntil[provider.id] = Date.now() + 600000;
               skipProvider = true;
               break;
             }
           }
 
-          const isAbort = err.name === 'AbortError' || (err.message || '').includes('aborted') || (err.message || '').includes('signal is aborted');
+          const isAbort = err.name === 'AbortError' || (err.message || '').includes('aborted') || (err.message || '').includes('signal is aborted') || (err.message || '').includes('timed out');
           if (isAbort) {
             blockKey(provider.id, keys[ki], ki, 120000);
             const otherUnblockedKeys = keyIndices.filter(idx => idx !== ki && !isKeyBlocked(provider.id, keys[idx], idx));
@@ -1494,7 +1532,8 @@ export async function generateTextWithAI(prompt, systemInstruction = '', onProgr
               activeKeyIndex[provider.id] = otherUnblockedKeys[0];
               break;
             } else {
-              providerBlockedUntil[provider.id] = Date.now() + 120000;
+              console.warn(`[AI Text] ${provider.name} requests timed out across all keys. Cooling down model for 180s and rotating to next Gemini model...`);
+              providerBlockedUntil[provider.id] = Date.now() + 180000;
               skipProvider = true;
               break;
             }
