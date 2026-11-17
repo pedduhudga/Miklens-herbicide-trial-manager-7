@@ -1297,7 +1297,7 @@ export default function LargeScaleTrials({ onMenuClick }) {
     if (cropCallbackRef.current) {
       let finalUrl = croppedUrl;
       try {
-        finalUrl = await compressImage(croppedUrl, 2048, 0.85);
+        finalUrl = await compressImage(croppedUrl, 1920, 0.95);
       } catch (err) {
         console.warn('[LargeScaleTrials] Crop compression failed:', err);
       }
@@ -1317,7 +1317,7 @@ export default function LargeScaleTrials({ onMenuClick }) {
 
     // Compress image before saving/uploading to prevent quota errors
     try {
-      dataUrl = await compressImage(dataUrl, 2048, 0.85);
+      dataUrl = await compressImage(dataUrl, 1920, 0.95);
     } catch (compressErr) {
       console.warn('Photo compression failed, using original:', compressErr);
     }
