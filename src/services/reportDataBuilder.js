@@ -110,7 +110,16 @@ export function getParametersWithData(subTrials, categoryId) {
         safeJsonParse(trial.EfficacyDataJSON, []),
         categoryId
       );
-      if (efficacy.some(obs => toNum(obs[field.key]) !== null)) {
+      if (field.key === 'fruitHealthScore') {
+        // Only include Fruit Health Score if fruit was actually observed (> 0)
+        if (efficacy.some(obs => {
+          const val = toNum(obs[field.key]);
+          return val !== null && val > 0;
+        })) {
+          found = true;
+          break;
+        }
+      } else if (efficacy.some(obs => toNum(obs[field.key]) !== null)) {
         found = true;
         break;
       }
@@ -696,7 +705,7 @@ export function exportTidyCSV(projectId, subTrials, state = {}) {
   const category = state.activeCategory || 'herbicide';
   const config   = getCategoryConfig(category);
   const obsFields = (config.observationFields || [])
-    .filter(f => f.type === 'number')
+    .filter(f => f.type === 'number' || f.key === 'flowerStage')
     .map(f => f.key);
 
   const projects     = state.projects || [];
@@ -1057,6 +1066,8 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
           harvestNumber: obs.harvestNumber || obs.harvest || 1,
           sampleCount: obs.sampleCount || '',
           notes: obs.notes || '',
+          flowerStage: obs.flowerStage || '',
+          fruitHealthNote: obs.fruitHealthNote || '',
         };
         for (const field of numFields) {
           obsEntry[field.key] = toNum(obs[field.key]);
@@ -1114,6 +1125,8 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
         const val = toNum(targetObs?.[field.key]);
         row[field.key] = val;
       }
+      row.flowerStage = targetObs?.flowerStage || '';
+      row.fruitHealthNote = targetObs?.fruitHealthNote || '';
       rawMatrix[name][repId] = row;
     });
   }

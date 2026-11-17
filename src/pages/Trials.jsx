@@ -13222,36 +13222,57 @@ If none are present, write "None".`;
                       </div>
                     )}
                   </div>
-                  <input
-                    type="number"
-                    min={field.min !== undefined ? field.min : undefined}
-                    max={field.max !== undefined ? field.max : undefined}
-                    step="0.1"
-                    value={obsForm[field.key] ?? ''}
-                    onChange={e => {
-                      const val = e.target.value;
-                      setObsForm(prev => {
-                        const next = { ...prev, [field.key]: val };
-                        // Real-time calculation of Root-to-Shoot Ratio
-                        if (field.key === 'rootBiomass' || field.key === 'shootBiomass') {
-                          const rb = parseFloat(next.rootBiomass);
-                          const sb = parseFloat(next.shootBiomass);
-                          if (!isNaN(rb) && !isNaN(sb) && sb > 0) {
-                            next.rootToShootRatio = parseFloat((rb / sb).toFixed(3));
+                  {field.type === 'select' ? (
+                    <select
+                      value={obsForm[field.key] ?? (field.options?.[0] || '')}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setObsForm(prev => {
+                          const next = { ...prev, [field.key]: val };
+                          if (activeTrial) {
+                            localStorage.setItem(`obs_draft_${activeTrial.ID}`, JSON.stringify(next));
                           }
-                        }
-                        if (activeTrial) {
-                          localStorage.setItem(`obs_draft_${activeTrial.ID}`, JSON.stringify(next));
-                        }
-                        return next;
-                      });
-                    }}
-                    className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 ${
-                      isPrimary 
-                        ? 'border-emerald-300 ring-2 ring-emerald-50 focus:ring-emerald-400 font-bold text-slate-800' 
-                        : 'focus:ring-emerald-400'
-                    }`}
-                  />
+                          return next;
+                        });
+                      }}
+                      className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white"
+                    >
+                      {field.options?.map(opt => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="number"
+                      min={field.min !== undefined ? field.min : undefined}
+                      max={field.max !== undefined ? field.max : undefined}
+                      step="0.1"
+                      value={obsForm[field.key] ?? ''}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setObsForm(prev => {
+                          const next = { ...prev, [field.key]: val };
+                          // Real-time calculation of Root-to-Shoot Ratio
+                          if (field.key === 'rootBiomass' || field.key === 'shootBiomass') {
+                            const rb = parseFloat(next.rootBiomass);
+                            const sb = parseFloat(next.shootBiomass);
+                            if (!isNaN(rb) && !isNaN(sb) && sb > 0) {
+                              next.rootToShootRatio = parseFloat((rb / sb).toFixed(3));
+                            }
+                          }
+                          if (activeTrial) {
+                            localStorage.setItem(`obs_draft_${activeTrial.ID}`, JSON.stringify(next));
+                          }
+                          return next;
+                        });
+                      }}
+                      className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 ${
+                        isPrimary 
+                          ? 'border-emerald-300 ring-2 ring-emerald-50 focus:ring-emerald-400 font-bold text-slate-800' 
+                          : 'focus:ring-emerald-400'
+                      }`}
+                    />
+                  )}
                   {isPrimary && coverDetectResult && (
                     <div className="mt-1.5 flex items-center gap-3 text-xs bg-violet-50 border border-violet-200 rounded-lg px-3 py-1.5">
                       <span className="text-violet-700 font-semibold">Detected: {coverDetectResult.cover}%</span>

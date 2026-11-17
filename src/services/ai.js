@@ -814,6 +814,10 @@ ZERO-HALLUCINATION & DIAGNOSTIC ACCURACY RULES:
    - "leafMarginNecrosis": Rating 0-10 for edge firing/scorch.
    - "canopyCoveragePct": Ground/pot surface area covered by green canopy (0-100%).
    - "chlorosisIncidencePct": Percentage of leaves showing yellowing/chlorosis (0-100%).
+   - "leafGlossScore": Leaf surface gloss and waxy cuticle luster rating 0-10 (0 = dull/matte/stressed leaves, 10 = highly glossy waxy cuticle). Score every visible leaf.
+   - "flowerStage": ONLY if flowers are clearly visible in this photo — set to "bud", "open", "setting", or "drop". If NO flowers are visible, MUST be "none".
+   - "fruitHealthScore": ONLY if fruit/pods are clearly visible — rate fruit condition 0-10 (10 = perfectly healthy, 0 = severe damage). If NO fruit visible, MUST be 0.
+   - "fruitHealthNote": ONLY if fruit visible — brief descriptor of dominant fruit condition: "healthy", "blossom-end-rot", "cracking", "sunscald", "pest-damaged", or "none". If NO fruit visible, MUST be "none".
 
 Respond ONLY with a single minified JSON object in this exact format:
 {
@@ -827,7 +831,11 @@ Respond ONLY with a single minified JSON object in this exact format:
     "interveinalChlorosis": NUMBER,
     "leafMarginNecrosis": NUMBER,
     "canopyCoveragePct": NUMBER,
-    "chlorosisIncidencePct": NUMBER
+    "chlorosisIncidencePct": NUMBER,
+    "leafGlossScore": NUMBER,
+    "flowerStage": "none|bud|open|setting|drop",
+    "fruitHealthScore": NUMBER,
+    "fruitHealthNote": "none|healthy|blossom-end-rot|cracking|sunscald|pest-damaged"
   },
   "targets": [
     {"name": "Nutrient Target", "value": NUMBER, "status": "Sufficient/Deficient/Marginal", "confidence": NUMBER, "notes": "..."}
@@ -855,9 +863,13 @@ ${historyPrompt}`;
               interveinalChlorosis: { type: Type.NUMBER },
               leafMarginNecrosis: { type: Type.NUMBER },
               canopyCoveragePct: { type: Type.NUMBER },
-              chlorosisIncidencePct: { type: Type.NUMBER }
+              chlorosisIncidencePct: { type: Type.NUMBER },
+              leafGlossScore: { type: Type.NUMBER },
+              flowerStage: { type: Type.STRING },
+              fruitHealthScore: { type: Type.NUMBER },
+              fruitHealthNote: { type: Type.STRING }
             },
-            required: ["visualVigor", "deficiencySeverity", "leafColorScore"]
+            required: ["visualVigor", "deficiencySeverity", "leafColorScore", "leafGlossScore", "flowerStage"]
           },
           targets: {
             type: Type.ARRAY,
@@ -905,6 +917,10 @@ ZERO-HALLUCINATION & ACCURACY RULES:
    - "wiltingIndex": Wilting or flaccidity score on scale 0-10 (0 = fully turgid/erect, 10 = completely desiccated/wilted).
    - "canopyGreennessPct": Percentage of canopy displaying vibrant, healthy green foliage (0-100%).
    - "foliarUniformityScore": Uniformity and consistency of canopy growth on scale 0-10.
+   - "leafGlossScore": Leaf surface gloss and waxy cuticle luster rating 0-10 (0 = dull/matte/stressed leaves, 10 = highly glossy waxy cuticle and foliar luster). Score visible leaves objectively regardless of treatment type.
+   - "flowerStage": ONLY if flowers are clearly visible in this photo — set to "bud", "open", "setting", or "drop". If NO flowers are visible, MUST be "none".
+   - "fruitHealthScore": ONLY if fruit/pods are clearly visible — rate fruit condition 0-10 (10 = perfectly healthy, 0 = severe damage). If NO fruit visible, MUST be 0.
+   - "fruitHealthNote": ONLY if fruit visible — brief descriptor: "healthy", "blossom-end-rot", "cracking", "sunscald", "pest-damaged", or "none". If NO fruit visible, MUST be "none".
 
 Respond ONLY with a single minified JSON object in this exact format:
 {
@@ -918,7 +934,11 @@ Respond ONLY with a single minified JSON object in this exact format:
     "shootDensityScore": NUMBER,
     "wiltingIndex": NUMBER,
     "canopyGreennessPct": NUMBER,
-    "foliarUniformityScore": NUMBER
+    "foliarUniformityScore": NUMBER,
+    "leafGlossScore": NUMBER,
+    "flowerStage": "none|bud|open|setting|drop",
+    "fruitHealthScore": NUMBER,
+    "fruitHealthNote": "none|healthy|blossom-end-rot|cracking|sunscald|pest-damaged"
   },
   "targets": [
     {"name": "Growth / Vigor Parameter", "value": NUMBER, "status": "Vigorous/Healthy/Stressed", "confidence": NUMBER, "notes": "..."}
@@ -946,9 +966,13 @@ ${historyPrompt}`;
               shootDensityScore: { type: Type.NUMBER },
               wiltingIndex: { type: Type.NUMBER },
               canopyGreennessPct: { type: Type.NUMBER },
-              foliarUniformityScore: { type: Type.NUMBER }
+              foliarUniformityScore: { type: Type.NUMBER },
+              leafGlossScore: { type: Type.NUMBER },
+              flowerStage: { type: Type.STRING },
+              fruitHealthScore: { type: Type.NUMBER },
+              fruitHealthNote: { type: Type.STRING }
             },
-            required: ["overallVigor", "shootVigor", "abioticStressRecovery"]
+            required: ["overallVigor", "shootVigor", "abioticStressRecovery", "leafGlossScore", "flowerStage"]
           },
           targets: {
             type: Type.ARRAY,

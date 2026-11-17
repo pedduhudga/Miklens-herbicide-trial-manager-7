@@ -86,6 +86,9 @@ CRITICAL INSTRUCTION:
 1. Avoid all causal physiological, biological or metabolic claims (such as "nutrient uptake", "assimilation", "photosynthetic rate", "metabolic demand") unless those biological parameters were directly measured. Focus strictly on physical, visual, and statistical observations (e.g. height, vigor, leaf color, SPAD, yield).
 2. Differentiate clearly between numerical differences and statistically significant differences. Do NOT write that observations were "uniform" across replicates unless all replicate data values are identical; describe the numerical means observed for the treatments and state that the differences were not statistically significant.
 3. Only state that deficiency symptoms were not noted if the actual deficiency or chlorosis values in the data are zero or absent.
+14. If leaf gloss / luster data (leafGlossScore) is present, interpret higher scores (≥7) as an indicator of healthy cuticle wax development, foliar health, and positive treatment response across plots (whether from nutrition, foliar inputs, biostimulants, or other treatments); lower scores (≤3) indicate dull, matte, or stressed foliage. Attribute differences objectively to the treatments evaluated rather than assuming any single input type.
+15. If flower stage data is present and not "none", mention the reproductive stage observed and any treatment differences in flowering progression.
+16. If fruit health score data is present (fruitHealthScore > 0), describe the fruit condition and any visible disorders such as blossom-end-rot, cracking, or sunscald noted in the fruitHealthNote, and relate this to treatment efficacy if differences exist.
 4. Never infer that the experiment lacked sufficient data, inadequate replication, or inadequate statistical power unless those conditions are explicitly supported by the statistical output. Do NOT claim the trial has "insufficient data" (it has multiple replication blocks and pots).
 5. Do NOT mention "Completely Randomized Design" or "CRD" unless the selected design is explicitly CRD.
 9. Avoid informal phrases like: "performed comparably", "showed comparable vigor", or "uniform". Instead, write: "no statistically significant treatment differences were detected under the conditions of this study."
@@ -632,6 +635,28 @@ function compileAgronomicInterpretation(observations, activeFields, treatmentNam
     summaries.push(`For ${f.label}: The trial showed ${isSig ? 'statistically significant' : 'no statistically significant'} differences between treatments (p = ${anova.p_value.toFixed(4)})${cvInfo}. The highest mean was observed under ${best.name} (${best.mean.toFixed(2)}, Group '${best.group}'), and the lowest under ${worst.name} (${worst.mean.toFixed(2)}, Group '${worst.group}') ${impStr}`);
   });
 
+  // Summarize reproductive stage (Flower Stage) if observed in plots
+  const flowerStages = (observations || [])
+    .map(o => o.flowerStage)
+    .filter(s => s && s !== 'none');
+  if (flowerStages.length > 0) {
+    const stageCounts = {};
+    flowerStages.forEach(s => { stageCounts[s] = (stageCounts[s] || 0) + 1; });
+    const dominantStage = Object.entries(stageCounts).sort((a, b) => b[1] - a[1])[0][0];
+    summaries.push(`Reproductive Phenology: Flowers were observed across plots with dominant stage '${dominantStage}' (${flowerStages.length} recorded observation points).`);
+  }
+
+  // Summarize fruit disorders (Fruit Health) if observed in plots
+  const fruitHealthNotes = (observations || [])
+    .map(o => o.fruitHealthNote)
+    .filter(n => n && n !== 'none' && n !== 'healthy');
+  if (fruitHealthNotes.length > 0) {
+    const noteCounts = {};
+    fruitHealthNotes.forEach(n => { noteCounts[n] = (noteCounts[n] || 0) + 1; });
+    const noteSummary = Object.entries(noteCounts).map(([k, v]) => `${k} (${v} plots)`).join(', ');
+    summaries.push(`Fruit Quality Observation: Specific fruit disorders detected in field canopy photos: ${noteSummary}.`);
+  }
+
   return summaries.join('\n');
 }
 
@@ -769,10 +794,14 @@ export class AdvancedReportGenerator {
     // They are added tentatively here and pruned after observations are loaded (see end of constructor).
     if (this.category === 'biostimulant') {
       this.activeFields.push({ key: 'rootToShootRatio', label: 'Root-to-Shoot Ratio' });
+      this.activeFields.push({ key: 'leafGlossScore', label: 'Leaf Gloss / Luster (0-10)' });
+      this.activeFields.push({ key: 'fruitHealthScore', label: 'Fruit Health Score (0-10)' });
     } else if (this.category === 'fungicide') {
       this.activeFields.push({ key: 'audpc', label: 'AUDPC' });
     } else if (this.category === 'nutrition') {
       this.activeFields.push({ key: 'nue', label: 'Nutrient Use Efficiency (NUE)' });
+      this.activeFields.push({ key: 'leafGlossScore', label: 'Leaf Gloss / Luster (0-10)' });
+      this.activeFields.push({ key: 'fruitHealthScore', label: 'Fruit Health Score (0-10)' });
     }
 
     if (Array.isArray(trialOrTrials)) {
@@ -970,13 +999,15 @@ export class AdvancedReportGenerator {
         const val = obs[f.key];
         if (val === undefined || val === null || val === '') return false;
         const num = parseFloat(val);
-        return !isNaN(num);
+        if (isNaN(num)) return false;
+        if (f.key === 'fruitHealthScore') return num > 0;
+        return true;
       });
 
       if (hasAnyData) {
         fieldsToKeep.push(f);
       } else {
-        this.skippedFields.push({ ...f, reason: 'No observations recorded' });
+        this.skippedFields.push({ ...f, reason: f.key === 'fruitHealthScore' ? 'No fruit present in observed plots' : 'No observations recorded' });
       }
     });
 

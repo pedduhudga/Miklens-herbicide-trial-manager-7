@@ -321,7 +321,7 @@ function buildSheet4RawData(wb, reportData) {
   const rawMatrix = reportData.rawMatrix || {};
   const meta = reportData.meta || {};
   const categoryConfig = meta.categoryConfig || {};
-  const observationFields = (categoryConfig.observationFields || []).filter(f => f.type === 'number');
+  const observationFields = (categoryConfig.observationFields || []).filter(f => f.type === 'number' || f.key === 'flowerStage');
 
   // Build headers: Treatment | Replication | Plot Number | Date | DAA | [field labels...]
   const fieldKeys = observationFields.map(f => f.key);
