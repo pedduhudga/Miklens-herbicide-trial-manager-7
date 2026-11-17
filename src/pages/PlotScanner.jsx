@@ -37,6 +37,7 @@ import { validateEfficacyData } from "../utils/analysisUtils.js";
 import { analyzePhoto, generateTextWithAI } from "../services/multiProviderAI.js";
 import { requestWakeLock, releaseWakeLock, triggerHaptic } from "../utils/nativeCapabilities.js";
 import { fetchObservationWeather } from "../services/weather.js";
+import { saveSyncQueueOffline } from "../services/offlineStorage.js";
 
 const getAutomaticPotPrefix = (targetTrial, allTrials) => {
   if (!targetTrial || !allTrials) return '';
@@ -369,6 +370,93 @@ export default function PlotScanner({ onMenuClick }) {
       releaseWakeLock();
     };
   }, [scannerOpen, cameraModal]);
+
+  // ── AUTOMATIC DRIVE PHOTO RECONCILER (Fail-safe for scanner photos) ──
+  const reconcileUnuploadedPhotos = useCallback(() => {
+    const trials = getAppState().trials || [];
+    const currentQueue = getAppState().syncQueue || [];
+    const queuedTempIds = new Set(
+      currentQueue.map(q => q.photo?.tempId || q.id).filter(Boolean)
+    );
+
+    const newQueueItems = [];
+
+    trials.forEach(trial => {
+      ['PhotoURLs', 'WeedPhotosJSON'].forEach(field => {
+        const photos = safeJsonParse(trial[field], []);
+        photos.forEach(pObj => {
+          if (!pObj) return;
+          const urlStr = String(pObj.url || pObj.src || '');
+          const hasDriveUrl = Boolean(
+            pObj.driveId ||
+            urlStr.includes('drive.google.com') ||
+            urlStr.includes('googleusercontent.com') ||
+            (urlStr.startsWith('http') && !urlStr.includes('localhost'))
+          );
+          const hasLocalData = (pObj.fileData && pObj.fileData.length > 50) || (urlStr.startsWith('data:image'));
+
+          if (!hasDriveUrl && hasLocalData) {
+            const tempId = pObj.tempId || `heal_scan_${trial.ID}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+            if (!queuedTempIds.has(tempId) && !queuedTempIds.has(`sync_${tempId}`)) {
+              queuedTempIds.add(tempId);
+              queuedTempIds.add(`sync_${tempId}`);
+              const syncItem = {
+                id: `sync_${tempId}`,
+                type: field === 'WeedPhotosJSON' ? 'weed_upload' : 'general_upload',
+                status: 'pending',
+                trialId: trial.ID,
+                timestamp: Date.now(),
+                photo: {
+                  tempId: tempId,
+                  fileData: pObj.fileData || pObj.url,
+                  mimeType: 'image/jpeg',
+                  fileName: `reconciled_scan_${trial.ID}_${Date.now()}.jpg`,
+                  date: pObj.date || trial.Date || new Date().toISOString().split('T')[0],
+                  label: pObj.label || 'Recovered Field Photo'
+                },
+                attempts: 0
+              };
+              newQueueItems.push(syncItem);
+            }
+          }
+        });
+      });
+    });
+
+    if (newQueueItems.length > 0) {
+      console.log(`[DriveReconciler-PlotScanner] Auto-healed ${newQueueItems.length} photo(s) missing Drive URLs. Queuing for upload...`);
+      const updatedQueue = [...currentQueue, ...newQueueItems];
+      updateState({ syncQueue: updatedQueue });
+      saveSyncQueueOffline(updatedQueue).catch(console.error);
+      if (typeof window !== 'undefined' && typeof window.processSyncQueue === 'function') {
+        setTimeout(() => window.processSyncQueue(), 500);
+      }
+    }
+  }, [getAppState, updateState]);
+
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      reconcileUnuploadedPhotos();
+    }, 2000);
+
+    const interval = setInterval(() => {
+      if (navigator.onLine) {
+        reconcileUnuploadedPhotos();
+      }
+    }, 60000); // Check every 60 seconds
+
+    const handleOnline = () => {
+      setTimeout(() => reconcileUnuploadedPhotos(), 1000);
+    };
+
+    window.addEventListener('online', handleOnline);
+
+    return () => {
+      clearTimeout(timer);
+      clearInterval(interval);
+      window.removeEventListener('online', handleOnline);
+    };
+  }, [reconcileUnuploadedPhotos]);
 
   const [cropSource, setCropSource] = useState(null);
   const cropCallbackRef = useRef(null);
@@ -1105,14 +1193,41 @@ Rules:
           getAppState,
         );
 
-        if (driveResult?._errType)
-          throw new Error(driveResult.message || "Upload failed");
+        let driveUrl = driveResult?.url || driveResult?.fileUrl || null;
+        let driveFileId = driveResult?.id || (driveUrl ? getDriveFileId(driveUrl) : null);
+        const tempId = `scan_${trialId}_${Date.now()}`;
 
-        const driveUrl = driveResult?.url || driveResult?.fileUrl || null;
-        const driveFileId = driveResult?.id || (driveUrl ? getDriveFileId(driveUrl) : null);
+        if (driveResult?._errType) {
+          console.warn(`[PlotScanner] Direct photo upload encountered ${driveResult._errType}: ${driveResult.message}. Auto-queuing into persistent background sync queue...`);
+          const fallbackSyncItem = {
+            id: `sync_${tempId}`,
+            type: isWeed ? 'weed_upload' : 'general_upload',
+            status: 'pending',
+            trialId,
+            timestamp: Date.now(),
+            photo: {
+              tempId,
+              fileData: finalDataUrl,
+              mimeType: finalMimeType,
+              fileName: `scan_${trialId}_${Date.now()}.jpg`,
+              date: photoDate,
+              label: photoLabel
+            },
+            attempts: 0
+          };
+          const currentQueue = getAppState().syncQueue || [];
+          const nextQueue = [...currentQueue.filter(i => i.id !== fallbackSyncItem.id), fallbackSyncItem];
+          updateState({ syncQueue: nextQueue });
+          saveSyncQueueOffline(nextQueue).catch(console.error);
+
+          if (typeof window !== 'undefined' && typeof window.processSyncQueue === 'function') {
+            setTimeout(() => window.processSyncQueue(), 500);
+          }
+        }
+
         const finalEntry = driveUrl
           ? { url: driveUrl, driveId: driveFileId, date: photoDate, label: photoLabel, tag: photoTagValue, identifications: [], aiStatus: 'pending' }
-          : { fileData: finalDataUrl, mimeType: finalMimeType, date: photoDate, label: photoLabel, tag: photoTagValue, identifications: [], aiStatus: 'pending' };
+          : { tempId, fileData: finalDataUrl, mimeType: finalMimeType, date: photoDate, label: photoLabel, tag: photoTagValue, identifications: [], aiStatus: 'pending' };
         
         // Fetch fresh trial from state to avoid overwriting photos added concurrently
         const latestTrial = (getAppState().trials || []).find((t) => t.ID === trialId) || trial;

@@ -5694,17 +5694,32 @@ export default function Trials({ onMenuClick }) {
     // Reconcile and heal any photos that previously failed to upload to Google Drive
     const timer = setTimeout(() => {
       reconcileUnuploadedPhotos();
-    }, 4000);
-    return () => clearTimeout(timer);
-  }, [reconcileUnuploadedPhotos]);
+    }, 2000);
 
-  useEffect(() => {
     const interval = setInterval(() => {
       if (navigator.onLine) {
         reconcileUnuploadedPhotos();
       }
-    }, 180000); // Check every 3 minutes
-    return () => clearInterval(interval);
+    }, 60000); // Check every 60 seconds
+
+    const handleOnline = () => {
+      setTimeout(() => reconcileUnuploadedPhotos(), 1000);
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && navigator.onLine) {
+        reconcileUnuploadedPhotos();
+      }
+    };
+
+    window.addEventListener('online', handleOnline);
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      clearTimeout(timer);
+      clearInterval(interval);
+      window.removeEventListener('online', handleOnline);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, [reconcileUnuploadedPhotos]);
 
   // ── AI SUMMARY GENERATION ─────────────────────────────────────────

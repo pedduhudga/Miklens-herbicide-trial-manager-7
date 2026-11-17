@@ -96,7 +96,7 @@ async function uploadPhotoChunked(item, folderPath, getAppState) {
         result = await Promise.race([
             uploadPromise,
             new Promise((_, reject) =>
-                setTimeout(() => reject(new Error(`Chunk upload timeout at chunk ${i + 1}`)), 45000)
+                setTimeout(() => reject(new Error(`Chunk upload timeout at chunk ${i + 1} (>75s)`)), 75000)
             )
         ]);
         
@@ -472,11 +472,11 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                                     folderPath: folderPath
                                 }, false, getAppState);
 
-                                // Timeout after 45 seconds
+                                // Resilient timeout: 75 seconds for large 3-5MB research-grade photos
                                 result = await Promise.race([
                                     uploadPromise,
                                     new Promise((_, reject) =>
-                                        setTimeout(() => reject(new Error('Upload timeout after 45s - connection too slow. Will retry.')), 45000)
+                                        setTimeout(() => reject(new Error('Upload timeout after 75s - connection too slow. Will retry.')), 75000)
                                     )
                                 ]);
                             }
@@ -743,7 +743,16 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                         item.attempts = (item.attempts || 0) + 1;
                         const drivePermDenied = isDrivePermissionError(errMsg);
                         item.noRetry = drivePermDenied;
-                        item.status = errMsg.includes('Timeout') || errMsg.includes('fetch') ? 'pending' : 'failed';
+
+                        // ZERO PHOTO LOSS MANDATE: Photos are NEVER marked permanently failed on network,
+                        // timeout, 503, or rate-limit issues. They stay 'pending' to retry automatically
+                        // until Google Drive confirms successful storage.
+                        const isPhotoItem = item.type === 'general_upload' || item.type === 'weed_upload' || !!item.photo;
+                        if (isPhotoItem) {
+                            item.status = drivePermDenied ? 'failed' : 'pending';
+                        } else {
+                            item.status = errMsg.includes('Timeout') || errMsg.includes('fetch') ? 'pending' : 'failed';
+                        }
                         item.lastError = errMsg;
 
                         if (drivePermDenied) {
@@ -756,6 +765,7 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                         console.groupEnd();
                     }
                     updateAppState({ syncQueue: getAppState().syncQueue });
+                    saveSyncQueueOffline(getAppState().syncQueue).catch(err => console.error('[HighTechSync] Failed to persist queue offline:', err));
                     renderSyncStatus();
                 }
 
@@ -770,20 +780,19 @@ export async function processSyncQueue(getAppState, updateAppState, showToast, r
                 const pendingCount = getAppState().syncQueue.filter(i => i.status === 'pending' || (i.status === 'failed' && !i.noRetry)).length;
 
                 if (successCount > 0) {
-                    showToast(`? Sync complete! ${successCount} item(s) uploaded. ${pendingCount} pending.`, 'success');
+                    showToast(`✓ Sync complete! ${successCount} item(s) uploaded. ${pendingCount} pending.`, 'success');
                 } else if (failedCount > 0) {
-                    showToast(`Sync finished with ${failedCount} error(s). Retrying in 30s...`, 'warning');
-                    // Auto-retry failed items after 30 seconds
+                    showToast(`Sync paused on ${failedCount} item(s). Retrying automatically in 15s...`, 'warning');
                     setTimeout(() => {
-                        if (navigator.onLine) processSyncQueue(getAppState, updateAppState, showToast, renderSyncStatus);
-                    }, 30000);
+                        if (navigator.onLine && !_isSyncProcessing) processSyncQueue(getAppState, updateAppState, showToast, renderSyncStatus);
+                    }, 15000);
                 } else if (blockedCount > 0) {
                     showToast(`Sync paused: ${blockedCount} item(s) need Drive permission fix in Apps Script settings.`, 'warning');
                 } else if (pendingCount > 0) {
-                    console.log(`[HighTechSync] [INFO] ${pendingCount} items still pending. Setting up auto-retry...`);
+                    console.log(`[HighTechSync] [INFO] ${pendingCount} items pending. Scheduling next sync pass in 6s...`);
                     setTimeout(() => {
                         if (navigator.onLine && !_isSyncProcessing) processSyncQueue(getAppState, updateAppState, showToast, renderSyncStatus);
-                    }, 5000);
+                    }, 6000);
                 }
 
                 renderSyncStatus();

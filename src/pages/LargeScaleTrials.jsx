@@ -38,6 +38,9 @@ import { EPPO_CODES, BBCH_STAGES, lookupEPPO } from '../utils/eppoBBCHData.js';
 import { exportToARM, importARMCSV } from '../services/armExporter.js';
 import { fetchWeather as fetchWeatherService, fetchSoilData, fetchObservationWeather } from '../services/weather.js';
 import { fbGetLargeScaleData } from '../services/largeScaleService.js';
+import { saveSyncQueueOffline } from '../services/offlineStorage.js';
+
+let _directUploadLockLS = Promise.resolve();
 import { GEMINI_FALLBACK_MODELS } from '../utils/aiConstants.js';
 import {
   INPUT_CATEGORIES,
@@ -362,6 +365,91 @@ export default function LargeScaleTrials({ onMenuClick }) {
       navigate(location.pathname, { replace: true, state: {} });
     }
   }, [location.state, navigate, location.pathname, state.auth?.user?.name]);
+
+  // ── AUTOMATIC DRIVE PHOTO RECONCILER (Fail-safe for field photos) ──
+  const reconcileUnuploadedPhotos = useCallback(() => {
+    const trials = getAppState().trials || [];
+    const currentQueue = getAppState().syncQueue || [];
+    const queuedTempIds = new Set(
+      currentQueue.map(q => q.photo?.tempId || q.id).filter(Boolean)
+    );
+
+    const newQueueItems = [];
+
+    trials.forEach(trial => {
+      const photos = safeJsonParse(trial.PhotoURLs, []);
+      photos.forEach(pObj => {
+        if (!pObj) return;
+        const urlStr = String(pObj.url || pObj.src || '');
+        const hasDriveUrl = Boolean(
+          pObj.driveId ||
+          urlStr.includes('drive.google.com') ||
+          urlStr.includes('googleusercontent.com') ||
+          (urlStr.startsWith('http') && !urlStr.includes('localhost'))
+        );
+        const hasLocalData = (pObj.fileData && pObj.fileData.length > 50) || (urlStr.startsWith('data:image'));
+
+        if (!hasDriveUrl && hasLocalData) {
+          const tempId = pObj.tempId || `heal_ls_${trial.ID}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+          if (!queuedTempIds.has(tempId) && !queuedTempIds.has(`sync_${tempId}`)) {
+            queuedTempIds.add(tempId);
+            queuedTempIds.add(`sync_${tempId}`);
+            const syncItem = {
+              id: `sync_${tempId}`,
+              type: 'general_upload',
+              status: 'pending',
+              trialId: trial.ID,
+              timestamp: Date.now(),
+              photo: {
+                tempId: tempId,
+                fileData: pObj.fileData || pObj.url,
+                mimeType: 'image/jpeg',
+                fileName: `reconciled_ls_${trial.ID}_${Date.now()}.jpg`,
+                date: pObj.date || trial.Date || new Date().toISOString().split('T')[0],
+                label: pObj.label || 'Recovered Field Photo'
+              },
+              attempts: 0
+            };
+            newQueueItems.push(syncItem);
+          }
+        }
+      });
+    });
+
+    if (newQueueItems.length > 0) {
+      console.log(`[DriveReconciler-LargeScale] Auto-healed ${newQueueItems.length} photo(s) missing Drive URLs. Queuing for upload...`);
+      const updatedQueue = [...currentQueue, ...newQueueItems];
+      updateState({ syncQueue: updatedQueue });
+      saveSyncQueueOffline(updatedQueue).catch(console.error);
+      if (typeof window !== 'undefined' && typeof window.processSyncQueue === 'function') {
+        setTimeout(() => window.processSyncQueue(), 500);
+      }
+    }
+  }, [getAppState, updateState]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      reconcileUnuploadedPhotos();
+    }, 2000);
+
+    const interval = setInterval(() => {
+      if (navigator.onLine) {
+        reconcileUnuploadedPhotos();
+      }
+    }, 60000); // Check every 60 seconds
+
+    const handleOnline = () => {
+      setTimeout(() => reconcileUnuploadedPhotos(), 1000);
+    };
+
+    window.addEventListener('online', handleOnline);
+
+    return () => {
+      clearTimeout(timer);
+      clearInterval(interval);
+      window.removeEventListener('online', handleOnline);
+    };
+  }, [reconcileUnuploadedPhotos]);
 
   const handleQuickPeekFormulation = useCallback((arg1, arg2) => {
     if (!arg1 && !arg2) return;
@@ -1359,16 +1447,46 @@ export default function LargeScaleTrials({ onMenuClick }) {
     if (selectedSubTrialId === targetTrial.ID) setSelectedSubTrialId(optimisticTrial.ID);
 
     try {
-      const uploadResult = await uploadPhoto({
-        trialId: targetTrial.ID,
-        fileData: dataUrl,
-        mimeType: 'image/jpeg',
-        fileName,
-        isWeed: cameraMode === 'weed',
-        label: photoEntry.label,
-        date: photoDate,
-        folderPath,
-      }, getAppState);
+      const uploadResult = await (_directUploadLockLS = _directUploadLockLS.catch(() => {}).then(async () => {
+        return await uploadPhoto({
+          trialId: targetTrial.ID,
+          fileData: dataUrl,
+          mimeType: 'image/jpeg',
+          fileName,
+          isWeed: cameraMode === 'weed',
+          label: photoEntry.label,
+          date: photoDate,
+          folderPath,
+        }, getAppState);
+      }));
+
+      if (uploadResult?._errType) {
+        console.warn(`[LargeScaleTrials] Direct upload failed (${uploadResult._errType}): ${uploadResult.message}. Queuing in background sync...`);
+        const fallbackSyncItem = {
+          id: `sync_${tempId}`,
+          type: cameraMode === 'weed' ? 'weed_upload' : 'general_upload',
+          status: 'pending',
+          trialId: targetTrial.ID,
+          timestamp: Date.now(),
+          photo: {
+            tempId,
+            fileData: dataUrl,
+            mimeType: 'image/jpeg',
+            fileName,
+            date: photoDate,
+            label: photoEntry.label
+          },
+          attempts: 0
+        };
+        const currentQueue = getAppState().syncQueue || [];
+        const nextQueue = [...currentQueue.filter(i => i.id !== fallbackSyncItem.id), fallbackSyncItem];
+        updateState({ syncQueue: nextQueue });
+        saveSyncQueueOffline(nextQueue).catch(console.error);
+
+        if (typeof window !== 'undefined' && typeof window.processSyncQueue === 'function') {
+          setTimeout(() => window.processSyncQueue(), 500);
+        }
+      }
 
       const driveUrl = uploadResult?.url || uploadResult?.fileUrl || null;
       const driveFileId = uploadResult?.id || (driveUrl ? getDriveFileId(driveUrl) : null);

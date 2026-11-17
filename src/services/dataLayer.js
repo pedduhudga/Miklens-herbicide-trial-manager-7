@@ -953,28 +953,40 @@ export async function uploadPhoto(payload, getAppState) {
 
   console.log(`[DataLayer] Uploading photo for category: ${category} (category-aware trial association)`);
 
-  // Resilient retry loop: retry up to 3 times on transient network/timeout/503 errors
+  // Resilient retry loop: retry up to 7 times on transient network/timeout/503 errors
+  // Guarantees zero dropped photos during rapid clicking or heavy network fluctuations
   let lastResult = null;
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  const maxAttempts = 7;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const res = await sheetDB.apiCall('uploadPhoto', photoData, false, getAppState);
+      // 75-second timeout per attempt to support ~3-5MB high-res research photos on slower field networks
+      const res = await Promise.race([
+        sheetDB.apiCall('uploadPhoto', photoData, false, getAppState),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error(`Direct upload timeout on attempt ${attempt} (>75s)`)), 75000)
+        )
+      ]);
       if (res && (res.url || res.fileUrl || res.id)) {
         return res;
       }
       if (res?._errType === 'config') {
-        return res; // Configuration error should not be retried
+        return res; // Configuration error (e.g. missing Script URL) should not be retried
       }
       lastResult = res;
     } catch (err) {
       lastResult = { _errType: 'fetch', message: err.message };
     }
-    if (attempt < 3) {
-      console.warn(`[DataLayer] uploadPhoto attempt ${attempt} failed. Retrying in ${attempt * 1200}ms...`);
-      await new Promise(r => setTimeout(r, attempt * 1200));
+    if (attempt < maxAttempts) {
+      // Progressive exponential backoff with slight jitter to prevent server stampedes: 1.2s, 2.5s, 4.5s, 7.5s, 11s, 15s
+      const baseBackoff = Math.min(15000, Math.round(1200 * Math.pow(1.5, attempt - 1)));
+      const jitter = Math.round(Math.random() * 500);
+      const backoffMs = baseBackoff + jitter;
+      console.warn(`[DataLayer] uploadPhoto attempt ${attempt}/${maxAttempts} failed (${lastResult?.message || 'unknown'}). Retrying in ${backoffMs}ms...`);
+      await new Promise(r => setTimeout(r, backoffMs));
     }
   }
 
-  return lastResult || { _errType: 'network', message: 'Upload failed after 3 attempts' };
+  return lastResult || { _errType: 'network', message: `Upload failed after ${maxAttempts} attempts` };
 }
 
 // ─── Re-export apiCall for anything that still needs raw access ───────────────
