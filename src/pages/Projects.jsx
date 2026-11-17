@@ -363,12 +363,9 @@ function BlockCard({ block, trials, activeCategory, onPlotClick, onDeleteBlock, 
   const theme = getThemeClasses(projectConfig.color.accent);
   const controls = trials.filter(t => String(t.IsControl).toLowerCase() === 'true');
   const hasControl = controls.length > 0;
-  const tooMany = controls.length > 1;
-  const icon = tooMany
-    ? <AlertCircle className="w-4 h-4 text-red-500 animate-pulse" title="Multiple controls!" />
-    : hasControl
-      ? <CheckCircle2 className={`w-4 h-4 ${theme.text}`} title="Control present" />
-      : <AlertTriangle className="w-4 h-4 text-amber-500" title="Missing control!" />;
+  const icon = hasControl
+    ? <CheckCircle2 className={`w-4 h-4 ${theme.text}`} title={controls.length > 1 ? `${controls.length} controls present` : "Control present"} />
+    : <AlertTriangle className="w-4 h-4 text-amber-500" title="Missing control!" />;
 
   const designType = trials[0]?.TrialDesign || 'RCBD';
 
@@ -2953,15 +2950,20 @@ export default function Projects({ onMenuClick }) {
       const groupingText = (analysisResults.grouping || [])
         .map(g => `- ${g.name}: mean=${isFinite(g.mean) ? g.mean.toFixed(2) : 'N/A'} (Group ${g.grouping})`)
         .join('\n');
-      const prompt = `Act as an Agronomist. Analyze trial data for '${activeProject?.Name}'.
+      const prompt = `Act as an objective, unbiased agricultural research scientist. Analyze trial data for '${activeProject?.Name}'.
 Metric: ${activeProject?.Metric}
 Treatments & Means:
 ${groupingText}
 Post-hoc: ${postHocMethod === 'tukey' ? 'Tukey HSD' : "Fisher's LSD"} (alpha=0.05)
 ANOVA P-Value: ${isFinite(analysisResults.anova?.pVal) ? analysisResults.anova.pVal.toFixed(5) : 'N/A'}
+
+SCIENTIFIC OBJECTIVITY & ZERO BIAS GUIDELINES:
+- Report findings purely based on the observed data and statistical letters.
+- Do NOT assume experimental treatments must outperform untreated controls. In agricultural research, untreated controls may equal or outperform treatments (e.g. if treatments cause phytotoxicity, stress, osmotic burn, or yield penalty). If the Untreated Control performs better than or equal to experimental treatments, state this clearly without bias.
+- If treatment differences are not statistically significant (p >= 0.05), clearly declare that no significant treatment effect was detected.
 Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
 
-      const text = await generateTextWithAI(prompt, 'Act as an Agronomist.');
+      const text = await generateTextWithAI(prompt, 'Act as an objective agricultural scientist.');
       setNarrative(text);
     } catch (e) {
       toast('AI error: ' + e.message, 'error');
@@ -4111,9 +4113,6 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       if (!window.confirm("You have not selected an Untreated Control. Do you want to proceed with generating the layout anyway?")) {
         return;
       }
-    } else if (controls.length > 1) {
-      toast('You cannot have more than one Untreated Control.', 'error');
-      return;
     }
     
     setIsRandomizeModalOpen(false);
@@ -6957,22 +6956,26 @@ ${photosHtml}
                           </h3>
                           <p className="text-xs text-slate-400 mt-0.5">Checks untreated control count per block.</p>
                         </div>
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-bold shrink-0 ${(designCheck.noControl.length === 0 && designCheck.multiControl.length === 0) ? theme.badge : 'bg-amber-100 text-amber-700'}`}>
-                          {(designCheck.noControl.length === 0 && designCheck.multiControl.length === 0) ? 'OK' : 'Attention'}
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-bold shrink-0 ${designCheck.noControl.length === 0 ? theme.badge : 'bg-amber-100 text-amber-700'}`}>
+                          {designCheck.noControl.length === 0 ? 'OK' : 'Attention'}
                         </span>
                       </div>
                       <div className="grid grid-cols-2 gap-2 text-xs mb-3">
                         <div className={`flex justify-between`}><span className={`text-slate-500`}>Blocks w/o control</span><span className={`font-bold ${designCheck.noControl.length > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>{designCheck.noControl.length}</span></div>
-                        <div className={`flex justify-between`}><span className={`text-slate-500`}>Blocks {'>'} 1 control</span><span className={`font-bold ${designCheck.multiControl.length > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>{designCheck.multiControl.length}</span></div>
+                        <div className={`flex justify-between`}><span className={`text-slate-500`}>Multi-control blocks</span><span className={`font-bold ${designCheck.multiControl.length > 0 ? 'text-blue-700' : 'text-slate-700'}`}>{designCheck.multiControl.length}</span></div>
                       </div>
-                      {(designCheck.noControl.length > 0 || designCheck.multiControl.length > 0) ? (
+                      {designCheck.noControl.length > 0 ? (
                         <div className="bg-amber-50 border border-amber-100 rounded-lg p-2 text-xs text-amber-800 space-y-1">
-                          {designCheck.noControl.length > 0 && <div><span className="font-bold">No control: </span>{designCheck.noControl.map(b => b.blockName).join(', ')}</div>}
-                          {designCheck.multiControl.length > 0 && <div><span className="font-bold">Multiple controls: </span>{designCheck.multiControl.map(b => `${b.blockName}(${b.count})`).join(', ')}</div>}
+                          <div><span className="font-bold">Missing control: </span>{designCheck.noControl.map(b => b.blockName).join(', ')}</div>
+                        </div>
+                      ) : designCheck.multiControl.length > 0 ? (
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 text-xs text-blue-800 flex items-center gap-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                          <span>Multi-control experimental design active ({designCheck.multiControl.map(b => `${b.blockName}: ${b.count}`).join(', ')}).</span>
                         </div>
                       ) : (
                         <div className={`${theme.bgLight} border ${theme.borderLight} rounded-lg p-2 text-xs ${theme.textDark} flex items-center gap-1`}>
-                          <CheckCircle2 className="w-3 h-3" /> Each block has exactly one control.
+                          <CheckCircle2 className="w-3 h-3" /> Each block has verified control integrity.
                         </div>
                       )}
                     </div>

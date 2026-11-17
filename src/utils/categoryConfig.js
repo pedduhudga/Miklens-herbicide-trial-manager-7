@@ -420,7 +420,7 @@ export function getCollectionName(categoryId, collectionType) {
   return cat.collections[collectionType] || collectionType;
 }
 
-// Helper: calculate efficacy based on category
+// Helper: calculate efficacy based on category (unbiased: preserves negative values for phytotoxicity / growth depression)
 export function calculateEfficacy(categoryId, treatedValue, controlValue) {
   const cat = CATEGORIES[categoryId];
   if (!cat || !controlValue || controlValue === 0) return 0;
@@ -429,16 +429,16 @@ export function calculateEfficacy(categoryId, treatedValue, controlValue) {
     case 'wce':     // Herbicide: (1 - treated_cover/control_cover) * 100
     case 'dce':     // Fungicide: (1 - treated_severity/control_severity) * 100
     case 'pre':     // Pesticide: (1 - after_count/before_count) * 100
-      return Math.max(0, (1 - treatedValue / controlValue) * 100);
+      return (1 - treatedValue / controlValue) * 100;
 
     case 'yieldImprovement': // Nutrition: (treated/control - 1) * 100
-      return Math.max(0, (treatedValue / controlValue - 1) * 100);
+      return (treatedValue / controlValue - 1) * 100;
 
     case 'growthIndex': // Biostimulant: composite score
-      return Math.max(0, (treatedValue / controlValue - 1) * 100);
+      return (treatedValue / controlValue - 1) * 100;
 
     default:
-      return Math.max(0, (1 - treatedValue / controlValue) * 100);
+      return (1 - treatedValue / controlValue) * 100;
   }
 }
 
@@ -491,12 +491,14 @@ export function getRatingFromEfficacy(categoryId, efficacyVal) {
     if (val >= 20) return 'Excellent';
     if (val >= 10) return 'Good';
     if (val >= 5)  return 'Fair';
+    if (val < 0)   return 'Negative / Depressed';
     return 'Poor';
   } else {
     // International Agricultural Research (EPPO / EWRS 4-tier mapping)
     if (val >= 85) return 'Excellent';
     if (val >= 70) return 'Good';
     if (val >= 50) return 'Fair';
+    if (val < 0)   return 'Negative Efficacy';
     return 'Poor';
   }
 }

@@ -841,7 +841,7 @@ export function buildInstitutionalReportData(targetData, globalState = {}, userO
         if (d7Obs && d7Obs.vigorRating !== undefined && d7Obs.vigorRating !== '') {
           mort7 = Number(d7Obs.vigorRating) * 10;
         } else if (d7Val !== null && preVal > 0) {
-          mort7 = Math.max(0, ((d7Val - preVal) / preVal) * 100);
+          mort7 = ((d7Val - preVal) / preVal) * 100;
         } else {
           mort7 = peakControl;
         }
@@ -857,9 +857,16 @@ export function buildInstitutionalReportData(targetData, globalState = {}, userO
         } else if (d7Obs && d7Obs.weedControlPct !== undefined && d7Obs.weedControlPct !== '') {
           mort7 = Number(d7Obs.weedControlPct);
         } else if (d7Val !== null && preVal > 0) {
-          mort7 = Math.max(0, Math.min(100, ((preVal - d7Val) / preVal) * 100));
+          mort7 = ((preVal - d7Val) / preVal) * 100;
         } else {
           mort7 = peakControl;
+        }
+      }
+    } else {
+      // For control, calculate actual change if observations are present
+      if (category === 'nutrition' || category === 'biostimulant') {
+        if (d7Val !== null && preVal > 0) {
+          mort7 = ((d7Val - preVal) / preVal) * 100;
         }
       }
     }

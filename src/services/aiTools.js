@@ -313,7 +313,10 @@ function extractObservationEfficacy(obs, baseObs = null, category = 'herbicide')
   if (primVal !== null && !isNaN(Number(primVal)) && basePrimVal !== null && !isNaN(Number(basePrimVal)) && Number(basePrimVal) > 0) {
     const calc = calculateEfficacy(category, Number(primVal), Number(basePrimVal));
     if (calc !== null && !isNaN(calc)) {
-      return Math.round(Math.max(0, Math.min(100, calc)));
+      if (category === 'nutrition' || category === 'biostimulant') {
+        return Math.round(calc);
+      }
+      return Math.round(Math.min(100, calc));
     }
   }
 

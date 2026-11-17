@@ -96,6 +96,7 @@ CRITICAL INSTRUCTION:
 11. Do NOT write that the trial "did not establish a baseline of nutrient deficiency". Instead, write: "Deficiency symptoms remained minimal throughout the observation period..."
 12. Do NOT use the word "variance" when describing percentage differences between treatment means (e.g. do not write "20% numerical variance"). Instead, use "higher/lower numerical mean" (e.g. "20% higher numerical mean").
 13. Avoid using terms like "colorimetric indices". Instead, use "visual and physiological observations" (such as leaf color, SPAD, vigor, plant height).
+14. ZERO BIAS TOWARDS EXPERIMENTAL TREATMENTS: Do NOT presume that experimental treatments must outperform untreated controls. In agricultural trials, untreated controls may equal or outperform treatments (e.g. where treatments cause phytotoxicity, fertilizer burn, vegetative stunting, or delay flowering/fruiting). If untreated controls yield higher or have superior vigor/metrics, report this finding clearly, objectively, and without bias.
 Do NOT use markdown headers or lists. Keep it strictly scientific, professional, and factual.`;
 
     const text = await generateTextWithAI(prompt, 'You are a professional agronomist.');
@@ -160,6 +161,7 @@ CRITICAL INSTRUCTION:
 11. Do NOT write that the trial "did not establish a baseline of nutrient deficiency". Instead, write: "Deficiency symptoms remained minimal throughout the observation period..."
 12. Do NOT use the word "variance" when describing percentage differences between treatment means (e.g. do not write "20% numerical variance"). Instead, use "higher/lower numerical mean" (e.g. "20% higher numerical mean").
 13. Avoid using terms like "colorimetric indices". Instead, use "visual and physiological observations" (such as leaf color, SPAD, vigor, plant height).
+14. ZERO BIAS TOWARDS EXPERIMENTAL TREATMENTS: Do NOT presume that experimental treatments must outperform untreated controls. In agricultural trials, untreated controls may equal or outperform treatments (e.g. where treatments cause phytotoxicity, fertilizer burn, vegetative stunting, or delay flowering/fruiting). If untreated controls yield higher or have superior vigor/metrics, report this finding clearly, objectively, and without bias.
 Do NOT use markdown headers or lists. Keep it strictly scientific, professional, and factual.`;
 
     const text = await generateTextWithAI(prompt, 'You are a senior agricultural scientist.');
@@ -618,8 +620,12 @@ function compileAgronomicInterpretation(observations, activeFields, treatmentNam
     const controlStats = anova.treatmentMeans[1];
     let impStr = '';
     if (controlStats && controlStats.mean > 0) {
-      const bestImp = ((best.mean - controlStats.mean) / controlStats.mean) * 100;
-      impStr = `with the highest performing treatment (${best.name}) showing a ${bestImp.toFixed(1)}% difference compared to control.`;
+      if (best.trtNum === 1) {
+        impStr = `with the untreated control achieving the highest numerical mean among all treatments.`;
+      } else {
+        const bestImp = ((best.mean - controlStats.mean) / controlStats.mean) * 100;
+        impStr = `with the highest performing treatment (${best.name}) showing a ${bestImp >= 0 ? '+' : ''}${bestImp.toFixed(1)}% difference compared to control.`;
+      }
     }
 
     const isMeanNearZero = anova.grandMean < 2.0 || 
@@ -837,7 +843,13 @@ export class AdvancedReportGenerator {
       };
 
       const uniqueTreatments = [...new Set(trialOrTrials.map(t => t.FormulationName || 'Untreated Control'))];
-      const utcIdx = uniqueTreatments.findIndex(n => /control|untreated|check|utc/i.test(n));
+      let utcIdx = uniqueTreatments.findIndex(n => /untreated|utc|negative\s*control/i.test(n));
+      if (utcIdx === -1) {
+        utcIdx = uniqueTreatments.findIndex(n => /control/i.test(n));
+      }
+      if (utcIdx === -1) {
+        utcIdx = uniqueTreatments.findIndex(n => /check/i.test(n));
+      }
       if (utcIdx > -1) {
         const [utc] = uniqueTreatments.splice(utcIdx, 1);
         uniqueTreatments.unshift(utc);
@@ -939,7 +951,13 @@ export class AdvancedReportGenerator {
       if (!obsTrts.includes(currentTrt)) {
         obsTrts.push(currentTrt);
       }
-      const controlIdx = obsTrts.findIndex(n => /control|untreated|check|utc/i.test(n));
+      let controlIdx = obsTrts.findIndex(n => /untreated|utc|negative\s*control/i.test(n));
+      if (controlIdx === -1) {
+        controlIdx = obsTrts.findIndex(n => /control/i.test(n));
+      }
+      if (controlIdx === -1) {
+        controlIdx = obsTrts.findIndex(n => /check/i.test(n));
+      }
       if (controlIdx > -1) {
         const [ctl] = obsTrts.splice(controlIdx, 1);
         obsTrts.unshift(ctl);
@@ -1618,7 +1636,18 @@ export class AdvancedReportGenerator {
     }
     if (!conclusionText) {
       const isSig = anovaResults && !anovaResults.error && anovaResults.p_value < 0.05;
-      conclusionText = `• Treatment "${this.trial.FormulationName || 'test formulation'}" showed a ${isSig ? 'statistically significant' : 'numerical'} improvement in primary observation metrics compared to the untreated control.\n• The experimental design (${this.trial.TrialDesign || this.trial.Design || this.design}) provided sufficient resolution to monitor treatment performance.\n• Further multi-site testing is recommended to confirm agronomic efficacy under varying environmental conditions.`;
+      const cMeanVal = anovaResults?.treatmentMeans?.[1]?.mean ?? 0;
+      const tMeanVal = anovaResults?.treatmentMeans?.[2]?.mean ?? 0;
+      const primaryKey = this.config.primaryMetric?.key || (this.activeFields[0]?.key) || 'plantHeight';
+      const isReduction = isReductionMetric(primaryKey, this.category);
+      const isBetterThanControl = cMeanVal > 0 ? (isReduction ? tMeanVal < cMeanVal : tMeanVal > cMeanVal) : true;
+      const performanceDesc = isBetterThanControl
+        ? `${isSig ? 'statistically significant' : 'numerical'} improvement`
+        : `${isSig ? 'statistically significant' : 'numerical'} reduction / depression`;
+      const contrastDesc = isBetterThanControl
+        ? 'compared to the untreated control'
+        : 'relative to the untreated control (untreated control demonstrated higher performance)';
+      conclusionText = `• Treatment "${this.trial.FormulationName || 'test formulation'}" showed a ${performanceDesc} in primary observation metrics ${contrastDesc}.\n• The experimental design (${this.trial.TrialDesign || this.trial.Design || this.design}) provided sufficient resolution to monitor treatment performance.\n• Further multi-site testing is recommended to evaluate agronomic response across varying environmental conditions.`;
     }
 
     ws.mergeCells('A17:F20');
@@ -2721,18 +2750,18 @@ export class AdvancedReportGenerator {
         };
       });
 
-      const controlTrt = trtSummaries.find(s => /control|untreated|check|utc/i.test(s.treatmentName)) || trtSummaries[0];
+      const controlTrt = trtSummaries.find(s => /untreated|utc|negative\s*control/i.test(s.treatmentName)) 
+        || trtSummaries.find(s => /control/i.test(s.treatmentName)) 
+        || trtSummaries[0];
       const ctlYield = controlTrt?.cumMarketable || 0;
 
       trtSummaries.forEach((s, sIdx) => {
-        let diffStr = 'Control (Ref)';
-        if (!/control|untreated|check|utc/i.test(s.treatmentName)) {
-          if (ctlYield > 0 && s.cumMarketable > 0) {
-            const diff = ((s.cumMarketable - ctlYield) / ctlYield) * 100;
-            diffStr = `${diff >= 0 ? '+' : ''}${diff.toFixed(1)}%`;
-          } else {
-            diffStr = '—';
-          }
+        let diffStr = '—';
+        if (s === controlTrt) {
+          diffStr = 'Control (Ref)';
+        } else if (ctlYield > 0 && s.cumMarketable > 0) {
+          const diff = ((s.cumMarketable - ctlYield) / ctlYield) * 100;
+          diffStr = `${diff >= 0 ? '+' : ''}${diff.toFixed(1)}%`;
         }
 
         ws.getRow(curRow).values = [

@@ -865,21 +865,29 @@ export async function generateInstitutionalPDF(reportData) {
   if (stdTrt) {
     comparisonClause = `, compared with ${stdTrt.mortality7.toFixed(2)}% under ${stdTrt.productName}`;
   } else if (ctrlTrt) {
-    comparisonClause = `, while the untreated control recorded 0.00% ${isNutritionOrBiostimulant ? 'gain' : 'control'}`;
+    const ctrlVal = ctrlTrt.mortality7 !== undefined && !isNaN(ctrlTrt.mortality7) ? ctrlTrt.mortality7.toFixed(2) + '%' : '0.00%';
+    comparisonClause = `, while the untreated control recorded ${ctrlVal} ${isNutritionOrBiostimulant ? 'gain' : 'control'}`;
   }
 
+  const isGainNegative = isNutritionOrBiostimulant && p.peakControl < 0;
   const p1 = isNutritionOrBiostimulant
-    ? `The field trial was conducted in ${dc.cropDisplay} naturally evaluated for ${targetLabel}. The treatments were applied over the crop canopy to assess growth stimulation, vegetative vigor enhancement, and crop safety. Application of ${bestTrt.productName} @ ${bestTrt.dose || 'calibrated dose'} resulted in peak vigor enhancement, recording ${p.peakControl.toFixed(2)}% gain at ${p.peakDaa || 7} DAT${comparisonClause}. Crop vigor under ${bestTrt.productName} progressed from ${p.baselineCover.toFixed(2)} ${densityUnit} before treatment to ${p.finalCover.toFixed(2)} ${densityUnit} at ${p.peakDaa || 7} DAT, indicating rapid vegetative stimulation.`
+    ? (isGainNegative
+        ? `The field trial was conducted in ${dc.cropDisplay} naturally evaluated for ${targetLabel}. The treatments were applied over the crop canopy to assess growth stimulation, vegetative vigor enhancement, and crop safety. Under evaluated conditions, the untreated control demonstrated superior or uninhibited vegetative performance, while ${bestTrt.productName} @ ${bestTrt.dose || 'calibrated dose'} recorded ${p.peakControl.toFixed(2)}% net change at ${p.peakDaa || 7} DAT${comparisonClause}. Crop vigor under ${bestTrt.productName} progressed from ${p.baselineCover.toFixed(2)} ${densityUnit} before treatment to ${p.finalCover.toFixed(2)} ${densityUnit} at ${p.peakDaa || 7} DAT.`
+        : `The field trial was conducted in ${dc.cropDisplay} naturally evaluated for ${targetLabel}. The treatments were applied over the crop canopy to assess growth stimulation, vegetative vigor enhancement, and crop safety. Application of ${bestTrt.productName} @ ${bestTrt.dose || 'calibrated dose'} resulted in peak vigor enhancement, recording ${p.peakControl.toFixed(2)}% gain at ${p.peakDaa || 7} DAT${comparisonClause}. Crop vigor under ${bestTrt.productName} progressed from ${p.baselineCover.toFixed(2)} ${densityUnit} before treatment to ${p.finalCover.toFixed(2)} ${densityUnit} at ${p.peakDaa || 7} DAT, indicating rapid vegetative stimulation.`)
     : `The field trial was conducted in ${dc.cropDisplay} naturally infested with a mixed population of ${targetLabel}. The treatments were applied as a post-emergence spray over the crop canopy and existing target flora to assess bio-efficacy and crop safety. The predominant species observed in the experimental plot was ${reportData.dominantFloraName}. Application of ${bestTrt.productName} @ ${bestTrt.dose || 'calibrated dose'} resulted in peak bio-efficacy, recording ${p.peakControl.toFixed(2)}% ${cat === 'fungicide' ? 'disease control' : cat === 'pesticide' ? 'pest suppression' : 'mortality'} at ${p.peakDaa || 7} DAT${comparisonClause}. Target population density under ${bestTrt.productName} decreased from ${p.baselineCover.toFixed(2)} ${densityUnit} before treatment to ${p.finalCover.toFixed(2)} ${densityUnit} at ${p.peakDaa || 7} DAT, indicating rapid post-emergence suppression.`;
 
   let p2 = '';
   if (isMulti) {
     p2 = isNutritionOrBiostimulant
-      ? `Crop vigor and physiological parameters were monitored across observation intervals. Across the evaluated treatments, ${bestTrt.productName} maintained superior growth response compared to untreated checks and baseline levels, demonstrating consistent biostimulatory efficacy throughout the assessment window.`
+      ? (isGainNegative
+          ? `Crop vigor and physiological parameters were monitored across observation intervals. The untreated control exhibited superior vegetative retention compared to experimental treatments, which experienced numerical growth depression during the assessment window.`
+          : `Crop vigor and physiological parameters were monitored across observation intervals. Across the evaluated treatments, ${bestTrt.productName} maintained superior growth response compared to untreated checks and baseline levels, demonstrating consistent biostimulatory efficacy throughout the assessment window.`)
       : `Target density was monitored across observation intervals. Across the evaluated treatments, ${bestTrt.productName} maintained superior suppression compared to untreated checks and baseline levels, demonstrating consistent bio-efficacy throughout the assessment window.`;
   } else {
     p2 = isNutritionOrBiostimulant
-      ? `Crop vigor was subsequently monitored across post-treatment observation intervals, maintaining sustained vegetative enhancement compared to pre-treatment baseline levels (${p.baselineCover.toFixed(2)} ${densityUnit}), confirming persistent positive growth response.`
+      ? (isGainNegative
+          ? `Crop vigor was subsequently monitored across post-treatment observation intervals, reflecting lower vegetative retention relative to pre-treatment levels (${p.baselineCover.toFixed(2)} ${densityUnit}).`
+          : `Crop vigor was subsequently monitored across post-treatment observation intervals, maintaining sustained vegetative enhancement compared to pre-treatment baseline levels (${p.baselineCover.toFixed(2)} ${densityUnit}), confirming persistent positive growth response.`)
       : `Target density was subsequently monitored across post-treatment observation intervals, maintaining sustained suppression compared to pre-treatment baseline levels (${p.baselineCover.toFixed(2)} ${densityUnit}), confirming persistent control without rapid target regeneration.`;
   }
 
@@ -2078,20 +2086,28 @@ export async function generateInstitutionalDocx(reportData) {
   if (stdTrt) {
     compClause = `, compared with ${stdTrt.mortality7.toFixed(2)}% under ${stdTrt.productName}`;
   } else if (ctrlTrt) {
-    compClause = `, while the untreated control recorded 0.00% ${isNutritionOrBiostimulant ? 'gain' : 'control'}`;
+    const ctrlVal = ctrlTrt.mortality7 !== undefined && !isNaN(ctrlTrt.mortality7) ? ctrlTrt.mortality7.toFixed(2) + '%' : '0.00%';
+    compClause = `, while the untreated control recorded ${ctrlVal} ${isNutritionOrBiostimulant ? 'gain' : 'control'}`;
   }
 
+  const isGainNegative = isNutritionOrBiostimulant && p.peakControl < 0;
   const p1 = isNutritionOrBiostimulant
-    ? `The field trial was conducted in ${dc.cropDisplay} naturally evaluated for ${targetLabel}. The treatments were applied over the crop canopy to assess growth stimulation, vegetative vigor enhancement, and crop safety. Application of ${bestTrt.productName} @ ${bestTrt.dose || 'calibrated dose'} resulted in peak vigor enhancement, recording ${p.peakControl.toFixed(2)}% gain at ${p.peakDaa || 7} DAT${compClause}. Crop vigor under ${bestTrt.productName} progressed from ${p.baselineCover.toFixed(2)} ${densityUnit} before treatment to ${p.finalCover.toFixed(2)} ${densityUnit} at ${p.peakDaa || 7} DAT, indicating rapid vegetative stimulation.`
+    ? (isGainNegative
+        ? `The field trial was conducted in ${dc.cropDisplay} naturally evaluated for ${targetLabel}. The treatments were applied over the crop canopy to assess growth stimulation, vegetative vigor enhancement, and crop safety. Under evaluated conditions, the untreated control demonstrated superior or uninhibited vegetative performance, while ${bestTrt.productName} @ ${bestTrt.dose || 'calibrated dose'} recorded ${p.peakControl.toFixed(2)}% net change at ${p.peakDaa || 7} DAT${compClause}. Crop vigor under ${bestTrt.productName} progressed from ${p.baselineCover.toFixed(2)} ${densityUnit} before treatment to ${p.finalCover.toFixed(2)} ${densityUnit} at ${p.peakDaa || 7} DAT.`
+        : `The field trial was conducted in ${dc.cropDisplay} naturally evaluated for ${targetLabel}. The treatments were applied over the crop canopy to assess growth stimulation, vegetative vigor enhancement, and crop safety. Application of ${bestTrt.productName} @ ${bestTrt.dose || 'calibrated dose'} resulted in peak vigor enhancement, recording ${p.peakControl.toFixed(2)}% gain at ${p.peakDaa || 7} DAT${compClause}. Crop vigor under ${bestTrt.productName} progressed from ${p.baselineCover.toFixed(2)} ${densityUnit} before treatment to ${p.finalCover.toFixed(2)} ${densityUnit} at ${p.peakDaa || 7} DAT, indicating rapid vegetative stimulation.`)
     : `The field trial was conducted in ${dc.cropDisplay} naturally infested with a mixed population of ${targetLabel}. The treatments were applied as a post-emergence spray over the crop canopy and existing target flora to assess bio-efficacy and crop safety. The predominant species observed in the experimental plot was ${reportData.dominantFloraName}. Application of ${bestTrt.productName} @ ${bestTrt.dose || 'calibrated dose'} resulted in peak bio-efficacy, recording ${p.peakControl.toFixed(2)}% ${cat === 'fungicide' ? 'disease control' : cat === 'pesticide' ? 'pest suppression' : 'mortality'} at ${p.peakDaa || 7} DAT${compClause}. Target population density under ${bestTrt.productName} decreased from ${p.baselineCover.toFixed(2)} ${densityUnit} before treatment to ${p.finalCover.toFixed(2)} ${densityUnit} at ${p.peakDaa || 7} DAT, indicating rapid post-emergence suppression.`;
 
   const isMulti = tMetrics.length > 1;
   const p2 = isMulti
     ? (isNutritionOrBiostimulant
-        ? `Crop vigor and physiological parameters were monitored across observation intervals. Across the evaluated treatments, ${bestTrt.productName} maintained superior growth response compared to untreated checks and baseline levels, demonstrating consistent biostimulatory efficacy throughout the assessment window.`
+        ? (isGainNegative
+            ? `Crop vigor and physiological parameters were monitored across observation intervals. The untreated control exhibited superior vegetative retention compared to experimental treatments, which experienced numerical growth depression during the assessment window.`
+            : `Crop vigor and physiological parameters were monitored across observation intervals. Across the evaluated treatments, ${bestTrt.productName} maintained superior growth response compared to untreated checks and baseline levels, demonstrating consistent biostimulatory efficacy throughout the assessment window.`)
         : `Target density was monitored across observation intervals. Across the evaluated treatments, ${bestTrt.productName} maintained superior suppression compared to untreated checks and baseline levels, demonstrating consistent bio-efficacy throughout the assessment window.`)
     : (isNutritionOrBiostimulant
-        ? `Crop vigor was subsequently monitored across post-treatment observation intervals, maintaining sustained vegetative enhancement compared to pre-treatment baseline levels (${p.baselineCover.toFixed(2)} ${densityUnit}), confirming persistent positive growth response.`
+        ? (isGainNegative
+            ? `Crop vigor was subsequently monitored across post-treatment observation intervals, reflecting lower vegetative retention relative to pre-treatment levels (${p.baselineCover.toFixed(2)} ${densityUnit}).`
+            : `Crop vigor was subsequently monitored across post-treatment observation intervals, maintaining sustained vegetative enhancement compared to pre-treatment baseline levels (${p.baselineCover.toFixed(2)} ${densityUnit}), confirming persistent positive growth response.`)
         : `Target density was subsequently monitored across post-treatment observation intervals, maintaining sustained suppression compared to pre-treatment baseline levels (${p.baselineCover.toFixed(2)} ${densityUnit}), confirming persistent control without rapid target regeneration.`);
 
   let p3 = '';

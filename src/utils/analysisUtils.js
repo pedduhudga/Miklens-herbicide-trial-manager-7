@@ -762,12 +762,11 @@ export class AnalysisEngine {
                     // Identify treatments (Formulations)
                     this.treatments = [...new Set(this.trials.map(t => t.FormulationName))];
 
-                    // Identify UTC (Untreated Control)
-                    this.utcName = this.treatments.find(t =>
-                        t.toLowerCase().includes('control') ||
-                        t.toLowerCase().includes('untreated') ||
-                        t.toLowerCase().includes('check')
-                    );
+                    // Identify UTC (Untreated Control) — prioritize untreated/utc before standard checks
+                    this.utcName = 
+                        this.treatments.find(t => /untreated|utc|negative\s*control/i.test(t)) ||
+                        this.treatments.find(t => /control/i.test(t)) ||
+                        this.treatments.find(t => /check/i.test(t));
                 }
 
                 /**

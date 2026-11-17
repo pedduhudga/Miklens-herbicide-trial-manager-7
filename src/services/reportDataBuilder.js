@@ -417,6 +417,7 @@ export function buildExecutiveSummary(reportData, template = 'standard') {
   const topSE   = topTrt ? topTrt[1].se   : null;
   const topEff  = topTrt ? topTrt[1].efficacy_pct : null;
   const topCLD  = topTrt ? topTrt[1].cldLetter     : '';
+  const isTopControl = isControlTreatment(topName);
 
   // ANOVA p-value and F-statistic
   const pVal = anova?.p?.[0] ?? null;
@@ -444,7 +445,9 @@ export function buildExecutiveSummary(reportData, template = 'standard') {
       `${projectName} evaluated ${nTreatments} treatment${nTreatments !== 1 ? 's' : ''} ` +
         `with ${nReps} replication${nReps !== 1 ? 's' : ''} at ${location}` +
         (crop ? ` on ${crop}` : '') + '.',
-      topName && topEff !== null
+      topName && isTopControl
+        ? `The highest numerical mean was recorded under the untreated control "${topName}" (CLD group '${topCLD || 'a'}'), indicating treatments did not exceed the control.`
+        : topName && topEff !== null
         ? `The top-performing treatment was "${topName}" achieving ${topEff.toFixed(1)}% efficacy ` +
           `(CLD group '${topCLD || 'a'}').`
         : topName
@@ -477,7 +480,9 @@ export function buildExecutiveSummary(reportData, template = 'standard') {
         : '',
       // Top treatment
       topName
-        ? topEff !== null
+        ? isTopControl
+          ? `The highest numerical mean was recorded under the untreated control "${topName}" (CLD group '${topCLD}'), demonstrating treatments did not outperform the untreated check.`
+          : topEff !== null
           ? `The top-performing treatment was "${topName}" with a mean efficacy of ${topEff.toFixed(1)}% (CLD group '${topCLD}').`
           : `The top-performing treatment was "${topName}" (CLD group '${topCLD}').`
         : '',
@@ -516,7 +521,11 @@ export function buildExecutiveSummary(reportData, template = 'standard') {
         ? `Statistical analysis (ANOVA) indicated treatment differences were ${significanceWord} (p = ${pVal.toFixed(3)}).`
         : '',
       topName
-        ? topEff !== null
+        ? isTopControl
+          ? `The highest numerical mean was achieved by the untreated control "${topName}" (${topMean !== null ? topMean.toFixed(2) : '—'}` +
+            (topSE !== null ? ` ± ${topSE.toFixed(2)} SE` : '') +
+            `, CLD group '${topCLD}'), indicating experimental treatments did not exceed the control.`
+          : topEff !== null
           ? `The highest efficacy was achieved by "${topName}" with a mean of ${topMean !== null ? topMean.toFixed(2) : '—'}` +
             (topSE !== null ? ` ± ${topSE.toFixed(2)} SE` : '') +
             `, corresponding to ${topEff.toFixed(1)}% efficacy relative to the untreated control (CLD group '${topCLD}').`
@@ -548,7 +557,9 @@ export function buildExecutiveSummary(reportData, template = 'standard') {
       ? `ANOVA indicated ${significanceWord} treatment differences (F = ${fVal.toFixed(2)}, p = ${pVal.toFixed(3)}).`
       : '',
     topName
-      ? topEff !== null
+      ? isTopControl
+        ? `"${topName}" (Untreated Control) was the top-ranked treatment (mean ${topMean !== null ? topMean.toFixed(2) : '—'}, CLD group '${topCLD}').`
+        : topEff !== null
         ? `"${topName}" was the top-ranked treatment (mean efficacy ${topEff.toFixed(1)}%, CLD group '${topCLD}').`
         : `"${topName}" was the top-ranked treatment (CLD group '${topCLD}').`
       : '',
@@ -957,8 +968,11 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
   const treatmentKeys = Object.keys(treatmentMap);
   const treatmentNames = treatmentKeys.map(k => treatmentMap[k].name);
 
-  // Identify UTC/control
-  const utcKey = treatmentKeys.find(k => isControlTreatment(treatmentMap[k].name));
+  // Identify UTC/control (prioritizing genuine untreated/negative control over standard commercial checks)
+  const utcKey = 
+    treatmentKeys.find(k => /untreated|utc|negative\s*control/i.test(treatmentMap[k].name)) ||
+    treatmentKeys.find(k => /control/i.test(treatmentMap[k].name)) ||
+    treatmentKeys.find(k => isControlTreatment(treatmentMap[k].name));
   const utcName = utcKey ? treatmentMap[utcKey].name : null;
 
   if (!utcName) {
@@ -2060,7 +2074,10 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
 
   // Fire-and-forget persist to IndexedDB
   try {
-    appendAuditEntry(auditTrail);
+    const p = appendAuditEntry(auditTrail);
+    if (p && typeof p.catch === 'function') {
+      p.catch(() => {});
+    }
   } catch (_e) {
     // Non-fatal — audit log write failure must not block report generation
   }

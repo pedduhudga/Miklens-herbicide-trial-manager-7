@@ -891,11 +891,21 @@ function anovaTable(doc, stats, y, ph, trial, options = {}) {
     if (controlMean > 0) {
       descRows.forEach(r => {
         if (r.treatment !== controlName) {
-          const diffPct = isPositiveMetric 
-            ? ((r.meanVal - controlMean) / controlMean) * 100 
-            : ((controlMean - r.meanVal) / controlMean) * 100;
-          
-          improvementText.push(`${r.treatment} ${isPositiveMetric ? 'increased' : 'reduced'} ${metricLabel} by ${diffPct.toFixed(1)}% over untreated control (${controlName}).`);
+          if (isPositiveMetric) {
+            const diffPct = ((r.meanVal - controlMean) / controlMean) * 100;
+            if (diffPct >= 0) {
+              improvementText.push(`${r.treatment} increased ${metricLabel} by ${diffPct.toFixed(1)}% over untreated control (${controlName}).`);
+            } else {
+              improvementText.push(`${r.treatment} resulted in ${Math.abs(diffPct).toFixed(1)}% lower ${metricLabel} compared to untreated control (${controlName}) (untreated control performed higher).`);
+            }
+          } else {
+            const diffPct = ((controlMean - r.meanVal) / controlMean) * 100;
+            if (diffPct >= 0) {
+              improvementText.push(`${r.treatment} reduced ${metricLabel} by ${diffPct.toFixed(1)}% relative to untreated control (${controlName}).`);
+            } else {
+              improvementText.push(`${r.treatment} resulted in ${Math.abs(diffPct).toFixed(1)}% higher ${metricLabel} than untreated control (${controlName}).`);
+            }
+          }
         }
       });
     }
