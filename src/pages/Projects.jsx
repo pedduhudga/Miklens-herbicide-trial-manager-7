@@ -19,6 +19,7 @@ import { AnalysisEngine, validateEfficacyData } from '../utils/analysisUtils.js'
 import PlotMap from '../components/PlotMap.jsx';
 import { formatDate, formatDateTime, toDatetimeLocal, calculateDAA } from '../utils/dateUtils.js';
 import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryValue, calculateEfficacy } from '../utils/categoryConfig.js';
+import { resolvePhotoSrc } from '../utils/photoUtils.js';
 import TrialDesignGuideModal from '../components/TrialDesignGuideModal.jsx';
 import { Info } from 'lucide-react';
 import { generateTextWithAI } from '../services/multiProviderAI.js';
@@ -1064,12 +1065,13 @@ export default function Projects({ onMenuClick }) {
   // ── Per-treatment WCE over time ─────────────────────────────────────────
   const wceTimelineData = useMemo(() => {
     if (!activeProject) return { daas: [], series: [] };
+    const projectCategory = activeProject?.Category || activeCategory;
     const trials = (state.trials || []).filter(t => String(t.ProjectID) === String(activeProject.ID));
     const daaSet = new Set();
     trials.forEach(t => safeJsonParse(t.EfficacyDataJSON, []).forEach(e => { if (e.daa > 0) daaSet.add(e.daa); }));
     const daas = [...daaSet].sort((a, b) => a - b);
     const treatmentNames = [...new Set(trials.map(t => t.FormulationName).filter(Boolean))];
-    const primaryObsField = getPrimaryObservationField(activeCategory);
+    const primaryObsField = getPrimaryObservationField(projectCategory);
 
     // Find UTC for WCE calc
     const utcName = treatmentNames.find(n => /control|untreated|check/i.test(n));
@@ -1080,7 +1082,7 @@ export default function Projects({ onMenuClick }) {
         const covers = trtTrials.map(t => {
           const eff = safeJsonParse(t.EfficacyDataJSON, []);
           const obs = eff.find(e => e.daa === daa);
-          return obs ? Number(getObservationPrimaryValue(activeCategory, obs) ?? 0) : null;
+          return obs ? Number(getObservationPrimaryValue(projectCategory, obs) ?? 0) : null;
         }).filter(v => v !== null);
         if (covers.length === 0) return null;
         const meanCover = covers.reduce((s, v) => s + v, 0) / covers.length;
@@ -1090,12 +1092,12 @@ export default function Projects({ onMenuClick }) {
           const utcCovers = utcTrials.map(t => {
             const eff = safeJsonParse(t.EfficacyDataJSON, []);
             const obs = eff.find(e => e.daa === daa);
-            return obs ? Number(getObservationPrimaryValue(activeCategory, obs) ?? 0) : null;
+            return obs ? Number(getObservationPrimaryValue(projectCategory, obs) ?? 0) : null;
           }).filter(v => v !== null);
           if (utcCovers.length > 0) {
             const utcMean = utcCovers.reduce((s, v) => s + v, 0) / utcCovers.length;
             if (utcMean > 0) {
-              return parseFloat(calculateEfficacy(activeCategory, meanCover, utcMean).toFixed(1));
+              return parseFloat(calculateEfficacy(projectCategory, meanCover, utcMean).toFixed(1));
             }
             return 0;
           }
@@ -1118,10 +1120,11 @@ export default function Projects({ onMenuClick }) {
   // ── Per-treatment stats (Mean, SD, CV, WCE) ────────────────────────────
   const treatmentStats = useMemo(() => {
     if (!activeProject || !analysisResults?.means) return [];
+    const projectCategory = activeProject?.Category || activeCategory;
     const trials = (state.trials || []).filter(t => String(t.ProjectID) === String(activeProject.ID));
     const utcName = Object.keys(analysisResults.means).find(n => /control|untreated|check/i.test(n));
     const utcMean = utcName ? (analysisResults.means[utcName] ?? 0) : 0;
-    const primaryObsField = getPrimaryObservationField(activeCategory);
+    const primaryObsField = getPrimaryObservationField(projectCategory);
 
     return (analysisResults.grouping || []).map(g => {
       const trtTrials = trials.filter(t => t.FormulationName === g.name);
@@ -1129,7 +1132,7 @@ export default function Projects({ onMenuClick }) {
         const eff = safeJsonParse(t.EfficacyDataJSON, []);
         if (!eff.length) return null;
         const last = eff.sort((a, b) => b.daa - a.daa)[0];
-        return last ? Number(getObservationPrimaryValue(activeCategory, last) ?? 0) : null;
+        return last ? Number(getObservationPrimaryValue(projectCategory, last) ?? 0) : null;
       }).filter(v => v !== null);
       const n = repValues.length;
       const mean = n > 0 ? repValues.reduce((s, v) => s + v, 0) / n : 0;
@@ -1138,7 +1141,7 @@ export default function Projects({ onMenuClick }) {
       const cv = mean > 0 ? (sd / mean) * 100 : 0;
       let wce = 0;
       if (utcMean > 0) {
-        wce = calculateEfficacy(activeCategory, mean, utcMean);
+        wce = calculateEfficacy(projectCategory, mean, utcMean);
       }
       return { name: g.name, n, mean, sd, cv, wce, grouping: g.grouping, repValues };
     });
@@ -1156,18 +1159,22 @@ export default function Projects({ onMenuClick }) {
 
   // ── Run analysis ────────────────────────────────────────────────────────
   const runAnalysis = useCallback(async (method = postHocMethod) => {
-    if (!activeProjectId) return;
+    if (!activeProjectId) return null;
     setIsAnalyzing(true);
     try {
       const currentState = getAppState();
+      const targetProj = currentState.projects?.find(p => String(p.ID) === String(activeProjectId));
+      const projectCategory = targetProj?.Category || activeCategory;
       const engine = new AnalysisEngine(activeProjectId, currentState, getAppState);
       // Detect primary metric: prefer yield if any trial has yield data, otherwise use category's primary observation field
       const hasYield = (currentState.trials || []).filter(t => String(t.ProjectID) === String(activeProjectId)).some(t => parseFloat(t.Yield || t.YieldValue) > 0);
-      const primaryMetric = hasYield ? 'yield' : getPrimaryObservationField(activeCategory);
+      const primaryMetric = hasYield ? 'yield' : getPrimaryObservationField(projectCategory);
       const results = await engine.analyze(primaryMetric, null, null, { postHoc: method, persist: true });
       setAnalysisResults(results);
+      return results;
     } catch (e) {
       toast('Analysis failed: ' + e.message, 'error');
+      return null;
     } finally {
       setIsAnalyzing(false);
     }
@@ -2964,13 +2971,15 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
   };
 
   const getTrialMetricValue = (t) => {
-      if (config.primaryMetric.key === 'Yield' || config.primaryMetric.key === 'YieldValue') {
+      const pCat = activeProject?.Category || t?.Category || activeCategory;
+      const pConf = getCategoryConfig(pCat);
+      if (pConf.primaryMetric.key === 'Yield' || pConf.primaryMetric.key === 'YieldValue') {
         return parseFloat(t.Yield || t.YieldValue || 0);
       }
       const eff = safeJsonParse(t.EfficacyDataJSON, []);
       if (!eff.length) return 0;
       const latest = eff.sort((a, b) => b.daa - a.daa)[0];
-      return latest ? Number(getObservationPrimaryValue(activeCategory, latest) ?? 0) : 0;
+      return latest ? Number(getObservationPrimaryValue(pCat, latest) ?? 0) : 0;
   };
 
   // ── Recalculate DAA for project trials ──────────────────────────────────
@@ -5266,8 +5275,13 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
     setCustomiseReportModalOpen(true);
   };
 
-  const handleScientificReport = () => {
-    if (!activeProject || !analysisResults) { toast('Run analysis first', 'error'); return; }
+  const handleScientificReport = async () => {
+    if (!activeProject) return;
+    if (!analysisResults) {
+      toast('Running statistical analysis for report...', 'info');
+      const res = await runAnalysis();
+      if (!res) return;
+    }
     setViewMode('report');
     toast('Scientific report view loaded');
   };
@@ -5297,13 +5311,21 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
 
   // ── Regulatory DOCX Export ────────────────────────────────────────────────
   const handleRegulatoryDOCX = async () => {
-    if (!activeProject || !analysisResults) { toast('Run analysis first', 'error'); return; }
+    if (!activeProject) return;
+    let currentAnalysis = analysisResults;
+    if (!currentAnalysis) {
+      toast('Running statistical analysis first...', 'info');
+      currentAnalysis = await runAnalysis();
+      if (!currentAnalysis) return;
+    }
     const pTrials = (state.trials || []).filter(t => String(t.ProjectID) === String(activeProject.ID));
     try {
+      const { exportMasterDocx } = await import('../services/trialReports.js');
       await exportMasterDocx(activeProject, pTrials, {
         aiSummary: narrative,
-        analysis: analysisResults
+        analysis: currentAnalysis
       });
+      toast('Regulatory DOCX generated successfully', 'success');
     } catch (err) {
       console.error(err);
       toast(`Failed to generate Regulatory DOCX: ${err.message}`, 'error');
@@ -5312,6 +5334,11 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
 
   const handleDownloadMasterPDF = async () => {
     if (!activeProject) return;
+    let currentAnalysis = analysisResults;
+    if (!currentAnalysis) {
+      toast('Running statistical analysis first...', 'info');
+      currentAnalysis = await runAnalysis();
+    }
     const pTrials = (state.trials || []).filter(t => String(t.ProjectID) === String(activeProject.ID));
     const projectCategory = activeProject?.Category || activeCategory;
     try {
@@ -5323,7 +5350,7 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
         showPhotoDates: true,
         formulations: state.formulations || [],
         aiSummary: narrative,
-        analysis: analysisResults
+        analysis: currentAnalysis
       });
     } catch (err) {
       console.error(err);
@@ -5333,12 +5360,17 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
 
   const handleDownloadMasterDocx = async () => {
     if (!activeProject) return;
+    let currentAnalysis = analysisResults;
+    if (!currentAnalysis) {
+      toast('Running statistical analysis first...', 'info');
+      currentAnalysis = await runAnalysis();
+    }
     const pTrials = (state.trials || []).filter(t => String(t.ProjectID) === String(activeProject.ID));
     try {
       const { exportMasterDocx } = await import('../services/trialReports.js');
       await exportMasterDocx(activeProject, pTrials, {
         aiSummary: narrative,
-        analysis: analysisResults
+        analysis: currentAnalysis
       });
     } catch (err) {
       console.error(err);
@@ -5359,20 +5391,34 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
   };
 
   // ── Regulatory PDF ────────────────────────────────────────────────────
-  const handleRegulatoryPDF = () => {
-    if (!activeProject || !analysisResults) { toast('Run analysis first', 'error'); return; }
+  const handleRegulatoryPDF = async () => {
+    if (!activeProject) return;
+    let currentAnalysis = analysisResults;
+    if (!currentAnalysis) {
+      toast('Running statistical analysis first...', 'info');
+      currentAnalysis = await runAnalysis();
+      if (!currentAnalysis) return;
+    }
     const projectCategory = activeProject?.Category || activeCategory;
     const projectConfig = getCategoryConfig(projectCategory);
     const pTrials = (state.trials || []).filter(t => String(t.ProjectID) === String(activeProject.ID));
     const pBlocks = (state.blocks || []).filter(b => String(b.ProjectID) === String(activeProject.ID));
-    const cv = isFinite(analysisResults.anova?.cv) ? analysisResults.anova.cv.toFixed(1) : 'N/A';
-    const rows = (analysisResults.grouping || []).map(g => {
+    const cv = isFinite(currentAnalysis.anova?.cv) ? currentAnalysis.anova.cv.toFixed(1) : 'N/A';
+    const rows = (currentAnalysis.grouping || []).map(g => {
       const ts = treatmentStats.find(x => x.name === g.name);
+      let metricCell = '-';
+      if (ts) {
+        if (projectCategory === 'nutrition' || projectCategory === 'biostimulant') {
+          metricCell = `${ts.wce > 0 ? '+' : ''}${ts.wce.toFixed(1)}%`;
+        } else {
+          metricCell = `${ts.wce.toFixed(1)}${projectConfig.primaryMetric.unit || '%'}`;
+        }
+      }
       return `<tr><td style="padding:6px 10px;border:1px solid #ddd">${g.name}</td>
         <td style="padding:6px 10px;border:1px solid #ddd;text-align:center">${isFinite(g.mean) ? g.mean.toFixed(2) : '-'}</td>
         <td style="padding:6px 10px;border:1px solid #ddd;text-align:center">${ts ? ts.sd.toFixed(2) : '-'}</td>
         <td style="padding:6px 10px;border:1px solid #ddd;text-align:center">${ts ? ts.cv.toFixed(1) : '-'}%</td>
-        <td style="padding:6px 10px;border:1px solid #ddd;text-align:center">${ts ? ts.wce.toFixed(1) : '-'}${projectConfig.primaryMetric.unit || ''}</td>
+        <td style="padding:6px 10px;border:1px solid #ddd;text-align:center">${metricCell}</td>
         <td style="padding:6px 10px;border:1px solid #ddd;text-align:center;font-weight:bold;color:#059669">${g.grouping}</td></tr>`;
     }).join('');
 
@@ -5398,7 +5444,7 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
           ${allPhotos.map((p, idx) => {
             const label = p.label ? `[Plot ${p.plotNum} - ${p.trialName}] ${p.label}` : `Plot ${p.plotNum} - ${p.trialName} - Photo ${idx + 1}`;
             const dateStr = p.date ? new Date(p.date).toLocaleDateString() : '';
-            const imgSrc = p.fileData || p.url || p.src || '';
+            const imgSrc = resolvePhotoSrc(p) || p.fileData || p.url || p.src || '';
             return `
               <div style="border: 1px solid #ddd; padding: 10px; border-radius: 8px; text-align: center; background: #fff; page-break-inside: avoid;">
                 <p style="font-size: 11px; font-weight: bold; margin: 5px 0; color: #1e293b;">${label}</p>
@@ -5411,32 +5457,45 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       `;
     }
 
+    const metricHeaderLabel = projectConfig.primaryMetric.label || projectConfig.primaryMetric.key || 'Efficacy';
+    const metricHeaderUnit = projectConfig.primaryMetric.unit ? ` (${projectConfig.primaryMetric.unit})` : (projectCategory === 'nutrition' || projectCategory === 'biostimulant' ? ' (%)' : '%');
+
     const html = `<!DOCTYPE html><html><head><title>Regulatory Report - ${activeProject.Name}</title>
 <style>body{font-family:Arial,sans-serif;margin:40px;color:#1e293b}h1{color:#065f46}h2{color:#334155;margin-top:24px;font-size:14px;text-transform:uppercase;letter-spacing:1px}table{border-collapse:collapse;width:100%}th{background:#f1f5f9;padding:8px 10px;border:1px solid #ddd;text-align:left;font-size:11px;text-transform:uppercase}td{font-size:12px}.meta{display:grid;grid-template-columns:1fr 1fr;gap:8px 24px;font-size:12px;color:#475569}.meta span{font-weight:600;color:#1e293b}.sig{background:#dcfce7;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600;color:#166534}</style></head>
-<body><h1>RCBD Trial Report: ${activeProject.Name}</h1>
+<body><h1>${activeProject.Design === 'PotTrial' ? 'Pot Trial' : 'RCBD Trial'} Report: ${activeProject.Name}</h1>
 <div class="meta"><div>Location: <span>${activeProject.Location || 'N/A'}</span></div><div>Investigator: <span>${activeProject.Investigator || 'N/A'}</span></div>
-<div>Crop: <span>${activeProject.Crop || 'N/A'}</span></div><div>Metric: <span>${activeProject.Metric}</span></div>
+<div>Crop: <span>${activeProject.Crop || 'N/A'}</span></div><div>Metric: <span>${activeProject.Metric || metricHeaderLabel}</span></div>
 <div>Blocks: <span>${pBlocks.length}</span></div><div>Plots: <span>${pTrials.length}</span></div>
 <div>Start Date: <span>${formatDateTime(activeProject.StartDate) || 'N/A'}</span></div><div>Generated: <span>${formatDateTime(new Date())}</span></div></div>
 <h2>Treatment Means & Statistical Grouping</h2>
-<table><thead><tr><th>Treatment</th><th>Mean</th><th>SD</th><th>CV%</th><th>${projectConfig.primaryMetric.key}%</th><th>Group (${postHocMethod === 'tukey' ? 'Tukey' : 'LSD'})</th></tr></thead><tbody>${rows}</tbody></table>
-<p style="font-size:11px;color:#64748b;margin-top:6px">Means sharing the same letter are not significantly different (${postHocMethod === 'tukey' ? 'Tukey HSD' : "Fisher's LSD"}, α=0.05). ${postHocMethod === 'tukey' ? 'HSD' : 'LSD'} (0.05): ${isFinite(analysisResults.postHoc?.value) ? analysisResults.postHoc.value.toFixed(2) : 'N/A'}</p>
+<table><thead><tr><th>Treatment</th><th>Mean</th><th>SD</th><th>CV%</th><th>${metricHeaderLabel}${metricHeaderUnit}</th><th>Group (${postHocMethod === 'tukey' ? 'Tukey' : 'LSD'})</th></tr></thead><tbody>${rows}</tbody></table>
+<p style="font-size:11px;color:#64748b;margin-top:6px">Means sharing the same letter are not significantly different (${postHocMethod === 'tukey' ? 'Tukey HSD' : "Fisher's LSD"}, α=0.05). ${postHocMethod === 'tukey' ? 'HSD' : 'LSD'} (0.05): ${isFinite(currentAnalysis.postHoc?.value) ? currentAnalysis.postHoc.value.toFixed(2) : 'N/A'}</p>
 <h2>ANOVA Table</h2>
 <table><thead><tr><th>Source</th><th>DF</th><th>SS</th><th>MS</th><th>F</th><th>P</th><th>Sig</th></tr></thead><tbody>
-<tr><td style="padding:6px 10px;border:1px solid #ddd">Treatment</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${analysisResults.anova?.dfTreat ?? '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${isFinite(analysisResults.anova?.ssTreat) ? analysisResults.anova.ssTreat.toFixed(2) : '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${isFinite(analysisResults.anova?.msTreat) ? analysisResults.anova.msTreat.toFixed(2) : '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right;font-weight:bold">${isFinite(analysisResults.anova?.fVal) ? analysisResults.anova.fVal.toFixed(2) : '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${isFinite(analysisResults.anova?.pVal) ? analysisResults.anova.pVal.toFixed(4) : '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:center" class="sig">${sigStars(analysisResults.anova?.pVal)}</td></tr>
-<tr><td style="padding:6px 10px;border:1px solid #ddd">Block</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${analysisResults.anova?.dfBlock ?? '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${isFinite(analysisResults.anova?.ssBlock) ? analysisResults.anova.ssBlock.toFixed(2) : '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${isFinite(analysisResults.anova?.msBlock) ? analysisResults.anova.msBlock.toFixed(2) : '-'}</td><td style="padding:6px 10px;border:1px solid #ddd"></td><td style="padding:6px 10px;border:1px solid #ddd"></td><td style="padding:6px 10px;border:1px solid #ddd"></td></tr>
-<tr><td style="padding:6px 10px;border:1px solid #ddd">Error</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${analysisResults.anova?.dfError ?? '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${isFinite(analysisResults.anova?.ssError) ? analysisResults.anova.ssError.toFixed(2) : '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${isFinite(analysisResults.anova?.msError) ? analysisResults.anova.msError.toFixed(2) : '-'}</td><td style="padding:6px 10px;border:1px solid #ddd"></td><td style="padding:6px 10px;border:1px solid #ddd"></td><td style="padding:6px 10px;border:1px solid #ddd"></td></tr>
-<tr style="font-weight:bold;background:#f8fafc"><td style="padding:6px 10px;border:1px solid #ddd">Total</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${analysisResults.anova?.dfTotal ?? '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${isFinite(analysisResults.anova?.ssTotal) ? analysisResults.anova.ssTotal.toFixed(2) : '-'}</td><td colspan="4" style="padding:6px 10px;border:1px solid #ddd"></td></tr>
+<tr><td style="padding:6px 10px;border:1px solid #ddd">Treatment</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${currentAnalysis.anova?.dfTreat ?? '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${isFinite(currentAnalysis.anova?.ssTreat) ? currentAnalysis.anova.ssTreat.toFixed(2) : '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${isFinite(currentAnalysis.anova?.msTreat) ? currentAnalysis.anova.msTreat.toFixed(2) : '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right;font-weight:bold">${isFinite(currentAnalysis.anova?.fVal) ? currentAnalysis.anova.fVal.toFixed(2) : '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${isFinite(currentAnalysis.anova?.pVal) ? currentAnalysis.anova.pVal.toFixed(4) : '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:center" class="sig">${sigStars(currentAnalysis.anova?.pVal)}</td></tr>
+<tr><td style="padding:6px 10px;border:1px solid #ddd">Block</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${currentAnalysis.anova?.dfBlock ?? '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${isFinite(currentAnalysis.anova?.ssBlock) ? currentAnalysis.anova.ssBlock.toFixed(2) : '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${isFinite(currentAnalysis.anova?.msBlock) ? currentAnalysis.anova.msBlock.toFixed(2) : '-'}</td><td style="padding:6px 10px;border:1px solid #ddd"></td><td style="padding:6px 10px;border:1px solid #ddd"></td><td style="padding:6px 10px;border:1px solid #ddd"></td></tr>
+<tr><td style="padding:6px 10px;border:1px solid #ddd">Error</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${currentAnalysis.anova?.dfError ?? '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${isFinite(currentAnalysis.anova?.ssError) ? currentAnalysis.anova.ssError.toFixed(2) : '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${isFinite(currentAnalysis.anova?.msError) ? currentAnalysis.anova.msError.toFixed(2) : '-'}</td><td style="padding:6px 10px;border:1px solid #ddd"></td><td style="padding:6px 10px;border:1px solid #ddd"></td><td style="padding:6px 10px;border:1px solid #ddd"></td></tr>
+<tr style="font-weight:bold;background:#f8fafc"><td style="padding:6px 10px;border:1px solid #ddd">Total</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${currentAnalysis.anova?.dfTotal ?? '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${isFinite(currentAnalysis.anova?.ssTotal) ? currentAnalysis.anova.ssTotal.toFixed(2) : '-'}</td><td colspan="4" style="padding:6px 10px;border:1px solid #ddd"></td></tr>
 </tbody></table>
-<p style="font-size:11px;color:#64748b;margin-top:6px">CV: ${cv}% · Design: ${analysisResults.balance?.isBalanced ? 'Balanced RCBD' : 'Unbalanced RCBD'}</p>
+<p style="font-size:11px;color:#64748b;margin-top:6px">CV: ${cv}% · Design: ${currentAnalysis.balance?.isBalanced ? 'Balanced' : 'Unbalanced'} ${activeProject.Design || 'RCBD'}</p>
 ${narrative ? `<h2>Agronomist Narrative</h2><p style="font-size:13px;line-height:1.6;white-space:pre-wrap">${narrative}</p>` : ''}
 ${photosHtml}
 </body></html>`;
     const w = window.open('', '_blank');
-    w.document.write(html);
-    w.document.close();
-    setTimeout(() => w.print(), 500);
-    toast('Regulatory report opened for printing');
+    if (!w) {
+      toast('Please allow pop-ups to print or view the Regulatory Report.', 'error');
+      return;
+    }
+    try {
+      w.document.write(html);
+      w.document.close();
+      setTimeout(() => {
+        try { w.print(); } catch (_) {}
+      }, 500);
+      toast('Regulatory report opened for printing');
+    } catch (err) {
+      toast('Could not open print window: ' + err.message, 'error');
+    }
   };
 
   // ── Export helpers ──────────────────────────────────────────────────────
@@ -5448,7 +5507,9 @@ ${photosHtml}
 
   const handleExportR = () => {
     if (!activeProject) return;
-    const key = config.primaryMetric.key;
+    const projectCategory = activeProject?.Category || activeCategory;
+    const projectConfig = getCategoryConfig(projectCategory);
+    const key = projectConfig.primaryMetric.key;
     const trials = (state.trials || []).filter(t => String(t.ProjectID) === String(activeProject.ID));
     exportCSV(`${activeProject.Name}_R.csv`, trials.map(t => {
       const val = getTrialMetricValue(t);
@@ -5464,7 +5525,9 @@ ${photosHtml}
 
   const handleExportSAS = () => {
     if (!activeProject) return;
-    const key = config.primaryMetric.key;
+    const projectCategory = activeProject?.Category || activeCategory;
+    const projectConfig = getCategoryConfig(projectCategory);
+    const key = projectConfig.primaryMetric.key;
     const keyLower = key.toLowerCase().replace(/[^a-z0-9]/g, '');
     const trials = (state.trials || []).filter(t => String(t.ProjectID) === String(activeProject.ID));
     const lines = ['data rcbd;', `input trt $ block ${keyLower};`, 'datalines;',
@@ -5476,11 +5539,28 @@ ${photosHtml}
     toast('Exported for SAS');
   };
 
-  const handleExportBundle = () => {
-    if (!activeProject || !analysisResults) { toast('Run analysis first', 'error'); return; }
-    const json = JSON.stringify({ project: activeProject, analysis: analysisResults }, null, 2);
+  const handleExportBundle = async () => {
+    if (!activeProject) return;
+    let currentAnalysis = analysisResults;
+    if (!currentAnalysis) {
+      toast('Running analysis for bundle...', 'info');
+      currentAnalysis = await runAnalysis();
+      if (!currentAnalysis) return;
+    }
+    const pTrials = (state.trials || []).filter(t => String(t.ProjectID) === String(activeProject.ID));
+    const pBlocks = (state.blocks || []).filter(b => String(b.ProjectID) === String(activeProject.ID));
+    const bundle = {
+      project: activeProject,
+      blocks: pBlocks,
+      trials: pTrials,
+      analysis: currentAnalysis,
+      narrative: narrative || '',
+      exportedAt: new Date().toISOString(),
+      version: '7.0'
+    };
+    const json = JSON.stringify(bundle, null, 2);
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
-    a.download = `${activeProject.Name}_analysis_bundle.json`; a.click();
+    a.download = `${(activeProject.Name || 'project').replace(/\s+/g, '_')}_analysis_bundle.json`; a.click();
     toast('Analysis bundle exported');
   };
 
@@ -8433,8 +8513,8 @@ ${photosHtml}
               <input value={protocolForm.Location} onChange={e => setProtocolForm(v => ({ ...v, Location: e.target.value }))} className={INPUT} placeholder="e.g., North Field" />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1">Target {config.targetLabel}</label>
-              <input value={protocolForm.TargetWeed} onChange={e => setProtocolForm(v => ({ ...v, TargetWeed: e.target.value }))} className={INPUT} placeholder={`e.g., Target ${config.targetLabel}`} />
+              <label className="block text-sm font-semibold text-slate-700 mb-1">Target {getCategoryConfig(activeProject?.Category || activeCategory).targetLabel}</label>
+              <input value={protocolForm.TargetWeed} onChange={e => setProtocolForm(v => ({ ...v, TargetWeed: e.target.value }))} className={INPUT} placeholder={`e.g., Target ${getCategoryConfig(activeProject?.Category || activeCategory).targetLabel}`} />
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -8446,7 +8526,7 @@ ${photosHtml}
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1">Primary Metric</label>
             <select value={protocolForm.Metric} onChange={e => setProtocolForm(v => ({ ...v, Metric: e.target.value }))} className={INPUT}>
-              {activeCategory === 'herbicide' && (
+              {(activeProject?.Category || activeCategory) === 'herbicide' && (
                 <>
                   <option value="Weed Control Efficiency">Weed Control Efficiency (%)</option>
                   <option value="Crop Injury">Crop Injury / Phytotoxicity (%)</option>
@@ -8454,7 +8534,7 @@ ${photosHtml}
                   <option value="Biomass Reduction">Biomass Reduction (%)</option>
                 </>
               )}
-              {activeCategory === 'fungicide' && (
+              {(activeProject?.Category || activeCategory) === 'fungicide' && (
                 <>
                   <option value="Disease Control Efficiency">Disease Control Efficiency (%)</option>
                   <option value="Crop Injury">Crop Injury / Phytotoxicity (%)</option>
@@ -8462,7 +8542,7 @@ ${photosHtml}
                   <option value="Green Leaf Area">Green Leaf Area (%)</option>
                 </>
               )}
-              {activeCategory === 'pesticide' && (
+              {(activeProject?.Category || activeCategory) === 'pesticide' && (
                 <>
                   <option value="Pest Reduction Efficiency">Pest Reduction Efficiency (%)</option>
                   <option value="Crop Injury">Crop Injury / Phytotoxicity (%)</option>
@@ -8470,7 +8550,7 @@ ${photosHtml}
                   <option value="Damage Rating">Damage Rating (0-9)</option>
                 </>
               )}
-              {activeCategory === 'nutrition' && (
+              {(activeProject?.Category || activeCategory) === 'nutrition' && (
                 <>
                   <option value="Yield Improvement">Yield Improvement (%)</option>
                   <option value="Chlorophyll Index">Chlorophyll Index (SPAD)</option>
@@ -8478,7 +8558,7 @@ ${photosHtml}
                   <option value="Plant Height">Plant Height (cm)</option>
                 </>
               )}
-              {activeCategory === 'biostimulant' && (
+              {(activeProject?.Category || activeCategory) === 'biostimulant' && (
                 <>
                   <option value="Growth Enhancement Index">Growth Enhancement Index</option>
                   <option value="Root Biomass">Root Biomass (g)</option>
@@ -8526,9 +8606,43 @@ ${photosHtml}
       {/* ── Customise Report Columns Modal ── */}
       <Modal isOpen={customiseReportModalOpen} onClose={() => setCustomiseReportModalOpen(false)} title="Customise Report Columns">
         <div className="space-y-4">
-          <p className="text-sm text-slate-500">
-            Select the observation variables/columns you want to include in the generated report:
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm text-slate-500">
+              Select the observation variables/columns you want to include in the generated report:
+            </p>
+            <div className="flex items-center gap-2 text-xs">
+              <button
+                type="button"
+                onClick={() => {
+                  const isPotTrial = activeProject?.Design === 'PotTrial';
+                  const fields = isPotTrial
+                    ? (activeProject.PotFields || ['Plant Height', 'Branches', 'Flowers', 'Fruit Count', 'Yield']).map(f => ({ key: f, label: f }))
+                    : (getCategoryConfig(activeProject?.Category || activeCategory).observationFields || []);
+                  const allOn = {};
+                  fields.forEach(f => { allOn[f.key] = true; });
+                  setReportFieldSelection(allOn);
+                }}
+                className="px-2.5 py-1 text-teal-700 bg-teal-50 hover:bg-teal-100 rounded-md font-medium transition"
+              >
+                Select All
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const isPotTrial = activeProject?.Design === 'PotTrial';
+                  const fields = isPotTrial
+                    ? (activeProject.PotFields || ['Plant Height', 'Branches', 'Flowers', 'Fruit Count', 'Yield']).map(f => ({ key: f, label: f }))
+                    : (getCategoryConfig(activeProject?.Category || activeCategory).observationFields || []);
+                  const allOff = {};
+                  fields.forEach(f => { allOff[f.key] = false; });
+                  setReportFieldSelection(allOff);
+                }}
+                className="px-2.5 py-1 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-md font-medium transition"
+              >
+                Clear All
+              </button>
+            </div>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-[50vh] overflow-y-auto pr-1">
             {(() => {
               const isPotTrial = activeProject?.Design === 'PotTrial';

@@ -794,14 +794,21 @@ export class AdvancedReportGenerator {
     // They are added tentatively here and pruned after observations are loaded (see end of constructor).
     if (this.category === 'biostimulant') {
       this.activeFields.push({ key: 'rootToShootRatio', label: 'Root-to-Shoot Ratio' });
-      this.activeFields.push({ key: 'leafGlossScore', label: 'Leaf Gloss / Luster (0-10)' });
-      this.activeFields.push({ key: 'fruitHealthScore', label: 'Fruit Health Score (0-10)' });
     } else if (this.category === 'fungicide') {
       this.activeFields.push({ key: 'audpc', label: 'AUDPC' });
     } else if (this.category === 'nutrition') {
       this.activeFields.push({ key: 'nue', label: 'Nutrient Use Efficiency (NUE)' });
+    }
+
+    // Visual/morphological indicators: tentatively supported across any treatment/category
+    if (!this.activeFields.some(f => f.key === 'leafGlossScore')) {
       this.activeFields.push({ key: 'leafGlossScore', label: 'Leaf Gloss / Luster (0-10)' });
+    }
+    if (!this.activeFields.some(f => f.key === 'fruitHealthScore')) {
       this.activeFields.push({ key: 'fruitHealthScore', label: 'Fruit Health Score (0-10)' });
+    }
+    if (!this.activeFields.some(f => f.key === 'flowerStage')) {
+      this.activeFields.push({ key: 'flowerStage', label: 'Flower Stage' });
     }
 
     if (Array.isArray(trialOrTrials)) {
@@ -998,6 +1005,7 @@ export class AdvancedReportGenerator {
       const hasAnyData = this.observations.some(obs => {
         const val = obs[f.key];
         if (val === undefined || val === null || val === '') return false;
+        if (f.key === 'flowerStage') return String(val).trim().length > 0;
         const num = parseFloat(val);
         if (isNaN(num)) return false;
         if (f.key === 'fruitHealthScore') return num > 0;
@@ -1007,7 +1015,10 @@ export class AdvancedReportGenerator {
       if (hasAnyData) {
         fieldsToKeep.push(f);
       } else {
-        this.skippedFields.push({ ...f, reason: f.key === 'fruitHealthScore' ? 'No fruit present in observed plots' : 'No observations recorded' });
+        const reason = f.key === 'fruitHealthScore' ? 'No fruit present in observed plots'
+          : f.key === 'flowerStage' ? 'No flowers present in observed plots'
+          : 'No observations recorded';
+        this.skippedFields.push({ ...f, reason });
       }
     });
 
