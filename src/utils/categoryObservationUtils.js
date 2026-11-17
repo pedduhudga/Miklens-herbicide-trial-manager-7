@@ -99,6 +99,25 @@ export function buildAiObservationPayload(categoryId = 'herbicide', aiData = {},
     });
   }
 
+  // Sanitize and clamp numeric metrics to declared category scale bounds
+  const catCfg = CATEGORIES[categoryId];
+  if (catCfg && Array.isArray(catCfg.observationFields)) {
+    catCfg.observationFields.forEach(field => {
+      if (field.type === 'number' && obs[field.key] !== undefined && obs[field.key] !== null && obs[field.key] !== '') {
+        let n = toNum(obs[field.key]);
+        if (n !== null) {
+          // If field is on a 0-10 scale and model returned percentage (e.g. 35, 15, 20), convert to 0-10 scale
+          if (field.max === 10 && n > 10 && n <= 100) {
+            n = parseFloat((n / 10).toFixed(1));
+          }
+          if (field.min !== undefined && n < field.min) n = field.min;
+          if (field.max !== undefined && n > field.max) n = field.max;
+          obs[field.key] = n;
+        }
+      }
+    });
+  }
+
   // Ensure primary observation field is set
   if (obs[primaryField] === undefined || obs[primaryField] === null) {
     if (typeof aiData.value === 'number') {
@@ -131,6 +150,24 @@ export function createObservationFromForm(form = {}, categoryId = 'herbicide') {
   if (obs.daa !== undefined) obs.daa = toNum(obs.daa);
   const primaryField = getPrimaryObservationField(categoryId);
   if (obs[primaryField] !== undefined) obs[primaryField] = toNum(obs[primaryField]);
+
+  const catCfg = CATEGORIES[categoryId];
+  if (catCfg && Array.isArray(catCfg.observationFields)) {
+    catCfg.observationFields.forEach(field => {
+      if (field.type === 'number' && obs[field.key] !== undefined && obs[field.key] !== null && obs[field.key] !== '') {
+        let n = toNum(obs[field.key]);
+        if (n !== null) {
+          if (field.max === 10 && n > 10 && n <= 100) {
+            n = parseFloat((n / 10).toFixed(1));
+          }
+          if (field.min !== undefined && n < field.min) n = field.min;
+          if (field.max !== undefined && n > field.max) n = field.max;
+          obs[field.key] = n;
+        }
+      }
+    });
+  }
+
   return normalizeObservation(obs, categoryId);
 }
 

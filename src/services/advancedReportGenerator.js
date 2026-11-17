@@ -858,8 +858,23 @@ export class AdvancedReportGenerator {
         
         // Tag observations with treatment name to distinguish them in Consolidated report
         obsList.forEach(obs => {
+          const cleanedObs = { ...obs };
+          (this.config.observationFields || []).forEach(f => {
+            if (f.type === 'number' && cleanedObs[f.key] !== undefined && cleanedObs[f.key] !== null && cleanedObs[f.key] !== '') {
+              let v = parseFloat(cleanedObs[f.key]);
+              if (!isNaN(v)) {
+                if (f.max === 10 && v > 10 && v <= 100) {
+                  v = parseFloat((v / 10).toFixed(1));
+                }
+                if (f.min !== undefined && v < f.min) v = f.min;
+                if (f.max !== undefined && v > f.max) v = f.max;
+                cleanedObs[f.key] = v;
+              }
+            }
+          });
+
           this.observations.push({
-            ...obs,
+            ...cleanedObs,
             date: normalizeDateString(obs.date, t.Date),
             treatment: obs.treatment || trtName,
             treatmentNumber: obs.treatmentNumber || trtNum,
@@ -935,6 +950,21 @@ export class AdvancedReportGenerator {
       this.treatmentNames = obsTrts;
 
       this.observations = rawObs.map(obs => {
+        const cleanedObs = { ...obs };
+        (this.config.observationFields || []).forEach(f => {
+          if (f.type === 'number' && cleanedObs[f.key] !== undefined && cleanedObs[f.key] !== null && cleanedObs[f.key] !== '') {
+            let v = parseFloat(cleanedObs[f.key]);
+            if (!isNaN(v)) {
+              if (f.max === 10 && v > 10 && v <= 100) {
+                v = parseFloat((v / 10).toFixed(1));
+              }
+              if (f.min !== undefined && v < f.min) v = f.min;
+              if (f.max !== undefined && v > f.max) v = f.max;
+              cleanedObs[f.key] = v;
+            }
+          }
+        });
+
         const trtName = obs.treatment || currentTrt;
         let trtNum = this.treatmentNames.indexOf(trtName) + 1;
         if (trtNum === 0) {
@@ -942,7 +972,7 @@ export class AdvancedReportGenerator {
           trtNum = this.treatmentNames.length;
         }
         return {
-          ...obs,
+          ...cleanedObs,
           date: normalizeDateString(obs.date, trialOrTrials.Date),
           treatmentNumber: trtNum,
           treatment: trtName,
@@ -2504,13 +2534,36 @@ export class AdvancedReportGenerator {
       ws.getCell(`A${r}`).value = f.label;
       ws.getCell(`A${r}`).font = { bold: true };
       
+      const trtMeansByDate = {}; // date -> array of means indexed by trtIdx
+      dates.forEach(d => {
+        trtMeansByDate[d] = [];
+      });
+
       this.treatmentNames.forEach((trtName, trtIdx) => {
         const trtNum = trtIdx + 1;
         ws.getCell(`A${r + trtNum}`).value = `  ${trtName} (Trt ${trtNum})`;
+        const escapedTrt = trtName.replace(/"/g, '""');
+
         dates.forEach((date, colIdx) => {
-          const cLetter = String.fromCharCode(66 + colIdx);
+          const cLetter = getColumnLetter(2 + colIdx);
+          
+          // Pre-calculate exact mean in JS using matchesTreatment
+          const matchingObs = this.observations.filter(o => 
+            (o.date || this.trial.Date || 'N/A') === date && this.matchesTreatment(o, trtNum, trtName)
+          );
+          const vals = matchingObs.map(o => {
+            if (f.key.toLowerCase().replace(/\s/g, '') === 'plantheight' && o.potHeights) {
+              return o.potHeights.map(h => parseFloat(h)).filter(v => !isNaN(v));
+            }
+            return parseFloat(o[f.key]);
+          }).flat().filter(v => !isNaN(v));
+
+          const meanVal = vals.length > 0 ? parseFloat((vals.reduce((s, v) => s + v, 0) / vals.length).toFixed(2)) : 0;
+          trtMeansByDate[date][trtIdx] = meanVal;
+
           ws.getCell(`${cLetter}${r + trtNum}`).value = {
-            formula: `IFERROR(AVERAGEIFS('Assessment Data Summary'!${fieldCol}:${fieldCol}, 'Assessment Data Summary'!F:F, ${trtNum}, 'Assessment Data Summary'!A:A, "${date}"), 0)`
+            formula: `IFERROR(AVERAGEIFS('Assessment Data Summary'!${fieldCol}:${fieldCol}, 'Assessment Data Summary'!F:F, "${escapedTrt}", 'Assessment Data Summary'!A:A, "${date}"), ${meanVal})`,
+            result: meanVal
           };
         });
       });
@@ -2523,12 +2576,23 @@ export class AdvancedReportGenerator {
         ws.getCell(`A${r + offset + i}`).value = isRed 
           ? `  Efficacy of ${trtName} (% Control)` 
           : `  Improvement of ${trtName} (%)`;
+
         dates.forEach((date, colIdx) => {
-          const cLetter = String.fromCharCode(66 + colIdx);
+          const cLetter = getColumnLetter(2 + colIdx);
+          const controlMean = trtMeansByDate[date]?.[0] || 0;
+          const trtMean = trtMeansByDate[date]?.[i] || 0;
+          let calculatedEff = 0;
+          if (controlMean > 0) {
+            calculatedEff = isRed
+              ? parseFloat(((controlMean - trtMean) / controlMean * 100).toFixed(2))
+              : parseFloat(((trtMean - controlMean) / controlMean * 100).toFixed(2));
+          }
+
           ws.getCell(`${cLetter}${r + offset + i}`).value = {
             formula: isRed
-              ? `IF(${cLetter}${r + 1} > 0, (${cLetter}${r + 1} - ${cLetter}${r + trtNum}) / ${cLetter}${r + 1} * 100, 0)`
-              : `IF(${cLetter}${r + 1} > 0, (${cLetter}${r + trtNum} - ${cLetter}${r + 1}) / ${cLetter}${r + 1} * 100, 0)`
+              ? `IF(${cLetter}${r + 1} > 0, (${cLetter}${r + 1} - ${cLetter}${r + trtNum}) / ${cLetter}${r + 1} * 100, ${calculatedEff})`
+              : `IF(${cLetter}${r + 1} > 0, (${cLetter}${r + trtNum} - ${cLetter}${r + 1}) / ${cLetter}${r + 1} * 100, ${calculatedEff})`,
+            result: calculatedEff
           };
         });
       }
@@ -2536,7 +2600,10 @@ export class AdvancedReportGenerator {
       r += offset + this.treatmentNames.length;
     });
 
-    ws.column_dimensions = { 'A': { width: 30 } };
+    ws.columns = [
+      { width: 35 },
+      ...dates.map(() => ({ width: 18 }))
+    ];
   }
 
   // 6. Post-Harvest Sheet

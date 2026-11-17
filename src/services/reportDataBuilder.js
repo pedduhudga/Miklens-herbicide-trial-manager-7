@@ -1070,7 +1070,13 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
           fruitHealthNote: obs.fruitHealthNote || '',
         };
         for (const field of numFields) {
-          obsEntry[field.key] = toNum(obs[field.key]);
+          let val = toNum(obs[field.key]);
+          if (val !== null && field.max === 10 && val > 10 && val <= 100) {
+            val = parseFloat((val / 10).toFixed(1));
+          }
+          if (val !== null && field.min !== undefined && val < field.min) val = field.min;
+          if (val !== null && field.max !== undefined && val > field.max) val = field.max;
+          obsEntry[field.key] = val;
         }
         allObservations.push(obsEntry);
       });
@@ -1122,7 +1128,12 @@ export async function buildReportData(projectId, subTrials, options = {}, state 
         applicationTiming: trial.ApplicationTiming || trial.Timing || '',
       };
       for (const field of numFields) {
-        const val = toNum(targetObs?.[field.key]);
+        let val = toNum(targetObs?.[field.key]);
+        if (val !== null && field.max === 10 && val > 10 && val <= 100) {
+          val = parseFloat((val / 10).toFixed(1));
+        }
+        if (val !== null && field.min !== undefined && val < field.min) val = field.min;
+        if (val !== null && field.max !== undefined && val > field.max) val = field.max;
         row[field.key] = val;
       }
       row.flowerStage = targetObs?.flowerStage || '';

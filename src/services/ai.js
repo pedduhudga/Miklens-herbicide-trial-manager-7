@@ -806,15 +806,15 @@ ZERO-HALLUCINATION & DIAGNOSTIC ACCURACY RULES:
 2. If the crop is healthy, turgid, and rich green, report "visualVigor": 9, "deficiencySign": "None", "deficiencySeverity": 0, "leafColorScore": 4, "interveinalChlorosis": 0, "leafMarginNecrosis": 0, and "targets": [{"name": "Adequate Nutrition", "value": 0, "status": "Sufficient", "confidence": 98, "notes": "Foliage exhibits uniform greenness with no visible deficiency symptoms"}]. DO NOT fabricate mineral deficiencies on healthy crops!
 3. Laboratory limitations: Do NOT invent exact SPAD sensor units, tissue ppm, or plant height in cm without reference scale. Estimate visible canopy indices.
 4. Estimate:
-   - "visualVigor": Overall visual vigor rating on scale 0-10 (10 = lush, optimal vigor).
+   - "visualVigor": Overall visual vigor rating on scale 0-10 (10 = lush, optimal vigor). STRICTLY 0.0 to 10.0 scale.
    - "deficiencySign": Dominant visible deficiency code ("None", "N", "P", "K", "Mg", "Ca", "S", "Zn", "Mn", "Fe", "B", "Cu").
-   - "deficiencySeverity": Severity of visible deficiency on scale 0-10 (0 = none, 10 = acute necrosis/collapse).
-   - "leafColorScore": Standard 1-5 scale on IRRI Leaf Color Chart (1 = yellowish-green, 5 = deep dark green).
-   - "interveinalChlorosis": Rating 0-10 for interveinal yellowing.
-   - "leafMarginNecrosis": Rating 0-10 for edge firing/scorch.
+   - "deficiencySeverity": Severity of visible deficiency on scale 0-10 (0 = none, 10 = acute necrosis/collapse). STRICTLY 0.0 to 10.0 scale (NEVER output a percentage > 10; if 35% foliage is affected, the severity score is 3.5).
+   - "leafColorScore": Standard 1-5 scale on IRRI Leaf Color Chart (1 = yellowish-green, 5 = deep dark green). STRICTLY 1.0 to 5.0.
+   - "interveinalChlorosis": Rating 0-10 for interveinal yellowing (0 = none, 10 = acute). STRICTLY 0.0 to 10.0 scale (NEVER > 10).
+   - "leafMarginNecrosis": Rating 0-10 for edge firing/scorch (0 = none, 10 = acute). STRICTLY 0.0 to 10.0 scale (NEVER > 10).
    - "canopyCoveragePct": Ground/pot surface area covered by green canopy (0-100%).
    - "chlorosisIncidencePct": Percentage of leaves showing yellowing/chlorosis (0-100%).
-   - "leafGlossScore": Leaf surface gloss and waxy cuticle luster rating 0-10 (0 = dull/matte/stressed leaves, 10 = highly glossy waxy cuticle). Score every visible leaf.
+   - "leafGlossScore": Leaf surface gloss and waxy cuticle luster rating 0-10 (0 = dull/matte/stressed leaves, 10 = highly glossy waxy cuticle). STRICTLY 0.0 to 10.0 scale.
    - "flowerStage": ONLY if flowers are clearly visible in this photo — set to "bud", "open", "setting", or "drop". If NO flowers are visible, MUST be "none".
    - "fruitHealthScore": ONLY if fruit/pods are clearly visible — rate fruit condition 0-10 (10 = perfectly healthy, 0 = severe damage). If NO fruit visible, MUST be 0.
    - "fruitHealthNote": ONLY if fruit visible — brief descriptor of dominant fruit condition: "healthy", "blossom-end-rot", "cracking", "sunscald", "pest-damaged", or "none". If NO fruit visible, MUST be "none".
