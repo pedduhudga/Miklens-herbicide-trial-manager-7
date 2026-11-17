@@ -636,3 +636,14 @@ span[class*="font-semibold"], span[class*="font-black"] {
   -webkit-font-smoothing: subpixel-antialiased;
   -moz-osx-font-smoothing: auto;
 }
+
+/* Hide mobile bottom navigation bar when camera or full-screen batch modals are active */
+body.camera-active nav[aria-label="Mobile Navigation"],
+body.camera-active [role="navigation"],
+body.hide-bottom-nav nav[aria-label="Mobile Navigation"],
+body.hide-bottom-nav [role="navigation"] {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+}

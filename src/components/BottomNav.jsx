@@ -10,6 +10,29 @@ export default function BottomNav({ onMoreClick }) {
   const { state } = useAppState();
   const activeCategory = state.activeCategory || 'herbicide';
   const catConfig = getCategoryConfig(activeCategory);
+
+  // Auto-hide bottom nav completely when camera or full-screen batch review modals are open
+  const [isHidden, setIsHidden] = React.useState(() => {
+    if (typeof document === 'undefined') return false;
+    return document.body.classList.contains('camera-active') || document.body.classList.contains('hide-bottom-nav');
+  });
+
+  React.useEffect(() => {
+    const checkVisibility = () => {
+      const hidden = document.body.classList.contains('camera-active') || document.body.classList.contains('hide-bottom-nav');
+      setIsHidden(hidden);
+    };
+    checkVisibility();
+    const observer = new MutationObserver(checkVisibility);
+    observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    window.addEventListener('camera:toggle', checkVisibility);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('camera:toggle', checkVisibility);
+    };
+  }, []);
+
+  if (isHidden) return null;
   
   // Dynamic active color class based on category - with deep forest green as primary
   const colorMaps = {

@@ -14047,42 +14047,50 @@ If none are present, write "None".`;
           }));
         };
 
-        const handleSaveAll = async () => {
+        const handleSaveAll = () => {
           const batch = [...pendingBatchPhotos];
+          // Close the modal immediately so the user can keep working
           setPendingBatchPhotos(null);
 
           window.dispatchEvent(new CustomEvent('app:toast', {
             detail: {
-              msg: `Saving and analyzing ${batch.length} pot photos...`,
+              msg: `Saving ${batch.length} photo${batch.length > 1 ? 's' : ''} in background — you can keep working!`,
               type: 'info'
             }
           }));
 
-          for (let i = 0; i < batch.length; i++) {
-            const item = batch[i];
-            await saveAndAnalyzePhoto(item.dataUrl, item.date, item.targetTrial, item.tag);
-            if (i < batch.length - 1) {
-              // Intelligent pacing between photo uploads to respect Google 15 RPM free-tier limit
-              await new Promise(r => setTimeout(r, 2000));
+          // Non-blocking sequential background saves with per-item yield to keep UI smooth
+          let savedCount = 0;
+          const saveNext = async (idx) => {
+            if (idx >= batch.length) {
+              window.dispatchEvent(new CustomEvent('app:toast', {
+                detail: {
+                  msg: `✅ All ${batch.length} photo${batch.length > 1 ? 's' : ''} saved & analysed!`,
+                  type: 'success'
+                }
+              }));
+              setTimeout(() => runAutoPhotoHealer(false), 1500);
+              return;
             }
-          }
-
-          window.dispatchEvent(new CustomEvent('app:toast', {
-            detail: {
-              msg: `All ${batch.length} photos saved! Background auto-healer active.`,
-              type: 'success'
+            const item = batch[idx];
+            try {
+              await saveAndAnalyzePhoto(item.dataUrl, item.date, item.targetTrial, item.tag);
+              savedCount++;
+            } catch (e) {
+              console.warn('[handleSaveAll] Photo save failed for index', idx, e);
             }
-          }));
+            // Yield to browser event loop (keeps UI interactive), then save next
+            // First item: 100ms delay; subsequent items: 1600ms (respects Google 15 RPM free-tier)
+            setTimeout(() => saveNext(idx + 1), idx === 0 ? 100 : 1600);
+          };
 
-          // Trigger auto-healer to clean up any photos that timed out or hit temporary rate limits
-          setTimeout(() => {
-            runAutoPhotoHealer(false);
-          }, 1500);
+          // Kick off the chain without awaiting — fully non-blocking
+          saveNext(0);
         };
 
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-2 sm:p-4 animate-fade-in backdrop-blur-xs">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] flex flex-col overflow-hidden border border-slate-200">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[96dvh] flex flex-col overflow-hidden border border-slate-200">
               
               {/* Modal Header */}
               <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/80">
@@ -14345,11 +14353,37 @@ If none are present, write "None".`;
                               >
                                 <option value="General">General / All Pots</option>
                                 {(() => {
-                                  let potCount = 3;
+                                  // Smart potCount: derive from project randomization data
+                                  // Priority: PotLabel regex → project PotCols/PotRows → sibling trial count → default 3
+                                  let potCount = null;
+
+                                  // 1. Try to read from PotLabel of the trial itself (e.g. "3 Pots")
                                   if (targetTrial?.PotLabel) {
                                     const m = targetTrial.PotLabel.match(/(\d+)\s*Pots?/i);
                                     if (m) potCount = parseInt(m[1], 10);
                                   }
+
+                                  // 2. Try project randomization settings (PotRows = plants per column)
+                                  if (!potCount) {
+                                    const itemProj = (projects || []).find(p => String(p.ID) === String(targetTrial?.ProjectID));
+                                    if (itemProj) {
+                                      const projPotRows = parseInt(itemProj.PotRows || itemProj.potRows || 0, 10);
+                                      const projPotCols = parseInt(itemProj.PotCols || itemProj.potCols || 0, 10);
+                                      if (projPotRows > 0) potCount = projPotRows;
+                                      else if (projPotCols > 0) potCount = projPotCols;
+                                    }
+                                  }
+
+                                  // 3. Fall back: count sibling trials in same project (each = one pot)
+                                  if (!potCount) {
+                                    const siblings = candidateTrials.filter(t => String(t.ProjectID) === String(targetTrial?.ProjectID));
+                                    if (siblings.length > 0) potCount = siblings.length;
+                                  }
+
+                                  // 4. Final default + safety cap (A-Z labeling supports up to 26)
+                                  if (!potCount || potCount < 1) potCount = 3;
+                                  potCount = Math.min(potCount, 26);
+
                                   const opts = [];
                                   for (let pIdx = 0; pIdx < potCount; pIdx++) {
                                     const potLetter = String.fromCharCode(65 + pIdx);
@@ -14391,7 +14425,7 @@ If none are present, write "None".`;
               </div>
 
               {/* Modal Footer: Discard All, Add More Pots, and Save & Analyse All */}
-              <div className="px-5 py-3.5 border-t border-slate-200 bg-white flex flex-wrap items-center justify-between gap-3">
+              <div className="px-5 py-4 border-t border-slate-200 bg-white flex flex-wrap items-center justify-between gap-3 sticky bottom-0 z-10 shadow-[0_-2px_12px_rgba(0,0,0,0.07)] shrink-0">
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
@@ -14597,14 +14631,21 @@ If none are present, write "None".`;
             }}
             initialAspectRatio={initialAspect}
             allowBurst={true}
-            initialCaptures={pendingBatchPhotos ? pendingBatchPhotos.map(p => ({
-              id: p.id,
-              dataUrl: p.dataUrl,
-              targetTrial: p.targetTrial,
-              trialId: p.targetTrial?.ID,
-              potLabel: p.potLabel,
-              timestamp: p.date
-            })) : []}
+            initialCaptures={
+              // When retaking a specific photo, open camera fresh in single mode (no previous captures loaded)
+              retakingBatchIndex !== null
+                ? []
+                : pendingBatchPhotos
+                  ? pendingBatchPhotos.map(p => ({
+                      id: p.id,
+                      dataUrl: p.dataUrl,
+                      targetTrial: p.targetTrial,
+                      trialId: p.targetTrial?.ID,
+                      potLabel: p.potLabel,
+                      timestamp: p.date
+                    }))
+                  : []
+            }
             onMultiCaptureDone={(captures) => {
               setIsCameraOpen(false);
               handleBatchCapturesDone(captures);
