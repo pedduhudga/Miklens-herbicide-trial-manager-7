@@ -41,7 +41,9 @@ export function validateEfficacyData (efficacy, categoryId = 'herbicide', includ
 
                         const isExplicitlyInvalid = rawObs.isInvalid === true || rawObs.isValidPlotPhoto === false || rawObs.isPlotPhoto === false;
                         const textBlob = `${rawObs.notes || ''} ${rawObs.aiEfficacyAssessment || ''} ${rawObs.validationNotes || ''} ${rawObs.invalidReason || ''}`.toLowerCase();
-                        const isPrecluded = isExplicitlyInvalid || /(?:precluded|packaging|fertilizer advertisement|commercial product|marketing flyer|promotional poster|product label|fertilizer packaging|not (?:a|an) (?:experimental|crop|field|plot|canopy)|cannot be evaluated|non-plot|non-agricultural)/i.test(textBlob);
+                        const hasTargets = Array.isArray(rawObs.targets) && rawObs.targets.length > 0;
+                        const hasWeedDetails = Array.isArray(rawObs.weedDetails) && rawObs.weedDetails.length > 0;
+                        const isPrecluded = (isExplicitlyInvalid || /(?:evaluation precluded: non-plot|rather than an experimental crop canopy|not an experimental (?:crop|plot|canopy))/i.test(textBlob)) && (!hasTargets && !hasWeedDetails);
 
                         if (isPrecluded) {
                             obs.isInvalid = true;
@@ -119,7 +121,9 @@ export function validateEfficacyData (efficacy, categoryId = 'herbicide', includ
                     // Domain Validity & Preclusion Check (Non-plot image / fertilizer packaging / precluded AI)
                     const isExplicitlyInvalid = rawObs.isInvalid === true || rawObs.isValidPlotPhoto === false || rawObs.isPlotPhoto === false;
                     const textBlob = `${rawObs.notes || ''} ${rawObs.aiEfficacyAssessment || ''} ${rawObs.validationNotes || ''} ${rawObs.invalidReason || ''}`.toLowerCase();
-                    const isPrecluded = isExplicitlyInvalid || /(?:precluded|packaging|fertilizer advertisement|commercial product|marketing flyer|promotional poster|product label|fertilizer packaging|not (?:a|an) (?:experimental|crop|field|plot|canopy)|cannot be evaluated|non-plot|non-agricultural)/i.test(textBlob);
+                    const hasTargets = Array.isArray(rawObs.targets) && rawObs.targets.length > 0;
+                    const hasWeedDetails = Array.isArray(rawObs.weedDetails) && rawObs.weedDetails.length > 0;
+                    const isPrecluded = (isExplicitlyInvalid || /(?:evaluation precluded: non-plot|rather than an experimental crop canopy|not an experimental (?:crop|plot|canopy))/i.test(textBlob)) && (!hasTargets && !hasWeedDetails);
 
                     if (isPrecluded) {
                         obs.isInvalid = true;

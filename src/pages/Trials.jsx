@@ -4277,9 +4277,16 @@ export default function Trials({ onMenuClick }) {
     });
 
     // Domain & Validity Verification: detect non-plot images (commercial packaging, flyers, lab bottles)
-    const isInvalidImage = aiData.isValidPlotPhoto === false || 
-      aiData.isPrecluded === true || 
-      /precluded|packaging|commercial product|advertisement|not an experimental plot|flyer/i.test(`${aiData.notes || ''} ${aiData.efficacyAssessment || ''} ${aiData.overallAssessment || ''}`);
+    // Never trigger on generic words like "commercial product" or "packaging", because trials evaluate products named "Commercial Product" or "Commercial Zn c b", and pot trials use nursery pots.
+    const explicitlyInvalid = aiData.isValidPlotPhoto === false || aiData.isPlotPhoto === false || aiData.isPrecluded === true;
+    const explicitPreclusionPhrase = /(?:evaluation precluded: non-plot|rather than an experimental crop canopy|not an experimental (?:crop|plot|canopy))/i.test(
+      `${aiData.notes || ''} ${aiData.efficacyAssessment || ''} ${aiData.overallAssessment || ''} ${aiData.invalidationReason || ''}`
+    );
+    const hasTargetsOrWeeds = (Array.isArray(aiData.targets) && aiData.targets.length > 0) ||
+                              (Array.isArray(aiData.weeds) && aiData.weeds.length > 0);
+    const hasCanopyMetrics = aiData.metrics && typeof aiData.metrics === 'object' && Object.values(aiData.metrics).some(v => typeof v === 'number' && v > 0);
+
+    const isInvalidImage = (explicitlyInvalid || explicitPreclusionPhrase) && (!hasTargetsOrWeeds && !hasCanopyMetrics);
 
     // Calculate primary values
     const primaryObsField = getPrimaryObservationField(trialCat);
@@ -5330,9 +5337,10 @@ export default function Trials({ onMenuClick }) {
       const result = await analyzePhoto(photoSrc, {
         category: activeTrial.Category || activeCategory, // Ensure category context for AI analysis
         treatment: activeTrial.FormulationName,
+        trialDesign: activeTrial.TrialDesign || (activeTrial.PotLabel ? 'PotTrial' : 'FieldTrial'),
+        crop: activeTrial.Crop || activeTrial.CropName || '',
         daa,
         rep: activeTrial.Replication || 1,
-        category: activeTrial.Category || activeCategory
       }, (msg) => window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg, type: 'info' } })));
 
       if (result.success) {
@@ -5377,6 +5385,8 @@ export default function Trials({ onMenuClick }) {
       const result = await analyzePhoto(photoSrc, {
         category: trial.Category || activeCategory,
         treatment: trial.FormulationName,
+        trialDesign: trial.TrialDesign || (trial.PotLabel ? 'PotTrial' : 'FieldTrial'),
+        crop: trial.Crop || trial.CropName || '',
         daa,
         rep: trial.Replication || 1,
         photoTag: photo.tag || ''
@@ -6674,10 +6684,20 @@ export default function Trials({ onMenuClick }) {
   }, []);
 
   const handleActivateToggle = useCallback(async (trial) => {
-    const isCurrentlyLive = String(trial.IsLive) !== 'false';
+    const isCompleted = trial.IsCompleted === true || trial.IsCompleted === 'true' || trial.ControlFinalized === true || trial.ControlFinalized === 'true';
+    const isCurrentlyLive = String(trial.IsLive) !== 'false' && !isCompleted;
     const patch = isCurrentlyLive
       ? { IsLive: false }
-      : { IsLive: true, IsCompleted: false, FinalizationDate: '', FinalControlDuration: '' };
+      : { 
+          IsLive: true, 
+          IsCompleted: false, 
+          ControlFinalized: false, 
+          AutoFinalized: false, 
+          AutoFinalizedReason: '', 
+          AutoFinalizedAt: '',
+          FinalizationDate: '', 
+          FinalControlDuration: '' 
+        };
     const updated = { ...trial, ...patch };
     updateState({ trials: (getAppState().trials || state.trials || []).map(t => t.ID === updated.ID ? updated : t) });
     if (activeTrial?.ID === updated.ID) setActiveTrial(updated);
@@ -6685,7 +6705,7 @@ export default function Trials({ onMenuClick }) {
       await updateTrial({ ID: updated.ID, ...patch }, getAppState);
       await syncTrialToQrScript({ ID: updated.ID, ...patch });
     } catch(e) {}
-    if (!isCurrentlyLive) window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Trial reactivated — control days reset', type: 'success' } }));
+    if (!isCurrentlyLive) window.dispatchEvent(new CustomEvent('app:toast', { detail: { msg: 'Trial reactivated — set to Live active status', type: 'success' } }));
   }, [state.trials, activeTrial, updateState, getAppState, syncTrialToQrScript]);
 
   const handleEditControlDays = useCallback(async (trial) => {
@@ -13073,9 +13093,10 @@ If none are present, write "None".`;
                       const result = await analyzePhoto(dataUrl, {
                         category: activeTrial?.Category || activeCategory, // Ensure category context for AI analysis
                         treatment: activeTrial?.FormulationName,
+                        trialDesign: activeTrial?.TrialDesign || (activeTrial?.PotLabel ? 'PotTrial' : 'FieldTrial'),
+                        crop: activeTrial?.Crop || activeTrial?.CropName || '',
                         daa: obsForm.daa || daa,
                         rep: activeTrial?.Replication || 1,
-                        category: activeCategory
                       });
                       
                       if (result.success && result.data) {

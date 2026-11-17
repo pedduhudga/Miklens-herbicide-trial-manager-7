@@ -123,7 +123,9 @@ export function getDetailedControlDaysInfo(trial, controlTrial = null) {
     if (!o || typeof o !== 'object') return false;
     if (o.isInvalid === true || o.isValidPlotPhoto === false || o.isPlotPhoto === false) return false;
     const textBlob = `${o.notes || ''} ${o.aiEfficacyAssessment || ''} ${o.validationNotes || ''} ${o.invalidReason || ''}`.toLowerCase();
-    if (/(?:precluded|packaging|fertilizer advertisement|commercial product|marketing flyer|promotional poster|product label|fertilizer packaging|not (?:a|an) (?:experimental|crop|field|plot|canopy)|cannot be evaluated|non-plot|non-agricultural)/i.test(textBlob)) {
+    const hasTargets = Array.isArray(o.targets) && o.targets.length > 0;
+    const hasWeedDetails = Array.isArray(o.weedDetails) && o.weedDetails.length > 0;
+    if (/(?:evaluation precluded: non-plot|rather than an experimental crop canopy|not an experimental (?:crop|plot|canopy))/i.test(textBlob) && !hasTargets && !hasWeedDetails) {
       return false;
     }
     return (o.weedCover !== null && o.weedCover !== undefined) ||

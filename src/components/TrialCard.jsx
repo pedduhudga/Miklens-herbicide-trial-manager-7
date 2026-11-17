@@ -1,5 +1,5 @@
 import React, { memo, useMemo, useCallback, useState, useEffect, useRef } from 'react';
-import { Calendar, MapPin, FlaskConical, Activity, Image as ImageIcon, ChevronLeft, ChevronRight, Edit, MoreVertical, Eye, Copy, FolderOpen, FileDown, ScanLine, MonitorPlay, Archive, FileCode, FileSpreadsheet, Share2, BrainCircuit, Trash2, Camera, CheckCircle, Clock, Pencil, CloudSun, Sparkles, Maximize2, Minimize2, X, ShieldCheck, FileText, AlertTriangle, ArrowLeftRight } from 'lucide-react';
+import { Calendar, MapPin, FlaskConical, Activity, Image as ImageIcon, ChevronLeft, ChevronRight, Edit, MoreVertical, Eye, Copy, FolderOpen, FileDown, ScanLine, MonitorPlay, Archive, FileCode, FileSpreadsheet, Share2, BrainCircuit, Trash2, Camera, CheckCircle, Clock, Pencil, CloudSun, Sparkles, Maximize2, Minimize2, X, ShieldCheck, FileText, AlertTriangle, ArrowLeftRight, RotateCcw } from 'lucide-react';
 import { safeJsonParse } from '../utils/helpers.js';
 import { formatDateTime } from '../utils/dateUtils.js';
 import { calculateEffectiveControlDays, getDetailedControlDaysInfo } from '../utils/trialLifecycle.js';
@@ -1235,22 +1235,33 @@ const TrialCard = memo(function TrialCard({
               </>
             )}
           </div>
-          {isEditable && !isCompleted && (
+          {isEditable && (
             <div className="flex items-center gap-1">
-              <button onClick={handleMarkComplete}
-                title="Mark as Completed"
-                className="text-[10px] font-bold px-2 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 flex items-center gap-0.5 transition">
-                <CheckCircle className="w-3 h-3" /> Done
-              </button>
-              <button
-                onClick={handleActivateToggle}
-                className={`text-[10px] font-bold px-2 py-0.5 rounded border transition ${
-                  isLive
-                    ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
-                    : 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100'
-                }`}>
-                {isLive ? 'Deactivate' : 'Activate'}
-              </button>
+              {isCompleted ? (
+                <button
+                  onClick={handleActivateToggle}
+                  title="Reactivate and resume trial"
+                  className="text-[10px] font-bold px-2 py-0.5 rounded border bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 flex items-center gap-0.5 transition">
+                  <RotateCcw className="w-3 h-3" /> Reactivate
+                </button>
+              ) : (
+                <>
+                  <button onClick={handleMarkComplete}
+                    title="Mark as Completed"
+                    className="text-[10px] font-bold px-2 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 flex items-center gap-0.5 transition">
+                    <CheckCircle className="w-3 h-3" /> Done
+                  </button>
+                  <button
+                    onClick={handleActivateToggle}
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded border transition ${
+                      isLive
+                        ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
+                        : 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100'
+                    }`}>
+                    {isLive ? 'Deactivate' : 'Activate'}
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>

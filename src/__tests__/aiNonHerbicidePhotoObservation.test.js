@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildAiObservationPayload } from '../utils/categoryObservationUtils.js';
 import { CATEGORIES, getPrimaryObservationField } from '../utils/categoryConfig.js';
+import { sanitizeAIPlotResult } from '../services/multiProviderAI.js';
 
 describe('Non-Herbicide AI Photo Automatic Observation & Clinical Diagnostics', () => {
 
@@ -42,6 +43,45 @@ describe('Non-Herbicide AI Photo Automatic Observation & Clinical Diagnostics', 
       expect(result.pestCount).toBeNull();
       expect(result.feedingDamagePct).toBeNull();
       expect(result.damageRating).toBeNull();
+    });
+
+    it('should NOT invalidate valid pot trial observation when notes or treatment mention commercial product standard', () => {
+      const mockValidPotTrial = {
+        isValidPlotPhoto: true,
+        overallAssessment: 'Foliage treated with Commercial Zn c b shows strong vegetative vigor with no chlorosis in pot trial.',
+        notes: 'Commercial product comparison pot trial at DAA 3.',
+        metrics: {
+          visualVigor: 8.5,
+          nutrientDeficiencyScore: 0,
+          canopyCoveragePct: 82.0
+        },
+        targets: [
+          { name: 'Healthy Foliage', value: 0, status: 'Healthy', confidence: 96 }
+        ],
+        confidence: 92
+      };
+
+      const result = buildAiObservationPayload('nutrition', mockValidPotTrial, '3');
+
+      expect(result.isInvalid).toBeFalsy();
+      expect(result.status).not.toBe('Invalid (Non-plot)');
+      expect(result.visualVigor).toBe(8.5);
+      expect(result.canopyCoveragePct).toBe(82.0);
+    });
+
+    it('sanitizeAIPlotResult should preserve valid canopy metrics even if text mentions commercial product', () => {
+      const parsedWithCommercialProduct = {
+        isValidPlotPhoto: true,
+        metrics: { visualVigor: 9.0, canopyCoveragePct: 85.0 },
+        targets: [{ name: 'Healthy Plant', status: 'Healthy', confidence: 95 }],
+        overallAssessment: 'Commercial product application shows excellent growth response.',
+        notes: 'Comparing against commercial product standard in nursery pot packaging.'
+      };
+
+      const sanitized = sanitizeAIPlotResult(parsedWithCommercialProduct);
+      expect(sanitized.isValidPlotPhoto).toBe(true);
+      expect(sanitized.metrics.visualVigor).toBe(9.0);
+      expect(sanitized.targets).toHaveLength(1);
     });
   });
 

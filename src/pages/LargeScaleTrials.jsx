@@ -1535,9 +1535,16 @@ export default function LargeScaleTrials({ onMenuClick }) {
     });
 
     // Domain & Validity Verification: detect non-plot images (commercial packaging, flyers, lab bottles)
-    const isInvalidImage = aiData.isValidPlotPhoto === false || 
-      aiData.isPrecluded === true || 
-      /precluded|packaging|commercial product|advertisement|not an experimental plot|flyer/i.test(`${aiData.notes || ''} ${aiData.efficacyAssessment || ''} ${aiData.overallAssessment || ''}`);
+    // Never trigger on generic words like "commercial product" or "packaging", because trials evaluate products named "Commercial Product" or "Commercial Zn c b", and pot trials use nursery pots.
+    const explicitlyInvalid = aiData.isValidPlotPhoto === false || aiData.isPlotPhoto === false || aiData.isPrecluded === true;
+    const explicitPreclusionPhrase = /(?:evaluation precluded: non-plot|rather than an experimental crop canopy|not an experimental (?:crop|plot|canopy))/i.test(
+      `${aiData.notes || ''} ${aiData.efficacyAssessment || ''} ${aiData.overallAssessment || ''} ${aiData.invalidationReason || ''}`
+    );
+    const hasTargetsOrWeeds = (Array.isArray(aiData.targets) && aiData.targets.length > 0) ||
+                              (Array.isArray(aiData.weeds) && aiData.weeds.length > 0);
+    const hasCanopyMetrics = aiData.metrics && typeof aiData.metrics === 'object' && Object.values(aiData.metrics).some(v => typeof v === 'number' && v > 0);
+
+    const isInvalidImage = (explicitlyInvalid || explicitPreclusionPhrase) && (!hasTargetsOrWeeds && !hasCanopyMetrics);
 
     // Calculate primary values
     const primaryObsField = getPrimaryObservationField(trialCat);

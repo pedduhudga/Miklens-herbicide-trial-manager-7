@@ -379,6 +379,7 @@ PLANT & PLOT INFORMATION:
 - Crop Type: ${context.crop || context.Crop || 'General Crop'}
 - Target Specified in Trial: ${context.targetPest || context.PestTarget || context.DiseaseTarget || context.targetDisease || context.targetValue || 'None Specified'}
 - Treatment/Product: ${context.treatment || 'Unknown'}
+- Trial Design: ${context.trialDesign || 'Pot / Field Trial'}
 - Days After Application (DAA): ${context.daa ?? 0}
 - Replication: ${context.rep || 1}
 ${historyNote}
@@ -386,7 +387,9 @@ ${historyNote}
 ADDITIONAL ANALYSIS FEATURES: ${catConfig.aiFeatures.join(', ')}
 
 RULES FOR SCIENTIFIC ASSESSMENT (CRITICAL - ZERO FALSE INFO & AVOID HALLUCINATION):
-0. IMAGE VALIDITY PRE-CHECK (CANOPY VERIFICATION): If this image depicts commercial fertilizer/chemical packaging, bottles, marketing flyers, pamphlets, documents, machinery, people, indoor items, or non-plot assets: you MUST set "isValidPlotPhoto": false, "invalidationReason": "Depicts commercial product packaging / non-plot asset rather than an experimental crop canopy.", "metrics": {}, "targets": [], "confidence": "LOW", "overallAssessment": "Evaluation precluded: Submitted media depicts commercial product packaging or promotional materials rather than an experimental crop canopy.", "notes": "Evaluation precluded: Non-plot image asset."
+0. IMAGE VALIDITY PRE-CHECK (CANOPY & POT TRIAL VERIFICATION):
+   - Experimental crop plots include BOTH open-field plots AND pot/container/greenhouse/shadehouse trials (e.g. plants in plastic/terracotta pots, nursery polybags, planters, or bench containers). All potted experimental plants and crop canopies ARE 100% VALID CROP PLOTS! You MUST set "isValidPlotPhoto": true and extract scientific metrics.
+   - ONLY set "isValidPlotPhoto": false if the image SOLELY depicts fertilizer bags, chemical bottles, marketing flyers, documents, machinery, people, or non-plant items with NO experimental crop plant present.
 1. STAGE & METRIC ACCURACY: Estimate values only for metrics and symptoms that are directly and clearly visible in the crop plot photo. Do NOT invent or assume data. If clean and healthy, report 0 severity.
 2. STAGE-APPROPRIATE METRICS (GROWTH-STAGE FILTERING): If the BBCH Growth Stage is early/vegetative (BBCH stage label starting with BBCH 00 through BBCH 59, i.e., before flowering and fruiting), reproductive and yield metrics (such as "fruitCount", "marketableYield", "unmarketableYield", "marketableYieldEstimateGrams", "unmarketableYieldEstimateGrams") are biologically not applicable. For these metrics in the "metrics" JSON object, you MUST set them to null. Do NOT return 0 or "Not detected". Only return numerical estimations for these if the BBCH stage is BBCH 61 or later (flowering/fruiting/ripening) and fruits are actually visible.
 3. PHYSICAL, SENSOR & LABORATORY LIMITATION: Physical parameters like plant height in cm without reference scale, sensor measurements like chlorophyll index (SPAD readings), and laboratory chemical tissue tests CANNOT be measured or determined from a 2D photo. You MUST set these to null in the "metrics" JSON object. Do NOT guess or estimate these values under any circumstances.
@@ -447,13 +450,14 @@ ${pixelSensorNote}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 STEP 0 — CANOPY VALIDITY & DOMAIN VERIFICATION (CRITICAL)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-First evaluate if this image authentically shows an agricultural field crop plot, trial bed, or living/dead weed canopy.
+First evaluate if this image authentically shows an agricultural field crop plot, trial bed, pot/container trial, or living/dead weed canopy.
+(NOTE: Pot trials, potted plants in plastic/terracotta containers, nursery bags, or greenhouse benches ARE 100% VALID CROP PLOTS!)
 If the image depicts:
   • Commercial product packaging, fertilizer bags, chemical bottles, marketing flyers, advertisements, brochures, product spec posters;
-  • Non-field items (indoor rooms, laboratory tables, machinery, vehicles, people, documents, computer screens, blank frames);
+  • Non-field items (indoor office rooms, documents, computer screens, blank frames) with NO living or dead crop/weed plants present;
 YOU MUST RETURN:
   "isValidPlotPhoto": false,
-  "invalidationReason": "Depicts commercial product packaging / fertilizer advertisement rather than an experimental plot canopy.",
+  "invalidationReason": "Depicts commercial product packaging / non-plot asset rather than an experimental plot canopy.",
   "totalWeedCover": null,
   "weeds": [],
   "confidence": "LOW",
@@ -578,12 +582,30 @@ export function sanitizeAIPlotResult(parsed) {
   if (!parsed || typeof parsed !== 'object') return parsed;
   if (Array.isArray(parsed)) return parsed;
 
+  const hasTargetsOrWeeds = (Array.isArray(parsed.targets) && parsed.targets.length > 0) ||
+                            (Array.isArray(parsed.weeds) && parsed.weeds.length > 0) ||
+                            (Array.isArray(parsed.identifications) && parsed.identifications.length > 0);
+  const hasCanopyMetrics = parsed.metrics && typeof parsed.metrics === 'object' && 
+                           Object.values(parsed.metrics).some(v => typeof v === 'number' && v > 0);
+
+  // If the vision model identified real plant targets, weeds, or canopy metrics, it is a valid plot photo!
+  // CRITICAL: Do NOT invalidate images based on the words "commercial product" or "packaging", because
+  // trials frequently evaluate products named "Commercial Product" or "Commercial Zn c b", and pot trials use nursery pots.
+  if (parsed.isValidPlotPhoto === true || hasTargetsOrWeeds || hasCanopyMetrics) {
+    return {
+      ...parsed,
+      isValidPlotPhoto: true,
+      isPlotPhoto: true,
+      invalidationReason: null
+    };
+  }
+
   const explicitlyInvalid = parsed.isValidPlotPhoto === false || parsed.isPlotPhoto === false;
   const textBlob = `${parsed.efficacyAssessment || ''} ${parsed.overallAssessment || ''} ${parsed.notes || ''} ${parsed.invalidationReason || ''}`.toLowerCase();
-  const preclusionTrigger = /(?:precluded|packaging|fertilizer advertisement|commercial product|marketing flyer|promotional poster|product label|fertilizer packaging|not (?:a|an) (?:experimental|crop|field|plot|canopy)|cannot be evaluated|non-plot|non-agricultural)/i.test(textBlob);
+  const preclusionTrigger = /(?:evaluation precluded: non-plot|rather than an experimental crop canopy|not an experimental (?:crop|plot|canopy)|non-plot asset)/i.test(textBlob);
 
   if (explicitlyInvalid || preclusionTrigger) {
-    const reason = parsed.invalidationReason || parsed.efficacyAssessment || parsed.overallAssessment || 'Image depicts commercial product packaging or non-plot asset rather than an experimental crop canopy.';
+    const reason = parsed.invalidationReason || parsed.efficacyAssessment || parsed.overallAssessment || 'Image depicts non-plot asset rather than an experimental crop canopy.';
     return {
       ...parsed,
       isValidPlotPhoto: false,
@@ -1368,7 +1390,7 @@ JSON ONLY. Do not write any conversational text or explanation. Only output the 
         
         if (txt.trim()) {
           const lower = txt.toLowerCase();
-          if (/(?:precluded|packaging|fertilizer advertisement|commercial product|marketing flyer|promotional poster|not (?:a|an) (?:experimental|crop|field|plot))/i.test(lower)) {
+          if (/(?:evaluation precluded: non-plot|rather than an experimental crop canopy|not an experimental (?:crop|plot|canopy))/i.test(lower)) {
             return [];
           }
           return [{ name: 'Unknown', commonName: txt.slice(0, 120), cover: 0, growthStage: '', confidence: 0.5 }];

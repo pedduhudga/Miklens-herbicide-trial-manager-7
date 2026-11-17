@@ -58,8 +58,16 @@ export function buildAiObservationPayload(categoryId = 'herbicide', aiData = {},
   }
 
   // Non-herbicide: check invalid image preclusion
-  const isInvalid = aiData.isValidPlotPhoto === false || aiData.isPrecluded === true || 
-    /precluded|packaging|commercial product|advertisement|not an experimental plot|flyer/i.test(`${aiData.notes || ''} ${aiData.overallAssessment || ''} ${aiData.efficacyAssessment || ''}`);
+  // Only invalidate if explicitly rejected by AI AND has zero positive targets or canopy metrics.
+  // Never trigger on generic words like "commercial product" or "packaging", because trials evaluate products named "Commercial Product" or "Commercial Zn c b", and pot trials use nursery pots.
+  const explicitlyInvalid = aiData.isValidPlotPhoto === false || aiData.isPlotPhoto === false || aiData.isPrecluded === true;
+  const explicitPreclusionPhrase = /(?:evaluation precluded: non-plot|rather than an experimental crop canopy|not an experimental (?:crop|plot|canopy))/i.test(
+    `${aiData.notes || ''} ${aiData.overallAssessment || ''} ${aiData.efficacyAssessment || ''} ${aiData.invalidationReason || ''}`
+  );
+  const hasTargets = Array.isArray(aiData.targets) && aiData.targets.length > 0;
+  const hasCanopyMetrics = aiData.metrics && typeof aiData.metrics === 'object' && Object.values(aiData.metrics).some(v => typeof v === 'number' && v > 0);
+
+  const isInvalid = (explicitlyInvalid || explicitPreclusionPhrase) && (!hasTargets && !hasCanopyMetrics);
 
   if (isInvalid) {
     obs.isInvalid = true;

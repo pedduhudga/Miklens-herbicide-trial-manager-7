@@ -582,8 +582,9 @@ ${historyPrompt}`;
     } else if (categoryId === 'fungicide') {
       prompt = `Act as a senior clinical plant pathologist. Conduct an expert visual diagnosis on this fungicide trial crop plot or pot photo to identify plant disease symptoms (fungal spots, rust pustules, blights, downy/powdery mildews, anthracnose, sclerotinia, bacterial blights, viral mosaics) with maximum scientific accuracy.
 
-PRE-CHECK (CRITICAL — ZERO FALSE INFO / NON-PLOT REJECTION):
-If this photo shows commercial fertilizer/chemical packaging, bottles, product flyers, advertisements, indoor non-plot objects, vehicles, people, or completely blurry/unusable images: YOU MUST set "isValidPlotPhoto": false, "invalidationReason": "Image depicts non-plot asset or packaging rather than crop canopy", "metrics": {"diseaseSeverity": 0, "diseaseIncidence": 0, "greenLeafArea": 0, "plantHealthScore": 0, "phytotoxicity": 0}, "targets": [], "details": {"identifiedDiseases": [], "symptoms": [], "confidence": "Low", "notes": "Evaluation precluded: Non-plot image."}}.
+PRE-CHECK (CANOPY & POT TRIAL VALIDITY):
+- Experimental crop plots include BOTH open-field plots AND pot/container/greenhouse/shadehouse trials (plants in plastic/terracotta pots, nursery bags, planters, bench trays). Potted crop plants and foliage ARE 100% VALID CROP PLOTS! Set "isValidPlotPhoto": true and extract scientific metrics.
+- ONLY if this photo SOLELY shows commercial fertilizer/chemical packaging, bottles, product flyers, advertisements, vehicles, people, or non-plant objects with NO crop plants present: YOU MUST set "isValidPlotPhoto": false, "invalidationReason": "Image depicts non-plot asset or packaging rather than crop canopy", "metrics": {"diseaseSeverity": 0, "diseaseIncidence": 0, "greenLeafArea": 0, "plantHealthScore": 0, "phytotoxicity": 0}, "targets": [], "details": {"identifiedDiseases": [], "symptoms": [], "confidence": "Low", "notes": "Evaluation precluded: Non-plot image."}}.
 
 ZERO-HALLUCINATION & ACCURACY RULES:
 1. ONLY report symptoms and diseases that are directly, unmistakably visible on the leaves, stems, or fruits. If the foliage is clean, green, and disease-free, report "diseaseSeverity": 0, "diseaseIncidence": 0, "greenLeafArea": 100, "plantHealthScore": 10, "phytotoxicity": 0, and "targets": [{"name": "Healthy Foliage", "value": 0, "status": "Healthy", "confidence": 98, "notes": "No disease symptoms or lesions observed"}]. DO NOT fabricate pathogens on clean crops!
@@ -677,8 +678,9 @@ ${historyPrompt}`;
     } else if (categoryId === 'pesticide') {
       prompt = `Act as a senior agricultural entomologist. Analyze this pesticide/insecticide trial plot or pot photo to identify, classify, and count crop insect pests, mites, developmental life stages, and feeding damage symptoms with scientific precision.
 
-PRE-CHECK (CRITICAL — ZERO FALSE INFO / NON-PLOT REJECTION):
-If this photo shows commercial chemical/pesticide bottles, jugs, packaging flyers, advertisements, indoor non-plot assets, machinery, people, or completely blurred images: YOU MUST set "isValidPlotPhoto": false, "invalidationReason": "Image depicts non-plot asset or packaging rather than crop canopy", "metrics": {"pestCount": 0, "liveInsectCount": 0, "deadInsectCount": 0, "feedingDamagePct": 0, "damageRating": 0, "phytotoxicity": 0}, "targets": [], "details": {"identifiedPests": [], "damageTypes": [], "confidence": "Low", "notes": "Evaluation precluded: Non-plot image."}}.
+PRE-CHECK (CANOPY & POT TRIAL VALIDITY):
+- Experimental crop plots include BOTH open-field plots AND pot/container/greenhouse/shadehouse trials (plants in plastic/terracotta pots, nursery bags, planters, bench trays). Potted crop plants and foliage ARE 100% VALID CROP PLOTS! Set "isValidPlotPhoto": true and extract scientific metrics.
+- ONLY if this photo SOLELY shows commercial chemical/pesticide bottles, jugs, packaging flyers, advertisements, machinery, people, or completely blurred non-plant images: YOU MUST set "isValidPlotPhoto": false, "invalidationReason": "Image depicts non-plot asset or packaging rather than crop canopy", "metrics": {"pestCount": 0, "liveInsectCount": 0, "deadInsectCount": 0, "feedingDamagePct": 0, "damageRating": 0, "phytotoxicity": 0}, "targets": [], "details": {"identifiedPests": [], "damageTypes": [], "confidence": "Low", "notes": "Evaluation precluded: Non-plot image."}}.
 
 ZERO-HALLUCINATION & ACCURACY RULES:
 1. ONLY report pest species, insects, or feeding injuries that are directly, unmistakably visible. If the foliage is clean, uninfested, and undamaged, report "pestCount": 0, "liveInsectCount": 0, "deadInsectCount": 0, "feedingDamagePct": 0, "damageRating": 0, "phytotoxicity": 0, and "targets": [{"name": "Healthy Foliage", "value": 0, "status": "Healthy", "confidence": 98, "notes": "No pest infestation or feeding damage observed"}]. DO NOT invent imaginary insects or chewing damage on clean leaves!
@@ -784,8 +786,9 @@ ${historyPrompt}`;
     } else if (categoryId === 'nutrition') {
       prompt = `Act as a senior crop nutritionist and soil-plant diagnostician. Analyze this plant nutrition trial plot or pot photo to evaluate crop nutrient status, foliar chlorosis patterns, and visual vigor with clinical scientific rigor.
 
-PRE-CHECK (CRITICAL — ZERO FALSE INFO / NON-PLOT REJECTION):
-If this photo shows commercial fertilizer bags, chemical bottles, marketing brochures, flyers, indoor non-plot items, or non-canopy imagery: YOU MUST set "isValidPlotPhoto": false, "invalidationReason": "Image depicts non-plot asset or fertilizer packaging rather than crop canopy", "metrics": {"visualVigor": 0, "deficiencySeverity": 0, "leafColorScore": 1, "interveinalChlorosis": 0, "leafMarginNecrosis": 0, "canopyCoveragePct": 0, "chlorosisIncidencePct": 0}, "targets": [], "details": {"deficiencySymptoms": [], "confidence": "Low", "notes": "Evaluation precluded: Non-plot image."}}.
+PRE-CHECK (CANOPY & POT TRIAL VALIDITY):
+- Experimental crop plots include BOTH open-field plots AND pot/container/greenhouse/shadehouse trials (plants in plastic/terracotta pots, nursery bags, planters, bench trays). Potted crop plants, pots with plants, and foliage ARE 100% VALID CROP PLOTS! Set "isValidPlotPhoto": true and extract scientific metrics.
+- ONLY if this photo SOLELY shows commercial fertilizer bags, chemical bottles, marketing brochures, flyers, or non-canopy imagery with NO experimental crop plants present: YOU MUST set "isValidPlotPhoto": false, "invalidationReason": "Image depicts non-plot asset or fertilizer packaging rather than crop canopy", "metrics": {"visualVigor": 0, "deficiencySeverity": 0, "leafColorScore": 1, "interveinalChlorosis": 0, "leafMarginNecrosis": 0, "canopyCoveragePct": 0, "chlorosisIncidencePct": 0}, "targets": [], "details": {"deficiencySymptoms": [], "confidence": "Low", "notes": "Evaluation precluded: Non-plot image."}}.
 
 ZERO-HALLUCINATION & DIAGNOSTIC ACCURACY RULES:
 1. ONLY report nutrient deficiencies that are clearly substantiated by foliar diagnostic symptoms:
@@ -885,8 +888,9 @@ ${historyPrompt}`;
     } else if (categoryId === 'biostimulant') {
       prompt = `Act as a senior plant physiologist and crop vigor specialist. Analyze this biostimulant trial plot or pot photo to evaluate vegetative growth enhancement, canopy expansion, foliar luster, and abiotic stress resilience (drought, heat, salinity, transplant shock).
 
-PRE-CHECK (CRITICAL — ZERO FALSE INFO / NON-PLOT REJECTION):
-If this photo shows commercial biostimulant bottles, jugs, advertising flyers, marketing posters, indoor office assets, or non-canopy imagery: YOU MUST set "isValidPlotPhoto": false, "invalidationReason": "Image depicts non-plot asset or packaging rather than crop canopy", "metrics": {"overallVigor": 0, "shootVigor": 0, "abioticStressRecovery": 5, "leafAreaIndexEstimated": 0, "shootDensityScore": 0, "wiltingIndex": 0, "canopyGreennessPct": 0, "foliarUniformityScore": 0}, "targets": [], "details": {"growthObservations": [], "confidence": "Low", "notes": "Evaluation precluded: Non-plot image."}}.
+PRE-CHECK (CANOPY & POT TRIAL VALIDITY):
+- Experimental crop plots include BOTH open-field plots AND pot/container/greenhouse/shadehouse trials (plants in plastic/terracotta pots, nursery bags, planters, bench trays). Potted crop plants, pots with plants, and foliage ARE 100% VALID CROP PLOTS! Set "isValidPlotPhoto": true and extract scientific metrics.
+- ONLY if this photo SOLELY shows commercial biostimulant bottles, jugs, advertising flyers, marketing posters, or non-canopy imagery with NO crop plants present: YOU MUST set "isValidPlotPhoto": false, "invalidationReason": "Image depicts non-plot asset or packaging rather than crop canopy", "metrics": {"overallVigor": 0, "shootVigor": 0, "abioticStressRecovery": 5, "leafAreaIndexEstimated": 0, "shootDensityScore": 0, "wiltingIndex": 0, "canopyGreennessPct": 0, "foliarUniformityScore": 0}, "targets": [], "details": {"growthObservations": [], "confidence": "Low", "notes": "Evaluation precluded: Non-plot image."}}.
 
 ZERO-HALLUCINATION & ACCURACY RULES:
 1. ONLY report verifiable physiological differences. Distinguish genuine biostimulant enhancement (enhanced shoot density, expanded leaf area, darker green foliar luster, turgid leaves) from normal baseline growth. DO NOT fabricate miraculous growth spurts or unsubstantiated claims.
