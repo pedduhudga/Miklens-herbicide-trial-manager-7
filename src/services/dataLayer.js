@@ -1054,6 +1054,98 @@ export async function deleteAiChatSession(payload, getAppState) {
   return { success: true };
 }
 
+// ─── Mass Observations (Dedicated Firebase Collection + Local Fallback) ──────
+
+const MASS_OBS_LOCAL_PREFIX = 'miklens_mass_obs_';
+
+function readLocalMassObs(projectId, category) {
+  try {
+    if (typeof localStorage === 'undefined') return [];
+    const raw = localStorage.getItem(`${MASS_OBS_LOCAL_PREFIX}${category}_${projectId}`);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalMassObs(projectId, category, record) {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    const key = `${MASS_OBS_LOCAL_PREFIX}${category}_${projectId}`;
+    const existing = readLocalMassObs(projectId, category);
+    const filtered = existing.filter(r => String(r.Date) !== String(record.Date));
+    const next = [record, ...filtered].sort((a, b) => String(b.Date || '').localeCompare(String(a.Date || '')));
+    localStorage.setItem(key, JSON.stringify(next));
+  } catch {
+    // Non-fatal
+  }
+}
+
+export async function saveMassObservationBatch(payload, getAppState) {
+  const category = payload?.Category || enforceActiveCategory(payload || {}, getAppState, 'saveMassObservationBatch');
+  validateCategory(category);
+  const projectId = String(payload?.ProjectID || '');
+  if (!projectId) return null;
+
+  const safeDate = String(payload.Date || new Date().toISOString().split('T')[0]);
+  const docId = payload.ID || `${category}_${projectId.replace(/[^a-zA-Z0-9_-]/g, '_')}_${safeDate.replace(/[^0-9-]/g, '')}`;
+  const batchRecord = {
+    ...payload,
+    ID: docId,
+    ProjectID: projectId,
+    Category: category,
+    Date: safeDate,
+    UpdatedAt: new Date().toISOString(),
+  };
+
+  // Always persist local cache first for immediate offline availability
+  writeLocalMassObs(projectId, category, batchRecord);
+
+  const { useFirebase } = getConfig(getAppState);
+  if (useFirebase) {
+    try {
+      const uid = getUserId(getAppState);
+      return await fbDB.fbSaveMassObservation(batchRecord, uid);
+    } catch (err) {
+      // Non-fatal: individual trial card updates still succeed even if Firestore rules for massObservations are pending deployment
+      console.warn('[DataLayer] Failed to persist massObservations collection record (falling back to trial cards + local cache):', err?.message || err);
+      return batchRecord;
+    }
+  }
+  return batchRecord;
+}
+
+export async function getMassObservationHistory(projectId, getAppState) {
+  if (!projectId) return [];
+  const state = getAppState?.() || {};
+  const category = state.activeCategory || 'herbicide';
+  const localRecords = readLocalMassObs(projectId, category);
+
+  const { useFirebase } = getConfig(getAppState);
+  if (useFirebase) {
+    try {
+      const uid = getUserId(getAppState);
+      const remoteRecords = await fbDB.fbGetMassObservations(projectId, category, uid);
+      // Merge remote + local (preferring newer UpdatedAt per Date)
+      const byDate = new Map();
+      localRecords.forEach(r => { if (r?.Date) byDate.set(String(r.Date), r); });
+      remoteRecords.forEach(r => {
+        if (!r?.Date) return;
+        const prev = byDate.get(String(r.Date));
+        if (!prev || String(r.UpdatedAt || '') >= String(prev.UpdatedAt || '')) {
+          byDate.set(String(r.Date), r);
+        }
+      });
+      return Array.from(byDate.values()).sort((a, b) => String(b.Date || '').localeCompare(String(a.Date || '')));
+    } catch (err) {
+      console.warn('[DataLayer] Could not read massObservations collection (using local + trial card history):', err?.message || err);
+      return localRecords;
+    }
+  }
+  return localRecords;
+}
+
 // ─── Enhanced Category Validation Functions ──────────────────────────────────
 
 /**

@@ -4,7 +4,7 @@ import { useAppState } from '../hooks/useAppState.jsx';
 import { useAuth } from '../hooks/useAuth.js';
 import TopBar from '../components/TopBar.jsx';
 import Modal from '../components/Modal.jsx';
-import { addProject, deleteProject, addBlock, deleteBlock, updateProject, addBatchTrials, deleteTrial, updateTrial, validateCategoryDataOperation } from '../services/dataLayer.js';
+import { addProject, deleteProject, addBlock, deleteBlock, updateProject, addBatchTrials, deleteTrial, updateTrial, validateCategoryDataOperation, saveMassObservationBatch } from '../services/dataLayer.js';
 import {
   Plus, Trash2, Edit, Layers, Beaker, Activity, ChevronRight, ArrowLeft,
   Lock, Unlock, Download, FileText, RefreshCw, BarChart2, Shuffle,
@@ -28,6 +28,7 @@ import CategoryValidationAlert, { showCategoryValidationToast } from '../compone
 import ProjectAgronomicInputModal from '../components/projects/ProjectAgronomicInputModal.jsx';
 import ProjectBatchHarvestModal from '../components/projects/ProjectBatchHarvestModal.jsx';
 import ProjectBatchObservationModal from '../components/trials/ProjectBatchObservationModal.jsx';
+import { mergePlotObservationForDate, buildMassObservationPayload } from '../utils/massObservationUtils.js';
 import {
   INPUT_CATEGORIES,
   DOSAGE_UNITS,
@@ -1799,86 +1800,88 @@ export default function Projects({ onMenuClick }) {
   };
 
   // ── Project Mass Observation & Plant Height Entry Handlers ─────────────────
-  const handleSaveBatchObservation = async ({ batchDaa, date, generalNotes, bbchStage, plotEntries, primaryField }) => {
+  const handleSaveBatchObservation = async ({ daa, batchDaa, date, generalNotes, bbchStage, plotEntries, primaryField, mode, project: modalProject, trialsList: modalTrialsList }) => {
     try {
+      const resolvedDaa = Number(daa ?? batchDaa ?? 0);
       const allTrials = getAppState().trials || state.trials || [];
-      let updatedTrialsList = [...allTrials];
-      let updatedCount = 0;
+      const updatedMap = new Map();
+      const patchPromises = [];
 
-      for (const [trialId, entry] of Object.entries(plotEntries)) {
+      for (const [trialId, entry] of Object.entries(plotEntries || {})) {
         const trial = allTrials.find(t => String(t.ID) === String(trialId));
         if (!trial) continue;
 
         const hasPlantHeight = entry.plantHeight !== '' && entry.plantHeight != null && !isNaN(parseFloat(entry.plantHeight));
         const hasValue = entry.metricValue !== '' && entry.metricValue != null && !isNaN(parseFloat(entry.metricValue));
         const hasRating = !!entry.rating;
-        if (!hasPlantHeight && !hasValue && !hasRating && !entry.notes) continue;
+        const hasNotes = !!(entry.notes && entry.notes.trim());
+        const isCtrl = trial.IsControl === true || trial.IsControl === 'true';
+        // Skip untouched controls where only default 'Control' rating is set with no height/metric/notes
+        if (!hasPlantHeight && !hasValue && !hasNotes && (!hasRating || (isCtrl && entry.rating === 'Control' && trial.Result === 'Control'))) continue;
 
         const trialCat = trial.Category || activeCategory || 'herbicide';
-        const efficacyData = validateEfficacyData(safeJsonParse(trial.EfficacyDataJSON, []), trialCat, true);
+        const existingEff = validateEfficacyData(safeJsonParse(trial.EfficacyDataJSON, []), trialCat, true);
 
-        const numVal = hasValue ? parseFloat(entry.metricValue) : null;
-        const heightVal = hasPlantHeight ? parseFloat(entry.plantHeight) : null;
-        const noteText = [generalNotes, entry.notes].filter(Boolean).join(' | ');
-
-        let obs = efficacyData.find(o => Number(o.daa) === Number(batchDaa) || o.date === date);
-        if (obs) {
-          if (hasValue) obs[primaryField] = numVal;
-          if (hasPlantHeight) {
-            obs['Plant Height'] = heightVal;
-            obs.plantHeight = heightVal;
-            obs.plant_height = heightVal;
-            obs.potHeights = [heightVal];
-          }
-          if (trialCat === 'herbicide' && hasValue) {
-            obs.weedCover = numVal;
-            if (!obs.weedDetails || obs.weedDetails.length === 0) {
-              obs.weedDetails = [{ species: 'Total', cover: numVal, status: '', notes: noteText }];
-            } else {
-              obs.weedDetails = obs.weedDetails.map(w => ({ ...w, cover: numVal }));
-            }
-          }
-          if (noteText) obs.notes = obs.notes ? `${obs.notes} | ${noteText}` : noteText;
-          if (bbchStage) obs.bbchStage = bbchStage;
-        } else {
-          obs = {
-            daa: Number(batchDaa),
-            date: date || new Date().toISOString().split('T')[0],
-            treatment: trial.FormulationName || 'Treated',
-            plot: trial.PlotNumber || '1',
-            rep: trial.Replication || 1,
-            notes: noteText || 'Mass observation entry',
-            bbchStage: bbchStage || '',
-            ...(hasPlantHeight ? {
-              'Plant Height': heightVal,
-              plantHeight: heightVal,
-              plant_height: heightVal,
-              potHeights: [heightVal]
-            } : {}),
-            ...(hasValue ? { [primaryField]: numVal } : {}),
-            ...(trialCat === 'herbicide' && hasValue ? {
-              weedCover: numVal,
-              weedDetails: [{ species: 'Total', cover: numVal, status: '', notes: noteText }]
-            } : {})
-          };
-          efficacyData.push(obs);
-        }
-        efficacyData.sort((a, b) => a.daa - b.daa);
+        const nextEff = (hasPlantHeight || hasValue || hasNotes || bbchStage)
+          ? mergePlotObservationForDate({
+              trial,
+              efficacyData: existingEff,
+              date,
+              daa: resolvedDaa,
+              heightVal: hasPlantHeight ? parseFloat(entry.plantHeight) : null,
+              numVal: hasValue ? parseFloat(entry.metricValue) : null,
+              rating: entry.rating || '',
+              entryNotes: entry.notes || '',
+              generalNotes: generalNotes || '',
+              bbchStage: bbchStage || '',
+              primaryField,
+              trialCat,
+            })
+          : existingEff;
 
         const updatedTrial = {
           ...trial,
-          EfficacyDataJSON: JSON.stringify(efficacyData),
-          ...(entry.rating ? { Result: entry.rating, isManualRating: true } : {})
+          Category: trialCat,
+          EfficacyDataJSON: JSON.stringify(nextEff),
+          ...(entry.rating ? { Result: entry.rating, isManualRating: true } : {}),
+          UpdatedAt: new Date().toISOString(),
         };
 
-        updatedTrialsList = updatedTrialsList.map(item => item.ID === trial.ID ? updatedTrial : item);
-        await updateTrial(updatedTrial, getAppState);
-        updatedCount++;
+        updatedMap.set(trial.ID, updatedTrial);
+        patchPromises.push(updateTrial({
+          ID: updatedTrial.ID,
+          Category: trialCat,
+          EfficacyDataJSON: updatedTrial.EfficacyDataJSON,
+          ...(entry.rating ? { Result: updatedTrial.Result, isManualRating: true } : {}),
+          UpdatedAt: updatedTrial.UpdatedAt,
+        }, getAppState));
       }
 
-      if (updatedCount > 0) {
+      if (updatedMap.size > 0) {
+        const updatedTrialsList = allTrials.map(item => updatedMap.get(item.ID) || item);
         updateState({ trials: updatedTrialsList });
-        toast(`Mass observations recorded for ${updatedCount} plots successfully!`);
+
+        // Persist all trial card updates + structured Firebase `massObservations` batch document
+        const targetProj = modalProject || batchObsModalProject?.project || batchObsModalProject || activeProject;
+        const massObsDoc = buildMassObservationPayload({
+          project: targetProj,
+          trialsList: modalTrialsList || Array.from(updatedMap.values()),
+          date,
+          daa: resolvedDaa,
+          generalNotes,
+          bbchStage,
+          plotEntries,
+          primaryField,
+          mode,
+          activeCategory,
+        });
+
+        await Promise.all([
+          ...patchPromises,
+          saveMassObservationBatch(massObsDoc, getAppState),
+        ]);
+
+        toast(`Mass observations recorded for ${updatedMap.size} plot(s) on ${date}!`);
         if (activeProjectId) {
           runAnalysis(postHocMethod);
         }
@@ -8726,15 +8729,24 @@ ${photosHtml}
       />
 
       {/* ── Project Batch Observation & Mass Plant Height Entry Modal ── */}
-      {batchObsModalProject && (
-        <ProjectBatchObservationModal
-          isOpen={!!batchObsModalProject}
-          onClose={() => setBatchObsModalProject(null)}
-          project={batchObsModalProject.project || batchObsModalProject}
-          trialsList={batchObsModalProject.trials || (state.trials || []).filter(t => String(t.ProjectID) === String(batchObsModalProject.project?.ID || batchObsModalProject.ID))}
-          onSave={handleSaveBatchObservation}
-        />
-      )}
+      {batchObsModalProject && (() => {
+        const modalProj = batchObsModalProject.project || batchObsModalProject;
+        const modalProjId = modalProj?.ID;
+        const liveProjTrials = (state.trials || []).filter(t => String(t.ProjectID) === String(modalProjId));
+        const modalCategory = modalProj?.Category || activeCategory;
+        return (
+          <ProjectBatchObservationModal
+            isOpen={!!batchObsModalProject}
+            onClose={() => setBatchObsModalProject(null)}
+            project={modalProj}
+            trialsList={liveProjTrials.length > 0 ? liveProjTrials : (batchObsModalProject.trials || [])}
+            activeCategory={modalCategory}
+            catConfig={getCategoryConfig(modalCategory)}
+            onSaveBatch={handleSaveBatchObservation}
+            getAppState={getAppState}
+          />
+        );
+      })()}
 
       <AppSharingModal
         isOpen={isShareModalOpen}

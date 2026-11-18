@@ -149,6 +149,10 @@ service cloud.firestore {
       allow read, write: if isAuthenticated();
     }
 
+    match /massObservations/{obsId} {
+      allow read, write: if isAuthenticated();
+    }
+
     match /aiChatSessions/{sessionId} {
       allow read, write: if isAuthenticated();
     }

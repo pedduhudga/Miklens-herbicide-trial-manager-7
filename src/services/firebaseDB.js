@@ -434,6 +434,55 @@ export async function fbAddSprayLog(data, userId) {
   return fbAdd(COLLECTIONS.sprayLogs, data, userId);
 }
 
+// ─── Mass Observations (Date-keyed batch height & metric logs) ────────────────
+
+export async function fbGetMassObservations(projectId, category = null, userId = null, sharedWithUid = null) {
+  const db = getFirebaseDB();
+  const baseCol = collection(db, COLLECTIONS.massObservations);
+  const conditions = [];
+  if (projectId) conditions.push(where("ProjectID", "==", String(projectId)));
+  if (category) conditions.push(where("Category", "==", category));
+
+  // Query by ProjectID (+ Category) first; avoids composite index errors while keeping reads tight
+  const q = conditions.length ? query(baseCol, ...conditions) : baseCol;
+  const snap = await getDocs(q);
+  const items = snapsToArray(snap);
+  // Sort newest date first
+  return items.sort((a, b) => String(b.Date || '').localeCompare(String(a.Date || '')));
+}
+
+export async function fbSaveMassObservation(data, userId = null) {
+  const db = getFirebaseDB();
+  const safeCat = data.Category || 'herbicide';
+  const safeProj = String(data.ProjectID || 'project').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const safeDate = String(data.Date || new Date().toISOString().split('T')[0]).replace(/[^0-9-]/g, '');
+  const docId = data.ID || `${safeCat}_${safeProj}_${safeDate}`;
+  const docRef = doc(db, COLLECTIONS.massObservations, docId);
+
+  const payload = cleanForFirestore({
+    ...data,
+    ID: docId,
+    ProjectID: String(data.ProjectID || ''),
+    Category: safeCat,
+    Date: safeDate,
+    ...(userId ? { CreatedBy: data.CreatedBy || userId, UpdatedBy: userId } : {}),
+    UpdatedAt: new Date().toISOString(),
+  });
+
+  await setDoc(docRef, {
+    ...payload,
+    _updatedAt: serverTimestamp(),
+  }, { merge: true });
+
+  return payload;
+}
+
+export async function fbDeleteMassObservation(docId) {
+  const db = getFirebaseDB();
+  await deleteDoc(doc(db, COLLECTIONS.massObservations, String(docId)));
+  return { success: true };
+}
+
 // ─── Batch import (migration) ─────────────────────────────────────────────────
 
 /**
@@ -691,7 +740,7 @@ export async function fbReclaimOrphanedUserData(emailOrUsername, targetUid, prev
   // Gather all unique collection names across all categories & root
   const categories = ['herbicide', 'fungicide', 'pesticide', 'nutrition', 'biostimulant'];
   const types = ['trials', 'projects', 'formulations', 'ingredients', 'blocks'];
-  const collectionsToScan = new Set(['organisations', 'sprayLogs', 'aiChatSessions', ...types]);
+  const collectionsToScan = new Set(['organisations', 'sprayLogs', 'massObservations', 'aiChatSessions', ...types]);
 
   categories.forEach(cat => {
     types.forEach(t => collectionsToScan.add(getCategoryCollection(cat, t)));

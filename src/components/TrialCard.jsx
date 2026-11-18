@@ -134,6 +134,26 @@ const TrialCard = memo(function TrialCard({
   const hasBaseline = useMemo(() => {
     return efficacyData.some(o => Number(o.daa) === 0);
   }, [efficacyData]);
+  const latestHeightInfo = useMemo(() => {
+    if (!efficacyData.length) return null;
+    const withHeight = efficacyData
+      .map(o => {
+        const raw = o.plantHeight ?? o['Plant Height'] ?? o.plant_height;
+        let val = raw !== undefined && raw !== null && raw !== '' ? parseFloat(raw) : NaN;
+        if (isNaN(val) && Array.isArray(o.potHeights) && o.potHeights.length > 0) {
+          const nums = o.potHeights.map(v => parseFloat(v)).filter(v => !isNaN(v));
+          if (nums.length > 0) val = parseFloat((nums.reduce((s, v) => s + v, 0) / nums.length).toFixed(1));
+        }
+        return !isNaN(val) ? { val, daa: Number(o.daa) || 0, date: o.date || '' } : null;
+      })
+      .filter(Boolean);
+    if (!withHeight.length) return null;
+    withHeight.sort((a, b) => {
+      if (a.date && b.date && a.date !== b.date) return b.date.localeCompare(a.date);
+      return b.daa - a.daa;
+    });
+    return withHeight[0];
+  }, [efficacyData]);
   const isSharedEdit = Array.isArray(trial.SharedWithEdit) && trial.SharedWithEdit.includes(ownUid);
   const hasBeenShared = !isShared && Array.isArray(trial.SharedWith) && trial.SharedWith.length > 0;
   const isEditable = !isViewer && (isOwnData || isSharedEdit);
@@ -1032,6 +1052,14 @@ const TrialCard = memo(function TrialCard({
           />
           {photos.length > 0 && <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full flex items-center gap-1"><ImageIcon className="w-3 h-3" />{photos.length}</span>}
           {efficacyData.length > 0 && <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{efficacyData.length} obs</span>}
+          {latestHeightInfo && (
+            <span
+              className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full font-semibold"
+              title={`Latest Plant Height: ${latestHeightInfo.val} cm${latestHeightInfo.date ? ` on ${latestHeightInfo.date}` : ''} (DAA ${latestHeightInfo.daa})`}
+            >
+              🌱 {latestHeightInfo.val} cm
+            </span>
+          )}
           {trial.YieldValue && <span className="text-xs bg-teal-50 text-teal-700 px-2 py-0.5 rounded-full font-semibold">{trial.YieldValue} t/ha</span>}
         </div>
 

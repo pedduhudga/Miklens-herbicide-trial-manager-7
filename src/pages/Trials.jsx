@@ -7,7 +7,7 @@ import { fbGetAllUsers } from '../services/firebaseAuth.js';
 import TopBar from '../components/TopBar.jsx';
 import Modal from '../components/Modal.jsx';
 import ErrorBoundary from '../components/ErrorBoundary.jsx';
-import { addTrial, deleteTrial, updateTrial, uploadPhoto, apiCall, validateCategoryDataOperation } from '../services/dataLayer.js';
+import { addTrial, deleteTrial, updateTrial, uploadPhoto, apiCall, validateCategoryDataOperation, saveMassObservationBatch } from '../services/dataLayer.js';
 import {
   Plus, Trash2, Edit, Copy, ChevronRight, ChevronLeft, Activity, MapPin, Calendar,
   CheckCircle, Camera, Grid, Info, Sparkles, Search, Filter, X,
@@ -44,6 +44,7 @@ import TrialKanbanBoard from '../components/trials/TrialKanbanBoard.jsx';
 import PhotoComparisonModal from '../components/PhotoComparisonModal.jsx';
 import ProjectRapidEntryTable from '../components/trials/ProjectRapidEntryTable.jsx';
 import ProjectBatchObservationModal from '../components/trials/ProjectBatchObservationModal.jsx';
+import { mergePlotObservationForDate, buildMassObservationPayload } from '../utils/massObservationUtils.js';
 import BatchApplicationModal from '../components/trials/BatchApplicationModal.jsx';
 import TrialRepCompareModal from '../components/trials/TrialRepCompareModal.jsx';
 import TrialApplicationModal from '../components/trials/TrialApplicationModal.jsx';
@@ -1381,89 +1382,64 @@ export default function Trials({ onMenuClick }) {
     }
   }, [activeCategory, activeTrial, state.trials, updateState, getAppState]);
 
-  const handleSaveBatchObservation = useCallback(async ({ date, daa: batchDaa, generalNotes, bbchStage, plotEntries, primaryField }) => {
+  const handleSaveBatchObservation = useCallback(async ({ date, daa, batchDaa, generalNotes, bbchStage, plotEntries, primaryField, mode, project: modalProject, trialsList: modalTrialsList }) => {
+    const resolvedDaa = Number(daa ?? batchDaa ?? 0);
     const allTrials = getAppState().trials || state.trials || [];
     const updatedList = [];
     const patchPromises = [];
 
-    Object.entries(plotEntries).forEach(([trialId, entry]) => {
+    Object.entries(plotEntries || {}).forEach(([trialId, entry]) => {
       const trial = allTrials.find(t => String(t.ID) === String(trialId));
       if (!trial) return;
 
       const hasPlantHeight = entry.plantHeight !== '' && entry.plantHeight != null && !isNaN(parseFloat(entry.plantHeight));
       const hasValue = entry.metricValue !== '' && entry.metricValue != null && !isNaN(parseFloat(entry.metricValue));
       const hasRating = !!entry.rating;
-      if (!hasPlantHeight && !hasValue && !hasRating && !entry.notes) return;
+      const hasNotes = !!(entry.notes && entry.notes.trim());
+      const isCtrl = trial.IsControl === true || trial.IsControl === 'true';
+      // Skip untouched controls where only default 'Control' rating is set with no height/metric/notes
+      if (!hasPlantHeight && !hasValue && !hasNotes && (!hasRating || (isCtrl && entry.rating === 'Control' && trial.Result === 'Control'))) return;
 
       const trialCat = trial.Category || activeCategory || 'herbicide';
-      const efficacyData = validateEfficacyData(safeJsonParse(trial.EfficacyDataJSON, []), trialCat, true);
+      const existingEff = validateEfficacyData(safeJsonParse(trial.EfficacyDataJSON, []), trialCat, true);
 
-      if (hasPlantHeight || hasValue || entry.notes) {
-        const numVal = hasValue ? parseFloat(entry.metricValue) : null;
-        const heightVal = hasPlantHeight ? parseFloat(entry.plantHeight) : null;
-        const noteText = [generalNotes, entry.notes].filter(Boolean).join(' | ');
-
-        let obs = efficacyData.find(o => Number(o.daa) === Number(batchDaa) || o.date === date);
-        if (obs) {
-          if (hasValue) obs[primaryField] = numVal;
-          if (hasPlantHeight) {
-            obs['Plant Height'] = heightVal;
-            obs.plantHeight = heightVal;
-            obs.plant_height = heightVal;
-            obs.potHeights = [heightVal];
-          }
-          if (trialCat === 'herbicide' && hasValue) {
-            obs.weedCover = numVal;
-            if (!obs.weedDetails || obs.weedDetails.length === 0) {
-              obs.weedDetails = [{ species: 'Total', cover: numVal, status: '', notes: noteText }];
-            } else {
-              obs.weedDetails = obs.weedDetails.map(w => ({ ...w, cover: numVal }));
-            }
-          }
-          if (noteText) obs.notes = obs.notes ? `${obs.notes} | ${noteText}` : noteText;
-          if (bbchStage) obs.bbchStage = bbchStage;
-        } else {
-          obs = {
-            daa: Number(batchDaa),
-            date: date || new Date().toISOString().split('T')[0],
-            treatment: trial.FormulationName || 'Treated',
-            plot: trial.PlotNumber || '1',
-            rep: trial.Replication || 1,
-            notes: noteText || 'Mass observation entry',
+      const efficacyData = (hasPlantHeight || hasValue || hasNotes || bbchStage)
+        ? mergePlotObservationForDate({
+            trial,
+            efficacyData: existingEff,
+            date,
+            daa: resolvedDaa,
+            heightVal: hasPlantHeight ? parseFloat(entry.plantHeight) : null,
+            numVal: hasValue ? parseFloat(entry.metricValue) : null,
+            rating: entry.rating || '',
+            entryNotes: entry.notes || '',
+            generalNotes: generalNotes || '',
             bbchStage: bbchStage || '',
-            ...(hasPlantHeight ? {
-              'Plant Height': heightVal,
-              plantHeight: heightVal,
-              plant_height: heightVal,
-              potHeights: [heightVal]
-            } : {}),
-            ...(hasValue ? { [primaryField]: numVal } : {}),
-            ...(trialCat === 'herbicide' && hasValue ? {
-              weedCover: numVal,
-              weedDetails: [{ species: 'Total', cover: numVal, status: '', notes: noteText }]
-            } : {})
-          };
-          efficacyData.push(obs);
-        }
-        efficacyData.sort((a, b) => a.daa - b.daa);
-      }
+            primaryField,
+            trialCat,
+          })
+        : existingEff;
 
-      const calculatedRating = calculateResultRating(efficacyData, trial.IsControl === true || trial.IsControl === 'true', trialCat, trial);
+      const calculatedRating = calculateResultRating(efficacyData, isCtrl, trialCat, trial);
       const finalRating = entry.rating || calculatedRating;
 
       const updatedTrial = {
         ...trial,
+        Category: trialCat,
         EfficacyDataJSON: JSON.stringify(efficacyData),
         Result: finalRating,
-        isManualRating: !!entry.rating
+        isManualRating: !!entry.rating,
+        UpdatedAt: new Date().toISOString(),
       };
 
       updatedList.push(updatedTrial);
       patchPromises.push(updateTrial({
         ID: updatedTrial.ID,
+        Category: trialCat,
         EfficacyDataJSON: updatedTrial.EfficacyDataJSON,
         Result: updatedTrial.Result,
-        isManualRating: updatedTrial.isManualRating
+        isManualRating: updatedTrial.isManualRating,
+        UpdatedAt: updatedTrial.UpdatedAt,
       }, getAppState));
     });
 
@@ -1476,11 +1452,30 @@ export default function Trials({ onMenuClick }) {
     const nextTrials = allTrials.map(t => updatedTrialMap.get(t.ID) || t);
     updateState({ trials: nextTrials });
 
-    await Promise.all(patchPromises);
+    // Also persist structured date-keyed batch document to Firebase `massObservations` collection
+    const targetProj = modalProject || batchObsModalProject?.project || batchObsModalProject;
+    const massObsDoc = buildMassObservationPayload({
+      project: targetProj,
+      trialsList: modalTrialsList || updatedList,
+      date,
+      daa: resolvedDaa,
+      generalNotes,
+      bbchStage,
+      plotEntries,
+      primaryField,
+      mode,
+      activeCategory,
+    });
+
+    await Promise.all([
+      ...patchPromises,
+      saveMassObservationBatch(massObsDoc, getAppState),
+    ]);
+
     window.dispatchEvent(new CustomEvent('app:toast', {
-      detail: { msg: `✓ Saved batch observations across ${updatedList.length} plot(s)!`, type: 'success' }
+      detail: { msg: `✓ Saved batch observations for ${date} across ${updatedList.length} plot(s)!`, type: 'success' }
     }));
-  }, [activeCategory, state.trials, updateState, getAppState]);
+  }, [activeCategory, state.trials, updateState, getAppState, batchObsModalProject]);
 
   const handleSaveBatchApplication = useCallback(async (applicationData, targetTrialIds) => {
     if (!targetTrialIds || targetTrialIds.length === 0) return;
@@ -14899,17 +14894,23 @@ If none are present, write "None".`;
         />
       )}
 
-      {batchObsModalProject && (
-        <ProjectBatchObservationModal
-          isOpen={!!batchObsModalProject}
-          onClose={() => setBatchObsModalProject(null)}
-          project={batchObsModalProject.project || batchObsModalProject}
-          trialsList={batchObsModalProject.trials || groupedRcbdTrials.groups[batchObsModalProject.project?.ID || batchObsModalProject.ID] || (state.trials || []).filter(t => String(t.ProjectID) === String(batchObsModalProject.project?.ID || batchObsModalProject.ID))}
-          activeCategory={activeCategory}
-          catConfig={catConfig}
-          onSaveBatch={handleSaveBatchObservation}
-        />
-      )}
+      {batchObsModalProject && (() => {
+        const modalProj = batchObsModalProject.project || batchObsModalProject;
+        const modalProjId = modalProj?.ID;
+        const liveProjTrials = (state.trials || []).filter(t => String(t.ProjectID) === String(modalProjId));
+        return (
+          <ProjectBatchObservationModal
+            isOpen={!!batchObsModalProject}
+            onClose={() => setBatchObsModalProject(null)}
+            project={modalProj}
+            trialsList={liveProjTrials.length > 0 ? liveProjTrials : (batchObsModalProject.trials || groupedRcbdTrials.groups[modalProjId] || [])}
+            activeCategory={modalProj?.Category || activeCategory}
+            catConfig={catConfig}
+            onSaveBatch={handleSaveBatchObservation}
+            getAppState={getAppState}
+          />
+        );
+      })()}
 
       {batchAppModalData && (
         <BatchApplicationModal

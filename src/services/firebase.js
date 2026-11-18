@@ -91,6 +91,7 @@ export const COLLECTIONS = {
   syncConflicts: 'syncConflicts',
   aiChatSessions: 'aiChatSessions',
   sprayLogs: 'sprayLogs',
+  massObservations: 'massObservations',
 };
 
 /**
@@ -101,7 +102,7 @@ export const COLLECTIONS = {
  */
 export function getCategoryCollection(categoryId, collectionType) {
   // Shared collections (not category-specific)
-  const sharedCollections = ['users', 'settings', 'analysisLog', 'syncConflicts', 'aiChatSessions', 'sprayLogs', 'organisations'];
+  const sharedCollections = ['users', 'settings', 'analysisLog', 'syncConflicts', 'aiChatSessions', 'sprayLogs', 'massObservations', 'organisations'];
   if (sharedCollections.includes(collectionType)) {
     return collectionType;
   }
