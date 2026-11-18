@@ -43,6 +43,15 @@ function getColumnLetter(col) {
   return letter;
 }
 
+// Helper: Strip raw LaTeX / markdown math wrappers (e.g. "$p = 0.5764$" -> "p = 0.5764") for clean Excel text
+function sanitizeExcelNarrativeText(text) {
+  if (!text || typeof text !== 'string') return text;
+  return text
+    .replace(/\$([^$]+)\$/g, '$1')
+    .replace(/\\([a-zA-Z]+)/g, '$1')
+    .trim();
+}
+
 // Helper to generate dynamic scientific narrative using Gemini AI
 async function generateNarrativeWithAI(trial, category, observations, activeFields, treatmentNames, design, anovaResults) {
   try {
@@ -99,10 +108,11 @@ CRITICAL INSTRUCTION:
 13. Avoid using terms like "colorimetric indices". Instead, use "visual and physiological observations" (such as leaf color, SPAD, vigor, plant height).
 14. ZERO BIAS TOWARDS EXPERIMENTAL TREATMENTS: Do NOT presume that experimental treatments must outperform untreated controls. In agricultural trials, untreated controls may equal or outperform treatments (e.g. where treatments cause phytotoxicity, fertilizer burn, vegetative stunting, or delay flowering/fruiting). If untreated controls yield higher or have superior vigor/metrics, report this finding clearly, objectively, and without bias.
 15. STRICT YIELD & MISSING DATA INTEGRITY: If Yield / Harvest observations were NOT recorded in this dataset, NEVER state that treatments showed "zero yield", "no measurable yield response", or "no agronomic efficacy on yield". Explicitly state that yield has not yet been harvested/measured and restrict conclusions strictly to the parameters actually recorded.
+16. PARAMETER ELIGIBILITY & SCALE CLARITY: Explicitly distinguish parameters statistically analysed via latest post-application ANOVA from parameters excluded due to insufficient observations, constant values, or ordinal/mixed coding scales (such as Flower Stage when BBCH codes are mixed with 0/1 scores). Clearly distinguish overall multi-date descriptive summaries from latest post-application independent ANOVA means. Do NOT use LaTeX math symbols like $p = 0.5764$; write plain text "(p = 0.5764)".
 Do NOT use markdown headers or lists. Keep it strictly scientific, professional, and factual.`;
 
     const text = await generateTextWithAI(prompt, 'You are a professional agronomist.');
-    return text || null;
+    return sanitizeExcelNarrativeText(text) || null;
   } catch (e) {
     console.warn('Failed to generate AI narrative during export:', e);
     return null;
@@ -165,10 +175,11 @@ CRITICAL INSTRUCTION:
 13. Avoid using terms like "colorimetric indices". Instead, use "visual and physiological observations" (such as leaf color, SPAD, vigor, plant height).
 14. ZERO BIAS TOWARDS EXPERIMENTAL TREATMENTS: Do NOT presume that experimental treatments must outperform untreated controls. In agricultural trials, untreated controls may equal or outperform treatments (e.g. where treatments cause phytotoxicity, fertilizer burn, vegetative stunting, or delay flowering/fruiting). If untreated controls yield higher or have superior vigor/metrics, report this finding clearly, objectively, and without bias.
 15. STRICT YIELD & MISSING DATA INTEGRITY: If Yield / Harvest observations were NOT recorded in this dataset, NEVER state that treatments showed "zero yield", "no measurable yield response", or "no agronomic efficacy on yield". Explicitly state that yield has not yet been harvested/measured and restrict conclusions strictly to the parameters actually recorded.
+16. PARAMETER ELIGIBILITY & SCALE CLARITY: Explicitly distinguish parameters statistically analysed via latest post-application ANOVA from parameters excluded due to insufficient observations, constant values, or ordinal/mixed coding scales (e.g. Flower Stage). Clearly note if any growth-stage parameter requires scale verification before statistical interpretation. Do NOT use LaTeX math delimiters like $p = 0.5764$; write plain text "(p = 0.5764)".
 Do NOT use markdown headers or lists. Keep it strictly scientific, professional, and factual.`;
 
     const text = await generateTextWithAI(prompt, 'You are a senior agricultural scientist.');
-    return text || null;
+    return sanitizeExcelNarrativeText(text) || null;
   } catch (e) {
     console.warn('Failed to generate AI conclusions during export:', e);
     return null;
@@ -433,15 +444,133 @@ function extractNumericMetricValue(obs, metricKey) {
 }
 
 /**
- * Detect anomalous / extreme outlier values across numeric parameters without
- * modifying or deleting raw field observations. Flags e.g. Plot 204 Flower Stage = 61
- * when the rest of the dataset is 0–1 (CV > 100%).
+ * Identify ordinal / categorical phenological growth-stage fields (e.g. Flower Stage,
+ * Growth Stage, BBCH Stage, Phenology) where ratio percentage-improvement calculations
+ * (+2420%) and parametric ANOVA on mixed stage codes are scientifically invalid.
+ */
+export function isOrdinalOrStageField(field) {
+  if (!field) return false;
+  const key = typeof field === 'string' ? field : (field.key || '');
+  const label = typeof field === 'string' ? field : (field.label || '');
+  const type = typeof field === 'object' ? (field.type || '') : '';
+  if (type === 'select' || type === 'categorical' || type === 'ordinal') return true;
+  return /flowerstage|growthstage|bbch|phenolog|stage$/i.test(String(key).replace(/\s+/g, '')) ||
+    /\b(flower\s*stage|growth\s*stage|bbch|phenology\s*stage)\b/i.test(String(label));
+}
+
+/**
+ * Validate measurement scale consistency across all observations for a field.
+ * Detects mixed coding systems (e.g. binary/ordinal 0–1 scores mixed with two-digit
+ * BBCH codes such as 61, or numeric codes mixed with text stage labels) WITHOUT
+ * altering or deleting raw measurements, and computes descriptive stage distributions.
+ */
+export function validateMeasurementScale(observations = [], field = {}, treatmentNames = []) {
+  const key = typeof field === 'string' ? field : (field.key || '');
+  const label = typeof field === 'string' ? field : (field.label || key);
+  const rows = Array.isArray(observations) ? observations : [];
+  const isStage = isOrdinalOrStageField(field);
+
+  const nonEmpty = [];
+  const numericEntries = [];
+  const textEntries = [];
+
+  rows.forEach((obs, idx) => {
+    if (!obs || obs[key] === undefined || obs[key] === null || obs[key] === '') return;
+    const raw = obs[key];
+    const str = String(raw).trim();
+    if (!str) return;
+    const num = Number(str);
+    const entry = {
+      raw,
+      str,
+      num: Number.isFinite(num) ? num : null,
+      plot: obs.plot || obs.plotNumber || `#${idx + 1}`,
+      treatment: obs.treatment || treatmentNames[(parseInt(obs.treatmentNumber || 1, 10) - 1)] || `Treatment ${obs.treatmentNumber || 1}`,
+      treatmentNumber: parseInt(obs.treatmentNumber || 1, 10),
+      date: obs.date || 'N/A'
+    };
+    nonEmpty.push(entry);
+    if (entry.num !== null) numericEntries.push(entry);
+    else textEntries.push(entry);
+  });
+
+  // Detect mixed coding systems on growth-stage / ordinal fields
+  let hasMixedCoding = false;
+  let detectedScale = isStage ? 'ordinal-stage' : 'continuous-numeric';
+  const flaggedEntries = [];
+
+  if (nonEmpty.length > 0) {
+    if (numericEntries.length > 0 && textEntries.length > 0) {
+      hasMixedCoding = true;
+      detectedScale = 'mixed-numeric-and-text';
+      flaggedEntries.push(...numericEntries.slice(0, 3), ...textEntries.slice(0, 3));
+    } else if (isStage && numericEntries.length > 0) {
+      const smallOrdinal = numericEntries.filter(e => e.num >= 0 && e.num <= 5);
+      const bbchLike = numericEntries.filter(e => e.num >= 10 && e.num <= 99);
+      const outOfRange = numericEntries.filter(e => e.num < 0 || e.num > 99);
+      if (smallOrdinal.length > 0 && bbchLike.length > 0) {
+        hasMixedCoding = true;
+        detectedScale = 'mixed-ordinal-and-bbch';
+        flaggedEntries.push(...bbchLike);
+      } else if (outOfRange.length > 0) {
+        hasMixedCoding = true;
+        detectedScale = 'inconsistent-stage-codes';
+        flaggedEntries.push(...outOfRange);
+      } else if (bbchLike.length > 0) {
+        detectedScale = 'bbch-code';
+      } else {
+        detectedScale = 'ordinal-numeric';
+      }
+    } else if (isStage && textEntries.length > 0) {
+      detectedScale = 'ordinal-categorical';
+    }
+  }
+
+  // Compute descriptive stage frequency distribution per treatment
+  const distributionByTreatment = {};
+  nonEmpty.forEach(e => {
+    const tName = e.treatment;
+    if (!distributionByTreatment[tName]) {
+      distributionByTreatment[tName] = { n: 0, counts: {} };
+    }
+    distributionByTreatment[tName].n++;
+    const codeKey = e.str;
+    distributionByTreatment[tName].counts[codeKey] = (distributionByTreatment[tName].counts[codeKey] || 0) + 1;
+  });
+
+  let warningMessage = null;
+  if (hasMixedCoding) {
+    const samplePlots = flaggedEntries
+      .slice(0, 4)
+      .map(e => `Plot ${e.plot} (${e.treatment}, ${e.date}) = ${e.str}`)
+      .join('; ');
+    warningMessage = `Measurement Scale Verification Required (${label}): Inconsistent coding systems detected (${detectedScale.replace(/-/g, ' ')}) — e.g. ${samplePlots}. Do NOT mix BBCH codes with 0/1 ordinal scores; verify and standardize the scale before statistical interpretation. Raw values were NOT altered or deleted.`;
+  }
+
+  return {
+    key,
+    label,
+    isOrdinalStage: isStage,
+    totalValid: nonEmpty.length,
+    hasMixedCoding,
+    detectedScale,
+    flaggedEntries,
+    distributionByTreatment,
+    warningMessage
+  };
+}
+
+/**
+ * Detect anomalous / extreme outlier values across continuous numeric parameters without
+ * modifying or deleting raw field observations (e.g. Plant Height = 0 cm when other plots
+ * are 20–30 cm). Skips ordinal/stage fields (handled by validateMeasurementScale) and
+ * skips legitimate bounded 0–10 symptom scores within [0, 10].
  */
 export function detectAnomalousObservations(observations = [], activeFields = []) {
   const anomalies = [];
   const rows = Array.isArray(observations) ? observations : [];
   const fields = (Array.isArray(activeFields) ? activeFields : []).filter(
-    f => f && f.key && !['nue', 'audpc', 'rootToShootRatio', 'fruitHealthNote'].includes(f.key)
+    f => f && f.key && !['nue', 'audpc', 'rootToShootRatio', 'fruitHealthNote'].includes(f.key) && !isOrdinalOrStageField(f)
   );
 
   fields.forEach(f => {
@@ -453,6 +582,9 @@ export function detectAnomalousObservations(observations = [], activeFields = []
       }
     });
     if (entries.length < 4) return;
+
+    const isBounded0to10 = /\(0-10\)/i.test(f.label || '') || (f.min === 0 && f.max === 10);
+    const isPercentSymptom = /chlorosis|deficiency|necrosis|severity|incidence/i.test(f.key || f.label || '');
 
     const vals = entries.map(e => e.val);
     const sorted = [...vals].sort((a, b) => a - b);
@@ -472,6 +604,10 @@ export function detectAnomalousObservations(observations = [], activeFields = []
     const iqr = q3 - q1;
 
     entries.forEach(({ val, obs, idx }) => {
+      // Do not falsely flag legitimate low-incidence symptom readings inside their valid 0–10 or 0–25% scale
+      if (isBounded0to10 && val >= 0 && val <= 10) return;
+      if (isPercentSymptom && val >= 0 && val <= 25 && median === 0) return;
+
       let isExtreme = false;
       let reason = '';
 
@@ -482,10 +618,9 @@ export function detectAnomalousObservations(observations = [], activeFields = []
           reason = `Modified Z-score = ${modZ.toFixed(1)}`;
         }
       } else if (stdDev > 0) {
-        // MAD == 0 (majority of plots share the same value, e.g. 0 or 1, while one plot is 61)
         const z = Math.abs(val - mean) / stdDev;
         const gap = Math.abs(val - median);
-        if ((z >= 2.8 && gap >= Math.max(10, 5 * Math.max(1, iqr))) || (gap >= 10 && val >= 10 * Math.max(1, Math.abs(median)))) {
+        if ((z >= 3.0 && gap >= Math.max(10, 5 * Math.max(1, iqr))) || (gap >= 10 && val >= 10 * Math.max(1, Math.abs(median)))) {
           isExtreme = true;
           reason = `Extreme spike (Z = ${z.toFixed(1)}, CV = ${cv.toFixed(1)}%)`;
         }
@@ -505,7 +640,7 @@ export function detectAnomalousObservations(observations = [], activeFields = []
           median,
           cv: parseFloat(cv.toFixed(1)),
           reason,
-          message: `Anomalous Value Flag (Requires Field Verification): Plot ${plot} (${trt}, ${dateStr}) has ${f.label || f.key} = ${val} vs dataset median = ${median.toFixed(2)} (${reason}). Value was NOT altered or deleted — verify whether this is a genuine reading, unit/BBCH scale mismatch, or data entry error.`
+          message: `Anomalous Value Flag (Requires Field Verification): Plot ${plot} (${trt}, ${dateStr}) has ${f.label || f.key} = ${val} vs dataset median = ${median.toFixed(2)} (${reason}). Value was NOT altered or deleted — verify whether this is a genuine reading, unit mismatch, or data entry error.`
         });
       }
     });
@@ -575,7 +710,19 @@ export function selectIndependentAssessmentSlice(data, metricKey, options = {}) 
   let chosenBucket = null;
   let baselineDatesExcluded = 0;
 
-  if (options.targetDateKey && dateBuckets.has(options.targetDateKey)) {
+  if (options.targetDateKey) {
+    if (!dateBuckets.has(options.targetDateKey)) {
+      // Explicit date requested but this parameter has NO measurements on that date — NEVER fall back to another date!
+      return {
+        sliceData: [],
+        analyzedDate: options.targetDateKey,
+        analyzedDaa: null,
+        totalDatesObserved,
+        isRepeatedMeasuresSliced: totalDatesObserved > 1,
+        isPreApplicationBaseline: false,
+        baselineDatesExcluded: 0
+      };
+    }
     chosenBucket = dateBuckets.get(options.targetDateKey);
   } else {
     const allBuckets = Array.from(dateBuckets.values());
@@ -619,8 +766,42 @@ export function selectIndependentAssessmentSlice(data, metricKey, options = {}) 
   };
 }
 
-// Perform ANOVA (RCB or CRD) on statistically independent experimental units with strict eligibility checks
+// Perform ANOVA (RCB or CRD) on statistically independent experimental units with strict eligibility & scale checks
 export function calculateAnovaRCB(data, metricKey, category = 'nutrition', design = 'RCBD', options = {}) {
+  // Ordinal / phenological growth-stage fields (e.g. Flower Stage, BBCH) are NOT ratio variables:
+  // never compute parametric ANOVA or +2420% ratio improvement on ordinal or mixed stage codes!
+  if (isOrdinalOrStageField({ key: metricKey, label: options.fieldLabel || metricKey })) {
+    const scaleReport = validateMeasurementScale(data || [], { key: metricKey, label: options.fieldLabel || metricKey });
+    if (scaleReport.hasMixedCoding) {
+      return {
+        error: 'NOT ANALYSED – Mixed/inconsistent coding scale detected; requires data verification before statistical interpretation',
+        ineligible: true,
+        ineligibleReason: 'mixed-scale',
+        scaleReport,
+        analyzedDate: null,
+        analyzedDateKey: null,
+        analyzedDaa: null,
+        nIndependentUnits: scaleReport.totalValid,
+        totalDatesObserved: 0,
+        isRepeatedMeasuresSliced: false,
+        isPreApplicationBaseline: false
+      };
+    }
+    return {
+      error: 'NOT ANALYSED – Ordinal/phenological growth-stage scale (parametric ANOVA and % improvement not applicable; see stage frequency distribution)',
+      ineligible: true,
+      ineligibleReason: 'ordinal-scale',
+      scaleReport,
+      analyzedDate: null,
+      analyzedDateKey: null,
+      analyzedDaa: null,
+      nIndependentUnits: scaleReport.totalValid,
+      totalDatesObserved: 0,
+      isRepeatedMeasuresSliced: false,
+      isPreApplicationBaseline: false
+    };
+  }
+
   const {
     sliceData,
     analyzedDate,
@@ -946,14 +1127,19 @@ export function calculateAnovaRCB(data, metricKey, category = 'nutrition', desig
 
 // Compile structured statistical interpretations to feed the AI prompt
 function compileAgronomicInterpretation(observations, activeFields, treatmentNames, category, design, trialStartDate = null) {
-  const summaries = [];
+  const analyzedSummaries = [];
+  const excludedSummaries = [];
   
   activeFields.forEach(f => {
     const anova = calculateAnovaRCB(observations, f.key, category, design, {
       trialStartDate,
-      expectedTreatments: treatmentNames.length
+      expectedTreatments: treatmentNames.length,
+      fieldLabel: f.label
     });
-    if (anova.error) return;
+    if (anova.error) {
+      excludedSummaries.push(`- ${f.label}: EXCLUDED from parametric ANOVA (${anova.error}).`);
+      return;
+    }
 
     const isSig = anova.p_value < 0.05;
     const sortedTrts = Object.entries(anova.treatmentMeans)
@@ -977,23 +1163,34 @@ function compileAgronomicInterpretation(observations, activeFields, treatmentNam
         impStr = `with the untreated control achieving the highest numerical mean among all treatments.`;
       } else {
         const bestImp = ((best.mean - controlStats.mean) / controlStats.mean) * 100;
-        impStr = `with the highest performing treatment (${best.name}) showing a ${bestImp >= 0 ? '+' : ''}${bestImp.toFixed(1)}% difference compared to control.`;
+        impStr = `with the highest numerical mean (${best.name}) showing a ${bestImp >= 0 ? '+' : ''}${bestImp.toFixed(1)}% difference compared to control.`;
       }
+    } else if (controlStats && controlStats.mean <= 0) {
+      impStr = `(percentage change vs control is N/A because the control baseline is zero).`;
     }
 
     const isMeanNearZero = anova.grandMean < 2.0 || 
       ((/deficiency|severity|chlorosis|necrosis|pest|disease|injury|mortality/i.test(f.key)) && anova.grandMean < 5.0);
     const cvRating = anova.cv < 10 ? 'Excellent' : anova.cv <= 20 ? 'Good' : anova.cv <= 30 ? 'Acceptable' : 'Poor';
     const cvInfo = !isMeanNearZero ? ` (CV: ${anova.cv.toFixed(1)}% - ${cvRating} precision)` : '';
-    const sliceContext = `[${anova.modelType} ANOVA on ${anova.analyzedDate || 'latest date'}, DAA ${anova.analyzedDaa ?? 'N/A'}, n=${anova.nIndependentUnits} independent units, DF=${anova.df_treatment},${anova.df_error}]`;
+    const sliceContext = `[Latest Post-App ${anova.modelType} ANOVA on ${anova.analyzedDate || 'latest date'}, DAA ${anova.analyzedDaa ?? 'N/A'}, n=${anova.nIndependentUnits} independent units, DF=${anova.df_treatment},${anova.df_error}]`;
 
     if (anova.f_value === 0 && anova.p_value === 1) {
-      summaries.push(`For ${f.label} ${sliceContext}: Measurements were identical across all treatments and replicates, resulting in an F-value of 0.00 and P-value of 1.00.`);
+      analyzedSummaries.push(`- ${f.label} ${sliceContext}: Measurements were identical across all treatments and replicates.`);
       return;
     }
 
-    summaries.push(`For ${f.label} ${sliceContext}: The trial showed ${isSig ? 'statistically significant' : 'no statistically significant'} differences between treatments (p = ${anova.p_value.toFixed(4)})${cvInfo}. The highest mean was observed under ${best.name} (${best.mean.toFixed(2)}, Group '${best.group}'), and the lowest under ${worst.name} (${worst.mean.toFixed(2)}, Group '${worst.group}') ${impStr}`);
+    analyzedSummaries.push(`- ${f.label} ${sliceContext}: ${isSig ? 'Statistically significant' : 'No statistically significant'} differences between treatments (p = ${anova.p_value.toFixed(4)})${cvInfo}. Highest numerical mean: ${best.name} (${best.mean.toFixed(2)}, Group '${best.group}'); lowest: ${worst.name} (${worst.mean.toFixed(2)}, Group '${worst.group}') ${impStr}`);
   });
+
+  const summaries = [];
+  summaries.push('STATISTICALLY ANALYSED PARAMETERS (Latest Post-Application Independent RCBD/CRD ANOVA — distinct from overall multi-date descriptive summaries):');
+  summaries.push(...(analyzedSummaries.length ? analyzedSummaries : ['- None met statistical eligibility criteria.']));
+
+  if (excludedSummaries.length > 0) {
+    summaries.push('PARAMETERS EXCLUDED FROM PARAMETRIC ANOVA (Not Analysed Statistically):');
+    summaries.push(...excludedSummaries);
+  }
 
   // Explicitly report whether yield was actually measured
   const hasRecordedYield = (observations || []).some(o => {
@@ -1293,8 +1490,12 @@ export class AdvancedReportGenerator {
           if (pKey) seenProjectPhotoKeys.add(pKey);
           this.photos.push({
             ...photo,
+            plot: photo.plot || photo.plotNumber || t.PlotNumber || '',
+            rep: photo.rep || photo.replication || t.Replication || '',
+            treatment: photo.treatment || t.FormulationName || 'Untreated Control',
+            treatmentNumber: photo.treatmentNumber || trtNum,
             date: normalizeDateString(photo.date, t.Date),
-            label: photo.label ? `[${t.FormulationName}] ${photo.label}` : `Plot ${t.PlotNumber || ''} - ${t.FormulationName}`
+            label: photo.label ? `[Plot ${t.PlotNumber || ''} · ${t.FormulationName}] ${photo.label}` : `Plot ${t.PlotNumber || ''} - ${t.FormulationName}`
           });
         });
       });
@@ -1625,6 +1826,8 @@ export class AdvancedReportGenerator {
     const trtDaaCounts = {};
     const trtRepSets = {};
 
+    const baselineDateCounts = {};
+
     // 2. Check observations
     this.observations.forEach((obs, idx) => {
       const daa = obs.daa ?? 0;
@@ -1660,16 +1863,13 @@ export class AdvancedReportGenerator {
         const oDateZero = getZeroedDate(obsDate);
         if (oDateZero && sDateZero && oDateZero < sDateZero) {
           const daysBefore = Math.round((sDateZero - oDateZero) / (1000 * 60 * 60 * 24));
-          warnings.push(`Pre-Application Baseline Date (Obs #${idx + 1}, ${obs.date}): Recorded ${daysBefore}d before Trial Start Date (${this.trial.Date || 'N/A'}). Verify whether this is a pre-application baseline assessment or a date entry error.`);
+          const bKey = `${obs.date}|${daysBefore}`;
+          baselineDateCounts[bKey] = (baselineDateCounts[bKey] || 0) + 1;
         }
       }
 
       if (obs.daa !== undefined && obs.daa !== null) {
         const daaNum = Number(obs.daa);
-        if (daaNum < 0) {
-          warnings.push(`Pre-Application Baseline (Obs #${idx + 1}, ${obs.date || 'N/A'}): Recorded at DAA ${daaNum} (kept separate from post-application treatment-effect ANOVA).`);
-        }
-        
         if (obs.date) {
           const dStr = obs.date;
           if (!daaByDate[dStr]) daaByDate[dStr] = [];
@@ -1763,7 +1963,23 @@ export class AdvancedReportGenerator {
       warnings.push('Duplicate Subsamples Alert: Every pot within a treatment × replication block has identical measurements. The data appear to be plot-level measurements copied to multiple pots; recommend analysing block means rather than treating each pot as an independent replicate.');
     }
 
-    // Anomalous / extreme outlier detection (flags for field verification WITHOUT altering data)
+    // Summarize Pre-Application Baseline dates cleanly (1 summary entry per date instead of repeating per plot)
+    Object.entries(baselineDateCounts).forEach(([bKey, count]) => {
+      const [bDate, daysBefore] = bKey.split('|');
+      warnings.push(`Pre-Application Baseline Date (${bDate}, DAA -${daysBefore}): ${count} plot observation(s) recorded ${daysBefore} day(s) before Trial Start Date (${this.trial.Date || 'N/A'}); classified as pre-application baseline and kept separate from post-application treatment-effect ANOVA.`);
+    });
+
+    // Measurement scale consistency check across all active fields (e.g. BBCH 61 mixed with 0/1 ordinal Flower Stage)
+    this.scaleValidationReports = {};
+    this.activeFields.forEach(f => {
+      const report = validateMeasurementScale(this.observations, f, this.treatmentNames);
+      this.scaleValidationReports[f.key] = report;
+      if (report.warningMessage) {
+        warnings.push(report.warningMessage);
+      }
+    });
+
+    // Anomalous / extreme outlier detection on continuous numeric parameters (flags for field verification WITHOUT altering data)
     const anomalies = detectAnomalousObservations(this.observations, this.activeFields);
     this.detectedAnomalies = anomalies;
     anomalies.forEach(a => {
@@ -1838,12 +2054,14 @@ export class AdvancedReportGenerator {
       // 5. Build Chartwork Sheet
       await this.createChartworkSheet();
       
-      // 6. Build Post-Harvest Sheet (if post-harvest observations or harvest pickings exist)
+      // 6. Build Post-Harvest Sheet (ONLY if genuine harvest pickings or post-harvest yield/storage observations exist;
+      //    note word boundary \bloss\b so "leafGlossScore" never falsely matches "loss"!)
+      const postHarvestFieldRe = /harvest|yield|storage|firmness|\bloss\b|weightLoss|postHarvest/i;
       const hasHarvestPickings = (this.harvestPickings && this.harvestPickings.length > 0);
       const hasPostHarvestObs = this.activeFields.some(f => 
-        /harvest|yield|storage|firmness|loss/i.test(f.key)
+        postHarvestFieldRe.test(f.key)
       ) && this.observations.some(o => 
-        this.activeFields.some(f => /harvest|yield|storage|firmness|loss/i.test(f.key) && o[f.key] !== undefined && o[f.key] !== null && o[f.key] !== '')
+        this.activeFields.some(f => postHarvestFieldRe.test(f.key) && o[f.key] !== undefined && o[f.key] !== null && o[f.key] !== '')
       );
       const hasPostHarvest = hasHarvestPickings || hasPostHarvestObs;
       if (hasPostHarvest) {
@@ -1938,7 +2156,7 @@ export class AdvancedReportGenerator {
     }
     
     ws.mergeCells('A6:F9');
-    ws.getCell('A6').value = findingsText;
+    ws.getCell('A6').value = sanitizeExcelNarrativeText(findingsText);
     ws.getCell('A6').alignment = { wrapText: true, vertical: 'top' };
 
     // Methodology Summary
@@ -2040,7 +2258,7 @@ export class AdvancedReportGenerator {
     }
 
     ws.mergeCells('A17:F20');
-    ws.getCell('A17').value = conclusionText;
+    ws.getCell('A17').value = sanitizeExcelNarrativeText(conclusionText);
     ws.getCell('A17').alignment = { wrapText: true, vertical: 'top' };
 
     // Executive Summary Dashboard
@@ -2688,18 +2906,48 @@ export class AdvancedReportGenerator {
       const stdDev = Math.sqrt(variance);
       const rawCv = mean > 0 ? (stdDev / mean) * 100 : 0;
 
-      // CV Suppression for low-incidence symptoms
+      // Proper CV & Variability Class handling (NEVER report CV = 0% -> "Excellent" on n=1 or constant zeros!)
+      const isStageField = isOrdinalOrStageField(f);
+      const scaleReport = isStageField ? validateMeasurementScale(this.observations, f, this.treatmentNames) : null;
       const isSymptom = /deficiency|severity|chlorosis|necrosis|pest|disease|injury|mortality/i.test(f.key) || 
                        /deficiency|severity|chlorosis|necrosis|pest|disease|injury|mortality/i.test(f.label);
       const suppressCV = isSymptom && mean < 2.0;
 
-      const cvDisplay = suppressCV ? 'N/A (Low Incidence)' : parseFloat(rawCv.toFixed(1)) + '%';
-      
-      let variabilityClass = 'Excellent';
-      if (suppressCV) variabilityClass = 'N/A (Low Incidence)';
-      else if (rawCv > 30) variabilityClass = 'High';
-      else if (rawCv > 20) variabilityClass = 'Moderate';
-      else if (rawCv > 10) variabilityClass = 'Good';
+      let cvDisplay;
+      let variabilityClass;
+      let suppressVarStyling = false;
+
+      if (isStageField) {
+        cvDisplay = scaleReport?.hasMixedCoding
+          ? 'N/A – Mixed scale (verify coding)'
+          : 'N/A – Ordinal/phenological scale';
+        variabilityClass = scaleReport?.hasMixedCoding
+          ? 'Scale verification required'
+          : 'Ordinal / Categorical';
+        suppressVarStyling = true;
+      } else if (sampleSize < 2) {
+        cvDisplay = 'N/A – Insufficient observations';
+        variabilityClass = 'N/A – Insufficient observations';
+        suppressVarStyling = true;
+      } else if (stdDev === 0) {
+        cvDisplay = 'N/A – Constant observations';
+        variabilityClass = 'N/A – Constant observations';
+        suppressVarStyling = true;
+      } else if (mean === 0) {
+        cvDisplay = 'N/A – Zero mean';
+        variabilityClass = 'N/A – Zero mean';
+        suppressVarStyling = true;
+      } else if (suppressCV) {
+        cvDisplay = 'N/A (Low Incidence)';
+        variabilityClass = 'N/A (Low Incidence)';
+        suppressVarStyling = true;
+      } else {
+        cvDisplay = parseFloat(rawCv.toFixed(1)) + '%';
+        if (rawCv > 30) variabilityClass = 'High';
+        else if (rawCv > 20) variabilityClass = 'Moderate';
+        else if (rawCv > 10) variabilityClass = 'Good';
+        else variabilityClass = 'Excellent';
+      }
 
       // Calculate treatment means strictly over valid numeric values (NEVER coerce missing to 0)
       const trtMeans = this.treatmentNames.map((name, idx) => {
@@ -2727,11 +2975,15 @@ export class AdvancedReportGenerator {
       const bestTrts = sortedTrts.filter(t => bestMeanVal !== undefined && Math.abs(t.mean - bestMeanVal) < 0.0001);
       const worstTrts = sortedTrts.filter(t => worstMeanVal !== undefined && Math.abs(t.mean - worstMeanVal) < 0.0001);
 
-      const bestTrtsName = bestTrts.length > 1 ? `Tie (${bestTrts.map(t => t.name).join(', ')})` : (bestTrts[0]?.name || 'N/A');
-      const worstTrtsName = worstTrts.length > 1 ? `Tie (${worstTrts.map(t => t.name).join(', ')})` : (worstTrts[0]?.name || 'N/A');
+      const bestTrtsName = isStageField
+        ? 'See Section 3c (Stage Frequencies)'
+        : (bestTrts.length > 1 ? `Tie (${bestTrts.map(t => t.name).join(', ')})` : (bestTrts[0]?.name || 'N/A'));
+      const worstTrtsName = isStageField
+        ? 'See Section 3c (Stage Frequencies)'
+        : (worstTrts.length > 1 ? `Tie (${worstTrts.map(t => t.name).join(', ')})` : (worstTrts[0]?.name || 'N/A'));
 
-      const bestMean = bestTrts[0]?.mean ?? null;
-      const worstMean = worstTrts[0]?.mean ?? null;
+      const bestMean = isStageField ? null : (bestTrts[0]?.mean ?? null);
+      const worstMean = isStageField ? null : (worstTrts[0]?.mean ?? null);
 
       const paramComp = completeness.perParameter[f.key] || {
         validCount: sampleSize,
@@ -2743,9 +2995,9 @@ export class AdvancedReportGenerator {
         f.label,
         parseFloat(min.toFixed(2)),
         parseFloat(max.toFixed(2)),
-        parseFloat(mean.toFixed(2)),
+        isStageField ? 'N/A (Ordinal)' : parseFloat(mean.toFixed(2)),
         parseFloat(median.toFixed(2)),
-        parseFloat(stdDev.toFixed(2)),
+        sampleSize < 2 || isStageField ? 'N/A' : parseFloat(stdDev.toFixed(2)),
         cvDisplay,
         parseFloat(range.toFixed(2)),
         paramComp.validCount,
@@ -2760,9 +3012,9 @@ export class AdvancedReportGenerator {
       
       // Styling the Variability Class
       const varCell = ws.getCell(curRow, 12);
-      if (suppressCV) {
-        varCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'F2F4F4' } };
-        varCell.font = { name: 'Calibri', color: { rgb: '7F8C8D' }, italic: true };
+      if (suppressVarStyling) {
+        varCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: scaleReport?.hasMixedCoding ? 'FCE4D6' : 'F2F4F4' } };
+        varCell.font = { name: 'Calibri', color: { rgb: scaleReport?.hasMixedCoding ? 'C00000' : '7F8C8D' }, italic: !scaleReport?.hasMixedCoding, bold: Boolean(scaleReport?.hasMixedCoding) };
       } else if (rawCv > 30) {
         varCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'FCE4D6' } };
         varCell.font = { name: 'Calibri', color: { rgb: 'C00000' }, bold: true };
@@ -2888,7 +3140,7 @@ export class AdvancedReportGenerator {
       });
     };
 
-    const beneficialFields = this.activeFields.filter(f => !isReductionMetric(f.key, this.category));
+    const beneficialFields = this.activeFields.filter(f => !isReductionMetric(f.key, this.category) && !isOrdinalOrStageField(f));
     renderRankingRows(beneficialFields, false);
 
     // 3b. Stress / Adverse Parameters (Lower is Better)
@@ -2903,21 +3155,77 @@ export class AdvancedReportGenerator {
     ws.getRow(curRow).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: '34495E' } };
     curRow++;
 
-    const stressFields = this.activeFields.filter(f => isReductionMetric(f.key, this.category));
+    const stressFields = this.activeFields.filter(f => isReductionMetric(f.key, this.category) && !isOrdinalOrStageField(f));
     renderRankingRows(stressFields, true);
 
-    // 4. DAA Trends Analysis — compares ONLY dates that actually contain valid observations for each parameter!
+    // 3c. Ordinal / Phenological Stage Frequency Distributions (no ratio % improvement!)
+    const ordinalStageFields = this.activeFields.filter(f => isOrdinalOrStageField(f));
+    if (ordinalStageFields.length > 0) {
+      curRow += 2;
+      ws.mergeCells(`A${curRow}:F${curRow}`);
+      ws.getCell(`A${curRow}`).value = '3c. ORDINAL / PHENOLOGICAL STAGE FREQUENCY DISTRIBUTIONS (NO RATIO % IMPROVEMENT)';
+      ws.getCell(`A${curRow}`).font = { name: 'Calibri', bold: true, size: 11, color: { rgb: '2980B9' } };
+      curRow++;
+
+      ws.getRow(curRow).values = [
+        'Parameter',
+        'Measurement Scale Status',
+        'Treatment',
+        'n (Valid)',
+        'Observed Stage Distribution',
+        'Statistical Guidance'
+      ];
+      ws.getRow(curRow).font = { name: 'Calibri', bold: true, color: { rgb: 'FFFFFF' } };
+      ws.getRow(curRow).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: '34495E' } };
+      curRow++;
+
+      ordinalStageFields.forEach(f => {
+        const scaleRep = validateMeasurementScale(this.observations, f, this.treatmentNames);
+        const statusStr = scaleRep.hasMixedCoding
+          ? `Mixed/Inconsistent Scale (${scaleRep.detectedScale.replace(/-/g, ' ')})`
+          : `Ordinal / Phenological (${scaleRep.detectedScale.replace(/-/g, ' ')})`;
+        const guidanceStr = scaleRep.hasMixedCoding
+          ? 'Requires data correction / scale standardization before statistical analysis'
+          : 'Ordinal scale: use stage frequency tables / non-parametric rank tests (no % improvement)';
+
+        this.treatmentNames.forEach(trtName => {
+          const dist = scaleRep.distributionByTreatment[trtName] || { n: 0, counts: {} };
+          const distText = dist.n > 0
+            ? Object.entries(dist.counts)
+                .sort((a, b) => String(a[0]).localeCompare(String(b[0]), undefined, { numeric: true }))
+                .map(([code, cnt]) => `Stage ${code}: ${cnt} (${((cnt / dist.n) * 100).toFixed(0)}%)`)
+                .join('; ')
+            : 'No valid records';
+
+          ws.getRow(curRow).values = [
+            f.label,
+            statusStr,
+            trtName,
+            dist.n,
+            distText,
+            guidanceStr
+          ];
+          if (scaleRep.hasMixedCoding) {
+            ws.getCell(curRow, 2).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'FCE4D6' } };
+            ws.getCell(curRow, 2).font = { name: 'Calibri', color: { rgb: 'C00000' }, bold: true };
+          }
+          curRow++;
+        });
+      });
+    }
+
+    // 4. DAA Trends Analysis — compares ONLY dates with adequate paired longitudinal coverage!
     curRow += 2;
     ws.mergeCells(`A${curRow}:G${curRow}`);
-    ws.getCell(`A${curRow}`).value = '4. DAA-WISE DEVELOPMENTAL TRENDS (VALID MEASUREMENTS ONLY — NO ZERO COERCION)';
+    ws.getCell(`A${curRow}`).value = '4. DAA-WISE DEVELOPMENTAL TRENDS (VALID PAIRED MEASUREMENTS ONLY — NO ZERO COERCION)';
     ws.getCell(`A${curRow}`).font = { name: 'Calibri', bold: true, size: 11, color: { rgb: '2980B9' } };
     curRow++;
 
     ws.getRow(curRow).values = [
       'Parameter',
-      'Initial Valid Date (DAA)',
+      'Initial Valid Date (DAA, n)',
       'Initial Mean',
-      'Latest Valid Date (DAA)',
+      'Latest Valid Date (DAA, n)',
       'Final Mean',
       'Net Change',
       'Trend Classification'
@@ -2926,7 +3234,31 @@ export class AdvancedReportGenerator {
     ws.getRow(curRow).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: '34495E' } };
     curRow++;
 
+    const expectedUnitsForTrends = Math.max(
+      this.treatmentNames.length * computedReplications,
+      this.isProjectWide ? (this.trials || []).length : 0,
+      4
+    );
+    const minDateCoverageN = Math.max(4, Math.ceil(expectedUnitsForTrends * 0.5));
+
     this.activeFields.forEach(f => {
+      if (isOrdinalOrStageField(f)) {
+        const scaleRep = validateMeasurementScale(this.observations, f, this.treatmentNames);
+        ws.getRow(curRow).values = [
+          f.label,
+          '—',
+          'N/A',
+          '—',
+          'N/A',
+          'N/A',
+          scaleRep.hasMixedCoding
+            ? 'Not evaluated – Mixed/inconsistent coding scale (requires verification)'
+            : 'Ordinal/phenological scale — evaluate via stage frequency progression (Section 3c)'
+        ];
+        curRow++;
+        return;
+      }
+
       // Group strictly by dates where THIS parameter actually has valid finite values
       const bucketMap = new Map();
       this.observations.forEach(o => {
@@ -2936,10 +3268,20 @@ export class AdvancedReportGenerator {
         const daaNum = o.daa !== undefined && o.daa !== null && o.daa !== '' ? Number(o.daa) : null;
         const key = normDate || (daaNum !== null && !isNaN(daaNum) ? `DAA:${daaNum}` : 'SINGLE');
         if (!bucketMap.has(key)) {
-          bucketMap.set(key, { key, normDate, displayDate: o.date || normDate || 'N/A', daa: daaNum, vals: [] });
+          bucketMap.set(key, {
+            key,
+            normDate,
+            displayDate: o.date || normDate || 'N/A',
+            daa: daaNum,
+            vals: [],
+            treatments: new Set(),
+            unitKeys: new Set()
+          });
         }
         const entry = bucketMap.get(key);
         entry.vals.push(val);
+        entry.treatments.add(parseInt(o.treatmentNumber || o.treatment || 1, 10));
+        entry.unitKeys.add(`${o.plot || o.plotNumber || ''}_${o.rep || o.replication || ''}_${o.treatmentNumber || ''}`);
         if (entry.daa === null && daaNum !== null && !isNaN(daaNum)) entry.daa = daaNum;
       });
 
@@ -2952,7 +3294,7 @@ export class AdvancedReportGenerator {
 
       const firstB = validBuckets[0];
       const firstMean = firstB.vals.reduce((s, v) => s + v, 0) / firstB.vals.length;
-      const firstLabel = `${firstB.displayDate} (DAA ${formatDaaLabel(firstB.daa)})`;
+      const firstLabel = `${firstB.displayDate} (DAA ${formatDaaLabel(firstB.daa)}, n=${firstB.vals.length})`;
 
       if (validBuckets.length < 2) {
         ws.getRow(curRow).values = [
@@ -2970,7 +3312,32 @@ export class AdvancedReportGenerator {
 
       const lastB = validBuckets[validBuckets.length - 1];
       const lastMean = lastB.vals.reduce((s, v) => s + v, 0) / lastB.vals.length;
-      const lastLabel = `${lastB.displayDate} (DAA ${formatDaaLabel(lastB.daa)})`;
+      const lastLabel = `${lastB.displayDate} (DAA ${formatDaaLabel(lastB.daa)}, n=${lastB.vals.length})`;
+
+      // Longitudinal coverage check: prevent classifying e.g. n=2 vs n=8 Tiller Count or n=1 vs n=20 Leaf Gloss as "Stable"!
+      const pairedUnits = [...firstB.unitKeys].filter(k => lastB.unitKeys.has(k)).length;
+      const hasAdequateCoverage =
+        firstB.vals.length >= minDateCoverageN &&
+        lastB.vals.length >= minDateCoverageN &&
+        firstB.treatments.size >= Math.min(2, this.treatmentNames.length) &&
+        lastB.treatments.size >= Math.min(2, this.treatmentNames.length) &&
+        pairedUnits >= Math.min(minDateCoverageN, Math.max(2, this.treatmentNames.length));
+
+      if (!hasAdequateCoverage) {
+        ws.getRow(curRow).values = [
+          f.label,
+          firstLabel,
+          parseFloat(firstMean.toFixed(2)),
+          lastLabel,
+          parseFloat(lastMean.toFixed(2)),
+          'N/A',
+          `Insufficient paired observations / Incomplete longitudinal coverage (paired n=${pairedUnits})`
+        ];
+        ws.getCell(curRow, 7).font = { name: 'Calibri', color: { rgb: '7F8C8D' }, italic: true };
+        curRow++;
+        return;
+      }
+
       const netChange = lastMean - firstMean;
 
       let trend = 'Stable';
@@ -3062,12 +3429,17 @@ export class AdvancedReportGenerator {
 
       let offset = this.treatmentNames.length;
       const isRed = isReductionMetric(f.key, this.category);
+      const isStageField = isOrdinalOrStageField(f);
+      const stageScaleRep = isStageField ? validateMeasurementScale(this.observations, f, this.treatmentNames) : null;
+
       for (let i = 1; i < this.treatmentNames.length; i++) {
         const trtName = this.treatmentNames[i];
         const trtNum = i + 1;
-        ws.getCell(`A${r + offset + i}`).value = isRed 
-          ? `  Efficacy of ${trtName} (% Control)` 
-          : `  Improvement of ${trtName} (%)`;
+        ws.getCell(`A${r + offset + i}`).value = isStageField
+          ? `  Comparison of ${trtName} (Ordinal Stage)`
+          : isRed 
+            ? `  Efficacy of ${trtName} (% Control)` 
+            : `  Improvement of ${trtName} (%)`;
 
         dates.forEach((date, colIdx) => {
           const cLetter = getColumnLetter(2 + colIdx);
@@ -3076,6 +3448,13 @@ export class AdvancedReportGenerator {
 
           if (controlMean === null || trtMean === null) {
             ws.getCell(`${cLetter}${r + offset + i}`).value = null;
+            return;
+          }
+
+          if (isStageField) {
+            ws.getCell(`${cLetter}${r + offset + i}`).value = stageScaleRep?.hasMixedCoding
+              ? 'N/A – Mixed scale (verify coding)'
+              : 'N/A – Ordinal/phenological scale';
             return;
           }
 
@@ -3254,9 +3633,9 @@ export class AdvancedReportGenerator {
       curRow += 2;
     }
 
-    // 3. Observation harvest fields if present
+    // 3. Observation harvest fields if present (word-boundary \bloss\b so "leafGlossScore" never matches!)
     const harvestFields = this.activeFields.filter(f => 
-      /harvest|yield|storage|firmness|loss/i.test(f.key)
+      /harvest|yield|storage|firmness|\bloss\b|weightLoss|postHarvest/i.test(f.key)
     );
 
     if (harvestFields.length > 0) {
@@ -3515,6 +3894,7 @@ export class AdvancedReportGenerator {
     let chartIndex = 0;
     
     for (const f of this.activeFields) {
+      if (isOrdinalOrStageField(f)) continue;
       const hasData = this.observations.some(obs => {
         const val = parseFloat(obs[f.key]);
         return !isNaN(val) && val !== 0;

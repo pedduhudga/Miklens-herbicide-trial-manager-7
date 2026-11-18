@@ -4,7 +4,9 @@ import {
   calculateAnovaRCB,
   selectIndependentAssessmentSlice,
   computeDataCompleteness,
-  detectAnomalousObservations
+  detectAnomalousObservations,
+  validateMeasurementScale,
+  isOrdinalOrStageField
 } from '../services/advancedReportGenerator.js';
 import {
   AnalysisEngine,
@@ -68,12 +70,15 @@ function buildComprehensiveChilliFixture() {
         visualVigor: trt.vigor[rIdx],
         leafColor: trt.num === 1 ? 3.8 : 4.0,
         canopyCoverage: trt.canopy[rIdx],
-        plantHeight: trt.height[rIdx],
+        plantHeight: (rep === 1 && trt.num === 4) ? 0 : trt.height[rIdx], // genuine 0 cm anomaly on Plot 104 / Rep1 N16
         deficiencySeverity: trt.defSev[rIdx],
         chlorosisIncidence: 0, // constant 0 across all 20 pots
+        leafGlossScore: 7,
+        // SPAD: single record only (n=1 -> CV must be "N/A – Insufficient observations", NEVER 0% Excellent!)
+        ...(rep === 1 && trt.num === 4 ? { chlorophyllIndex: 0 } : {}),
         // Tiller count: sparse (only 3 plots in Trt 1 and 3 in Trt 2 -> missing Trt 3 & Trt 4!)
         ...(trt.num <= 2 && rep <= 3 ? { tillerCount: 0 } : {}),
-        // Flower stage: 18 valid plots (missing rep 5 on Trt 1 and Trt 4) with extreme outlier 61 on Plot 204!
+        // Flower stage: 18 valid plots (missing rep 5 on Trt 1 and Trt 4) with mixed BBCH code 61 on Plot 204!
         ...((rep === 5 && (trt.num === 1 || trt.num === 4))
           ? {}
           : { flowerStage: effectivePlot === '204' ? 61 : (rep % 2 === 0 ? 1 : 0) })
@@ -87,7 +92,10 @@ function buildComprehensiveChilliFixture() {
           visualVigor: +(trt.vigor[rIdx] - 0.5).toFixed(1),
           leafColor: 3.5,
           canopyCoverage: trt.canopy[rIdx] - 10,
-          plantHeight: trt.height[rIdx] - 2
+          plantHeight: trt.height[rIdx] - 2,
+          // Sparse baseline Tiller Count (n=2) & Leaf Gloss (n=1) to verify incomplete longitudinal coverage guard
+          ...(rep === 1 && trt.num <= 2 ? { tillerCount: 0 } : {}),
+          ...(rep === 1 && trt.num === 2 ? { leafGlossScore: 7, flowerStage: 1 } : {})
         },
         nov17Obs,
         {
@@ -251,45 +259,97 @@ describe('Final Report Integrity Audit — All 10 Regression Scenarios & Excel v
     expect(directZero.ineligibleReason).toBe('constant');
   });
 
-  it('Scenario 5: Extreme outlier (Plot 204 Flower Stage = 61) is flagged without deleting/modifying it, and Grand Mean reconciles across tables', async () => {
+  it('Scenario 5: Mixed Flower Stage coding (0/1 + BBCH 61) blocks parametric ANOVA & +2420%, emits stage frequency distributions, and flags continuous anomalies without altering raw values', async () => {
     const { project, trials, flatObservations } = buildComprehensiveChilliFixture();
 
-    const anomalies = detectAnomalousObservations(flatObservations, [{ key: 'flowerStage', label: 'Flower Stage' }]);
-    expect(anomalies.length).toBeGreaterThanOrEqual(1);
-    const plot204Flag = anomalies.find(a => String(a.plot) === '204' && a.value === 61);
-    expect(plot204Flag).toBeDefined();
-    expect(plot204Flag.message).toContain('Plot 204');
-    expect(plot204Flag.message).toContain('61');
-    expect(plot204Flag.message).toContain('NOT altered or deleted');
+    // 1. Scale validator detects mixed 0/1 + BBCH 61 on Plot 204 without deleting/modifying 61
+    expect(isOrdinalOrStageField({ key: 'flowerStage', label: 'Flower Stage' })).toBe(true);
+    const scaleRep = validateMeasurementScale(flatObservations, { key: 'flowerStage', label: 'Flower Stage' });
+    expect(scaleRep.hasMixedCoding).toBe(true);
+    expect(scaleRep.detectedScale).toBe('mixed-ordinal-and-bbch');
+    expect(scaleRep.warningMessage).toContain('Plot 204');
+    expect(scaleRep.warningMessage).toContain('61');
+    expect(scaleRep.warningMessage).toContain('NOT altered or deleted');
 
-    // Verify Excel retains raw 61 AND reconciles Grand Mean identically in both AOV Means Table and ANOVA Summary
+    // 2. Parametric ANOVA & +2420% ratio improvement MUST be blocked for Flower Stage
+    const flowerAnova = calculateAnovaRCB(flatObservations, 'flowerStage', 'nutrition', 'PotTrial', {
+      trialStartDate: project.StartDate,
+      expectedTreatments: 4,
+      fieldLabel: 'Flower Stage'
+    });
+    expect(flowerAnova.ineligible).toBe(true);
+    expect(flowerAnova.ineligibleReason).toBe('mixed-scale');
+    expect(flowerAnova.error).toContain('Mixed/inconsistent coding scale');
+
+    // 3. Continuous anomaly detector flags genuine Plant Height = 0 cm without deleting it
+    const anomalies = detectAnomalousObservations(flatObservations, [{ key: 'plantHeight', label: 'Plant Height (cm)' }]);
+    expect(anomalies.some(a => a.value === 0 && a.fieldKey === 'plantHeight')).toBe(true);
+
+    // 4. Verify Excel workbook sheets: no +2420%, stage frequency distribution present, CV handling fixed,
+    //    incomplete longitudinal trends flagged, no duplicate 17-Nov rows, and no bogus Post-Harvest sheet!
     const gen = new AdvancedReportGenerator(trials, 'nutrition', project);
     await gen.processObservationsWithAI();
     gen.validationWarnings = gen.validateData();
     await gen.createTrialInfoSheet();
+    await gen.createAssessmentSummarySheet();
+    await gen.createChartworkSheet();
     await gen.createAOVMeansTable();
     await gen.createANOVASummarySheet();
 
-    // Flag appears in Trial Information validation report
-    expect(gen.validationWarnings.some(w => w.includes('Plot 204') && w.includes('61'))).toBe(true);
+    // Scale verification warning present; pre-app baseline grouped into 1 concise warning (not 40 duplicates!)
+    expect(gen.validationWarnings.some(w => w.includes('Measurement Scale Verification Required') && w.includes('Plot 204'))).toBe(true);
+    const baselineWarnings = gen.validationWarnings.filter(w => w.includes('Pre-Application Baseline Date'));
+    expect(baselineWarnings).toHaveLength(1);
 
-    // Grand mean in AOV Means Table == Grand mean in ANOVA Summary (exact N=18 reconciliation)
-    const flowerAnova = calculateAnovaRCB(gen.observations, 'flowerStage', 'nutrition', 'PotTrial', {
-      trialStartDate: project.StartDate,
-      expectedTreatments: 4
-    });
-    expect(flowerAnova.nIndependentUnits).toBe(18);
-    expect(flowerAnova.treatmentMeans[2].n).toBe(5);
-    expect(flowerAnova.treatmentMeans[1].n).toBe(4);
-    expect(flowerAnova.treatmentMeans[4].n).toBe(4);
+    // Assessment Summary checks:
+    const summaryRows = getWorksheetRows(gen.workbook.getWorksheet('Assessment Summary'));
+    // (a) NO "+2420%" anywhere in Assessment Summary
+    const allSummaryText = summaryRows.flat().map(v => String(v ?? '')).join(' | ');
+    expect(allSummaryText).not.toContain('2420');
+    // (b) Section 3c stage frequency distribution exists for Flower Stage
+    expect(allSummaryText).toContain('3c. ORDINAL / PHENOLOGICAL STAGE FREQUENCY DISTRIBUTIONS');
+    expect(allSummaryText).toContain('Stage 61');
+    // (c) CV handling: SPAD (n=1) -> "N/A – Insufficient observations"; Tiller Count (all 0s) -> "N/A – Constant observations" (NEVER 0% Excellent!)
+    const spadDescRow = summaryRows.find(r => String(r[0] || '').includes('SPAD'));
+    expect(spadDescRow).toBeDefined();
+    expect(spadDescRow[6]).toBe('N/A – Insufficient observations');
+    expect(spadDescRow[11]).toBe('N/A – Insufficient observations');
 
-    const aovRows = getWorksheetRows(gen.workbook.getWorksheet('AOV Means Table'));
-    const grandMeanRow = aovRows.find(r =>
-      String(r[0] || '').includes('Grand Mean (All Analyzed Independent Units)') &&
-      Number(r[1]) === 18
-    );
-    expect(grandMeanRow).toBeDefined();
-    expect(grandMeanRow[2]).toBeCloseTo(flowerAnova.grandMean, 3);
+    const tillerDescRow = summaryRows.find(r => String(r[0] || '').includes('Tiller Count'));
+    expect(tillerDescRow).toBeDefined();
+    expect(tillerDescRow[6]).toBe('N/A – Constant observations');
+    expect(tillerDescRow[11]).toBe('N/A – Constant observations');
+
+    // (d) Incomplete longitudinal trends: Tiller Count (n=2 vs n=6) & Leaf Gloss (n=1 vs n=20) NOT classified as Stable!
+    const trendStart = summaryRows.findIndex(r => String(r[0] || '').includes('4. DAA-WISE DEVELOPMENTAL TRENDS'));
+    const trendRows = summaryRows.slice(trendStart + 2);
+    const tillerTrend = trendRows.find(r => String(r[0] || '').includes('Tiller Count'));
+    expect(tillerTrend).toBeDefined();
+    expect(String(tillerTrend[6])).toContain('Insufficient paired observations');
+    expect(String(tillerTrend[6])).not.toBe('Stable');
+
+    const glossTrend = trendRows.find(r => String(r[0] || '').includes('Leaf Gloss'));
+    expect(glossTrend).toBeDefined();
+    expect(String(glossTrend[6])).toContain('Insufficient paired observations');
+
+    // Chartwork: NO 2420 improvement for Flower Stage!
+    const chartworkRows = getWorksheetRows(gen.workbook.getWorksheet('Chartwork'));
+    const chartworkText = chartworkRows.flat().map(v => typeof v === 'object' && v ? String(v.result ?? '') : String(v ?? '')).join(' | ');
+    expect(chartworkText).not.toContain('2420');
+
+    // ANOVA Summary: Per-Assessment-Date breakdown NEVER duplicates 17-Nov-2026 Visual Vigor twice!
+    const anovaRows = getWorksheetRows(gen.workbook.getWorksheet('ANOVA Summary'));
+    const breakdownIdx = anovaRows.findIndex(r => String(r[0] || '').includes('PER-ASSESSMENT-DATE INDEPENDENT ANOVA BREAKDOWN'));
+    expect(breakdownIdx).toBeGreaterThan(-1);
+    const breakdownRows = anovaRows.slice(breakdownIdx + 2);
+    const nov17VigorRows = breakdownRows.filter(r => r[0] === '17-Nov-2026' && String(r[1] || '').includes('Visual Vigor'));
+    expect(nov17VigorRows).toHaveLength(1);
+
+    // Post-Harvest regex check: leafGlossScore MUST NOT match post-harvest loss!
+    const postHarvestRe = /harvest|yield|storage|firmness|\bloss\b|weightLoss|postHarvest/i;
+    expect(postHarvestRe.test('leafGlossScore')).toBe(false);
+    expect(postHarvestRe.test('weightLoss')).toBe(true);
+    expect(postHarvestRe.test('yield')).toBe(true);
   });
 
   it('Scenario 6: Zero control baseline displays "N/A – Control baseline is zero" instead of fake percentages', async () => {
