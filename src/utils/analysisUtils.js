@@ -807,104 +807,161 @@ export class AnalysisEngine {
                 getObservationValue(trial, metric, species = null, daa = null) {
                     const primaryField = getPrimaryObservationField(this.category);
 
+                    // Strict numeric parser: NEVER coerces undefined/null/'' into 0
+                    const parseStrictNum = (v) => {
+                        if (v === undefined || v === null || v === '') return null;
+                        const n = parseFloat(v);
+                        return Number.isFinite(n) ? n : null;
+                    };
+
+                    // Extract real yield strictly (checks trial fields, HarvestDataJSON, and obs fields; returns null if unharvested)
+                    const extractStrictYield = (t, o = null) => {
+                        const direct = parseStrictNum(t?.Yield) ?? parseStrictNum(t?.YieldValue) ?? parseStrictNum(t?.yieldKgPlot)
+                            ?? parseStrictNum(t?.yield) ?? parseStrictNum(t?.yieldValue)
+                            ?? parseStrictNum(o?.yield) ?? parseStrictNum(o?.yieldKgPlot) ?? parseStrictNum(o?.yieldValue);
+                        if (direct !== null) return direct;
+                        if (t?.HarvestDataJSON) {
+                            const h = safeJsonParse(t.HarvestDataJSON, null);
+                            if (h && typeof h === 'object') {
+                                const hVal = parseStrictNum(h.cumulativeMarketableYield)
+                                    ?? parseStrictNum(h.actualMarketableWeight)
+                                    ?? parseStrictNum(h.cumulativeTotalYield);
+                                if (hVal !== null) return hVal;
+                                if (Array.isArray(h.pickings) && h.pickings.length > 0) {
+                                    const sum = h.pickings.reduce((acc, p) => acc + (parseStrictNum(p?.actualMarketableWeight ?? p?.marketableWeight) ?? 0), 0);
+                                    if (sum > 0) return sum;
+                                }
+                            }
+                        }
+                        return null;
+                    };
+
                     if (trial && trial.trialId) {
                         if (metric === 'yield') {
-                            const v = parseFloat(trial.yield || trial.yieldValue || trial.yieldKgPlot || trial.Yield || trial.YieldValue || 0);
-                            return Number.isFinite(v) ? v : null;
+                            return extractStrictYield(trial, null);
                         }
                         if (metric === 'audpc') {
-                            return Number.isFinite(parseFloat(trial.audpc || trial.AUDPC || 0)) ? parseFloat(trial.audpc || trial.AUDPC || 0) : null;
+                            return parseStrictNum(trial.audpc ?? trial.AUDPC);
                         }
                         if (metric === 'cover' || metric === primaryField) {
-                            const v = parseFloat(trial.cover || trial[primaryField] || trial.diseaseSeverity || trial.pestCount || trial.plantHeight || 0);
-                            return Number.isFinite(v) ? v : null;
+                            return parseStrictNum(trial[primaryField] ?? trial.cover ?? trial.diseaseSeverity ?? trial.pestCount ?? trial.plantHeight);
                         }
-                        const value = trial[metric] ?? trial[metric === 'yield' ? 'yieldKgPlot' : metric];
-                        const numeric = parseFloat(value);
-                        return Number.isFinite(numeric) ? numeric : null;
+                        return parseStrictNum(trial[metric] ?? trial[metric === 'yield' ? 'yieldKgPlot' : metric]);
                     }
 
                     const efficacy = safeJsonParse(trial.EfficacyDataJSON, []);
+                    if (metric === 'yield') {
+                        // Allow trial-level or harvest-level yield even if EfficacyDataJSON is empty
+                        const sortedForYield = Array.isArray(efficacy)
+                            ? efficacy.slice().sort((a, b) => (parseFloat(b?.daa) || 0) - (parseFloat(a?.daa) || 0))
+                            : [];
+                        const obsWithYield = sortedForYield.find(o => extractStrictYield(trial, o) !== null) || sortedForYield[0] || null;
+                        return extractStrictYield(trial, obsWithYield);
+                    }
+
                     if (!Array.isArray(efficacy) || efficacy.length === 0) return null;
 
-                    const obs = daa !== null
-                        ? (efficacy.find(e => Number(e.daa) === Number(daa) || Number(e.daysAfterApplication) === Number(daa)) || efficacy[efficacy.length - 1])
-                        : efficacy.slice().sort((a, b) => (parseFloat(b.daa) || 0) - (parseFloat(a.daa) || 0))[0];
-                    if (!obs) return null;
+                    // Helper to extract the requested metric from a single observation object (strictly null if absent)
+                    const extractFromSingleObs = (obs) => {
+                        if (!obs || typeof obs !== 'object') return null;
 
-                    if (metric === 'yield') {
-                        const yVal = parseFloat(trial.Yield || trial.YieldValue || obs.yield || obs.yieldKgPlot || obs.yieldValue || 0);
-                        return Number.isFinite(yVal) ? yVal : null;
-                    }
+                        if (metric === 'rootToShootRatio') {
+                            const root = parseStrictNum(obs.rootBiomass);
+                            const shoot = parseStrictNum(obs.shootBiomass);
+                            return (root !== null && shoot !== null && shoot > 0) ? root / shoot : null;
+                        }
+
+                        if (metric === 'plantHeight' || metric === 'Plant Height') {
+                            const directH = parseStrictNum(obs.plantHeight ?? obs['Plant Height'] ?? obs.plant_height);
+                            if (directH !== null) return directH;
+                            if (Array.isArray(obs.potHeights) && obs.potHeights.length > 0) {
+                                const nums = obs.potHeights.map(parseStrictNum).filter(v => v !== null);
+                                if (nums.length > 0) return nums.reduce((a, b) => a + b, 0) / nums.length;
+                            }
+                            return null;
+                        }
+
+                        if (metric === 'cover' || metric === primaryField) {
+                            if (this.category === 'herbicide') {
+                                if (species) {
+                                    const canonicalSpecies = canonicalizeWeedSpecies(species);
+                                    const d = (obs.weedDetails || []).find(w => canonicalizeWeedSpecies(w.species) === canonicalSpecies);
+                                    return d ? parseStrictNum(d.cover) : null;
+                                }
+                                if (Array.isArray(obs.weedDetails) && obs.weedDetails.length > 0) {
+                                    const nums = obs.weedDetails.map(w => parseStrictNum(w?.cover)).filter(v => v !== null);
+                                    if (nums.length > 0) return nums.reduce((sum, v) => sum + v, 0);
+                                }
+                                return parseStrictNum(obs.weedCover ?? obs.weedCoverage);
+                            }
+                            return parseStrictNum(getObservationPrimaryValue(this.category, obs));
+                        }
+
+                        return parseStrictNum(obs[metric]);
+                    };
 
                     if (metric === 'audpc') {
                         const sortedObs = [...efficacy].sort((a, b) => (parseFloat(a.daa) || 0) - (parseFloat(b.daa) || 0));
                         let audpcVal = 0;
+                        let validSegments = 0;
                         for (let i = 0; i < sortedObs.length - 1; i++) {
-                            const y1 = parseFloat(getObservationPrimaryValue(this.category, sortedObs[i]) ?? 0);
-                            const y2 = parseFloat(getObservationPrimaryValue(this.category, sortedObs[i + 1]) ?? 0);
+                            const y1 = parseStrictNum(getObservationPrimaryValue(this.category, sortedObs[i]));
+                            const y2 = parseStrictNum(getObservationPrimaryValue(this.category, sortedObs[i + 1]));
+                            if (y1 === null || y2 === null) continue;
                             const t1 = parseFloat(sortedObs[i].daa || 0);
                             const t2 = parseFloat(sortedObs[i + 1].daa || 0);
-                            audpcVal += ((y1 + y2) / 2) * (t2 - t1);
+                            if (t2 > t1) {
+                                audpcVal += ((y1 + y2) / 2) * (t2 - t1);
+                                validSegments++;
+                            }
                         }
-                        return Number.isFinite(audpcVal) ? audpcVal : null;
-                    }
-
-                    if (metric === 'rootToShootRatio') {
-                        const root = parseFloat(obs.rootBiomass ?? 0);
-                        const shoot = parseFloat(obs.shootBiomass ?? 0);
-                        return shoot > 0 ? root / shoot : null;
+                        return validSegments > 0 && Number.isFinite(audpcVal) ? audpcVal : null;
                     }
 
                     if (metric === 'nue') {
                         const plotSize = trial.plotSize || trial.PlotSize || this.project?.plotSize || this.project?.PlotSize;
                         const areaHa = getPlotAreaHectares(plotSize);
-                        
                         const getYieldInKgHa = (t, o) => {
-                            const rawYield = parseFloat(t.Yield || t.YieldValue || o?.yield || o?.yieldKgPlot || o?.yieldValue || 0);
+                            const rawYield = extractStrictYield(t, o);
+                            if (rawYield === null) return null;
                             const isPlotYield = t.yieldKgPlot !== undefined || o?.yieldKgPlot !== undefined || (t.Yield && String(t.Yield).toLowerCase().includes('plot')) || (o?.yield && String(o?.yield).toLowerCase().includes('plot'));
-                            if (isPlotYield && areaHa > 0) {
-                                return rawYield / areaHa;
-                            }
-                            return rawYield;
+                            return (isPlotYield && areaHa > 0) ? rawYield / areaHa : rawYield;
                         };
-
-                        const yieldVal = getYieldInKgHa(trial, obs);
-                        const rate = parseFloat(trial.Dosage || 1);
-                        if (rate <= 0) return null;
+                        const lastObs = efficacy.slice().sort((a, b) => (parseFloat(b.daa) || 0) - (parseFloat(a.daa) || 0))[0];
+                        const yieldVal = getYieldInKgHa(trial, lastObs);
+                        const rate = parseStrictNum(trial.Dosage);
+                        if (yieldVal === null || rate === null || rate <= 0) return null;
                         const utcReps = this.getReplications(this.utcName || '');
                         const utcYields = utcReps.map(ur => {
                             const eff = safeJsonParse(ur.EfficacyDataJSON, []);
-                            const lastObs = eff.length ? eff[eff.length - 1] : null;
-                            const y = getYieldInKgHa(ur, lastObs);
-                            return Number.isFinite(y) ? y : null;
+                            const uLast = eff.length ? eff[eff.length - 1] : null;
+                            return getYieldInKgHa(ur, uLast);
                         }).filter(v => v !== null);
-                        const utcMeanYield = utcYields.length ? utcYields.reduce((a, b) => a + b, 0) / utcYields.length : 0;
+                        if (utcYields.length === 0) return null;
+                        const utcMeanYield = utcYields.reduce((a, b) => a + b, 0) / utcYields.length;
                         return Number.isFinite(utcMeanYield) ? (yieldVal - utcMeanYield) / rate : null;
                     }
 
-                    if (metric === 'cover' || metric === primaryField) {
-                        if (this.category === 'herbicide') {
-                            if (species) {
-                                const canonicalSpecies = canonicalizeWeedSpecies(species);
-                                const d = (obs.weedDetails || []).find(w => canonicalizeWeedSpecies(w.species) === canonicalSpecies);
-                                const val = d ? parseFloat(d.cover) : NaN;
-                                return Number.isFinite(val) ? val : null;
-                            }
-                            const totalCover = (obs.weedDetails || []).reduce((sum, w) => {
-                                const v = parseFloat(w.cover);
-                                return sum + (Number.isFinite(v) ? v : 0);
-                            }, 0);
-                            return Number.isFinite(totalCover) ? totalCover : null;
-                        }
-                        const raw = getObservationPrimaryValue(this.category, obs) ?? 0;
-                        const numeric = parseFloat(raw);
-                        return Number.isFinite(numeric) ? numeric : null;
+                    // If explicit DAA requested, read strictly from that DAA
+                    if (daa !== null) {
+                        const exactObs = efficacy.find(e => Number(e.daa) === Number(daa) || Number(e.daysAfterApplication) === Number(daa));
+                        return exactObs ? extractFromSingleObs(exactObs) : null;
                     }
 
-                    const rawVal = obs[metric] ?? 0;
-                    const numeric = parseFloat(rawVal);
-                    return Number.isFinite(numeric) ? numeric : null;
+                    // Otherwise, pick the LATEST observation that ACTUALLY HAS a recorded value for `metric`
+                    // (Prevents e.g. a plant-height-only walk on Nov 18 from zeroing out Nov 17's visualVigor!)
+                    const sortedNewestFirst = efficacy.slice().sort((a, b) => {
+                        const dA = parseFloat(a?.daa);
+                        const dB = parseFloat(b?.daa);
+                        if (!isNaN(dA) && !isNaN(dB) && dA !== dB) return dB - dA;
+                        return String(b?.date || '').localeCompare(String(a?.date || ''));
+                    });
+
+                    for (const candidateObs of sortedNewestFirst) {
+                        const extracted = extractFromSingleObs(candidateObs);
+                        if (extracted !== null) return extracted;
+                    }
+                    return null;
                 }
 
                  // Get aggregated data for a specific metric
@@ -989,10 +1046,11 @@ export class AnalysisEngine {
                     let potLayout = 'stripe';
                     if (isPotTrial) {
                         potLayout = this.project?.PotLayout || this.trials[0]?.PotLayout || 'stripe';
-                        if (potLayout === 'rcbd-pot') {
-                            anovaResults = performANOVA(this.trials, { metric, species, daa, design: 'RCBD' });
-                        } else {
+                        const repCount = new Set(this.trials.map(t => t.Replication).filter(Boolean)).size;
+                        if (potLayout === 'crd' || repCount < 2) {
                             anovaResults = performANOVA(this.trials, { metric, species, daa, design: 'CRD' });
+                        } else {
+                            anovaResults = performANOVA(this.trials, { metric, species, daa, design: 'RCBD' });
                         }
                     } else if (isTwoWay) {
                         anovaResults = performTwoWayANOVA(this.trials, {
@@ -1782,5 +1840,149 @@ export function calculateCRD_ANOVA(groups) {
     msTreat, msError,
     fVal, pVal, grandMean,
     cv: grandMean > 0 ? (Math.sqrt(msError) / grandMean) * 100 : 0
+  };
+}
+
+/**
+ * Extract the latest valid finite numeric observation for `metricKey` from a trial.
+ * NEVER coerces missing / empty / unmeasured values to 0.
+ */
+export function extractLatestValidTrialMetric(trial, metricKey, projectCategory = 'herbicide') {
+  if (!trial) return null;
+  const parseStrict = (v) => {
+    if (v === undefined || v === null || v === '') return null;
+    if (typeof v === 'boolean') return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  if (metricKey === 'yield' || metricKey === 'Yield' || metricKey === 'YieldValue') {
+    const direct = parseStrict(trial.Yield ?? trial.YieldValue ?? trial.yieldKgPlot);
+    if (direct !== null) return direct;
+    if (trial.HarvestDataJSON) {
+      const h = safeJsonParse(trial.HarvestDataJSON, null);
+      if (h && typeof h === 'object') {
+        const directH = parseStrict(h.actualMarketableWeight ?? h.totalYield ?? h.yield);
+        if (directH !== null) return directH;
+        if (Array.isArray(h.pickings) && h.pickings.length > 0) {
+          const vals = h.pickings.map(p => parseStrict(p?.actualMarketableWeight ?? p?.weight)).filter(v => v !== null);
+          if (vals.length > 0) return vals.reduce((s, v) => s + v, 0);
+        }
+      }
+    }
+    const eff = safeJsonParse(trial.EfficacyDataJSON, []);
+    const sorted = eff.slice().sort((a, b) => (parseFloat(b?.daa) || 0) - (parseFloat(a?.daa) || 0));
+    for (const obs of sorted) {
+      const y = parseStrict(obs?.yield ?? obs?.Yield ?? obs?.yieldKgPlot);
+      if (y !== null) return y;
+    }
+    return null;
+  }
+
+  const eff = safeJsonParse(trial.EfficacyDataJSON, []);
+  if (!eff.length) return null;
+  const sorted = eff.slice().sort((a, b) => {
+    const dA = parseFloat(a?.daa);
+    const dB = parseFloat(b?.daa);
+    if (!isNaN(dA) && !isNaN(dB) && dA !== dB) return dB - dA;
+    return String(b?.date || '').localeCompare(String(a?.date || ''));
+  });
+
+  const primaryField = getPrimaryObservationField(projectCategory);
+  for (const obs of sorted) {
+    if (!obs || typeof obs !== 'object') continue;
+    if (metricKey && obs[metricKey] !== undefined && obs[metricKey] !== null && obs[metricKey] !== '') {
+      const v = parseStrict(obs[metricKey]);
+      if (v !== null) return v;
+    }
+    if (!metricKey || metricKey === primaryField || metricKey === 'cover') {
+      const pv = parseStrict(getObservationPrimaryValue(projectCategory, obs));
+      if (pv !== null) return pv;
+    }
+  }
+  return null;
+}
+
+/**
+ * Single source of truth for experimental design metadata, true block/replication count,
+ * yield availability, and actually analyzed metric across Regulatory PDF, Word DOC,
+ * Project Dashboard, and AI Narrative.
+ */
+export function resolveProjectAnalysisContext(project, pTrials = [], pBlocks = [], projectCategory = 'herbicide', analysisResults = null) {
+  const cat = project?.Category || projectCategory || 'herbicide';
+  const catConfig = getCategoryConfig(cat);
+  const trials = Array.isArray(pTrials) ? pTrials : [];
+  const blocks = Array.isArray(pBlocks) ? pBlocks : [];
+
+  // 1. True replication / block count (prevents PotTrial printing "Blocks: 1" when DF Block = 4)
+  const uniqueReps = new Set(
+    trials.map(t => t?.Replication).filter(v => v !== undefined && v !== null && String(v).trim() !== '')
+  );
+  const anovaBlockCount = (analysisResults?.anova?.dfBlock !== undefined && analysisResults.anova.dfBlock >= 1)
+    ? analysisResults.anova.dfBlock + 1
+    : 0;
+  const potRows = Number(project?.PotRows) || 0;
+  const potBlocks = Number(project?.PotBlocks) || 0;
+
+  let effectiveBlocks = blocks.length;
+  if (effectiveBlocks <= 1) {
+    effectiveBlocks = Math.max(effectiveBlocks, uniqueReps.size, anovaBlockCount, potBlocks);
+    if (project?.Design === 'PotTrial' && effectiveBlocks <= 1 && potRows > 1) {
+      effectiveBlocks = potRows;
+    }
+  }
+  if (effectiveBlocks < 1 && trials.length > 0) effectiveBlocks = 1;
+
+  // 2. Yield presence check (strict — NEVER treats empty/missing yield as 0)
+  const hasYield = trials.some(t => extractLatestValidTrialMetric(t, 'yield', cat) !== null);
+
+  // 3. Determine actually analyzed metric key & human-readable label
+  const defaultObsKey = getPrimaryObservationField(cat);
+  const obsFields = Array.isArray(catConfig.observationFields) ? catConfig.observationFields : [];
+  const findFieldLabel = (key) => {
+    if (!key) return catConfig.primaryMetric?.label || 'Primary Metric';
+    if (key === 'yield' || key === 'Yield' || key === 'YieldValue') return 'Yield';
+    const match = obsFields.find(f => f.key === key);
+    if (match) return match.label;
+    if (key === 'plantHeight') return 'Plant Height (cm)';
+    return key;
+  };
+
+  let analyzedMetricKey = analysisResults?.metric || (hasYield ? 'yield' : defaultObsKey);
+  // If yield was not recorded, verify the metric actually has observations; otherwise fall back to first recorded numeric field
+  if (!hasYield && (analyzedMetricKey === 'yield' || analyzedMetricKey === 'Yield' || analyzedMetricKey === 'YieldValue')) {
+    analyzedMetricKey = defaultObsKey;
+  }
+  if (!hasYield && trials.length > 0) {
+    const hasPrimaryObs = trials.some(t => extractLatestValidTrialMetric(t, analyzedMetricKey, cat) !== null);
+    if (!hasPrimaryObs) {
+      const candidateField = obsFields.find(f =>
+        f.type !== 'text' && f.type !== 'select' &&
+        trials.some(t => extractLatestValidTrialMetric(t, f.key, cat) !== null)
+      );
+      if (candidateField) {
+        analyzedMetricKey = candidateField.key;
+      } else if (trials.some(t => extractLatestValidTrialMetric(t, 'plantHeight', cat) !== null)) {
+        analyzedMetricKey = 'plantHeight';
+      }
+    }
+  }
+
+  const analyzedMetricLabel = findFieldLabel(analyzedMetricKey);
+  const uniqueTreatments = [...new Set(trials.map(t => t?.FormulationName).filter(Boolean))];
+  const designLabel = project?.Design === 'PotTrial'
+    ? 'RCBD Pot Trial'
+    : (project?.Design || 'RCBD');
+
+  return {
+    category: cat,
+    hasYield,
+    analyzedMetricKey,
+    analyzedMetricLabel,
+    effectiveBlocks,
+    treatmentCount: uniqueTreatments.length,
+    treatments: uniqueTreatments,
+    experimentalUnits: trials.length,
+    designLabel
   };
 }

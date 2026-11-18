@@ -2,6 +2,9 @@ import { saveAs } from 'file-saver';
 import jsPDF from 'jspdf';
 import pptxgen from 'pptxgenjs';
 import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryValue } from './categoryConfig.js';
+import { formatDate, formatDateTime } from './dateUtils.js';
+import { resolveProjectAnalysisContext } from './analysisUtils.js';
+import { resolvePhotoSrc } from './photoUtils.js';
 
 // Helper utilities for DOCX exports
 async function toBase64(url, maxWidth = 600) {
@@ -29,19 +32,14 @@ async function toBase64(url, maxWidth = 600) {
 
 function photoSrc(p) {
   if (!p) return '';
-  return p.fileData || p.url || p.src || '';
+  return resolvePhotoSrc(p) || p.fileData || p.url || p.src || '';
 }
 
 function safeFormatDate(d) {
   if (!d) return 'N/A';
-  try {
-    const dt = new Date(d);
-    if (isNaN(dt.getTime())) return 'N/A';
-    const day = String(dt.getDate()).padStart(2, '0');
-    const month = String(dt.getMonth() + 1).padStart(2, '0');
-    const year = dt.getFullYear();
-    return `${day}-${month}-${year}`;
-  } catch { return 'N/A'; }
+  const formatted = formatDate(d);
+  if (!formatted || /NaN/i.test(formatted)) return 'N/A';
+  return formatted;
 }
 
 function getCleanPhotoLabel(photo, index, trialDaa) {
@@ -268,6 +266,7 @@ export async function exportRegulatoryReportAsDOC(project, state, options = {}) 
 
         const category = project.Category || 'herbicide';
         const catConfig = getCategoryConfig(category);
+        const ctx = resolveProjectAnalysisContext(project, projectTrials, blocks, category);
         const targetLabel = catConfig.targetLabel || 'Target';
         const targetField = catConfig.targetField || 'WeedSpecies';
         const targetVal = project[targetField] || project.TargetWeed || project.DiseaseTarget || project.PestTarget || project.NutrientType || project.BiostimulantType || 'N/A';
@@ -281,20 +280,24 @@ export async function exportRegulatoryReportAsDOC(project, state, options = {}) 
         let contentHtml = `
             <h1>REGULATORY COMPLIANCE REPORT</h1>
             <p class="center"><strong>${project.Name || 'Untitled Project'}</strong></p>
-            <p class="center">Generated: ${new Date().toLocaleDateString()}</p>
+            <p class="center">Trial / Project ID: ${project.ID || 'N/A'} | Generated: ${formatDateTime(new Date())}</p>
             <hr/>
 
             <h2>1. Executive Summary</h2>
-            <p>This report presents the findings of a Randomized Complete Block Design (RCBD) ${trialTypeLabel} trial 
-            conducted to evaluate ${treatments.length} treatment(s) for the control or evaluation of ${targetVal} 
+            <p>This report presents the findings of a ${ctx.designLabel} ${trialTypeLabel} trial 
+            conducted to evaluate ${treatments.length} treatment(s) across ${ctx.effectiveBlocks} replication(s)/block(s) (${ctx.experimentalUnits} experimental units) for ${targetVal} 
             in ${project.Crop || 'specified crop'}.</p>
+            ${!ctx.hasYield ? `<p style="background:#fffbeb;border:1px solid #f59e0b;padding:8px 12px;color:#92400e;"><strong>Yield Data Status:</strong> No harvest or yield observations have been recorded yet. Statistical summaries reflect recorded <strong>${ctx.analyzedMetricLabel}</strong> observations only; yield performance cannot yet be evaluated.</p>` : ''}
 
             <h2>2. Trial Design & Methodology</h2>
             <table class="meta-table">
-                <tr><td><strong>Design:</strong></td><td>Randomized Complete Block Design (RCBD)</td></tr>
-                <tr><td><strong>Replications:</strong></td><td>${blocks.length} blocks</td></tr>
+                <tr><td><strong>Trial / Project ID:</strong></td><td>${project.ID || 'N/A'}</td></tr>
+                <tr><td><strong>Design:</strong></td><td>${ctx.designLabel}</td></tr>
+                <tr><td><strong>Replications / Blocks:</strong></td><td>${ctx.effectiveBlocks}</td></tr>
+                <tr><td><strong>Experimental Units:</strong></td><td>${ctx.experimentalUnits}</td></tr>
                 <tr><td><strong>Treatments:</strong></td><td>${treatments.join(', ')}</td></tr>
-                <tr><td><strong>Metric:</strong></td><td>${project.Metric || catConfig.primaryMetric.label}</td></tr>
+                <tr><td><strong>Analyzed Parameter:</strong></td><td>${ctx.analyzedMetricLabel}</td></tr>
+                <tr><td><strong>Yield Status:</strong></td><td>${ctx.hasYield ? 'Recorded' : 'Not yet harvested'}</td></tr>
                 <tr><td><strong>${targetLabel}:</strong></td><td>${targetVal}</td></tr>
                 <tr><td><strong>Crop:</strong></td><td>${project.Crop || 'N/A'}</td></tr>
             </table>
@@ -322,7 +325,7 @@ export async function exportRegulatoryReportAsDOC(project, state, options = {}) 
 
             <h2>4. Statistical Analysis</h2>
             ${Object.keys(analysisResults).length > 0 ? `
-                <p>Analysis of Variance (ANOVA) was conducted on ${catConfig.primaryMetric.label} data. 
+                <p>Analysis of Variance (ANOVA) was conducted on ${ctx.analyzedMetricLabel} data. 
                 Key findings across observation periods:</p>
                 <table class="data-table">
                     <tr>
@@ -373,13 +376,19 @@ export async function exportRegulatoryReportAsDOC(project, state, options = {}) 
 
             ${await (async () => {
                 const allPhotos = [];
+                const seenKeys = new Set();
                 projectTrials.forEach(t => {
                     const pList = JSON.parse(t.PhotoURLs || '[]');
                     pList.forEach(p => {
+                        if (!p || p.deleted) return;
+                        const resolved = photoSrc(p);
+                        const dedupKey = String(p.driveId || p.id || resolved || '').trim();
+                        if (!resolved || (dedupKey && seenKeys.has(dedupKey))) return;
+                        if (dedupKey) seenKeys.add(dedupKey);
                         allPhotos.push({
                             ...p,
                             trialName: t.FormulationName || 'Untreated Control',
-                            rep: t.Replication || 'R1'
+                            rep: t.Replication || '1'
                         });
                     });
                 });

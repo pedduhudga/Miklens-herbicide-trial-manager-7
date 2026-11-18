@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import Chart from 'chart.js/auto';
 import { safeJsonParse } from '../utils/helpers.js';
-import { AnalysisEngine, validateEfficacyData } from '../utils/analysisUtils.js';
+import { AnalysisEngine, validateEfficacyData, resolveProjectAnalysisContext, extractLatestValidTrialMetric } from '../utils/analysisUtils.js';
 import PlotMap from '../components/PlotMap.jsx';
 import { formatDate, formatDateTime, toDatetimeLocal, calculateDAA } from '../utils/dateUtils.js';
 import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryValue, calculateEfficacy } from '../utils/categoryConfig.js';
@@ -1115,25 +1115,36 @@ export default function Projects({ onMenuClick }) {
       .sort((a, b) => b.value - a.value);
   }, [analysisResults]);
 
+  // ── Single source of truth for active project design, blocks, yield & analyzed parameter ─
+  const projectAnalysisContext = useMemo(() => {
+    if (!activeProject) return null;
+    const projectCategory = activeProject?.Category || activeCategory;
+    const trials = (state.trials || []).filter(t => String(t.ProjectID) === String(activeProject.ID));
+    const blocks = (state.blocks || []).filter(b => String(b.ProjectID) === String(activeProject.ID));
+    return resolveProjectAnalysisContext(activeProject, trials, blocks, projectCategory, analysisResults);
+  }, [activeProject, analysisResults, state.trials, state.blocks, activeCategory]);
+
   // ── Per-treatment stats (Mean, SD, CV, WCE) ────────────────────────────
   const treatmentStats = useMemo(() => {
     if (!activeProject || !analysisResults?.means) return [];
     const projectCategory = activeProject?.Category || activeCategory;
     const trials = (state.trials || []).filter(t => String(t.ProjectID) === String(activeProject.ID));
-    const utcName = Object.keys(analysisResults.means).find(n => /control|untreated|check/i.test(n));
+    const blocks = (state.blocks || []).filter(b => String(b.ProjectID) === String(activeProject.ID));
+    const ctx = resolveProjectAnalysisContext(activeProject, trials, blocks, projectCategory, analysisResults);
+    const meanKeys = Object.keys(analysisResults.means);
+    const utcName =
+      meanKeys.find(n => /untreated|utc|negative\s*control/i.test(n)) ||
+      meanKeys.find(n => /control/i.test(n)) ||
+      meanKeys.find(n => /check/i.test(n));
     const utcMean = utcName ? (analysisResults.means[utcName] ?? 0) : 0;
-    const primaryObsField = getPrimaryObservationField(projectCategory);
 
     return (analysisResults.grouping || []).map(g => {
       const trtTrials = trials.filter(t => t.FormulationName === g.name);
-      const repValues = trtTrials.map(t => {
-        const eff = safeJsonParse(t.EfficacyDataJSON, []);
-        if (!eff.length) return null;
-        const last = eff.sort((a, b) => b.daa - a.daa)[0];
-        return last ? Number(getObservationPrimaryValue(projectCategory, last) ?? 0) : null;
-      }).filter(v => v !== null);
+      const repValues = trtTrials
+        .map(t => extractLatestValidTrialMetric(t, ctx.analyzedMetricKey, projectCategory))
+        .filter(v => v !== null && Number.isFinite(v));
       const n = repValues.length;
-      const mean = n > 0 ? repValues.reduce((s, v) => s + v, 0) / n : 0;
+      const mean = n > 0 ? repValues.reduce((s, v) => s + v, 0) / n : (Number.isFinite(g.mean) ? g.mean : 0);
       const variance = n > 1 ? repValues.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / (n - 1) : 0;
       const sd = Math.sqrt(variance);
       const cv = mean > 0 ? (sd / mean) * 100 : 0;
@@ -1143,7 +1154,7 @@ export default function Projects({ onMenuClick }) {
       }
       return { name: g.name, n, mean, sd, cv, wce, grouping: g.grouping, repValues };
     });
-  }, [activeProject, analysisResults, state.trials, activeCategory]);
+  }, [activeProject, analysisResults, state.trials, state.blocks, activeCategory]);
 
   // ── Open project dashboard ──────────────────────────────────────────────
   const openProject = (id) => {
@@ -1163,11 +1174,11 @@ export default function Projects({ onMenuClick }) {
       const currentState = getAppState();
       const targetProj = currentState.projects?.find(p => String(p.ID) === String(activeProjectId));
       const projectCategory = targetProj?.Category || activeCategory;
+      const pTrials = (currentState.trials || []).filter(t => String(t.ProjectID) === String(activeProjectId));
+      const pBlocks = (currentState.blocks || []).filter(b => String(b.ProjectID) === String(activeProjectId));
+      const ctx = resolveProjectAnalysisContext(targetProj, pTrials, pBlocks, projectCategory);
       const engine = new AnalysisEngine(activeProjectId, currentState, getAppState);
-      // Detect primary metric: prefer yield if any trial has yield data, otherwise use category's primary observation field
-      const hasYield = (currentState.trials || []).filter(t => String(t.ProjectID) === String(activeProjectId)).some(t => parseFloat(t.Yield || t.YieldValue) > 0);
-      const primaryMetric = hasYield ? 'yield' : getPrimaryObservationField(projectCategory);
-      const results = await engine.analyze(primaryMetric, null, null, { postHoc: method, persist: true });
+      const results = await engine.analyze(ctx.analyzedMetricKey, null, null, { postHoc: method, persist: true });
       setAnalysisResults(results);
       return results;
     } catch (e) {
@@ -1235,7 +1246,7 @@ export default function Projects({ onMenuClick }) {
         data: {
           labels: perfChartData.map(d => d.label),
           datasets: [{
-            label: `Mean ${activeProject.Metric}`,
+            label: `Mean ${projectAnalysisContext?.analyzedMetricLabel || activeProject.Metric}`,
             data: perfChartData.map(d => d.value),
             backgroundColor: 'rgba(59, 130, 246, 0.7)',
             borderColor: '#3b82f6',
@@ -2950,20 +2961,33 @@ export default function Projects({ onMenuClick }) {
     if (!analysisResults) { toast('Run analysis first', 'error'); return; }
     setIsGeneratingNarrative(true);
     try {
+      const projectCategory = activeProject?.Category || activeCategory;
+      const pTrials = (state.trials || []).filter(t => String(t.ProjectID) === String(activeProject?.ID));
+      const pBlocks = (state.blocks || []).filter(b => String(b.ProjectID) === String(activeProject?.ID));
+      const ctx = resolveProjectAnalysisContext(activeProject, pTrials, pBlocks, projectCategory, analysisResults);
+
       const groupingText = (analysisResults.grouping || [])
         .map(g => `- ${g.name}: mean=${isFinite(g.mean) ? g.mean.toFixed(2) : 'N/A'} (Group ${g.grouping})`)
         .join('\n');
-      const prompt = `Act as an objective, unbiased agricultural research scientist. Analyze trial data for '${activeProject?.Name}'.
-Metric: ${activeProject?.Metric}
-Treatments & Means:
-${groupingText}
+      const yieldNotice = ctx.hasYield
+        ? 'Yield Status: Harvest yield observations are recorded in this dataset.'
+        : 'Yield Status: NOT YET HARVESTED (no yield observations recorded). Do NOT state or conclude that treatments showed zero yield, no measurable yield response, or no yield efficacy. Restrict conclusions strictly to the actually analyzed parameter below.';
+
+      const prompt = `Act as an objective, unbiased agricultural research scientist. Analyze trial data for '${activeProject?.Name}' (Trial ID: ${activeProject?.ID || 'N/A'}).
+Design: ${ctx.designLabel} (${ctx.treatmentCount} treatments × ${ctx.effectiveBlocks} replications/blocks = ${ctx.experimentalUnits} experimental units)
+Crop: ${activeProject?.Crop || 'N/A'}
+Actually Analyzed Parameter: ${ctx.analyzedMetricLabel}
+${yieldNotice}
+Treatments & Means (${ctx.analyzedMetricLabel}):
+${groupingText || '(No valid numeric observations recorded for this parameter yet.)'}
 Post-hoc: ${postHocMethod === 'tukey' ? 'Tukey HSD' : "Fisher's LSD"} (alpha=0.05)
 ANOVA P-Value: ${isFinite(analysisResults.anova?.pVal) ? analysisResults.anova.pVal.toFixed(5) : 'N/A'}
 
 SCIENTIFIC OBJECTIVITY & ZERO BIAS GUIDELINES:
-- Report findings purely based on the observed data and statistical letters.
+- Report findings purely based on the observed data, actual analyzed parameter (${ctx.analyzedMetricLabel}), and statistical letters.
+- NEVER fabricate or infer yield conclusions if yield was not recorded.
 - Do NOT assume experimental treatments must outperform untreated controls. In agricultural research, untreated controls may equal or outperform treatments (e.g. if treatments cause phytotoxicity, stress, osmotic burn, or yield penalty). If the Untreated Control performs better than or equal to experimental treatments, state this clearly without bias.
-- If treatment differences are not statistically significant (p >= 0.05), clearly declare that no significant treatment effect was detected.
+- If treatment differences are not statistically significant (p >= 0.05), clearly declare that no significant treatment effect was detected for ${ctx.analyzedMetricLabel}.
 Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
 
       const text = await generateTextWithAI(prompt, 'Act as an objective agricultural scientist.');
@@ -2975,16 +2999,15 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
     }
   };
 
-  const getTrialMetricValue = (t) => {
+  const getTrialMetricValue = (t, overrideMetricKey = null) => {
       const pCat = activeProject?.Category || t?.Category || activeCategory;
-      const pConf = getCategoryConfig(pCat);
-      if (pConf.primaryMetric.key === 'Yield' || pConf.primaryMetric.key === 'YieldValue') {
-        return parseFloat(t.Yield || t.YieldValue || 0);
+      if (overrideMetricKey) {
+        return extractLatestValidTrialMetric(t, overrideMetricKey, pCat);
       }
-      const eff = safeJsonParse(t.EfficacyDataJSON, []);
-      if (!eff.length) return 0;
-      const latest = eff.sort((a, b) => b.daa - a.daa)[0];
-      return latest ? Number(getObservationPrimaryValue(pCat, latest) ?? 0) : 0;
+      const pTrials = (state.trials || []).filter(x => String(x.ProjectID) === String(activeProject?.ID));
+      const pBlocks = (state.blocks || []).filter(b => String(b.ProjectID) === String(activeProject?.ID));
+      const ctx = resolveProjectAnalysisContext(activeProject, pTrials, pBlocks, pCat, analysisResults);
+      return extractLatestValidTrialMetric(t, ctx.analyzedMetricKey, pCat);
   };
 
   // ── Recalculate DAA for project trials ──────────────────────────────────
@@ -5405,34 +5428,67 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
     const projectConfig = getCategoryConfig(projectCategory);
     const pTrials = (state.trials || []).filter(t => String(t.ProjectID) === String(activeProject.ID));
     const pBlocks = (state.blocks || []).filter(b => String(b.ProjectID) === String(activeProject.ID));
+    const ctx = resolveProjectAnalysisContext(activeProject, pTrials, pBlocks, projectCategory, currentAnalysis);
+
+    // Compute per-treatment descriptive stats directly from currentAnalysis & validated plot observations
+    const meanKeys = Object.keys(currentAnalysis.means || {});
+    const utcName =
+      meanKeys.find(n => /untreated|utc|negative\s*control/i.test(n)) ||
+      meanKeys.find(n => /control/i.test(n)) ||
+      meanKeys.find(n => /check/i.test(n));
+    const utcMean = utcName ? (currentAnalysis.means[utcName] ?? 0) : 0;
+
+    const hasValidGrouping = Array.isArray(currentAnalysis.grouping) && currentAnalysis.grouping.length > 0;
     const cv = isFinite(currentAnalysis.anova?.cv) ? currentAnalysis.anova.cv.toFixed(1) : 'N/A';
-    const rows = (currentAnalysis.grouping || []).map(g => {
-      const ts = treatmentStats.find(x => x.name === g.name);
-      let metricCell = '-';
-      if (ts) {
+
+    const rows = hasValidGrouping ? currentAnalysis.grouping.map(g => {
+      const trtTrials = pTrials.filter(t => t.FormulationName === g.name);
+      const repValues = trtTrials
+        .map(t => extractLatestValidTrialMetric(t, ctx.analyzedMetricKey, projectCategory))
+        .filter(v => v !== null && Number.isFinite(v));
+      const n = repValues.length;
+      const mean = n > 0 ? repValues.reduce((s, v) => s + v, 0) / n : (isFinite(g.mean) ? g.mean : 0);
+      const variance = n > 1 ? repValues.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / (n - 1) : 0;
+      const sd = Math.sqrt(variance);
+      const trtCv = mean > 0 ? (sd / mean) * 100 : 0;
+
+      let metricCell = '—';
+      if (utcName && g.name === utcName) {
+        metricCell = 'Control (Ref)';
+      } else if (utcMean > 0) {
+        const diffPct = calculateEfficacy(projectCategory, mean, utcMean);
         if (projectCategory === 'nutrition' || projectCategory === 'biostimulant') {
-          metricCell = `${ts.wce > 0 ? '+' : ''}${ts.wce.toFixed(1)}%`;
+          metricCell = `${diffPct > 0 ? '+' : ''}${diffPct.toFixed(1)}%`;
         } else {
-          metricCell = `${ts.wce.toFixed(1)}${projectConfig.primaryMetric.unit || '%'}`;
+          metricCell = `${diffPct.toFixed(1)}${projectConfig.primaryMetric.unit || '%'}`;
         }
       }
+
       return `<tr><td style="padding:6px 10px;border:1px solid #ddd">${g.name}</td>
-        <td style="padding:6px 10px;border:1px solid #ddd;text-align:center">${isFinite(g.mean) ? g.mean.toFixed(2) : '-'}</td>
-        <td style="padding:6px 10px;border:1px solid #ddd;text-align:center">${ts ? ts.sd.toFixed(2) : '-'}</td>
-        <td style="padding:6px 10px;border:1px solid #ddd;text-align:center">${ts ? ts.cv.toFixed(1) : '-'}%</td>
+        <td style="padding:6px 10px;border:1px solid #ddd;text-align:center">${n}</td>
+        <td style="padding:6px 10px;border:1px solid #ddd;text-align:center">${isFinite(mean) ? mean.toFixed(2) : '-'}</td>
+        <td style="padding:6px 10px;border:1px solid #ddd;text-align:center">${n > 1 ? sd.toFixed(2) : '—'}</td>
+        <td style="padding:6px 10px;border:1px solid #ddd;text-align:center">${n > 1 && mean > 0 ? trtCv.toFixed(1) + '%' : '—'}</td>
         <td style="padding:6px 10px;border:1px solid #ddd;text-align:center">${metricCell}</td>
         <td style="padding:6px 10px;border:1px solid #ddd;text-align:center;font-weight:bold;color:#059669">${g.grouping}</td></tr>`;
-    }).join('');
+    }).join('') : '';
 
-    // Gather all photos from project trials
+    // Gather deduplicated, non-deleted photos from project trials
     const allPhotos = [];
+    const seenPhotoKeys = new Set();
     pTrials.forEach(t => {
       const pList = safeJsonParse(t.PhotoURLs, []);
       pList.forEach(p => {
+        if (!p || p.deleted) return;
+        const resolved = resolvePhotoSrc(p) || p.fileData || p.url || p.src || '';
+        const dedupKey = String(p.driveId || p.id || resolved || '').trim();
+        if (!resolved || (dedupKey && seenPhotoKeys.has(dedupKey))) return;
+        if (dedupKey) seenPhotoKeys.add(dedupKey);
         allPhotos.push({
           ...p,
+          resolvedSrc: resolved,
           trialName: t.FormulationName || 'Untreated Control',
-          rep: t.Replication || 'R1',
+          rep: t.Replication || '1',
           plotNum: t.PlotNumber || ''
         });
       });
@@ -5441,17 +5497,17 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
     let photosHtml = '';
     if (allPhotos.length > 0) {
       photosHtml = `
-        <h2>Photographic Evidence Log</h2>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+        <h2 style="page-break-before: always;">Photographic Evidence Log (${allPhotos.length} unique photos)</h2>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
           ${allPhotos.map((p, idx) => {
-            const label = p.label ? `[Plot ${p.plotNum} - ${p.trialName}] ${p.label}` : `Plot ${p.plotNum} - ${p.trialName} - Photo ${idx + 1}`;
-            const dateStr = p.date ? new Date(p.date).toLocaleDateString() : '';
-            const imgSrc = resolvePhotoSrc(p) || p.fileData || p.url || p.src || '';
+            const label = p.label ? `[Plot ${p.plotNum} · Rep ${p.rep} · ${p.trialName}] ${p.label}` : `Plot ${p.plotNum} · Rep ${p.rep} · ${p.trialName} — Photo ${idx + 1}`;
+            const rawDateFormatted = p.date ? (formatDateTime(p.date) !== 'N/A' ? formatDateTime(p.date) : formatDate(p.date)) : 'Not recorded';
+            const dateStr = rawDateFormatted && !/NaN/i.test(rawDateFormatted) ? rawDateFormatted : 'Not recorded';
             return `
-              <div style="border: 1px solid #ddd; padding: 10px; border-radius: 8px; text-align: center; background: #fff; page-break-inside: avoid;">
-                <p style="font-size: 11px; font-weight: bold; margin: 5px 0; color: #1e293b;">${label}</p>
+              <div style="border: 1px solid #ddd; padding: 10px; border-radius: 8px; text-align: center; background: #fff; page-break-inside: avoid; break-inside: avoid;">
+                <p style="font-size: 11px; font-weight: bold; margin: 4px 0; color: #1e293b;">${label}</p>
                 <p style="font-size: 9px; color: #64748b; margin: 0 0 8px 0;">Captured: ${dateStr}</p>
-                ${imgSrc ? `<img src="${imgSrc}" style="max-width: 100%; max-height: 200px; border-radius: 4px; display: block; margin: 0 auto;" />` : ''}
+                <img src="${p.resolvedSrc}" crossorigin="anonymous" style="width: 100%; height: 190px; object-fit: contain; background: #f8fafc; border-radius: 4px; display: block; margin: 0 auto;" />
               </div>
             `;
           }).join('')}
@@ -5459,29 +5515,77 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       `;
     }
 
-    const metricHeaderLabel = projectConfig.primaryMetric.label || projectConfig.primaryMetric.key || 'Efficacy';
-    const metricHeaderUnit = projectConfig.primaryMetric.unit ? ` (${projectConfig.primaryMetric.unit})` : (projectCategory === 'nutrition' || projectCategory === 'biostimulant' ? ' (%)' : '%');
+    const diffColHeader = (projectCategory === 'nutrition' || projectCategory === 'biostimulant')
+      ? '% vs Control'
+      : `${projectConfig.primaryMetric.label || 'Efficacy'} (${projectConfig.primaryMetric.unit || '%'})`;
 
-    const html = `<!DOCTYPE html><html><head><title>Regulatory Report - ${activeProject.Name}</title>
-<style>body{font-family:Arial,sans-serif;margin:40px;color:#1e293b}h1{color:#065f46}h2{color:#334155;margin-top:24px;font-size:14px;text-transform:uppercase;letter-spacing:1px}table{border-collapse:collapse;width:100%}th{background:#f1f5f9;padding:8px 10px;border:1px solid #ddd;text-align:left;font-size:11px;text-transform:uppercase}td{font-size:12px}.meta{display:grid;grid-template-columns:1fr 1fr;gap:8px 24px;font-size:12px;color:#475569}.meta span{font-weight:600;color:#1e293b}.sig{background:#dcfce7;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600;color:#166534}</style></head>
-<body><h1>${activeProject.Design === 'PotTrial' ? 'Pot Trial' : 'RCBD Trial'} Report: ${activeProject.Name}</h1>
-<div class="meta"><div>Location: <span>${activeProject.Location || 'N/A'}</span></div><div>Investigator: <span>${activeProject.Investigator || 'N/A'}</span></div>
-<div>Crop: <span>${activeProject.Crop || 'N/A'}</span></div><div>Metric: <span>${activeProject.Metric || metricHeaderLabel}</span></div>
-<div>Blocks: <span>${pBlocks.length}</span></div><div>Plots: <span>${pTrials.length}</span></div>
-<div>Start Date: <span>${formatDateTime(activeProject.StartDate) || 'N/A'}</span></div><div>Generated: <span>${formatDateTime(new Date())}</span></div></div>
-<h2>Treatment Means & Statistical Grouping</h2>
-<table><thead><tr><th>Treatment</th><th>Mean</th><th>SD</th><th>CV%</th><th>${metricHeaderLabel}${metricHeaderUnit}</th><th>Group (${postHocMethod === 'tukey' ? 'Tukey' : 'LSD'})</th></tr></thead><tbody>${rows}</tbody></table>
-<p style="font-size:11px;color:#64748b;margin-top:6px">Means sharing the same letter are not significantly different (${postHocMethod === 'tukey' ? 'Tukey HSD' : "Fisher's LSD"}, α=0.05). ${postHocMethod === 'tukey' ? 'HSD' : 'LSD'} (0.05): ${isFinite(currentAnalysis.postHoc?.value) ? currentAnalysis.postHoc.value.toFixed(2) : 'N/A'}</p>
-<h2>ANOVA Table</h2>
-<table><thead><tr><th>Source</th><th>DF</th><th>SS</th><th>MS</th><th>F</th><th>P</th><th>Sig</th></tr></thead><tbody>
+    const yieldStatusBanner = !ctx.hasYield
+      ? `<div style="margin:14px 0;padding:10px 14px;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;font-size:12px;color:#92400e;">
+           <strong>Yield Data Status:</strong> No harvest or yield observations have been recorded for this trial yet. The statistical analysis below evaluates recorded <strong>${ctx.analyzedMetricLabel}</strong> data only; yield performance and yield efficacy cannot yet be evaluated.
+         </div>`
+      : '';
+
+    const statsSectionHtml = hasValidGrouping ? `
+<h2>Treatment Means & Statistical Grouping — ${ctx.analyzedMetricLabel}</h2>
+<table><thead><tr><th>Treatment</th><th style="text-align:center">n</th><th style="text-align:center">Mean</th><th style="text-align:center">SD</th><th style="text-align:center">CV%</th><th style="text-align:center">${diffColHeader}</th><th style="text-align:center">Group (${postHocMethod === 'tukey' ? 'Tukey' : 'LSD'})</th></tr></thead><tbody>${rows}</tbody></table>
+<p style="font-size:11px;color:#64748b;margin-top:6px">Means sharing the same letter are not significantly different (${postHocMethod === 'tukey' ? 'Tukey HSD' : "Fisher's LSD"}, α=0.05). ${postHocMethod === 'tukey' ? 'HSD' : 'LSD'} (0.05): ${isFinite(currentAnalysis.postHoc?.value) ? currentAnalysis.postHoc.value.toFixed(2) : 'N/A'}. Independent plot-level values (1 value per experimental unit on the latest valid assessment date).</p>
+<h2>ANOVA Table (${ctx.analyzedMetricLabel})</h2>
+<table><thead><tr><th>Source</th><th style="text-align:right">DF</th><th style="text-align:right">SS</th><th style="text-align:right">MS</th><th style="text-align:right">F</th><th style="text-align:right">P</th><th style="text-align:center">Sig</th></tr></thead><tbody>
 <tr><td style="padding:6px 10px;border:1px solid #ddd">Treatment</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${currentAnalysis.anova?.dfTreat ?? '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${isFinite(currentAnalysis.anova?.ssTreat) ? currentAnalysis.anova.ssTreat.toFixed(2) : '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${isFinite(currentAnalysis.anova?.msTreat) ? currentAnalysis.anova.msTreat.toFixed(2) : '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right;font-weight:bold">${isFinite(currentAnalysis.anova?.fVal) ? currentAnalysis.anova.fVal.toFixed(2) : '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${isFinite(currentAnalysis.anova?.pVal) ? currentAnalysis.anova.pVal.toFixed(4) : '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:center" class="sig">${sigStars(currentAnalysis.anova?.pVal)}</td></tr>
-<tr><td style="padding:6px 10px;border:1px solid #ddd">Block</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${currentAnalysis.anova?.dfBlock ?? '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${isFinite(currentAnalysis.anova?.ssBlock) ? currentAnalysis.anova.ssBlock.toFixed(2) : '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${isFinite(currentAnalysis.anova?.msBlock) ? currentAnalysis.anova.msBlock.toFixed(2) : '-'}</td><td style="padding:6px 10px;border:1px solid #ddd"></td><td style="padding:6px 10px;border:1px solid #ddd"></td><td style="padding:6px 10px;border:1px solid #ddd"></td></tr>
+${currentAnalysis.anova?.dfBlock > 0 ? `<tr><td style="padding:6px 10px;border:1px solid #ddd">Block (Replications)</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${currentAnalysis.anova.dfBlock}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${isFinite(currentAnalysis.anova?.ssBlock) ? currentAnalysis.anova.ssBlock.toFixed(2) : '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${isFinite(currentAnalysis.anova?.msBlock) ? currentAnalysis.anova.msBlock.toFixed(2) : '-'}</td><td style="padding:6px 10px;border:1px solid #ddd"></td><td style="padding:6px 10px;border:1px solid #ddd"></td><td style="padding:6px 10px;border:1px solid #ddd"></td></tr>` : ''}
 <tr><td style="padding:6px 10px;border:1px solid #ddd">Error</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${currentAnalysis.anova?.dfError ?? '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${isFinite(currentAnalysis.anova?.ssError) ? currentAnalysis.anova.ssError.toFixed(2) : '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${isFinite(currentAnalysis.anova?.msError) ? currentAnalysis.anova.msError.toFixed(2) : '-'}</td><td style="padding:6px 10px;border:1px solid #ddd"></td><td style="padding:6px 10px;border:1px solid #ddd"></td><td style="padding:6px 10px;border:1px solid #ddd"></td></tr>
 <tr style="font-weight:bold;background:#f8fafc"><td style="padding:6px 10px;border:1px solid #ddd">Total</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${currentAnalysis.anova?.dfTotal ?? '-'}</td><td style="padding:6px 10px;border:1px solid #ddd;text-align:right">${isFinite(currentAnalysis.anova?.ssTotal) ? currentAnalysis.anova.ssTotal.toFixed(2) : '-'}</td><td colspan="4" style="padding:6px 10px;border:1px solid #ddd"></td></tr>
 </tbody></table>
-<p style="font-size:11px;color:#64748b;margin-top:6px">CV: ${cv}% · Design: ${currentAnalysis.balance?.isBalanced ? 'Balanced' : 'Unbalanced'} ${activeProject.Design || 'RCBD'}</p>
+<p style="font-size:11px;color:#64748b;margin-top:6px">CV: ${cv}% · Design: ${currentAnalysis.balance?.isBalanced ? 'Balanced' : 'Unbalanced'} ${ctx.designLabel} (${ctx.treatmentCount} treatments × ${ctx.effectiveBlocks} replications = ${ctx.experimentalUnits} experimental units)</p>
+` : `<div style="margin:16px 0;padding:14px;background:#fef2f2;border:1px solid #ef4444;border-radius:6px;font-size:12px;color:#991b1b;">
+       <strong>No Valid Quantitative Observations Found:</strong> No numeric observations have been recorded for <strong>${ctx.analyzedMetricLabel}</strong> yet. Statistical ANOVA and treatment comparisons are omitted until valid measurements are entered.
+     </div>`;
+
+    const html = `<!DOCTYPE html><html><head><title>Regulatory Report - ${activeProject.Name}</title>
+<style>body{font-family:Arial,sans-serif;margin:40px;color:#1e293b}h1{color:#065f46;margin-bottom:6px}h2{color:#334155;margin-top:24px;font-size:14px;text-transform:uppercase;letter-spacing:1px}table{border-collapse:collapse;width:100%}th{background:#f1f5f9;padding:8px 10px;border:1px solid #ddd;text-align:left;font-size:11px;text-transform:uppercase}td{font-size:12px}.meta{display:grid;grid-template-columns:1fr 1fr;gap:8px 24px;font-size:12px;color:#475569;background:#f8fafc;padding:12px 16px;border-radius:8px;border:1px solid #e2e8f0}.meta span{font-weight:600;color:#1e293b}.sig{background:#dcfce7;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600;color:#166534}@media print{img{page-break-inside:avoid;break-inside:avoid}}</style></head>
+<body><h1>${ctx.designLabel} Regulatory Report: ${activeProject.Name}</h1>
+<div class="meta">
+  <div>Trial / Project ID: <span>${activeProject.ID || 'N/A'}</span></div><div>Design: <span>${ctx.designLabel}</span></div>
+  <div>Location: <span>${activeProject.Location || 'N/A'}</span></div><div>Investigator: <span>${activeProject.Investigator || 'N/A'}</span></div>
+  <div>Crop: <span>${activeProject.Crop || 'N/A'}</span></div><div>Analyzed Parameter: <span>${ctx.analyzedMetricLabel}</span></div>
+  <div>Treatments: <span>${ctx.treatmentCount}</span></div><div>Replications / Blocks: <span>${ctx.effectiveBlocks}</span></div>
+  <div>Experimental Units (Plots/Pots): <span>${ctx.experimentalUnits}</span></div><div>Yield Data Status: <span>${ctx.hasYield ? 'Recorded' : 'Not yet harvested'}</span></div>
+  <div>Start Date: <span>${formatDateTime(activeProject.StartDate) !== 'N/A' ? formatDateTime(activeProject.StartDate) : (formatDate(activeProject.StartDate) || 'N/A')}</span></div><div>Generated: <span>${formatDateTime(new Date())}</span></div>
+</div>
+${yieldStatusBanner}
+${statsSectionHtml}
 ${narrative ? `<h2>Agronomist Narrative</h2><p style="font-size:13px;line-height:1.6;white-space:pre-wrap">${narrative}</p>` : ''}
 ${photosHtml}
+<script>
+(function() {
+  var printed = false;
+  function doPrint() {
+    if (printed) return;
+    printed = true;
+    setTimeout(function() { try { window.print(); } catch (e) {} }, 150);
+  }
+  window.addEventListener('load', function() {
+    var imgs = Array.prototype.slice.call(document.images || []);
+    if (imgs.length === 0) { doPrint(); return; }
+    var remaining = imgs.length;
+    var safety = setTimeout(doPrint, 8000);
+    function done() {
+      remaining--;
+      if (remaining <= 0) { clearTimeout(safety); doPrint(); }
+    }
+    imgs.forEach(function(img) {
+      if (img.complete) {
+        if (img.decode) { img.decode().then(done, done); } else { done(); }
+      } else {
+        img.addEventListener('load', function() {
+          if (img.decode) { img.decode().then(done, done); } else { done(); }
+        }, { once: true });
+        img.addEventListener('error', done, { once: true });
+      }
+    });
+  });
+})();
+</script>
 </body></html>`;
     const w = window.open('', '_blank');
     if (!w) {
@@ -5491,10 +5595,7 @@ ${photosHtml}
     try {
       w.document.write(html);
       w.document.close();
-      setTimeout(() => {
-        try { w.print(); } catch (_) {}
-      }, 500);
-      toast('Regulatory report opened for printing');
+      toast('Regulatory report opened — waiting for all photos to load before printing');
     } catch (err) {
       toast('Could not open print window: ' + err.message, 'error');
     }
@@ -5510,35 +5611,40 @@ ${photosHtml}
   const handleExportR = () => {
     if (!activeProject) return;
     const projectCategory = activeProject?.Category || activeCategory;
-    const projectConfig = getCategoryConfig(projectCategory);
-    const key = projectConfig.primaryMetric.key;
     const trials = (state.trials || []).filter(t => String(t.ProjectID) === String(activeProject.ID));
+    const blocks = (state.blocks || []).filter(b => String(b.ProjectID) === String(activeProject.ID));
+    const ctx = resolveProjectAnalysisContext(activeProject, trials, blocks, projectCategory, analysisResults);
+    const key = ctx.analyzedMetricKey;
     exportCSV(`${activeProject.Name}_R.csv`, trials.map(t => {
-      const val = getTrialMetricValue(t);
+      const val = getTrialMetricValue(t, key);
       return {
         Treatment: t.FormulationName,
         Block: t.Replication || t.BlockID || '1',
-        [key]: val,
-        Result: t.Result || val
+        [key]: val !== null && Number.isFinite(val) ? val : 'NA',
+        Result: t.Result || (val !== null && Number.isFinite(val) ? val : 'NA')
       };
     }), ['Treatment', 'Block', key, 'Result']);
-    toast('Exported for R');
+    toast(`Exported ${ctx.analyzedMetricLabel} for R`);
   };
 
   const handleExportSAS = () => {
     if (!activeProject) return;
     const projectCategory = activeProject?.Category || activeCategory;
-    const projectConfig = getCategoryConfig(projectCategory);
-    const key = projectConfig.primaryMetric.key;
-    const keyLower = key.toLowerCase().replace(/[^a-z0-9]/g, '');
     const trials = (state.trials || []).filter(t => String(t.ProjectID) === String(activeProject.ID));
+    const blocks = (state.blocks || []).filter(b => String(b.ProjectID) === String(activeProject.ID));
+    const ctx = resolveProjectAnalysisContext(activeProject, trials, blocks, projectCategory, analysisResults);
+    const key = ctx.analyzedMetricKey;
+    const keyLower = key.toLowerCase().replace(/[^a-z0-9]/g, '');
     const lines = ['data rcbd;', `input trt $ block ${keyLower};`, 'datalines;',
-      ...trials.map(t => `${(t.FormulationName || 'T').replace(/\s/g, '_')} ${t.Replication || t.BlockID || 1} ${getTrialMetricValue(t)}`),
+      ...trials.map(t => {
+        const val = getTrialMetricValue(t, key);
+        return `${(t.FormulationName || 'T').replace(/\s/g, '_')} ${t.Replication || t.BlockID || 1} ${val !== null && Number.isFinite(val) ? val : '.'}`;
+      }),
       ';', 'run;', '', 'proc glm data=rcbd;', '  class trt block;', `  model ${keyLower}=block trt;`, '  lsmeans trt / pdiff adjust=tukey;', 'run;'
     ];
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/plain' }));
     a.download = `${activeProject.Name}_SAS.sas`; a.click();
-    toast('Exported for SAS');
+    toast(`Exported ${ctx.analyzedMetricLabel} for SAS`);
   };
 
   const handleExportBundle = async () => {
@@ -5953,7 +6059,7 @@ ${photosHtml}
                   </button>
                   <div>
                     <h1 className="text-2xl font-bold text-slate-800">Scientific Trial Report</h1>
-                    <p className="text-xs text-slate-500">{activeProject.Name} — Metric: {activeProject.Metric}</p>
+                    <p className="text-xs text-slate-500">{activeProject.Name} (ID: {activeProject.ID}) — Analyzed Parameter: {projectAnalysisContext?.analyzedMetricLabel || activeProject.Metric}</p>
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2.5">
@@ -6815,7 +6921,7 @@ ${photosHtml}
                       {activeProject.Status || 'Draft'}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-500 mt-0.5">Metric: {activeProject.Metric} · {projectBlocks.length} blocks · {projectTrials.length} plots · {treatments.length} treatments</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Analyzed: {projectAnalysisContext?.analyzedMetricLabel || activeProject.Metric} · {projectAnalysisContext?.effectiveBlocks ?? projectBlocks.length} reps/blocks · {projectTrials.length} plots · {treatments.length} treatments</p>
                 </div>
                 <button
                   onClick={() => setBatchObsModalProject({ project: activeProject, trials: projectTrials })}
@@ -7517,7 +7623,8 @@ ${photosHtml}
                   <h3 className="font-bold text-slate-800 mb-4 text-sm">Project Scope</h3>
                   <ul className="space-y-2.5 text-sm">
                     {[
-                      ['Blocks', projectBlocks.length],
+                      ['Trial ID', activeProject.ID || 'N/A'],
+                      ['Replications / Blocks', projectAnalysisContext?.effectiveBlocks ?? projectBlocks.length],
                       ['Treatments', treatments.length],
                       ['Total Plots', projectTrials.length],
                       ['Crop', activeProject.Crop || 'N/A'],
@@ -7527,7 +7634,8 @@ ${photosHtml}
                       activeProject.WeatherWind ? ['Wind Speed', `${activeProject.WeatherWind} km/h`] : null,
                       activeProject.WeatherRain ? ['Rain', `${activeProject.WeatherRain} mm`] : null,
                       ['Investigator', activeProject.Investigator || 'N/A'],
-                      ['Metric', activeProject.Metric],
+                      ['Analyzed Parameter', projectAnalysisContext?.analyzedMetricLabel || activeProject.Metric],
+                      ['Yield Status', projectAnalysisContext?.hasYield ? 'Recorded' : 'Not yet harvested'],
                     ].filter(Boolean).map(([label, val]) => (
                       <li key={label} className="flex justify-between border-b border-slate-50 pb-2 last:border-0 last:pb-0">
                         <span className="text-slate-500">{label}</span>

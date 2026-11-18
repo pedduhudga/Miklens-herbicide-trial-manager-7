@@ -1,6 +1,9 @@
 if (typeof Date !== 'undefined') {
     const originalToLocaleDateString = Date.prototype.toLocaleDateString;
     Date.prototype.toLocaleDateString = function(locale, options) {
+        if (isNaN(this.getTime())) {
+            return 'N/A';
+        }
         if (options && (options.month || options.weekday || options.year)) {
             return originalToLocaleDateString.call(this, locale, options);
         }
@@ -13,7 +16,18 @@ if (typeof Date !== 'undefined') {
 
 export function parseCustomDate(str) {
     if (!str) return null;
-    if (str instanceof Date) return str;
+    if (str instanceof Date) return isNaN(str.getTime()) ? null : str;
+    // Support Firestore Timestamp objects ({ seconds, nanoseconds } or .toDate())
+    if (typeof str === 'object') {
+        if (typeof str.toDate === 'function') {
+            const d = str.toDate();
+            return d && !isNaN(d.getTime()) ? d : null;
+        }
+        if (typeof str.seconds === 'number') {
+            const d = new Date(str.seconds * 1000);
+            return isNaN(d.getTime()) ? null : d;
+        }
+    }
     const s = String(str).trim();
     const monthMap = { jan:0, feb:1, mar:2, apr:3, may:4, jun:5, jul:6, aug:7, sep:8, oct:9, nov:10, dec:11 };
     
@@ -148,7 +162,10 @@ export function formatDateTime(dateInput) {
         return formatDate(dateInput);
     }
     const d = parseCustomDate(dateInput);
-    if (!d) return String(dateInput);
+    if (!d || isNaN(d.getTime())) {
+        const s = String(dateInput).trim();
+        return /nan|invalid/i.test(s) ? 'N/A' : s;
+    }
 
     const day = String(d.getDate()).padStart(2, '0');
     const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -167,7 +184,10 @@ export function formatDateTime(dateInput) {
 export function formatDate(dateInput) {
     if (!dateInput) return '';
     const d = parseCustomDate(dateInput);
-    if (!d) return String(dateInput);
+    if (!d || isNaN(d.getTime())) {
+        const s = String(dateInput).trim();
+        return /nan|invalid/i.test(s) ? 'N/A' : s;
+    }
 
     const day = String(d.getDate()).padStart(2, '0');
     const month = String(d.getMonth() + 1).padStart(2, '0');

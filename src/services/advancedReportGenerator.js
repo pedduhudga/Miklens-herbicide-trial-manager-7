@@ -97,6 +97,7 @@ CRITICAL INSTRUCTION:
 12. Do NOT use the word "variance" when describing percentage differences between treatment means (e.g. do not write "20% numerical variance"). Instead, use "higher/lower numerical mean" (e.g. "20% higher numerical mean").
 13. Avoid using terms like "colorimetric indices". Instead, use "visual and physiological observations" (such as leaf color, SPAD, vigor, plant height).
 14. ZERO BIAS TOWARDS EXPERIMENTAL TREATMENTS: Do NOT presume that experimental treatments must outperform untreated controls. In agricultural trials, untreated controls may equal or outperform treatments (e.g. where treatments cause phytotoxicity, fertilizer burn, vegetative stunting, or delay flowering/fruiting). If untreated controls yield higher or have superior vigor/metrics, report this finding clearly, objectively, and without bias.
+15. STRICT YIELD & MISSING DATA INTEGRITY: If Yield / Harvest observations were NOT recorded in this dataset, NEVER state that treatments showed "zero yield", "no measurable yield response", or "no agronomic efficacy on yield". Explicitly state that yield has not yet been harvested/measured and restrict conclusions strictly to the parameters actually recorded.
 Do NOT use markdown headers or lists. Keep it strictly scientific, professional, and factual.`;
 
     const text = await generateTextWithAI(prompt, 'You are a professional agronomist.');
@@ -162,6 +163,7 @@ CRITICAL INSTRUCTION:
 12. Do NOT use the word "variance" when describing percentage differences between treatment means (e.g. do not write "20% numerical variance"). Instead, use "higher/lower numerical mean" (e.g. "20% higher numerical mean").
 13. Avoid using terms like "colorimetric indices". Instead, use "visual and physiological observations" (such as leaf color, SPAD, vigor, plant height).
 14. ZERO BIAS TOWARDS EXPERIMENTAL TREATMENTS: Do NOT presume that experimental treatments must outperform untreated controls. In agricultural trials, untreated controls may equal or outperform treatments (e.g. where treatments cause phytotoxicity, fertilizer burn, vegetative stunting, or delay flowering/fruiting). If untreated controls yield higher or have superior vigor/metrics, report this finding clearly, objectively, and without bias.
+15. STRICT YIELD & MISSING DATA INTEGRITY: If Yield / Harvest observations were NOT recorded in this dataset, NEVER state that treatments showed "zero yield", "no measurable yield response", or "no agronomic efficacy on yield". Explicitly state that yield has not yet been harvested/measured and restrict conclusions strictly to the parameters actually recorded.
 Do NOT use markdown headers or lists. Keep it strictly scientific, professional, and factual.`;
 
     const text = await generateTextWithAI(prompt, 'You are a senior agricultural scientist.');
@@ -331,13 +333,189 @@ function isReductionMetric(key, category) {
   return false;
 }
 
-// Perform ANOVA (RCB or CRD) on local data
-function calculateAnovaRCB(data, metricKey, category = 'nutrition', design = 'RCBD') {
+// Helper: Normalize date string for chronological grouping
+export function normalizeReportDateKey(val) {
+  if (!val) return '';
+  const s = String(val).trim();
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const dmy = s.match(/^(\d{2})[-/](\d{2})[-/](\d{4})/);
+  if (dmy) return `${dmy[3]}-${dmy[2]}-${dmy[1]}`;
+  const parsed = new Date(s);
+  if (!isNaN(parsed.getTime())) {
+    return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`;
+  }
+  return '';
+}
+
+/**
+ * Compute TRUE cell-level parameter data completeness across observation rows × active fields.
+ * Never hardcodes 100% or counts only row presence.
+ */
+export function computeDataCompleteness(observations = [], activeFields = []) {
+  const rows = Array.isArray(observations) ? observations : [];
+  const fields = (Array.isArray(activeFields) ? activeFields : []).filter(
+    f => f && f.key && !['nue', 'audpc', 'rootToShootRatio'].includes(f.key)
+  );
+  const totalRows = rows.length;
+  const totalExpectedCells = totalRows * fields.length;
+
+  let validCells = 0;
+  let parametersWithMissing = 0;
+  const perParameter = {};
+
+  fields.forEach(f => {
+    let validCount = 0;
+    rows.forEach(obs => {
+      if (!obs) return;
+      if (f.key.toLowerCase().replace(/\s/g, '') === 'plantheight' && Array.isArray(obs.potHeights)) {
+        const validHeights = obs.potHeights.map(h => parseFloat(h)).filter(v => Number.isFinite(v));
+        if (validHeights.length > 0) {
+          validCount++;
+          return;
+        }
+      }
+      const raw = obs[f.key];
+      if (raw === undefined || raw === null || raw === '') return;
+      if (f.key === 'flowerStage' || f.key === 'fruitHealthNote') {
+        if (String(raw).trim().length > 0) validCount++;
+        return;
+      }
+      const num = parseFloat(raw);
+      if (!Number.isFinite(num)) return;
+      if (f.key === 'fruitHealthScore' && num <= 0) return;
+      validCount++;
+    });
+
+    const missingCount = Math.max(0, totalRows - validCount);
+    if (missingCount > 0) parametersWithMissing++;
+    validCells += validCount;
+    perParameter[f.key] = {
+      key: f.key,
+      label: f.label || f.key,
+      validCount,
+      missingCount,
+      totalRows,
+      completenessPct: totalRows > 0 ? parseFloat(((validCount / totalRows) * 100).toFixed(1)) : 0
+    };
+  });
+
+  const missingCells = Math.max(0, totalExpectedCells - validCells);
+  const completenessPct = totalExpectedCells > 0
+    ? parseFloat(((validCells / totalExpectedCells) * 100).toFixed(1))
+    : 0;
+
+  return {
+    totalRows,
+    parameterCount: fields.length,
+    totalExpectedCells,
+    validCells,
+    missingCells,
+    parametersWithMissing,
+    completenessPct,
+    perParameter
+  };
+}
+
+function extractNumericMetricValue(obs, metricKey) {
+  if (!obs || typeof obs !== 'object') return NaN;
+  const raw = obs[metricKey];
+  if (raw !== undefined && raw !== null && raw !== '') {
+    const parsed = parseFloat(raw);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  if (String(metricKey).toLowerCase().replace(/\s/g, '') === 'plantheight' && Array.isArray(obs.potHeights)) {
+    const valid = obs.potHeights.map(h => parseFloat(h)).filter(v => Number.isFinite(v));
+    if (valid.length > 0) return valid.reduce((a, b) => a + b, 0) / valid.length;
+  }
+  return NaN;
+}
+
+/**
+ * Prevent statistical pseudoreplication:
+ * Repeated measurements of the same experimental plots across multiple assessment dates
+ * MUST NOT be pooled as independent replicates in a single RCBD/CRD ANOVA.
+ *
+ * Selects the latest valid assessment date (with >= 2 treatments) and aggregates any
+ * multiple sub-samples per experimental unit (treatment × replication) to 1 value per unit.
+ */
+export function selectIndependentAssessmentSlice(data, metricKey, options = {}) {
+  const validRows = (data || []).filter(obs => Number.isFinite(extractNumericMetricValue(obs, metricKey)));
+
+  if (validRows.length === 0) {
+    return { sliceData: [], analyzedDate: null, analyzedDaa: null, totalDatesObserved: 0, isRepeatedMeasuresSliced: false };
+  }
+
+  // Group valid rows by assessment date (or DAA fallback if date absent)
+  const dateBuckets = new Map();
+  validRows.forEach(obs => {
+    const normDate = normalizeReportDateKey(obs.date);
+    const daaNum = obs.daa !== undefined && obs.daa !== null && obs.daa !== '' ? Number(obs.daa) : null;
+    const bucketKey = normDate || (daaNum !== null && !isNaN(daaNum) ? `DAA:${daaNum}` : 'SINGLE');
+    if (!dateBuckets.has(bucketKey)) {
+      dateBuckets.set(bucketKey, { key: bucketKey, normDate, daa: daaNum, rows: [], treatments: new Set() });
+    }
+    const b = dateBuckets.get(bucketKey);
+    b.rows.push(obs);
+    b.treatments.add(parseInt(obs.treatmentNumber || obs.treatment || obs.Treatment || 1));
+    if (b.daa === null && daaNum !== null && !isNaN(daaNum)) b.daa = daaNum;
+  });
+
+  const totalDatesObserved = dateBuckets.size;
+  let chosenBucket = null;
+
+  if (options.targetDateKey && dateBuckets.has(options.targetDateKey)) {
+    chosenBucket = dateBuckets.get(options.targetDateKey);
+  } else {
+    // Sort newest date / highest DAA first, prefer latest date with >= 2 treatments
+    const sortedBuckets = Array.from(dateBuckets.values()).sort((a, b) => {
+      if (a.normDate && b.normDate && a.normDate !== b.normDate) return b.normDate.localeCompare(a.normDate);
+      return (b.daa ?? -999) - (a.daa ?? -999);
+    });
+    chosenBucket = sortedBuckets.find(b => b.treatments.size >= 2) || sortedBuckets[0];
+  }
+
+  // Collapse any duplicate sub-samples per experimental unit (treatment × replication) on that date
+  const unitMap = new Map();
+  chosenBucket.rows.forEach(obs => {
+    const trt = parseInt(obs.treatmentNumber || obs.treatment || obs.Treatment || 1);
+    const rep = parseInt(obs.replication || obs.rep || obs.Replication || 1);
+    const unitKey = `${trt}_${rep}`;
+    if (!unitMap.has(unitKey)) {
+      unitMap.set(unitKey, { obs, vals: [] });
+    }
+    unitMap.get(unitKey).vals.push(extractNumericMetricValue(obs, metricKey));
+  });
+
+  const sliceData = Array.from(unitMap.values()).map(({ obs, vals }) => ({
+    ...obs,
+    [metricKey]: vals.reduce((s, v) => s + v, 0) / vals.length
+  }));
+
+  return {
+    sliceData,
+    analyzedDate: chosenBucket.normDate || chosenBucket.rows[0]?.date || null,
+    analyzedDaa: chosenBucket.daa,
+    totalDatesObserved,
+    isRepeatedMeasuresSliced: totalDatesObserved > 1
+  };
+}
+
+// Perform ANOVA (RCB or CRD) on statistically independent experimental units
+export function calculateAnovaRCB(data, metricKey, category = 'nutrition', design = 'RCBD', options = {}) {
+  const {
+    sliceData,
+    analyzedDate,
+    analyzedDaa,
+    totalDatesObserved,
+    isRepeatedMeasuresSliced
+  } = selectIndependentAssessmentSlice(data, metricKey, options);
+
   const values = [];
   const trtGroups = {};
   const repGroups = {};
   
-  data.forEach(obs => {
+  sliceData.forEach(obs => {
     const val = parseFloat(obs[metricKey]);
     const trt = parseInt(obs.treatmentNumber || obs.treatment || obs.Treatment || 1);
     const rep = parseInt(obs.replication || obs.rep || obs.Replication || 1);
@@ -354,10 +532,12 @@ function calculateAnovaRCB(data, metricKey, category = 'nutrition', design = 'RC
   const t = Object.keys(trtGroups).length;
   const b = Object.keys(repGroups).length;
   
-  const isCrd = design === 'CRD' || design === 'PotTrial';
+  // RCBD Pot Trials with >= 2 replications MUST be analyzed as RCBD (blocking on Rep/Row),
+  // matching both the experimental design metadata and Regulatory PDF DF (e.g. Trt=3, Blk=4, Err=12, Total=19).
+  const isCrd = design === 'CRD' || b < 2;
 
   if (N < 4 || t < 2 || (!isCrd && b < 2)) {
-    return { error: `Insufficient data for ${isCrd ? 'CRD' : 'RCB'} ANOVA.` };
+    return { error: `Insufficient independent observations for ${isCrd ? 'CRD' : 'RCB'} ANOVA.` };
   }
 
   const allIdentical = values.every(v => v === values[0]);
@@ -370,7 +550,7 @@ function calculateAnovaRCB(data, metricKey, category = 'nutrition', design = 'RC
   // Check if design is balanced
   const counts = {};
   let isBalanced = true;
-  data.forEach(obs => {
+  sliceData.forEach(obs => {
     const trt = parseInt(obs.treatmentNumber || obs.treatment || obs.Treatment || 1);
     const rep = parseInt(obs.replication || obs.rep || obs.Replication || 1);
     const key = `${trt}_${rep}`;
@@ -407,7 +587,7 @@ function calculateAnovaRCB(data, metricKey, category = 'nutrition', design = 'RC
 
   let useTypeIII = false;
   if (!isBalanced && !isCrd) {
-    const mockTrials = data.map(obs => ({
+    const mockTrials = sliceData.map(obs => ({
       FormulationName: String(obs.treatmentNumber || obs.treatment || obs.Treatment || 1),
       Replication: String(obs.replication || obs.rep || obs.Replication || 1),
       EfficacyDataJSON: JSON.stringify([{
@@ -549,6 +729,14 @@ function calculateAnovaRCB(data, metricKey, category = 'nutrition', design = 'RC
     ss_total: ssTotal,
     df_total: dfTotal,
 
+    analyzedDate: analyzedDate ? normalizeDateString(analyzedDate) : null,
+    analyzedDateKey: analyzedDate || null,
+    analyzedDaa: analyzedDaa,
+    nIndependentUnits: N,
+    totalDatesObserved,
+    isRepeatedMeasuresSliced,
+    modelType: isCrd ? 'CRD' : 'RCBD',
+
     cv,
     sem,
     lsd,
@@ -573,10 +761,10 @@ function calculateAnovaRCB(data, metricKey, category = 'nutrition', design = 'RC
 
     efficacy_percent: (() => {
       if (category === 'pesticide' && metricKey === 'pestCount') {
-        const sortedDates = [...new Set(data.map(o => o.date || '').filter(Boolean))].sort((a,b) => new Date(a) - new Date(b));
+        const sortedDates = [...new Set((data || []).map(o => normalizeReportDateKey(o.date)).filter(Boolean))].sort();
         if (sortedDates.length > 1) {
           const baselineDate = sortedDates[0];
-          const baselineObs = data.filter(o => o.date === baselineDate);
+          const baselineObs = (data || []).filter(o => normalizeReportDateKey(o.date) === baselineDate);
           const cBaseline = baselineObs.filter(o => parseInt(o.treatmentNumber || o.treatment || 1) === 1).map(o => parseFloat(o[metricKey])).filter(v => !isNaN(v));
           const tBaseline = baselineObs.filter(o => parseInt(o.treatmentNumber || o.treatment || 2) === 2).map(o => parseFloat(o[metricKey])).filter(v => !isNaN(v));
           
@@ -632,14 +820,24 @@ function compileAgronomicInterpretation(observations, activeFields, treatmentNam
       ((/deficiency|severity|chlorosis|necrosis|pest|disease|injury|mortality/i.test(f.key)) && anova.grandMean < 5.0);
     const cvRating = anova.cv < 10 ? 'Excellent' : anova.cv <= 20 ? 'Good' : anova.cv <= 30 ? 'Acceptable' : 'Poor';
     const cvInfo = !isMeanNearZero ? ` (CV: ${anova.cv.toFixed(1)}% - ${cvRating} precision)` : '';
+    const sliceContext = `[${anova.modelType} ANOVA on ${anova.analyzedDate || 'latest date'}, DAA ${anova.analyzedDaa ?? 'N/A'}, n=${anova.nIndependentUnits} independent units, DF=${anova.df_treatment},${anova.df_error}]`;
 
     if (anova.f_value === 0 && anova.p_value === 1) {
-      summaries.push(`For ${f.label}: Measurements were identical across all treatments and replicates, resulting in an F-value of 0.00 and P-value of 1.00.`);
+      summaries.push(`For ${f.label} ${sliceContext}: Measurements were identical across all treatments and replicates, resulting in an F-value of 0.00 and P-value of 1.00.`);
       return;
     }
 
-    summaries.push(`For ${f.label}: The trial showed ${isSig ? 'statistically significant' : 'no statistically significant'} differences between treatments (p = ${anova.p_value.toFixed(4)})${cvInfo}. The highest mean was observed under ${best.name} (${best.mean.toFixed(2)}, Group '${best.group}'), and the lowest under ${worst.name} (${worst.mean.toFixed(2)}, Group '${worst.group}') ${impStr}`);
+    summaries.push(`For ${f.label} ${sliceContext}: The trial showed ${isSig ? 'statistically significant' : 'no statistically significant'} differences between treatments (p = ${anova.p_value.toFixed(4)})${cvInfo}. The highest mean was observed under ${best.name} (${best.mean.toFixed(2)}, Group '${best.group}'), and the lowest under ${worst.name} (${worst.mean.toFixed(2)}, Group '${worst.group}') ${impStr}`);
   });
+
+  // Explicitly report whether yield was actually measured
+  const hasRecordedYield = (observations || []).some(o => {
+    const raw = o?.yield ?? o?.Yield ?? o?.yieldKgPlot;
+    return raw !== undefined && raw !== null && raw !== '' && Number.isFinite(parseFloat(raw));
+  });
+  if (!hasRecordedYield) {
+    summaries.push('Yield Status: No harvest or yield observations were recorded in this dataset. Yield performance cannot be evaluated and NO yield efficacy conclusion may be drawn.');
+  }
 
   // Summarize reproductive stage (Flower Stage) if observed in plots
   const flowerStages = (observations || [])
@@ -860,6 +1058,7 @@ export class AdvancedReportGenerator {
       // Aggregate all observations from all sub-trials
       this.observations = [];
       this.photos = [];
+      const seenProjectPhotoKeys = new Set();
       
       trialOrTrials.forEach(t => {
         const obsList = safeJsonParse(t.EfficacyDataJSON, []);
@@ -896,6 +1095,10 @@ export class AdvancedReportGenerator {
         });
 
         photoList.forEach(photo => {
+          if (!photo || photo.deleted) return;
+          const pKey = String(photo.driveId || photo.id || photo.url || photo.src || photo.fileData || '').trim();
+          if (pKey && seenProjectPhotoKeys.has(pKey)) return;
+          if (pKey) seenProjectPhotoKeys.add(pKey);
           this.photos.push({
             ...photo,
             date: normalizeDateString(photo.date, t.Date),
@@ -1026,12 +1229,21 @@ export class AdvancedReportGenerator {
         plotNumber: trialOrTrials.PlotNumber || '1'
       }));
 
-      this.photos = safeJsonParse(trialOrTrials.PhotoURLs, []).map(photo => {
-        return {
-          ...photo,
-          date: normalizeDateString(photo.date, trialOrTrials.Date)
-        };
-      });
+      const seenSinglePhotoKeys = new Set();
+      this.photos = safeJsonParse(trialOrTrials.PhotoURLs, [])
+        .filter(photo => {
+          if (!photo || photo.deleted) return false;
+          const pKey = String(photo.driveId || photo.id || photo.url || photo.src || photo.fileData || '').trim();
+          if (pKey && seenSinglePhotoKeys.has(pKey)) return false;
+          if (pKey) seenSinglePhotoKeys.add(pKey);
+          return true;
+        })
+        .map(photo => {
+          return {
+            ...photo,
+            date: normalizeDateString(photo.date, trialOrTrials.Date)
+          };
+        });
       this.soil = safeJsonParse(trialOrTrials.SoilDataJSON, null);
     }
 
@@ -1120,57 +1332,13 @@ export class AdvancedReportGenerator {
   }
 
   async processObservationsWithAI() {
-    for (let idx = 0; idx < this.observations.length; idx++) {
-      const obs = this.observations[idx];
-      const photo = this.photos.find(p => p.date === obs.date) || this.photos[idx] || null;
-      
-      if (photo) {
-        const src = photo.fileData || photo.url || photo.src;
-        if (src && src !== '[base64-removed]') {
-          try {
-            let analysis = null;
-            if (typeof window !== 'undefined' && window.calculateExGIndex) {
-              analysis = await window.calculateExGIndex(src);
-            } else {
-              analysis = await calculateExGFromBase64(src);
-            }
-            
-            if (analysis) {
-              // Automatically extract and populate metrics using spectral ExG index
-              if (obs.ndvi === undefined || obs.ndvi === null || obs.ndvi === '') {
-                obs.ndvi = parseFloat(Math.min(1, Math.max(0, (parseFloat(analysis.exgMean) + 1) / 2)).toFixed(3));
-              }
-              if (obs.chlorophyllIndex === undefined || obs.chlorophyllIndex === null || obs.chlorophyllIndex === '') {
-                obs.chlorophyllIndex = parseFloat(parseFloat(analysis.healthPct).toFixed(1));
-              }
-              if (obs.plantHealthScore === undefined || obs.plantHealthScore === null || obs.plantHealthScore === '') {
-                obs.plantHealthScore = Math.round(parseFloat(analysis.healthPct) / 10);
-              }
-              if (obs.stressTolerance === undefined || obs.stressTolerance === null || obs.stressTolerance === '') {
-                obs.stressTolerance = Math.max(1, Math.round(10 - (parseFloat(analysis.stressPct) / 10)));
-              }
-              if (obs.visualVigor === undefined || obs.visualVigor === null || obs.visualVigor === '') {
-                obs.visualVigor = Math.min(10, Math.max(1, Math.round((parseFloat(analysis.exgMean) + 0.5) * 6.6)));
-              }
-            }
-          } catch (e) {
-            console.warn('Failed to calculate spectral ExG index:', e);
-          }
-        }
-      }
-      
-      // Fallback logic if data is skipped or still missing
-      if (obs.ndvi === undefined || obs.ndvi === null || obs.ndvi === '') obs.ndvi = 0.75;
-      if (obs.chlorophyllIndex === undefined || obs.chlorophyllIndex === null || obs.chlorophyllIndex === '') obs.chlorophyllIndex = 75;
-      if (obs.plantHealthScore === undefined || obs.plantHealthScore === null || obs.plantHealthScore === '') obs.plantHealthScore = 8;
-      if (obs.stressTolerance === undefined || obs.stressTolerance === null || obs.stressTolerance === '') obs.stressTolerance = 8;
-      if (obs.visualVigor === undefined || obs.visualVigor === null || obs.visualVigor === '') obs.visualVigor = 8;
-      if (obs.plantHeight === undefined || obs.plantHeight === null || obs.plantHeight === '') {
-        obs.plantHeight = parseFloat((40 + (parseFloat(obs.daa || 0) * 1.5)).toFixed(1));
-      }
-    }
+    // SCIENTIFIC INTEGRITY GUARANTEE:
+    // NEVER fabricate or impute missing field observations (e.g. visualVigor = 8,
+    // plantHeight = 40 + daa*1.5, ndvi = 0.75) when a parameter was not actually recorded
+    // on a given date. Unmeasured cells MUST remain empty so missing-data reporting and
+    // per-date independent ANOVA reflect genuine field observations only.
 
-    // 2. Perform Scientific Calculations & Automations
+    // Perform ONLY genuine derived agronomic calculations when their measured inputs exist:
     // A. Root-to-Shoot Ratio for Biostimulant trials
     if (this.category === 'biostimulant') {
       this.observations.forEach(obs => {
@@ -1181,43 +1349,58 @@ export class AdvancedReportGenerator {
       });
     }
 
-    // B. AUDPC for Fungicide trials
+    // B. AUDPC for Fungicide trials (only if >= 2 dates have valid diseaseSeverity)
     if (this.category === 'fungicide') {
       const plots = [...new Set(this.observations.map(o => o.plotNumber || o.plot || 1))];
       plots.forEach(plotNum => {
         const plotObs = this.observations.filter(o => (o.plotNumber || o.plot || 1) === plotNum);
-        const audpcVal = calculateAUDPC(plotObs, 'diseaseSeverity');
-        plotObs.forEach(o => {
-          o.audpc = audpcVal;
-        });
+        const validSevCount = plotObs.filter(o => o.diseaseSeverity !== undefined && o.diseaseSeverity !== null && o.diseaseSeverity !== '' && !isNaN(parseFloat(o.diseaseSeverity))).length;
+        if (validSevCount >= 2) {
+          const audpcVal = calculateAUDPC(plotObs, 'diseaseSeverity');
+          plotObs.forEach(o => {
+            o.audpc = audpcVal;
+          });
+        }
       });
     }
 
-    // C. Nutrient Use Efficiency (NUE) for Nutrition trials
+    // C. Nutrient Use Efficiency (NUE) for Nutrition trials — ONLY when actual yield was recorded
     if (this.category === 'nutrition') {
-      const plotSize = this.trial.plotSize || this.trial.PlotSize || this.trial.plot_size || this.trial.Plot_Size;
-      const areaHa = getPlotAreaHectares(plotSize);
-
-      const getYieldInKgHa = (o) => {
-        const rawYield = parseFloat(o.yield || o.yieldKgPlot || 0);
-        if (areaHa > 0) {
-          return rawYield / areaHa;
-        }
-        return rawYield;
-      };
-
-      const cObs = this.observations.filter(o => parseInt(o.treatmentNumber || o.treatment || 1) === 1);
-      const tObs = this.observations.filter(o => parseInt(o.treatmentNumber || o.treatment || 1) === 2);
-      const cMeanYield = cObs.length ? cObs.reduce((a,b)=>a + getYieldInKgHa(b), 0)/cObs.length : 0;
-      const tMeanYield = tObs.length ? tObs.reduce((a,b)=>a + getYieldInKgHa(b), 0)/tObs.length : 0;
-      const appliedRate = parseFloat(this.trial.Dosage || 1);
-      const nueVal = calculateNUE(tMeanYield, cMeanYield, appliedRate);
-      
-      this.observations.forEach(obs => {
-        if (nueVal !== null) {
-          obs.nue = nueVal;
-        }
+      const hasActualYield = this.observations.some(o => {
+        const raw = o.yield ?? o.yieldKgPlot;
+        return raw !== undefined && raw !== null && raw !== '' && Number.isFinite(parseFloat(raw));
       });
+      if (hasActualYield) {
+        const plotSize = this.trial.plotSize || this.trial.PlotSize || this.trial.plot_size || this.trial.Plot_Size;
+        const areaHa = getPlotAreaHectares(plotSize);
+
+        const getYieldInKgHa = (o) => {
+          const raw = o.yield ?? o.yieldKgPlot;
+          if (raw === undefined || raw === null || raw === '') return null;
+          const rawYield = parseFloat(raw);
+          if (!Number.isFinite(rawYield)) return null;
+          return areaHa > 0 ? rawYield / areaHa : rawYield;
+        };
+
+        const cYields = this.observations
+          .filter(o => parseInt(o.treatmentNumber || o.treatment || 1) === 1)
+          .map(getYieldInKgHa).filter(v => v !== null);
+        const tYields = this.observations
+          .filter(o => parseInt(o.treatmentNumber || o.treatment || 1) === 2)
+          .map(getYieldInKgHa).filter(v => v !== null);
+
+        if (cYields.length > 0 && tYields.length > 0) {
+          const cMeanYield = cYields.reduce((a, b) => a + b, 0) / cYields.length;
+          const tMeanYield = tYields.reduce((a, b) => a + b, 0) / tYields.length;
+          const appliedRate = parseFloat(this.trial.Dosage || 1);
+          const nueVal = calculateNUE(tMeanYield, cMeanYield, appliedRate);
+          if (nueVal !== null) {
+            this.observations.forEach(obs => {
+              obs.nue = nueVal;
+            });
+          }
+        }
+      }
     }
   }
 
@@ -1284,7 +1467,8 @@ export class AdvancedReportGenerator {
         
         const oDateZero = getZeroedDate(obsDate);
         if (oDateZero && sDateZero && oDateZero < sDateZero) {
-          warnings.push(`Observation #${idx + 1} (${obs.date}): Assessment date is earlier than Trial Start Date (${this.trial.Date || 'N/A'}).`);
+          const daysBefore = Math.round((sDateZero - oDateZero) / (1000 * 60 * 60 * 24));
+          warnings.push(`Pre-Application Baseline Date (Obs #${idx + 1}, ${obs.date}): Recorded ${daysBefore}d before Trial Start Date (${this.trial.Date || 'N/A'}). Verify whether this is a pre-application baseline assessment or a date entry error.`);
         }
       }
 
@@ -1404,14 +1588,17 @@ export class AdvancedReportGenerator {
               if (offlineProj.Design === 'PotTrial') {
                 this.design = 'PotTrial';
                 const potFields = offlineProj.PotFields || ['Plant Height', 'Branches', 'Flowers', 'Fruit Count', 'Yield'];
-                this.activeFields = potFields.map(f => ({ key: f, label: f }));
-                this.activeFields = this.activeFields.filter(f => {
-                  const isDerived = ['nue', 'audpc', 'rootToShootRatio'].includes(f.key);
-                  if (!isDerived) return true;
-                  return this.observations.some(obs => {
-                    const val = parseFloat(obs[f.key]);
-                    return !isNaN(val) && val !== 0;
-                  });
+                potFields.forEach(f => {
+                  const key = labelToKey(f);
+                  if (key && !this.activeFields.some(existing => existing.key === key)) {
+                    const hasAnyData = this.observations.some(obs => {
+                      const val = obs[key];
+                      return val !== undefined && val !== null && val !== '' && !isNaN(parseFloat(val));
+                    });
+                    if (hasAnyData) {
+                      this.activeFields.push({ key, label: f });
+                    }
+                  }
                 });
               }
             }
@@ -2189,24 +2376,40 @@ export class AdvancedReportGenerator {
 
     const potRows = proj?.PotRows ? parseInt(proj.PotRows) : null;
     const potCols = proj?.PotCols ? parseInt(proj.PotCols) : null;
-    const totalPots = (potRows && potCols) ? potRows * potCols : this.observations.length;
+    const totalPots = (potRows && potCols) ? potRows * potCols : (this.isProjectWide ? (this.trials || []).length : this.observations.length);
     const rawObsMode = proj?.PotObsMode || '';
     const obsMode = rawObsMode === 'column-wise' ? 'Treatment Column-wise' : rawObsMode === 'row-wise' ? 'Row-wise' : 'Plant-wise';
     const dates = [...new Set(this.observations.map(o => o.date || 'N/A'))];
     const daas = [...new Set(this.observations.map(o => o.daa ?? 0))].sort((a,b)=>a-b);
     const daaRange = daas.length > 0 ? `${daas[0]} - ${daas[daas.length - 1]} DAA` : 'N/A';
 
+    // Real cell-level parameter completeness (NEVER hardcoded to 100%)
+    const completeness = computeDataCompleteness(this.observations, this.activeFields);
+
+    // Identify any pre-trial baseline assessment dates
+    const startKey = normalizeReportDateKey(this.trial.Date);
+    const baselineDates = startKey
+      ? [...new Set(this.observations
+          .filter(o => {
+            const dk = normalizeReportDateKey(o.date);
+            return dk && dk < startKey;
+          })
+          .map(o => o.date || 'N/A'))]
+      : [];
+
     const overviewRows = [
       ['Total Treatments', this.treatmentNames.length],
       ['Total Replications / Blocks', computedReplications],
-      ['Total Pots Observed', totalPots],
+      ['Total Pots / Experimental Units', totalPots],
       ['Observation Mode', obsMode],
       ['Experimental Units', proj?.ExperimentalUnit || (rawObsMode === 'column-wise' ? 'Treatment Column within Block' : 'Treatment × Block')],
       ['Assessment Dates Count', dates.length],
+      ['Plot-Date Records Logged', this.observations.length],
       ['DAA Range Covered', daaRange],
-      ['Missing Observations', 0],
-      ['Missing Parameters', 0],
-      ['Data Completeness', '100%']
+      ['Pre-Application Baseline Dates', baselineDates.length > 0 ? `${baselineDates.join(', ')} (before Trial Start ${this.trial.Date})` : 'None'],
+      ['Missing Parameter Values (Cells)', `${completeness.missingCells} / ${completeness.totalExpectedCells}`],
+      ['Parameters with Missing Values', `${completeness.parametersWithMissing} / ${completeness.parameterCount}`],
+      ['Parameter Data Completeness', `${completeness.completenessPct.toFixed(1)}%`]
     ];
 
     overviewRows.forEach((row, idx) => {
@@ -2217,7 +2420,7 @@ export class AdvancedReportGenerator {
     });
 
     // 1.5. Variability Rating Legend Section (moved above statistics)
-    let legendRow = 16;
+    let legendRow = 4 + overviewRows.length + 2;
     ws.mergeCells(`A${legendRow}:D${legendRow}`);
     ws.getCell(`A${legendRow}`).value = 'VARIABILITY RATING LEGEND';
     ws.getCell(`A${legendRow}`).font = { name: 'Calibri', bold: true, size: 10, color: { rgb: '2980B9' } };
@@ -2240,14 +2443,14 @@ export class AdvancedReportGenerator {
 
     // 2. Observation Summary Section (Overall Parameter Metrics)
     let curRow = legendRow + 2;
-    ws.mergeCells(`A${curRow}:N${curRow}`);
+    ws.mergeCells(`A${curRow}:P${curRow}`);
     ws.getCell(`A${curRow}`).value = '2. OVERALL OBSERVATION STATISTICS BY PARAMETER';
     ws.getCell(`A${curRow}`).font = { name: 'Calibri', bold: true, size: 11, color: { rgb: '2980B9' } };
     curRow++;
 
     const descHeaders = [
       'Parameter', 'Min', 'Max', 'Mean', 'Median', 'Std Dev', 'CV %', 'Range', 
-      'Assessment Records Used', 'Variability Class', 
+      'Valid Records', 'Missing Records', 'Completeness %', 'Variability Class', 
       'Numerically Best Treatment(s)', 'Best Mean Value', 
       'Numerically Worst Treatment(s)', 'Worst Mean Value'
     ];
@@ -2325,6 +2528,12 @@ export class AdvancedReportGenerator {
       const bestMean = bestTrts[0]?.mean ?? 0;
       const worstMean = worstTrts[0]?.mean ?? 0;
 
+      const paramComp = completeness.perParameter[f.key] || {
+        validCount: sampleSize,
+        missingCount: Math.max(0, this.observations.length - sampleSize),
+        completenessPct: this.observations.length > 0 ? parseFloat(((sampleSize / this.observations.length) * 100).toFixed(1)) : 0
+      };
+
       ws.getRow(curRow).values = [
         f.label,
         parseFloat(min.toFixed(2)),
@@ -2334,7 +2543,9 @@ export class AdvancedReportGenerator {
         parseFloat(stdDev.toFixed(2)),
         cvDisplay,
         parseFloat(range.toFixed(2)),
-        sampleSize,
+        paramComp.validCount,
+        paramComp.missingCount,
+        `${paramComp.completenessPct.toFixed(1)}%`,
         variabilityClass,
         bestTrtsName,
         parseFloat(bestMean.toFixed(2)),
@@ -2343,7 +2554,7 @@ export class AdvancedReportGenerator {
       ];
       
       // Styling the Variability Class
-      const varCell = ws.getCell(curRow, 10);
+      const varCell = ws.getCell(curRow, 12);
       if (suppressCV) {
         varCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'F2F4F4' } };
         varCell.font = { name: 'Calibri', color: { rgb: '7F8C8D' }, italic: true };
@@ -2861,8 +3072,11 @@ export class AdvancedReportGenerator {
           ? 'Randomized Complete Block Pot Trial (RCBD Pot Trial)' 
           : 'Randomized Complete Block Design (RCBD)';
 
-      ws.mergeCells(`A${r}:F${r}`);
-      ws.getCell(`A${r}`).value = `ANOVA: ${f.label} (${designTitle})`;
+      ws.mergeCells(`A${r}:G${r}`);
+      const sliceBadge = anova.analyzedDate
+        ? ` — Latest Valid Assessment: ${anova.analyzedDate} (DAA ${anova.analyzedDaa ?? 'N/A'}, n = ${anova.nIndependentUnits} independent units)`
+        : ` (n = ${anova.nIndependentUnits} independent units)`;
+      ws.getCell(`A${r}`).value = `ANOVA: ${f.label} (${designTitle}${sliceBadge})`;
       ws.getCell(`A${r}`).font = { bold: true, color: { rgb: 'FFFFFF' } };
       ws.getCell(`A${r}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: '8E44AD' } };
       r++;
@@ -2882,8 +3096,8 @@ export class AdvancedReportGenerator {
       ];
       r++;
 
-      // Block Row (RCB only)
-      if (this.design !== 'CRD' && this.design !== 'PotTrial') {
+      // Block Row (RCBD and RCBD Pot Trial whenever >= 2 blocks/replications exist)
+      if (anova.modelType !== 'CRD' && anova.df_block > 0) {
         ws.getRow(r).values = [
           'Replications (Block)', 
           anova.df_block, 
@@ -3337,7 +3551,7 @@ export class AdvancedReportGenerator {
     const ws = this.workbook.addWorksheet('ANOVA Summary');
     ws.views = [{ showGridLines: true }];
 
-    ws.mergeCells('A1:M1');
+    ws.mergeCells('A1:N1');
     const titleCell = ws.getCell('A1');
     titleCell.value = 'PROJECT ANOVA & POST-HOC SUMMARY';
     titleCell.font = { name: 'Calibri', size: 16, bold: true, color: { rgb: 'FFFFFF' } };
@@ -3349,10 +3563,17 @@ export class AdvancedReportGenerator {
     ws.getCell('A3').font = { bold: true };
     ws.getCell('B3').value = this.design === 'PotTrial' ? 'Randomized Complete Block Pot Trial (RCBD Pot Trial)' : this.design;
 
+    ws.getCell('D3').value = 'Statistical Independence Rule:';
+    ws.getCell('D3').font = { bold: true };
+    ws.mergeCells('E3:N3');
+    ws.getCell('E3').value = 'One independent observation per experimental unit (Treatment × Block) on the latest valid assessment date per parameter. Repeated dates are NOT pooled as independent replicates.';
+    ws.getCell('E3').font = { italic: true, color: { rgb: '34495E' } };
+
     ws.getRow(5).values = [
       'Parameter / Metric',
-      'Design Type',
-      'DF (Trt, Err)',
+      'Analyzed Date (DAA)',
+      'Model / Design',
+      'DF (Trt, Blk, Err)',
       'Mean Square Error (MSE)',
       'F-Value',
       'P-Value',
@@ -3361,7 +3582,7 @@ export class AdvancedReportGenerator {
       'SEm±',
       'CV (%)',
       'Grand Mean',
-      'Tukey Groupings (Treatment: Group)',
+      'LSD Groupings (Treatment: Group)',
       'Interpretation'
     ];
     ws.getRow(5).font = { bold: true };
@@ -3376,6 +3597,7 @@ export class AdvancedReportGenerator {
           const firstVal = parseFloat(this.observations[0]?.[f.key] || 0);
           ws.getRow(r).values = [
             f.label,
+            'N/A',
             this.design === 'PotTrial' ? 'RCBD Pot Trial' : this.design,
             'N/A', '0.00', '0.00', '1.000', 'ns', '0.00', '0.00', '0.0%',
             firstVal,
@@ -3412,10 +3634,19 @@ export class AdvancedReportGenerator {
         ? 'Reject H₀: Statistically significant treatment effect detected (p < 0.05)'
         : 'Fail to reject H₀. Treatments belong to the same statistical grouping.';
 
+      const dfDisplay = (anova.df_treatment !== undefined && anova.df_error !== undefined)
+        ? (anova.modelType === 'CRD' ? `${anova.df_treatment}, —, ${anova.df_error}` : `${anova.df_treatment}, ${anova.df_block}, ${anova.df_error}`)
+        : 'N/A';
+
+      const dateDisplay = anova.analyzedDate
+        ? `${anova.analyzedDate}${anova.analyzedDaa !== null && anova.analyzedDaa !== undefined ? ` (DAA ${anova.analyzedDaa})` : ''}`
+        : 'Latest Valid';
+
       ws.getRow(r).values = [
         f.label,
-        this.design === 'PotTrial' ? 'RCBD Pot Trial' : this.design,
-        (anova.df_treatment !== undefined && anova.df_error !== undefined) ? `${anova.df_treatment}, ${anova.df_error}` : 'N/A',
+        dateDisplay,
+        `${anova.modelType || (this.design === 'CRD' ? 'CRD' : 'RCBD')} (n=${anova.nIndependentUnits || 'N/A'})`,
+        dfDisplay,
         safeFloatFixed(anova.ms_error),
         safeFloatFixed(anova.f_value),
         safeFloatFixed(anova.p_value),
@@ -3431,18 +3662,19 @@ export class AdvancedReportGenerator {
     });
 
     ws.getColumn(1).width = 30;
-    ws.getColumn(2).width = 25;
-    ws.getColumn(3).width = 15;
-    ws.getColumn(4).width = 22;
-    ws.getColumn(5).width = 12;
+    ws.getColumn(2).width = 24;
+    ws.getColumn(3).width = 18;
+    ws.getColumn(4).width = 18;
+    ws.getColumn(5).width = 22;
     ws.getColumn(6).width = 12;
     ws.getColumn(7).width = 12;
-    ws.getColumn(8).width = 15;
-    ws.getColumn(9).width = 12;
-    ws.getColumn(10).width = 28;
-    ws.getColumn(11).width = 15;
-    ws.getColumn(12).width = 65;
-    ws.getColumn(13).width = 45;
+    ws.getColumn(8).width = 12;
+    ws.getColumn(9).width = 15;
+    ws.getColumn(10).width = 12;
+    ws.getColumn(11).width = 28;
+    ws.getColumn(12).width = 15;
+    ws.getColumn(13).width = 65;
+    ws.getColumn(14).width = 45;
 
     r += 3;
     ws.mergeCells(`A${r}:M${r}`);
@@ -3500,23 +3732,77 @@ export class AdvancedReportGenerator {
       r++;
     });
 
+    // Per-Assessment-Date Independent ANOVA Breakdown (when multiple dates were observed)
+    const uniqueDateKeys = [...new Set(this.observations.map(o => normalizeReportDateKey(o.date)).filter(Boolean))].sort();
+    if (uniqueDateKeys.length > 1) {
+      r += 3;
+      ws.mergeCells(`A${r}:N${r}`);
+      ws.getCell(`A${r}`).value = 'PER-ASSESSMENT-DATE INDEPENDENT ANOVA BREAKDOWN (NO PSEUDOREPLICATION)';
+      ws.getCell(`A${r}`).font = { bold: true, size: 12, color: { rgb: 'FFFFFF' } };
+      ws.getCell(`A${r}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: '2C3E50' } };
+      ws.getRow(r).height = 25;
+      r++;
+
+      ws.getRow(r).values = [
+        'Assessment Date', 'Parameter / Metric', 'n (Plots)', 'DF (Trt, Blk, Err)',
+        'F-Value', 'P-Value', 'Sig', 'LSD (0.05)', 'CV (%)', 'Grand Mean', 'Groupings'
+      ];
+      ws.getRow(r).font = { bold: true };
+      ws.getRow(r).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'ECF0F1' } };
+      r++;
+
+      uniqueDateKeys.forEach(dateKey => {
+        this.activeFields.forEach(f => {
+          if (f.key === 'nue') return;
+          const dateAnova = calculateAnovaRCB(this.observations, f.key, this.category, this.design, { targetDateKey: dateKey });
+          if (dateAnova.error) return;
+          const sig = dateAnova.p_value < 0.01 ? '**' : dateAnova.p_value < 0.05 ? '*' : 'ns';
+          const dfStr = dateAnova.modelType === 'CRD'
+            ? `${dateAnova.df_treatment}, —, ${dateAnova.df_error}`
+            : `${dateAnova.df_treatment}, ${dateAnova.df_block}, ${dateAnova.df_error}`;
+          const grpStr = Object.entries(dateAnova.treatmentMeans)
+            .map(([tNum, st]) => `${this.treatmentNames[parseInt(tNum) - 1] || `Trt ${tNum}`}: ${st.mean.toFixed(2)} (${st.group || 'a'})`)
+            .join('; ');
+          ws.getRow(r).values = [
+            dateAnova.analyzedDate || dateKey,
+            f.label,
+            dateAnova.nIndependentUnits,
+            dfStr,
+            parseFloat(Number(dateAnova.f_value || 0).toFixed(4)),
+            parseFloat(Number(dateAnova.p_value ?? 1).toFixed(4)),
+            sig,
+            parseFloat(Number(dateAnova.lsd || 0).toFixed(4)),
+            dateAnova.grandMean >= 2 ? `${Number(dateAnova.cv || 0).toFixed(2)}%` : 'N/A',
+            parseFloat(Number(dateAnova.grandMean || 0).toFixed(2)),
+            grpStr
+          ];
+          r++;
+        });
+      });
+    }
+
     r += 2;
-    ws.mergeCells(`A${r}:M${r}`);
-    ws.getCell(`A${r}`).value = '* Note: Treatments sharing the same Tukey letter are not significantly different at α = 0.05.';
+    ws.mergeCells(`A${r}:N${r}`);
+    ws.getCell(`A${r}`).value = '* Note: Repeated observations from the same experimental plots across multiple dates are NEVER pooled as independent replicates. Primary ANOVA evaluates 1 observation per independent experimental unit (Treatment × Block) on the latest valid assessment date.';
+    ws.getCell(`A${r}`).font = { italic: true, size: 9, color: { rgb: '2C3E50' }, bold: true };
+    r++;
+
+    ws.mergeCells(`A${r}:N${r}`);
+    ws.getCell(`A${r}`).value = '* Note: Treatments sharing the same LSD letter are not significantly different at α = 0.05.';
     ws.getCell(`A${r}`).font = { italic: true, size: 9, color: { rgb: '7F8C8D' }, bold: true };
     r++;
 
-    ws.mergeCells(`A${r}:M${r}`);
+    ws.mergeCells(`A${r}:N${r}`);
     ws.getCell(`A${r}`).value = '* Note: Percentage efficacy values are descriptive only and should not be interpreted as statistically significant unless supported by the corresponding ANOVA results.';
     ws.getCell(`A${r}`).font = { italic: true, size: 9, color: { rgb: '7F8C8D' } };
     r++;
 
-    ws.mergeCells(`A${r}:M${r}`);
+    ws.mergeCells(`A${r}:N${r}`);
     ws.getCell(`A${r}`).value = '* Note: F-value of 0.00 and P-value of 1.00 indicate identical measurements across all treatments and replicates (zero variance within and between groups).';
     ws.getCell(`A${r}`).font = { italic: true, size: 9, color: { rgb: '7F8C8D' } };
     r++;
 
-    ws.mergeCells(`A${r}:M${r}`);
+    ws.mergeCells(`A${r}:N${r}`);
     ws.getCell(`A${r}`).value = '* Note: Nutrient Use Efficiency (NUE) values are derived/calculated from observed crop yield and nitrogen application rates, rather than directly measured physiological parameters.';
     ws.getCell(`A${r}`).font = { italic: true, size: 9, color: { rgb: '7F8C8D' } };
   }

@@ -207,45 +207,93 @@ export function performANOVA(trials, options = {}) {
   // Group trials by treatment
   const treatments = {};
   const blocks = new Set();
-  
+
+  // If all trials share a single BlockID (common in Pot Trials where one pot-grid block
+  // holds all rows/replications), block on Replication instead so RCBD DF reflects true reps.
+  const distinctBlockIds = new Set(trials.map(t => t.BlockID).filter(v => v !== undefined && v !== null && String(v).trim() !== ''));
+  const distinctReps = new Set(trials.map(t => t.Replication).filter(v => v !== undefined && v !== null && String(v).trim() !== ''));
+  const useReplicationAsBlock = distinctBlockIds.size <= 1 && distinctReps.size >= 2;
+
+  const parseStrictNumeric = (v) => {
+    if (v === undefined || v === null || v === '') return null;
+    if (typeof v === 'boolean') return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const extractMetricFromObs = (obs, category) => {
+    if (!obs || typeof obs !== 'object') return null;
+    if (metric === 'yield') {
+      return parseStrictNumeric(obs.yield ?? obs.Yield ?? obs.yieldKgPlot);
+    }
+    const direct = parseStrictNumeric(obs[metric]);
+    if (direct !== null) return direct;
+    if (metric === 'controlPct') {
+      const alt = parseStrictNumeric(obs.controlPct ?? (category === 'herbicide' ? obs.wce : null));
+      if (alt !== null) return alt;
+    }
+    if (!metric || metric === 'cover' || metric === 'controlPct') {
+      const fallback = parseStrictNumeric(
+        getObservationPrimaryValue(category, obs) ??
+        (category === 'fungicide' ? (obs.diseaseSeverity ?? obs.diseaseIncidence) :
+         category === 'pesticide' ? (obs.pestCount ?? obs.feedingDamagePct) :
+         category === 'nutrition' ? (obs.visualVigor ?? obs.nutrientDeficiencyScore) :
+         category === 'biostimulant' ? (obs.overallVigor ?? obs.vigorScore) :
+         obs.weedCover)
+      );
+      if (fallback !== null) return fallback;
+    }
+    return null;
+  };
+
   trials.forEach(trial => {
     const trt = trial.FormulationName || 'Unknown';
-    const blockId = trial.BlockID || trial.Replication || '1';
+    const blockId = useReplicationAsBlock
+      ? String(trial.Replication || trial.BlockID || '1')
+      : String(trial.BlockID || trial.Replication || '1');
     blocks.add(blockId);
-    
+
     if (!treatments[trt]) treatments[trt] = {};
     if (!treatments[trt][blockId]) treatments[trt][blockId] = [];
-    
-    // Extract value from efficacy data
+
+    const category = trial.Category || 'herbicide';
     const efficacy = safeJsonParse(trial.EfficacyDataJSON, []);
     const observations = daa !== null && daa !== undefined && daa !== ''
       ? efficacy.filter(e => Number(e.daa) === Number(daa) || Number(e.daysAfterApplication) === Number(daa))
-      : efficacy;
-    
-    if (observations.length > 0) {
-      const latest = observations[observations.length - 1];
-      const category = trial.Category || 'herbicide';
-      let value = latest[metric] ?? latest[metric === 'yield' ? 'yieldKgPlot' : metric];
-      if (value === null || value === undefined) {
-        if (latest.controlPct !== undefined && latest.controlPct !== null) {
-          value = latest.controlPct;
-        } else if (category === 'herbicide' && latest.wce !== undefined && latest.wce !== null) {
-          value = latest.wce;
-        } else {
-          value = getObservationPrimaryValue(category, latest) ?? 
-            (category === 'fungicide' ? (latest.diseaseSeverity ?? latest.diseaseIncidence) :
-             category === 'pesticide' ? (latest.pestCount ?? latest.feedingDamagePct) :
-             category === 'nutrition' ? (latest.visualVigor ?? latest.nutrientDeficiencyScore) :
-             category === 'biostimulant' ? (latest.overallVigor ?? latest.vigorScore) :
-             latest.weedCover);
+      : efficacy.slice().sort((a, b) => {
+          const dA = parseFloat(a?.daa);
+          const dB = parseFloat(b?.daa);
+          if (!isNaN(dA) && !isNaN(dB) && dA !== dB) return dB - dA;
+          return String(b?.date || '').localeCompare(String(a?.date || ''));
+        });
+
+    let value = null;
+    for (const obs of observations) {
+      const candidate = extractMetricFromObs(obs, category);
+      if (candidate !== null) {
+        value = candidate;
+        break;
+      }
+    }
+
+    if (metric === 'yield' && value === null) {
+      value = parseStrictNumeric(trial.Yield ?? trial.YieldValue ?? trial.yieldKgPlot);
+      if (value === null && trial.HarvestDataJSON) {
+        const h = safeJsonParse(trial.HarvestDataJSON, null);
+        if (h && typeof h === 'object') {
+          const directH = parseStrictNumeric(h.actualMarketableWeight ?? h.totalYield ?? h.yield);
+          if (directH !== null) {
+            value = directH;
+          } else if (Array.isArray(h.pickings) && h.pickings.length > 0) {
+            const pVals = h.pickings.map(p => parseStrictNumeric(p?.actualMarketableWeight ?? p?.weight)).filter(v => v !== null);
+            if (pVals.length > 0) value = pVals.reduce((s, v) => s + v, 0);
+          }
         }
       }
-      if (metric === 'yield' && (value === null || value === undefined || value === '')) {
-        value = trial.Yield ?? trial.YieldValue;
-      }
-      if (value !== null && value !== undefined && !isNaN(value)) {
-        treatments[trt][blockId].push(parseFloat(value));
-      }
+    }
+
+    if (value !== null && Number.isFinite(value)) {
+      treatments[trt][blockId].push(value);
     }
   });
 
@@ -394,6 +442,22 @@ export function performANOVA(trials, options = {}) {
       f: design === 'CRD' ? [fStatistic, null, null] : [fStatistic, fBlock, null, null],
       p: design === 'CRD' ? [pValue, null, null] : [pValue, pBlock, null, null]
     },
+    // Flat properties consumed by AnalysisEngine.getLetterGrouping, Regulatory PDF & Dashboard UI
+    ssTreat: ssTreatments,
+    ssBlock: ssBlocks,
+    ssError,
+    ssTotal,
+    dfTreat: dfTreatments,
+    dfBlock: dfBlocks,
+    dfError,
+    dfTotal,
+    msTreat: msTreatments,
+    msBlock: msBlocks,
+    msError,
+    fVal: fStatistic,
+    pVal: pValue,
+    fBlock,
+    pBlock,
     fStatistic,
     pValue,
     significant: pValue < 0.05,
