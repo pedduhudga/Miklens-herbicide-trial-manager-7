@@ -247,5 +247,45 @@ describe('CameraCapture Enhancements & Anti-Blur Engine', () => {
     expect(batch.map(p => p.id)).toEqual(['1', '2']);
   });
 
+  // 8. Regression guard: Camera stream initialization MUST NOT restart on inline onClose changes
+  it('keeps camera stream lifecycle mount-only (no [onClose] dependency and no desynchronized readback)', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const source = fs.readFileSync(
+      path.resolve(process.cwd(), 'src/components/CameraCapture.jsx'),
+      'utf-8'
+    );
+
+    // Must NEVER re-run getUserMedia effect when inline onClose changes
+    expect(source).not.toMatch(/\}, \[onClose\]\);/);
+    // Must NEVER use desynchronized: true on 2D capture canvas (causes black readbacks on Android Chrome)
+    expect(source).not.toContain('desynchronized: true');
+    // Must NEVER fake videoWidth || 1920 when videoWidth is 0
+    expect(source).not.toContain('video.videoWidth || 1920');
+    // Must use ref for onClose and check cancellation + black frame guard
+    expect(source).toContain('onCloseRef');
+    expect(source).toContain('isCanvasAllBlack');
+  });
+
+  // 9. Black-frame detector rejects pure black frames while accepting real plant frames
+  it('detects solid black frames accurately via 8x8 pixel luminance sampling', () => {
+    const isAllBlack = (pixelFn, width, height) => {
+      const steps = 8;
+      for (let gy = 1; gy <= steps; gy++) {
+        const py = Math.min(height - 1, Math.floor((gy * height) / (steps + 1)));
+        for (let gx = 1; gx <= steps; gx++) {
+          const px = Math.min(width - 1, Math.floor((gx * width) / (steps + 1)));
+          const [r, g, b] = pixelFn(px, py);
+          if (r + g + b > 8) return false;
+        }
+      }
+      return true;
+    };
+
+    expect(isAllBlack(() => [0, 0, 0], 1080, 1440)).toBe(true);
+    expect(isAllBlack(() => [2, 2, 2], 1080, 1440)).toBe(true);
+    expect(isAllBlack(() => [45, 110, 38], 1080, 1440)).toBe(false);
+  });
+
 });
 

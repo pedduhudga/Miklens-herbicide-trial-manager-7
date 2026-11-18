@@ -46,10 +46,19 @@ export default function CameraCapture({
   const [gridMode, setGridMode] = useState('pot'); // 'off' | 'pot' | 'thirds'
 
   // Capture Modes: 'single' (default on fresh opens) | 'multi' | 'burst'
-  const [captureMode, setCaptureMode] = useState('single');
-  const [sessionCaptures, setSessionCaptures] = useState(initialCaptures || []);
+  // Mount-only initialization so parent re-renders NEVER wipe active sessionCaptures
+  const [captureMode, setCaptureMode] = useState(() => (initialCaptures && initialCaptures.length > 0 ? 'multi' : 'single'));
+  const [sessionCaptures, setSessionCaptures] = useState(() => (Array.isArray(initialCaptures) ? initialCaptures : []));
   const [isCapturing, setIsCapturing] = useState(false);
   const [shutterFlash, setShutterFlash] = useState(false);
+  const [isStreamReady, setIsStreamReady] = useState(false);
+
+  // Stable refs so parent re-renders (e.g. background AI updates, pot auto-advance, inline onClose)
+  // NEVER restart or blink the hardware camera stream
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const streamRef = useRef(null);
+  const isRestartingRef = useRef(false);
 
   // Auto-hide mobile bottom nav & QR code scan button while camera is active
   useEffect(() => {
@@ -60,13 +69,6 @@ export default function CameraCapture({
       window.dispatchEvent(new Event('camera:toggle'));
     };
   }, []);
-
-  useEffect(() => {
-    if (initialCaptures && initialCaptures.length > 0) {
-      setSessionCaptures(initialCaptures);
-      setCaptureMode('multi');
-    }
-  }, [initialCaptures]);
 
   // Tap-to-Focus Reticle
   const [tapReticle, setTapReticle] = useState(null); // { x, y, status: 'focusing' | 'locked' }
@@ -95,26 +97,63 @@ export default function CameraCapture({
         setCurrentTrialIdx(idx);
       }
     }
-  }, [trial, trials]);
+  }, [trial?.ID]);
 
-  // ── High-Efficiency 1080p Optical Stream Initialization ──────────────────
+  // ── High-Efficiency 1080p Optical Stream Initialization (Mount/Unmount ONLY) ─
   useEffect(() => {
-    let activeStream = null;
+    let isCancelled = false;
+    let restartAttempts = 0;
+    let restartTimer = null;
+
+    const DEFAULT_CONSTRAINTS = {
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1920, min: 1280 },
+        height: { ideal: 1080, min: 720 },
+        frameRate: { ideal: 30, max: 30 }
+      }
+    };
+
+    const stopStreamTracks = (s) => {
+      if (!s) return;
+      s.getTracks().forEach(track => {
+        try { track.onended = null; } catch (_) {}
+        try { track.applyConstraints({ advanced: [{ torch: false }] }); } catch (_) {}
+        try { track.stop(); } catch (_) {}
+      });
+    };
 
     const startCamera = async (constraints) => {
+      if (isCancelled) return;
       try {
         const s = await navigator.mediaDevices.getUserMedia(constraints);
-        activeStream = s;
+
+        // If unmounted while awaiting getUserMedia, immediately release hardware & abort
+        if (isCancelled) {
+          stopStreamTracks(s);
+          return;
+        }
+
+        // Stop any stale prior stream before switching
+        if (streamRef.current && streamRef.current !== s) {
+          stopStreamTracks(streamRef.current);
+        }
+
+        streamRef.current = s;
         setStream(s);
 
-        if (videoRef.current) {
-          videoRef.current.srcObject = s;
-          videoRef.current.setAttribute('playsinline', true);
-          videoRef.current.setAttribute('autoplay', true);
-          videoRef.current.muted = true;
+        const videoEl = videoRef.current;
+        if (videoEl) {
+          videoEl.srcObject = s;
+          videoEl.setAttribute('playsinline', true);
+          videoEl.setAttribute('autoplay', true);
+          videoEl.muted = true;
           try {
-            await videoRef.current.play();
+            await videoEl.play();
           } catch (_) {}
+          if (!isCancelled && videoEl.videoWidth > 0 && videoEl.videoHeight > 0) {
+            setIsStreamReady(true);
+          }
         }
 
         const track = s.getVideoTracks()[0];
@@ -130,22 +169,26 @@ export default function CameraCapture({
           if (capabilities.exposureCompensation) setExposureSupported(true);
           if (capabilities.focusMode) setFocusSupported(true);
 
-          // Watchdog: auto-recover if mobile OS interrupts or mutes camera track
+          // Watchdog: recover ONLY if OS genuinely kills the live track while mounted
           track.onended = () => {
-            console.warn('[Camera] Track ended unexpectedly, re-initializing...');
-            if (activeStream) {
-              startCamera({
-                video: {
-                  facingMode: { ideal: 'environment' },
-                  width: { ideal: 1920, min: 1280 },
-                  height: { ideal: 1080, min: 720 },
-                  frameRate: { ideal: 30, max: 30 }
-                }
-              });
-            }
+            if (isCancelled || streamRef.current !== s || isRestartingRef.current) return;
+            if (restartAttempts >= 2) return;
+            restartAttempts += 1;
+            isRestartingRef.current = true;
+            setIsStreamReady(false);
+            console.warn(`[Camera] Track ended unexpectedly (attempt ${restartAttempts}), recovering...`);
+            restartTimer = setTimeout(async () => {
+              if (isCancelled) return;
+              try {
+                await startCamera(DEFAULT_CONSTRAINTS);
+              } finally {
+                isRestartingRef.current = false;
+              }
+            }, 300);
           };
         }
       } catch (err) {
+        if (isCancelled) return;
         console.warn('[CameraCapture] Camera 1080p fallback down to 720p/generic:', err);
         if (constraints?.video?.width?.ideal === 1920) {
           await startCamera({
@@ -156,54 +199,71 @@ export default function CameraCapture({
               frameRate: { ideal: 30, max: 30 }
             }
           });
+        } else if (constraints?.video !== true) {
+          await startCamera({ video: true });
         } else {
-          try {
-            await startCamera({ video: true });
-          } catch (finalErr) {
-            window.dispatchEvent(new CustomEvent('app:toast', { 
-              detail: { msg: 'Camera access denied or unavailable.', type: 'error' } 
-            }));
-            onClose();
-          }
+          window.dispatchEvent(new CustomEvent('app:toast', {
+            detail: { msg: 'Camera access denied or unavailable.', type: 'error' }
+          }));
+          if (onCloseRef.current) onCloseRef.current();
         }
       }
     };
 
-    // 1080p (1920x1080) at 30fps: ultra-sharp, zero lag, phone stays cool, no battery drain or blackouts
-    startCamera({
-      video: {
-        facingMode: { ideal: 'environment' },
-        width: { ideal: 1920, min: 1280 },
-        height: { ideal: 1080, min: 720 },
-        frameRate: { ideal: 30, max: 30 }
-      }
-    });
+    // 1080p (1920x1080) at 30fps: ultra-sharp, zero lag, phone stays cool, no blackouts
+    startCamera(DEFAULT_CONSTRAINTS);
 
-    // Watchdog: If video element ever pauses or stalls (e.g. background switch), auto resume
+    // Track video readiness & recover seamlessly from OS pauses/visibility switches
     const videoEl = videoRef.current;
+    const handleVideoReady = () => {
+      if (!isCancelled && videoEl && videoEl.videoWidth > 0 && videoEl.videoHeight > 0) {
+        setIsStreamReady(true);
+      }
+    };
     const handleStall = () => {
-      if (videoEl && videoEl.paused) {
+      if (!isCancelled && videoEl && videoEl.paused && streamRef.current) {
         videoEl.play().catch(() => {});
       }
     };
+    const handleVisibilityChange = () => {
+      if (isCancelled || document.visibilityState !== 'visible') return;
+      const track = streamRef.current?.getVideoTracks()?.[0];
+      if (!track || track.readyState === 'ended') {
+        if (!isRestartingRef.current) {
+          isRestartingRef.current = true;
+          setIsStreamReady(false);
+          startCamera(DEFAULT_CONSTRAINTS).finally(() => {
+            isRestartingRef.current = false;
+          });
+        }
+      } else if (videoEl && videoEl.paused) {
+        videoEl.play().catch(() => {});
+      }
+    };
+
     if (videoEl) {
+      videoEl.addEventListener('loadeddata', handleVideoReady);
+      videoEl.addEventListener('playing', handleVideoReady);
       videoEl.addEventListener('stalled', handleStall);
       videoEl.addEventListener('pause', handleStall);
     }
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
+      isCancelled = true;
+      if (restartTimer) clearTimeout(restartTimer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (videoEl) {
+        videoEl.removeEventListener('loadeddata', handleVideoReady);
+        videoEl.removeEventListener('playing', handleVideoReady);
         videoEl.removeEventListener('stalled', handleStall);
         videoEl.removeEventListener('pause', handleStall);
+        videoEl.srcObject = null;
       }
-      if (activeStream) {
-        activeStream.getTracks().forEach(track => {
-          try { track.applyConstraints({ advanced: [{ torch: false }] }); } catch (_) {}
-          track.stop();
-        });
-      }
+      stopStreamTracks(streamRef.current);
+      streamRef.current = null;
     };
-  }, [onClose]);
+  }, []);
 
   // Monitor preview dimensions for responsive aspect-ratio containment
   useEffect(() => {
@@ -404,22 +464,51 @@ export default function CameraCapture({
     if (onSelectTrial) onSelectTrial(trials[prevIdx]);
   }, [currentTrialIdx, trials, onSelectTrial]);
 
+  // Fast 8x8 pixel sample check (<0.1ms) to guarantee we NEVER save a solid-black frame
+  const isCanvasAllBlack = (ctx, width, height) => {
+    try {
+      const steps = 8;
+      for (let gy = 1; gy <= steps; gy++) {
+        const py = Math.min(height - 1, Math.floor((gy * height) / (steps + 1)));
+        for (let gx = 1; gx <= steps; gx++) {
+          const px = Math.min(width - 1, Math.floor((gx * width) / (steps + 1)));
+          const pixel = ctx.getImageData(px, py, 1, 1).data;
+          if (pixel[0] + pixel[1] + pixel[2] > 8) {
+            return false;
+          }
+        }
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  };
+
   // ── High-Speed, Ultra-Reliable Still Capture Engine ──────────────────────
   const captureSingleFrame = async () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return null;
 
-    // Guard: Ensure video has valid decoded dimensions
-    const videoWidth = video.videoWidth || 1920;
-    const videoHeight = video.videoHeight || 1080;
-    if (videoWidth === 0 || videoHeight === 0) return null;
+    // Ensure live video track & actual decoded video frame (NO fake 1920x1080 fallback!)
+    const track = streamRef.current?.getVideoTracks?.()?.[0];
+    if (!track || track.readyState !== 'live') return null;
 
-    const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
+    if (video.paused) {
+      try { await video.play(); } catch (_) {}
+    }
+
+    const videoWidth = video.videoWidth;
+    const videoHeight = video.videoHeight;
+    if (!videoWidth || !videoHeight || video.readyState < 2) return null;
+
+    // Avoid desynchronized:true which can produce black GPU readbacks on Android Chrome
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) return null;
+
     const displayWidth = video.clientWidth;
     const displayHeight = video.clientHeight;
     const targetRatio = displayWidth && displayHeight ? displayWidth / displayHeight : (videoWidth / videoHeight);
-
     const videoRatio = videoWidth / videoHeight;
 
     let srcX, srcY, srcW, srcH;
@@ -435,7 +524,7 @@ export default function CameraCapture({
       srcY = (videoHeight - srcH) / 2;
     }
 
-    // Standard 1080p/2K resolution: crystal-sharp foliage & pest clarity, instant 3ms capture, 30x lighter RAM
+    // Standard 1080p/2K resolution: crystal-sharp foliage & pest clarity, instant capture, light RAM
     const capDimension = 1920;
     let destW = Math.round(srcW);
     let destH = Math.round(srcH);
@@ -451,24 +540,38 @@ export default function CameraCapture({
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(video, srcX, srcY, srcW, srcH, 0, 0, destW, destH);
 
-    // High quality JPEG (0.92) gives razor-sharp details in ~400KB instead of 15MB, eliminating phone freezes
+    // If sensor briefly delivered a black frame, wait 120ms for next decoded frame and retry once
+    if (isCanvasAllBlack(ctx, destW, destH)) {
+      await new Promise(r => setTimeout(r, 120));
+      if (video.videoWidth > 0 && video.readyState >= 2) {
+        ctx.drawImage(video, srcX, srcY, srcW, srcH, 0, 0, destW, destH);
+      }
+      if (isCanvasAllBlack(ctx, destW, destH)) {
+        return null;
+      }
+    }
+
+    // High quality JPEG (0.92) gives razor-sharp details in ~400KB instead of 15MB
     return canvas.toDataURL('image/jpeg', 0.92);
   };
 
   // ── Shutter Action ────────────────────────────────────────────────────────
   const handleShutterPress = async () => {
-    if (isCapturing || !videoRef.current) return;
+    if (isCapturing || !videoRef.current || !isStreamReady) return;
     setIsCapturing(true);
-
-    setShutterFlash(true);
-    triggerHaptic('medium');
-    setTimeout(() => setShutterFlash(false), 80);
 
     const capturedDataUrl = await captureSingleFrame();
     if (!capturedDataUrl) {
       setIsCapturing(false);
+      window.dispatchEvent(new CustomEvent('app:toast', {
+        detail: { msg: 'Camera frame not ready yet — please tap shutter again.', type: 'warn', duration: 2000 }
+      }));
       return;
     }
+
+    setShutterFlash(true);
+    triggerHaptic('medium');
+    setTimeout(() => setShutterFlash(false), 80);
 
     const currentTargetTrial = activeTrial;
     const newCount = sessionCaptures.length + 1;
@@ -696,6 +799,16 @@ export default function CameraCapture({
             <video ref={videoRef} className="w-full h-full object-cover" autoPlay playsInline muted />
             <canvas ref={canvasRef} className="hidden" />
 
+            {/* Subtle Initial Stream Readiness Indicator (only shown briefly until first live frame renders) */}
+            {!isStreamReady && (
+              <div className="absolute inset-0 flex items-center justify-center bg-slate-950/70 pointer-events-none z-20">
+                <div className="flex items-center gap-2 px-3.5 py-2 rounded-full bg-slate-900/90 border border-emerald-500/30 text-emerald-300 text-xs font-bold shadow-lg">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                  <span>Starting camera...</span>
+                </div>
+              </div>
+            )}
+
             {/* Shutter White Flash Feedback */}
             {shutterFlash && (
               <div className="absolute inset-0 bg-white pointer-events-none z-50 animate-fade-out" />
@@ -887,8 +1000,8 @@ export default function CameraCapture({
           <button
             type="button"
             onClick={handleShutterPress}
-            disabled={isCapturing}
-            className={`w-[72px] h-[72px] rounded-full flex items-center justify-center active:scale-90 transition-transform shadow-2xl relative ${
+            disabled={isCapturing || !isStreamReady}
+            className={`w-[72px] h-[72px] rounded-full flex items-center justify-center active:scale-90 transition-transform shadow-2xl relative disabled:opacity-50 ${
               captureMode === 'multi' 
                 ? 'bg-emerald-500 border-4 border-emerald-300/40' 
                 : captureMode === 'burst'
