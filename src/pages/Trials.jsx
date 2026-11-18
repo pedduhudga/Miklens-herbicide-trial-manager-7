@@ -5512,7 +5512,9 @@ export default function Trials({ onMenuClick }) {
         break;
       }
 
-      while (isPausedRef.current && !isCancelledRef.current) {
+      // Thermal protection: pause heavy background AI/network analysis while camera sensor is open,
+      // and resume automatically the moment the camera closes.
+      while ((isPausedRef.current || (typeof document !== 'undefined' && document.body.classList.contains('camera-active'))) && !isCancelledRef.current) {
         await new Promise(r => setTimeout(r, 1000));
       }
       if (isCancelledRef.current) break;
@@ -14616,8 +14618,8 @@ If none are present, write "None".`;
             trial={currentTrial}
             trials={sortedProjectTrials}
             onSelectTrial={(nextTrial) => {
+              // Update ref only while camera is open to avoid re-rendering 100+ trial cards behind the viewfinder on every snap
               quickActionTrialRef.current = nextTrial;
-              setActiveTrial(nextTrial);
             }}
             onCapture={handleCapturePhoto}
             onClose={() => {

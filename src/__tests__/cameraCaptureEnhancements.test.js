@@ -265,6 +265,12 @@ describe('CameraCapture Enhancements & Anti-Blur Engine', () => {
     // Must use ref for onClose and check cancellation + black frame guard
     expect(source).toContain('onCloseRef');
     expect(source).toContain('isCanvasAllBlack');
+    // Thermal protection: NO backdrop-blur-* class over live <video> and release canvas buffer after capture
+    expect(source).not.toMatch(/backdrop-blur-/);
+    expect(source).toContain('canvas.width = 0');
+    // Quality preservation: must NOT compress images below 1920px / 0.92 JPEG quality
+    expect(source).toContain('const capDimension = 1920');
+    expect(source).toContain("canvas.toDataURL('image/jpeg', 0.92)");
   });
 
   // 9. Black-frame detector rejects pure black frames while accepting real plant frames

@@ -110,7 +110,7 @@ export default function CameraCapture({
         facingMode: { ideal: 'environment' },
         width: { ideal: 1920, min: 1280 },
         height: { ideal: 1080, min: 720 },
-        frameRate: { ideal: 30, max: 30 }
+        frameRate: { ideal: 24, max: 24 }
       }
     };
 
@@ -196,7 +196,7 @@ export default function CameraCapture({
               facingMode: { ideal: 'environment' },
               width: { ideal: 1280 },
               height: { ideal: 720 },
-              frameRate: { ideal: 30, max: 30 }
+              frameRate: { ideal: 24, max: 24 }
             }
           });
         } else if (constraints?.video !== true) {
@@ -551,8 +551,11 @@ export default function CameraCapture({
       }
     }
 
-    // High quality JPEG (0.92) gives razor-sharp details in ~400KB instead of 15MB
-    return canvas.toDataURL('image/jpeg', 0.92);
+    // High quality JPEG (0.92) — NO extra compression; immediately release GPU canvas backing buffer after readback
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+    canvas.width = 0;
+    canvas.height = 0;
+    return dataUrl;
   };
 
   // ── Shutter Action ────────────────────────────────────────────────────────
@@ -758,7 +761,7 @@ export default function CameraCapture({
               <button
                 type="button"
                 onClick={handleDoneCapturing}
-                className="px-2.5 py-1 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-[11px] flex items-center gap-1 shadow-md transition active:scale-95 animate-pulse shrink-0"
+                className="px-2.5 py-1 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-[11px] flex items-center gap-1 shadow-md transition active:scale-95 shrink-0"
                 title="Finish & Review Captures"
               >
                 <Check className="w-3.5 h-3.5" />
@@ -793,7 +796,7 @@ export default function CameraCapture({
           onClick={handleTapToFocus}
         >
           <div 
-            className="relative overflow-hidden bg-[#0a0f1d] transition-all duration-300 shadow-2xl flex items-center justify-center cursor-crosshair" 
+            className="relative overflow-hidden bg-[#0a0f1d] transition-[width,height] duration-200 shadow-2xl flex items-center justify-center cursor-crosshair" 
             style={previewStyle}
           >
             <video ref={videoRef} className="w-full h-full object-cover" autoPlay playsInline muted />
@@ -817,7 +820,7 @@ export default function CameraCapture({
             {/* Floating Pot Walkthrough HUD (Inside Viewfinder, Taking Zero Vertical Height!) */}
             {activeTrial && (
               <div className="absolute top-2.5 left-1/2 -translate-x-1/2 max-w-[92%] z-30 pointer-events-auto">
-                <div className="flex items-center gap-1.5 bg-slate-900/85 backdrop-blur-md border border-emerald-500/40 rounded-full px-2.5 py-1 text-white shadow-lg">
+                <div className="flex items-center gap-1.5 bg-slate-950/90 border border-emerald-500/40 rounded-full px-2.5 py-1 text-white shadow-lg">
                   {trials && trials.length > 1 && (
                     <button
                       type="button"
@@ -896,7 +899,7 @@ export default function CameraCapture({
               </div>
             )}
 
-            {/* Floating Quick Tools (Right Side) */}
+            {/* Floating Quick Tools (Right Side) — solid dark translucent pills (no backdrop-blur over live video to prevent GPU heat) */}
             <div className="absolute top-12 sm:top-14 right-2 sm:right-3 flex flex-col gap-2 z-30 pointer-events-auto">
               
               {/* Zoom Button */}
@@ -904,8 +907,8 @@ export default function CameraCapture({
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); toggleZoom(); }}
-                  className={`w-8 h-8 rounded-full flex items-center justify-center backdrop-blur-md border text-[10px] font-black transition-all ${
-                    zoomLevel > 1.2 ? 'bg-emerald-500 text-white border-emerald-400 shadow-md' : 'bg-black/60 text-white border-white/15'
+                  className={`w-8 h-8 rounded-full flex items-center justify-center border text-[10px] font-black transition-colors ${
+                    zoomLevel > 1.2 ? 'bg-emerald-600 text-white border-emerald-400 shadow-md' : 'bg-slate-950/85 text-white border-white/20'
                   }`}
                   title={`Zoom: ${zoomLevel > 1.2 ? '2x' : '1x'}`}
                 >
@@ -918,8 +921,8 @@ export default function CameraCapture({
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); cycleExposure(); }}
-                  className={`w-8 h-8 rounded-full flex items-center justify-center backdrop-blur-md border transition-all ${
-                    exposureEV !== 0 ? 'bg-amber-500 text-white border-amber-400' : 'bg-black/60 text-white border-white/15'
+                  className={`w-8 h-8 rounded-full flex items-center justify-center border transition-colors ${
+                    exposureEV !== 0 ? 'bg-amber-600 text-white border-amber-400' : 'bg-slate-950/85 text-white border-white/20'
                   }`}
                   title={`Exposure: ${exposureEV > 0 ? `+${exposureEV}` : exposureEV}`}
                 >
@@ -931,8 +934,8 @@ export default function CameraCapture({
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); cycleGridMode(); }}
-                className={`w-8 h-8 rounded-full flex items-center justify-center backdrop-blur-md border transition-all ${
-                  gridMode !== 'off' ? 'bg-emerald-600/80 text-white border-emerald-400' : 'bg-black/60 text-slate-300 border-white/15'
+                className={`w-8 h-8 rounded-full flex items-center justify-center border transition-colors ${
+                  gridMode !== 'off' ? 'bg-emerald-700/90 text-white border-emerald-400' : 'bg-slate-950/85 text-slate-300 border-white/20'
                 }`}
                 title={`Grid Guide: ${gridMode.toUpperCase()}`}
               >
@@ -943,7 +946,7 @@ export default function CameraCapture({
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); handleForceRefocus(); }}
-                className="w-8 h-8 rounded-full flex items-center justify-center backdrop-blur-md bg-black/60 text-white border border-white/15 hover:bg-black/80 transition"
+                className="w-8 h-8 rounded-full flex items-center justify-center bg-slate-950/85 text-white border border-white/20 hover:bg-black transition-colors"
                 title="Re-focus Lens Now"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
@@ -955,10 +958,10 @@ export default function CameraCapture({
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); toggleFocusMode(); }}
-                className="bg-slate-900/80 backdrop-blur-md border border-white/15 px-3 py-1 rounded-full flex items-center gap-1.5 shadow-md active:scale-95 transition"
+                className="bg-slate-950/90 border border-white/20 px-3 py-1 rounded-full flex items-center gap-1.5 shadow-md active:scale-95 transition-transform"
               >
                 <span className={`w-2 h-2 rounded-full ${
-                  focusMode === 'continuous' ? 'bg-emerald-400 animate-pulse' : 'bg-sky-400'
+                  focusMode === 'continuous' ? 'bg-emerald-400' : 'bg-sky-400'
                 }`} />
                 <span className="text-[10px] font-extrabold text-slate-200 uppercase tracking-wider">
                   {focusMode === 'continuous' ? 'Auto Focus' : 'Focus Locked'}

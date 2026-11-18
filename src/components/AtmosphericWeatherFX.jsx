@@ -632,13 +632,35 @@ export default function AtmosphericWeatherFX({
         }
       }
 
-      animationFrameId = requestAnimationFrame(render);
+      if (!isPaused) {
+        animationFrameId = requestAnimationFrame(render);
+      }
     };
 
-    render();
+    let isPaused = document.hidden || document.body.classList.contains('camera-active');
+    const syncPauseState = () => {
+      const shouldPause = document.hidden || document.body.classList.contains('camera-active');
+      if (shouldPause && !isPaused) {
+        isPaused = true;
+        cancelAnimationFrame(animationFrameId);
+      } else if (!shouldPause && isPaused) {
+        isPaused = false;
+        animationFrameId = requestAnimationFrame(render);
+      }
+    };
+
+    window.addEventListener('camera:toggle', syncPauseState);
+    document.addEventListener('visibilitychange', syncPauseState);
+
+    if (!isPaused) {
+      render();
+    }
 
     return () => {
+      isPaused = true;
       cancelAnimationFrame(animationFrameId);
+      window.removeEventListener('camera:toggle', syncPauseState);
+      document.removeEventListener('visibilitychange', syncPauseState);
       resizeObserver.disconnect();
     };
   }, [effect, intensity]);
