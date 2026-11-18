@@ -948,16 +948,52 @@ export class AnalysisEngine {
                         return exactObs ? extractFromSingleObs(exactObs) : null;
                     }
 
-                    // Otherwise, pick the LATEST observation that ACTUALLY HAS a recorded value for `metric`
-                    // (Prevents e.g. a plant-height-only walk on Nov 18 from zeroing out Nov 17's visualVigor!)
+                    // Otherwise, pick the LATEST post-application observation that ACTUALLY HAS a recorded value for `metric`
+                    // (Prevents e.g. a plant-height-only walk on Nov 18 from zeroing out Nov 17's visualVigor,
+                    //  and keeps pre-application baseline dates separate from post-application treatment analysis!)
+                    const toDateKeyLocal = (v) => {
+                        if (!v) return '';
+                        const s = String(v).trim();
+                        const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+                        if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+                        const dmy = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+                        if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+                        const p = new Date(s);
+                        if (!isNaN(p.getTime())) {
+                            return `${p.getFullYear()}-${String(p.getMonth() + 1).padStart(2, '0')}-${String(p.getDate()).padStart(2, '0')}`;
+                        }
+                        return '';
+                    };
+                    const startKey = toDateKeyLocal(this.project?.StartDate || trial.Date);
+                    const isBaselineObs = (o) => {
+                        if (!o) return false;
+                        const dNum = parseFloat(o.daa);
+                        if (!isNaN(dNum) && dNum < 0) return true;
+                        if (startKey && o.date) {
+                            const ok = toDateKeyLocal(o.date);
+                            if (ok && ok < startKey) return true;
+                        }
+                        return false;
+                    };
+
                     const sortedNewestFirst = efficacy.slice().sort((a, b) => {
+                        const ka = toDateKeyLocal(a?.date);
+                        const kb = toDateKeyLocal(b?.date);
+                        if (ka && kb && ka !== kb) return kb.localeCompare(ka);
                         const dA = parseFloat(a?.daa);
                         const dB = parseFloat(b?.daa);
                         if (!isNaN(dA) && !isNaN(dB) && dA !== dB) return dB - dA;
-                        return String(b?.date || '').localeCompare(String(a?.date || ''));
+                        return 0;
                     });
 
+                    // First look in post-application observations; only fall back to baseline if no post-app value exists
+                    const postAppSorted = sortedNewestFirst.filter(o => !isBaselineObs(o));
+                    for (const candidateObs of postAppSorted) {
+                        const extracted = extractFromSingleObs(candidateObs);
+                        if (extracted !== null) return extracted;
+                    }
                     for (const candidateObs of sortedNewestFirst) {
+                        if (!isBaselineObs(candidateObs)) continue;
                         const extracted = extractFromSingleObs(candidateObs);
                         if (extracted !== null) return extracted;
                     }
@@ -1044,13 +1080,14 @@ export class AnalysisEngine {
 
                     let anovaResults;
                     let potLayout = 'stripe';
+                    const startDateRef = this.project?.StartDate || this.trials[0]?.Date || null;
                     if (isPotTrial) {
                         potLayout = this.project?.PotLayout || this.trials[0]?.PotLayout || 'stripe';
                         const repCount = new Set(this.trials.map(t => t.Replication).filter(Boolean)).size;
                         if (potLayout === 'crd' || repCount < 2) {
-                            anovaResults = performANOVA(this.trials, { metric, species, daa, design: 'CRD' });
+                            anovaResults = performANOVA(this.trials, { metric, species, daa, design: 'CRD', trialStartDate: startDateRef, includeBaseline: !!options.includeBaseline });
                         } else {
-                            anovaResults = performANOVA(this.trials, { metric, species, daa, design: 'RCBD' });
+                            anovaResults = performANOVA(this.trials, { metric, species, daa, design: 'RCBD', trialStartDate: startDateRef, includeBaseline: !!options.includeBaseline });
                         }
                     } else if (isTwoWay) {
                         anovaResults = performTwoWayANOVA(this.trials, {
@@ -1061,10 +1098,36 @@ export class AnalysisEngine {
                             subFactorName: this.project?.SubFactor || this.trials.find(t => t.SubFactor)?.SubFactor || 'Factor B'
                         });
                         if (anovaResults.error) {
-                            anovaResults = performANOVA(this.trials, { metric, species, daa, design: effectiveDesign });
+                            anovaResults = performANOVA(this.trials, { metric, species, daa, design: effectiveDesign, trialStartDate: startDateRef, includeBaseline: !!options.includeBaseline });
                         }
                     } else {
-                        anovaResults = performANOVA(this.trials, { metric, species, daa, design: effectiveDesign });
+                        anovaResults = performANOVA(this.trials, { metric, species, daa, design: effectiveDesign, trialStartDate: startDateRef, includeBaseline: !!options.includeBaseline });
+                    }
+
+                    // Do NOT mask strict ineligibility (insufficient valid observations or zero variance) with fake fallback ANOVA!
+                    if (anovaResults.ineligible) {
+                        return {
+                            means: {},
+                            efficacy: {},
+                            anova: {
+                                error: anovaResults.error,
+                                ineligible: true,
+                                ineligibleReason: anovaResults.ineligibleReason,
+                                ssTreat: 0, ssBlock: 0, ssError: 0, ssTotal: 0,
+                                dfTreat: 0, dfBlock: 0, dfError: 0, dfTotal: 0,
+                                msTreat: 0, msBlock: 0, msError: 0,
+                                fVal: null, pVal: null, grandMean: 0, cv: null
+                            },
+                            postHoc: { letters: {}, method: 'lsd', value: null },
+                            grouping: [],
+                            raw: dataMap,
+                            balance: { isBalanced: false, counts: {} },
+                            ineligible: true,
+                            ineligibleReason: anovaResults.ineligibleReason,
+                            error: anovaResults.error,
+                            timestamp: new Date().toISOString(),
+                            metric
+                        };
                     }
 
                     if (anovaResults.error && !isTwoWay) {
@@ -1881,26 +1944,59 @@ export function extractLatestValidTrialMetric(trial, metricKey, projectCategory 
 
   const eff = safeJsonParse(trial.EfficacyDataJSON, []);
   if (!eff.length) return null;
+  const toDateKeyLocal = (v) => {
+    if (!v) return '';
+    const s = String(v).trim();
+    const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+    const dmy = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+    if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+    const p = new Date(s);
+    if (!isNaN(p.getTime())) {
+      return `${p.getFullYear()}-${String(p.getMonth() + 1).padStart(2, '0')}-${String(p.getDate()).padStart(2, '0')}`;
+    }
+    return '';
+  };
+  const startKey = toDateKeyLocal(trial.Date);
+  const isBaselineObs = (o) => {
+    if (!o) return false;
+    const dNum = parseFloat(o.daa);
+    if (!isNaN(dNum) && dNum < 0) return true;
+    if (startKey && o.date) {
+      const ok = toDateKeyLocal(o.date);
+      if (ok && ok < startKey) return true;
+    }
+    return false;
+  };
   const sorted = eff.slice().sort((a, b) => {
+    const ka = toDateKeyLocal(a?.date);
+    const kb = toDateKeyLocal(b?.date);
+    if (ka && kb && ka !== kb) return kb.localeCompare(ka);
     const dA = parseFloat(a?.daa);
     const dB = parseFloat(b?.daa);
     if (!isNaN(dA) && !isNaN(dB) && dA !== dB) return dB - dA;
-    return String(b?.date || '').localeCompare(String(a?.date || ''));
+    return 0;
   });
 
   const primaryField = getPrimaryObservationField(projectCategory);
-  for (const obs of sorted) {
-    if (!obs || typeof obs !== 'object') continue;
-    if (metricKey && obs[metricKey] !== undefined && obs[metricKey] !== null && obs[metricKey] !== '') {
-      const v = parseStrict(obs[metricKey]);
-      if (v !== null) return v;
+  const tryList = (list) => {
+    for (const obs of list) {
+      if (!obs || typeof obs !== 'object') continue;
+      if (metricKey && obs[metricKey] !== undefined && obs[metricKey] !== null && obs[metricKey] !== '') {
+        const v = parseStrict(obs[metricKey]);
+        if (v !== null) return v;
+      }
+      if (!metricKey || metricKey === primaryField || metricKey === 'cover') {
+        const pv = parseStrict(getObservationPrimaryValue(projectCategory, obs));
+        if (pv !== null) return pv;
+      }
     }
-    if (!metricKey || metricKey === primaryField || metricKey === 'cover') {
-      const pv = parseStrict(getObservationPrimaryValue(projectCategory, obs));
-      if (pv !== null) return pv;
-    }
-  }
-  return null;
+    return null;
+  };
+  // Prefer post-application observations; only fall back to pre-app baseline if no post-app data exists
+  const postAppVal = tryList(sorted.filter(o => !isBaselineObs(o)));
+  if (postAppVal !== null) return postAppVal;
+  return tryList(sorted.filter(o => isBaselineObs(o)));
 }
 
 /**
@@ -1973,6 +2069,12 @@ export function resolveProjectAnalysisContext(project, pTrials = [], pBlocks = [
   const designLabel = project?.Design === 'PotTrial'
     ? 'RCBD Pot Trial'
     : (project?.Design || 'RCBD');
+  const isCleanLoc = (val) => val && !/^(various|n\/a|not specified|unknown|—|-)$/i.test(String(val).trim());
+  const location = isCleanLoc(project?.Location)
+    ? String(project.Location).trim()
+    : (trials.find(t => isCleanLoc(t?.Location))?.Location || project?.Location || 'Not specified');
+  const plotDateRecords = trials.reduce((sum, t) => sum + safeJsonParse(t?.EfficacyDataJSON, []).length, 0);
+  const independentUnits = trials.length > 0 ? trials.length : uniqueTreatments.length * effectiveBlocks;
 
   return {
     category: cat,
@@ -1983,6 +2085,9 @@ export function resolveProjectAnalysisContext(project, pTrials = [], pBlocks = [
     treatmentCount: uniqueTreatments.length,
     treatments: uniqueTreatments,
     experimentalUnits: trials.length,
+    independentUnits,
+    plotDateRecords,
+    location,
     designLabel
   };
 }

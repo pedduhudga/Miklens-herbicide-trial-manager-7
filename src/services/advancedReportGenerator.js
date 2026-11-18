@@ -10,6 +10,7 @@ import { getCategoryConfig } from '../utils/categoryConfig.js';
 import { getAPIKeys, generateTextWithAI } from './multiProviderAI.js';
 import { getPlotAreaHectares } from '../utils/helpers.js';
 import { performTypeIIIANOVA, getStudentTCritical } from '../utils/statsUtils.js';
+import { calculateDAA, formatDaaLabel } from '../utils/dateUtils.js';
 
 // Local helper for safe JSON parsing
 function safeJsonParse(val, fallback = []) {
@@ -71,7 +72,7 @@ async function generateNarrativeWithAI(trial, category, observations, activeFiel
     });
 
     const obsSummary = summaryParts.slice(0, 20).join('; ');
-    const interpretation = compileAgronomicInterpretation(observations, activeFields, treatmentNames, category, design);
+    const interpretation = compileAgronomicInterpretation(observations, activeFields, treatmentNames, category, design, trial?.Date);
 
     const prompt = `You are a professional agronomist. Write a concise, executive-level scientific narrative (2 paragraphs) summarizing the results of this trial.
 Trial: ${trial.FormulationName || 'Test formulation'} on crop ${trial.CropCrop || trial.Crop || 'N/A'}.
@@ -137,7 +138,7 @@ async function generateConclusionsWithAI(trial, category, activeFields, observat
     });
 
     const obsSummary = summaryParts.slice(0, 20).join('; ');
-    const interpretation = compileAgronomicInterpretation(observations, activeFields, treatmentNames, category, design);
+    const interpretation = compileAgronomicInterpretation(observations, activeFields, treatmentNames, category, design, trial?.Date);
 
     const prompt = `You are a senior agricultural scientist. Write a bulleted list of 3 scientific conclusions and practical grower recommendations based on this trial's statistical results.
 Trial: ${trial.FormulationName || 'Test treatment'}
@@ -432,19 +433,121 @@ function extractNumericMetricValue(obs, metricKey) {
 }
 
 /**
+ * Detect anomalous / extreme outlier values across numeric parameters without
+ * modifying or deleting raw field observations. Flags e.g. Plot 204 Flower Stage = 61
+ * when the rest of the dataset is 0–1 (CV > 100%).
+ */
+export function detectAnomalousObservations(observations = [], activeFields = []) {
+  const anomalies = [];
+  const rows = Array.isArray(observations) ? observations : [];
+  const fields = (Array.isArray(activeFields) ? activeFields : []).filter(
+    f => f && f.key && !['nue', 'audpc', 'rootToShootRatio', 'fruitHealthNote'].includes(f.key)
+  );
+
+  fields.forEach(f => {
+    const entries = [];
+    rows.forEach((obs, idx) => {
+      const val = extractNumericMetricValue(obs, f.key);
+      if (Number.isFinite(val)) {
+        entries.push({ val, obs, idx });
+      }
+    });
+    if (entries.length < 4) return;
+
+    const vals = entries.map(e => e.val);
+    const sorted = [...vals].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    const median = sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    const mean = vals.reduce((s, v) => s + v, 0) / vals.length;
+    const variance = vals.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / (vals.length - 1);
+    const stdDev = Math.sqrt(variance);
+    const cv = mean > 0 ? (stdDev / mean) * 100 : 0;
+
+    const absDevs = sorted.map(v => Math.abs(v - median)).sort((a, b) => a - b);
+    const madMid = Math.floor(absDevs.length / 2);
+    const mad = absDevs.length % 2 !== 0 ? absDevs[madMid] : (absDevs[madMid - 1] + absDevs[madMid]) / 2;
+
+    const q1 = sorted[Math.floor(sorted.length * 0.25)];
+    const q3 = sorted[Math.floor(sorted.length * 0.75)];
+    const iqr = q3 - q1;
+
+    entries.forEach(({ val, obs, idx }) => {
+      let isExtreme = false;
+      let reason = '';
+
+      if (mad > 0) {
+        const modZ = (0.6745 * Math.abs(val - median)) / mad;
+        if (modZ > 3.5 && Math.abs(val - median) > Math.max(2 * iqr, 1)) {
+          isExtreme = true;
+          reason = `Modified Z-score = ${modZ.toFixed(1)}`;
+        }
+      } else if (stdDev > 0) {
+        // MAD == 0 (majority of plots share the same value, e.g. 0 or 1, while one plot is 61)
+        const z = Math.abs(val - mean) / stdDev;
+        const gap = Math.abs(val - median);
+        if ((z >= 2.8 && gap >= Math.max(10, 5 * Math.max(1, iqr))) || (gap >= 10 && val >= 10 * Math.max(1, Math.abs(median)))) {
+          isExtreme = true;
+          reason = `Extreme spike (Z = ${z.toFixed(1)}, CV = ${cv.toFixed(1)}%)`;
+        }
+      }
+
+      if (isExtreme) {
+        const plot = obs.plot || obs.plotNumber || `#${idx + 1}`;
+        const trt = obs.treatment || `Treatment ${obs.treatmentNumber || 1}`;
+        const dateStr = obs.date || 'N/A';
+        anomalies.push({
+          fieldKey: f.key,
+          fieldLabel: f.label || f.key,
+          plot,
+          treatment: trt,
+          date: dateStr,
+          value: val,
+          median,
+          cv: parseFloat(cv.toFixed(1)),
+          reason,
+          message: `Anomalous Value Flag (Requires Field Verification): Plot ${plot} (${trt}, ${dateStr}) has ${f.label || f.key} = ${val} vs dataset median = ${median.toFixed(2)} (${reason}). Value was NOT altered or deleted — verify whether this is a genuine reading, unit/BBCH scale mismatch, or data entry error.`
+        });
+      }
+    });
+  });
+
+  return anomalies;
+}
+
+/**
  * Prevent statistical pseudoreplication:
  * Repeated measurements of the same experimental plots across multiple assessment dates
  * MUST NOT be pooled as independent replicates in a single RCBD/CRD ANOVA.
  *
- * Selects the latest valid assessment date (with >= 2 treatments) and aggregates any
- * multiple sub-samples per experimental unit (treatment × replication) to 1 value per unit.
+ * Selects the latest valid post-application assessment date (keeping pre-application baseline
+ * separate unless includeBaseline=true or targetDateKey is explicitly specified) and aggregates
+ * any sub-samples per experimental unit (treatment × replication) to 1 value per unit.
  */
 export function selectIndependentAssessmentSlice(data, metricKey, options = {}) {
   const validRows = (data || []).filter(obs => Number.isFinite(extractNumericMetricValue(obs, metricKey)));
 
   if (validRows.length === 0) {
-    return { sliceData: [], analyzedDate: null, analyzedDaa: null, totalDatesObserved: 0, isRepeatedMeasuresSliced: false };
+    return {
+      sliceData: [],
+      analyzedDate: null,
+      analyzedDaa: null,
+      totalDatesObserved: 0,
+      isRepeatedMeasuresSliced: false,
+      isPreApplicationBaseline: false,
+      baselineDatesExcluded: 0
+    };
   }
+
+  const startDateKey = normalizeReportDateKey(options.trialStartDate);
+  const isBaselineRow = (obs) => {
+    const daaNum = obs.daa !== undefined && obs.daa !== null && obs.daa !== '' ? Number(obs.daa) : null;
+    if (daaNum !== null && !isNaN(daaNum) && daaNum < 0) return true;
+    if (startDateKey) {
+      const ok = normalizeReportDateKey(obs.date);
+      if (ok && ok < startDateKey) return true;
+    }
+    return false;
+  };
 
   // Group valid rows by assessment date (or DAA fallback if date absent)
   const dateBuckets = new Map();
@@ -453,7 +556,14 @@ export function selectIndependentAssessmentSlice(data, metricKey, options = {}) 
     const daaNum = obs.daa !== undefined && obs.daa !== null && obs.daa !== '' ? Number(obs.daa) : null;
     const bucketKey = normDate || (daaNum !== null && !isNaN(daaNum) ? `DAA:${daaNum}` : 'SINGLE');
     if (!dateBuckets.has(bucketKey)) {
-      dateBuckets.set(bucketKey, { key: bucketKey, normDate, daa: daaNum, rows: [], treatments: new Set() });
+      dateBuckets.set(bucketKey, {
+        key: bucketKey,
+        normDate,
+        daa: daaNum,
+        rows: [],
+        treatments: new Set(),
+        isBaseline: isBaselineRow(obs)
+      });
     }
     const b = dateBuckets.get(bucketKey);
     b.rows.push(obs);
@@ -463,12 +573,18 @@ export function selectIndependentAssessmentSlice(data, metricKey, options = {}) 
 
   const totalDatesObserved = dateBuckets.size;
   let chosenBucket = null;
+  let baselineDatesExcluded = 0;
 
   if (options.targetDateKey && dateBuckets.has(options.targetDateKey)) {
     chosenBucket = dateBuckets.get(options.targetDateKey);
   } else {
+    const allBuckets = Array.from(dateBuckets.values());
+    const postAppBuckets = options.includeBaseline ? allBuckets : allBuckets.filter(b => !b.isBaseline);
+    baselineDatesExcluded = allBuckets.length - postAppBuckets.length;
+    const candidateBuckets = postAppBuckets.length > 0 ? postAppBuckets : allBuckets;
+
     // Sort newest date / highest DAA first, prefer latest date with >= 2 treatments
-    const sortedBuckets = Array.from(dateBuckets.values()).sort((a, b) => {
+    const sortedBuckets = candidateBuckets.sort((a, b) => {
       if (a.normDate && b.normDate && a.normDate !== b.normDate) return b.normDate.localeCompare(a.normDate);
       return (b.daa ?? -999) - (a.daa ?? -999);
     });
@@ -497,18 +613,22 @@ export function selectIndependentAssessmentSlice(data, metricKey, options = {}) 
     analyzedDate: chosenBucket.normDate || chosenBucket.rows[0]?.date || null,
     analyzedDaa: chosenBucket.daa,
     totalDatesObserved,
-    isRepeatedMeasuresSliced: totalDatesObserved > 1
+    isRepeatedMeasuresSliced: totalDatesObserved > 1,
+    isPreApplicationBaseline: Boolean(chosenBucket.isBaseline),
+    baselineDatesExcluded
   };
 }
 
-// Perform ANOVA (RCB or CRD) on statistically independent experimental units
+// Perform ANOVA (RCB or CRD) on statistically independent experimental units with strict eligibility checks
 export function calculateAnovaRCB(data, metricKey, category = 'nutrition', design = 'RCBD', options = {}) {
   const {
     sliceData,
     analyzedDate,
     analyzedDaa,
     totalDatesObserved,
-    isRepeatedMeasuresSliced
+    isRepeatedMeasuresSliced,
+    isPreApplicationBaseline,
+    baselineDatesExcluded
   } = selectIndependentAssessmentSlice(data, metricKey, options);
 
   const values = [];
@@ -531,18 +651,55 @@ export function calculateAnovaRCB(data, metricKey, category = 'nutrition', desig
   const N = values.length;
   const t = Object.keys(trtGroups).length;
   const b = Object.keys(repGroups).length;
+  const formattedDate = analyzedDate ? normalizeDateString(analyzedDate) : null;
   
   // RCBD Pot Trials with >= 2 replications MUST be analyzed as RCBD (blocking on Rep/Row),
   // matching both the experimental design metadata and Regulatory PDF DF (e.g. Trt=3, Blk=4, Err=12, Total=19).
   const isCrd = design === 'CRD' || b < 2;
 
-  if (N < 4 || t < 2 || (!isCrd && b < 2)) {
-    return { error: `Insufficient independent observations for ${isCrd ? 'CRD' : 'RCB'} ANOVA.` };
+  // Strict statistical eligibility validation before ANOVA:
+  // 1) Require >= 2 treatments (and all expected treatments represented if expectedTreatments >= 2)
+  // 2) Every represented treatment must have >= 2 valid independent replicates
+  // 3) RCBD requires >= 2 blocks and N >= 4
+  const trtRepCounts = Object.values(trtGroups).map(arr => arr.length);
+  const minTrtReps = trtRepCounts.length > 0 ? Math.min(...trtRepCounts) : 0;
+  const expectedTrts = Number(options.expectedTreatments) || 0;
+
+  if (
+    N < 4 ||
+    t < 2 ||
+    (!isCrd && b < 2) ||
+    minTrtReps < 2 ||
+    (expectedTrts >= 2 && t < expectedTrts)
+  ) {
+    return {
+      error: 'NOT ANALYSED – Insufficient valid observations',
+      ineligible: true,
+      ineligibleReason: 'insufficient',
+      analyzedDate: formattedDate,
+      analyzedDateKey: analyzedDate || null,
+      analyzedDaa,
+      nIndependentUnits: N,
+      totalDatesObserved,
+      isRepeatedMeasuresSliced,
+      isPreApplicationBaseline
+    };
   }
 
   const allIdentical = values.every(v => v === values[0]);
   if (allIdentical) {
-    return { error: 'No variability detected; ANOVA cannot identify treatment differences because all treatment means are identical.' };
+    return {
+      error: 'NOT ANALYSED – Constant values across all experimental units (zero variance)',
+      ineligible: true,
+      ineligibleReason: 'constant',
+      analyzedDate: formattedDate,
+      analyzedDateKey: analyzedDate || null,
+      analyzedDaa,
+      nIndependentUnits: N,
+      totalDatesObserved,
+      isRepeatedMeasuresSliced,
+      isPreApplicationBaseline
+    };
   }
 
   const grandMean = values.reduce((a, b) => a + b, 0) / N;
@@ -675,6 +832,7 @@ export function calculateAnovaRCB(data, metricKey, category = 'nutrition', desig
     const trtSE = trtSD / Math.sqrt(trtVals.length || 1);
     
     treatmentMeans[trt] = {
+      n: trtVals.length,
       mean: trtMean,
       sd: trtSD,
       se: trtSE,
@@ -735,7 +893,10 @@ export function calculateAnovaRCB(data, metricKey, category = 'nutrition', desig
     nIndependentUnits: N,
     totalDatesObserved,
     isRepeatedMeasuresSliced,
+    isPreApplicationBaseline,
+    baselineDatesExcluded,
     modelType: isCrd ? 'CRD' : 'RCBD',
+    controlBaselineZero: cMean <= 0,
 
     cv,
     sem,
@@ -777,17 +938,21 @@ export function calculateAnovaRCB(data, metricKey, category = 'nutrition', desig
           }
         }
       }
-      return cMean > 0 ? (isReductionMetric(metricKey, category) ? ((cMean - tMean) / cMean) * 100 : ((tMean - cMean) / cMean) * 100) : 0;
+      if (cMean <= 0) return null;
+      return isReductionMetric(metricKey, category) ? ((cMean - tMean) / cMean) * 100 : ((tMean - cMean) / cMean) * 100;
     })()
   };
 }
 
 // Compile structured statistical interpretations to feed the AI prompt
-function compileAgronomicInterpretation(observations, activeFields, treatmentNames, category, design) {
+function compileAgronomicInterpretation(observations, activeFields, treatmentNames, category, design, trialStartDate = null) {
   const summaries = [];
   
   activeFields.forEach(f => {
-    const anova = calculateAnovaRCB(observations, f.key, category, design);
+    const anova = calculateAnovaRCB(observations, f.key, category, design, {
+      trialStartDate,
+      expectedTreatments: treatmentNames.length
+    });
     if (anova.error) return;
 
     const isSig = anova.p_value < 0.05;
@@ -1022,16 +1187,28 @@ export class AdvancedReportGenerator {
       
       // Let's create a combined/representative trial object for single-trial compatibility fields
       const firstTrial = trialOrTrials[0] || {};
+      const isCleanMeta = (v) => v && !/^(various|n\/a|not specified|unknown|—|-)$/i.test(String(v).trim());
+      const resolvedLocation = isCleanMeta(proj?.Location)
+        ? String(proj.Location).trim()
+        : (trialOrTrials.find(t => isCleanMeta(t?.Location))?.Location || firstTrial.Location || 'Not specified');
+      const resolvedInvestigator = isCleanMeta(proj?.Investigator)
+        ? String(proj.Investigator).trim()
+        : (trialOrTrials.find(t => isCleanMeta(t?.InvestigatorName))?.InvestigatorName || firstTrial.InvestigatorName || 'Project Team');
+      const resolvedCrop = isCleanMeta(proj?.Crop)
+        ? String(proj.Crop).trim()
+        : (firstTrial.CropCrop || firstTrial.Crop || 'N/A');
+      const resolvedStartDate = proj?.StartDate || firstTrial.Date || trialOrTrials.find(t => t?.Date)?.Date || 'N/A';
+
       this.trial = {
-        ID: `PROJ-${firstTrial.ProjectID || 'ALL'}`,
+        ID: proj?.ID || `PROJ-${firstTrial.ProjectID || 'ALL'}`,
         FormulationName: firstTrial.FormulationName || 'Consolidated Project Plots',
-        Crop: firstTrial.Crop || firstTrial.CropCrop || proj?.Crop || 'N/A',
-        CropCrop: firstTrial.CropCrop || firstTrial.Crop || proj?.Crop || 'N/A',
-        InvestigatorName: firstTrial.InvestigatorName || 'Project Team',
-        Location: firstTrial.Location || 'Various',
+        Crop: resolvedCrop,
+        CropCrop: resolvedCrop,
+        InvestigatorName: resolvedInvestigator,
+        Location: resolvedLocation,
         Dosage: firstTrial.Dosage || 'Various',
         Replication: 'Multiple',
-        Date: firstTrial.Date || 'Various',
+        Date: resolvedStartDate,
         Temperature: firstTrial.Temperature,
         Humidity: firstTrial.Humidity,
         Windspeed: firstTrial.Windspeed,
@@ -1084,9 +1261,24 @@ export class AdvancedReportGenerator {
             }
           });
 
+          const normDateStr = normalizeDateString(obs.date, t.Date);
+          const refStart = resolvedStartDate && resolvedStartDate !== 'N/A' ? resolvedStartDate : t.Date;
+          // Preserve signed DAA when observation predates trial start (e.g. 12-Nov vs 13-Nov -> -1)
+          let effectiveDaa = obs.daa;
+          if (obs.date && refStart) {
+            const signedDaa = calculateDAA(obs.date, refStart);
+            if (signedDaa < 0) {
+              effectiveDaa = signedDaa;
+            } else if (effectiveDaa === undefined || effectiveDaa === null || effectiveDaa === '') {
+              effectiveDaa = signedDaa;
+            }
+          }
+
           this.observations.push({
             ...cleanedObs,
-            date: normalizeDateString(obs.date, t.Date),
+            date: normDateStr,
+            daa: effectiveDaa,
+            isPreApplicationBaseline: Number(effectiveDaa) < 0,
             treatment: obs.treatment || trtName,
             treatmentNumber: obs.treatmentNumber || trtNum,
             plot: obs.plot || t.PlotNumber || 'N/A',
@@ -1475,7 +1667,7 @@ export class AdvancedReportGenerator {
       if (obs.daa !== undefined && obs.daa !== null) {
         const daaNum = Number(obs.daa);
         if (daaNum < 0) {
-          warnings.push(`Observation #${idx + 1}: Negative DAA (${obs.daa}) detected.`);
+          warnings.push(`Pre-Application Baseline (Obs #${idx + 1}, ${obs.date || 'N/A'}): Recorded at DAA ${daaNum} (kept separate from post-application treatment-effect ANOVA).`);
         }
         
         if (obs.date) {
@@ -1571,6 +1763,13 @@ export class AdvancedReportGenerator {
       warnings.push('Duplicate Subsamples Alert: Every pot within a treatment × replication block has identical measurements. The data appear to be plot-level measurements copied to multiple pots; recommend analysing block means rather than treating each pot as an independent replicate.');
     }
 
+    // Anomalous / extreme outlier detection (flags for field verification WITHOUT altering data)
+    const anomalies = detectAnomalousObservations(this.observations, this.activeFields);
+    this.detectedAnomalies = anomalies;
+    anomalies.forEach(a => {
+      warnings.push(a.message);
+    });
+
     return warnings;
   }
 
@@ -1616,7 +1815,10 @@ export class AdvancedReportGenerator {
 
       // Compute ANOVA on primary metric to supply to AI narrative writer
       const primaryMetricKey = this.config.primaryMetric?.key || 'plantHeight';
-      const anovaResults = calculateAnovaRCB(this.observations, primaryMetricKey, this.category, this.design);
+      const anovaResults = calculateAnovaRCB(this.observations, primaryMetricKey, this.category, this.design, {
+        trialStartDate: this.trial.Date,
+        expectedTreatments: this.treatmentNames.length
+      });
 
       // 1. Build Narrative Sheet
       await this.createNarrativeSheet(anovaResults);
@@ -1848,9 +2050,10 @@ export class AdvancedReportGenerator {
     ws.getCell('A22').fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'F3F4F6' } };
 
     const maxDaa = this.observations.length ? Math.max(...this.observations.map(o => Number(o.daa || 0))) : 0;
+    const anovaOpts = { trialStartDate: this.trial.Date, expectedTreatments: this.treatmentNames.length };
     const sigParams = [];
     this.activeFields.forEach(f => {
-      const anova = calculateAnovaRCB(this.observations, f.key, this.category, this.design);
+      const anova = calculateAnovaRCB(this.observations, f.key, this.category, this.design, anovaOpts);
       if (!anova.error && anova.p_value < 0.05) {
         sigParams.push(f.label);
       }
@@ -1858,10 +2061,10 @@ export class AdvancedReportGenerator {
     const sigParamsList = sigParams.length ? sigParams.join(', ') : 'None';
 
     const primaryMetricKey = this.config.primaryMetric?.key || (this.activeFields[0]?.key) || 'plantHeight';
-    let primaryAnova = calculateAnovaRCB(this.observations, primaryMetricKey, this.category, this.design);
+    let primaryAnova = calculateAnovaRCB(this.observations, primaryMetricKey, this.category, this.design, anovaOpts);
     if (!primaryAnova || primaryAnova.error) {
       for (let i = 0; i < this.activeFields.length; i++) {
-        const testAnova = calculateAnovaRCB(this.observations, this.activeFields[i].key, this.category, this.design);
+        const testAnova = calculateAnovaRCB(this.observations, this.activeFields[i].key, this.category, this.design, anovaOpts);
         if (testAnova && !testAnova.error) {
           primaryAnova = testAnova;
           break;
@@ -1929,10 +2132,10 @@ export class AdvancedReportGenerator {
     header.alignment = { horizontal: 'center' };
 
     const designLabel = this.design === 'CRD' 
-      ? 'CRD (Completely Randomized Design)' 
+      ? 'Completely Randomized Design (CRD)' 
       : this.design === 'PotTrial' 
-        ? 'Pot Trial Design' 
-        : 'RCB (Randomized Complete Block)';
+        ? 'RCBD Pot Trial' 
+        : 'Randomized Complete Block Design (RCBD)';
 
     // ── Derive design parameters from REAL project data ──
     const proj = this.project;
@@ -1983,16 +2186,14 @@ export class AdvancedReportGenerator {
       unitText = `Statistical analysis was performed using ${independentUnits} independent experimental units (${totalPots} total pots).`;
     }
 
-    // Read pot layout from project
+    // Read pot layout from project (aligned with RCBD statistical model)
     const rawLayout = proj?.PotLayout || '';
     let layoutLabel = '';
     if (rawLayout === 'rcbd-pot') layoutLabel = 'RCBD Pot Trial';
-    else if (rawLayout === 'stripe') layoutLabel = 'Stripe Layout';
-    else if (rawLayout === 'randomized-row') layoutLabel = 'Randomized Row';
+    else if (rawLayout === 'stripe') layoutLabel = computedReplications >= 2 ? 'RCBD Pot Trial (Stripe Grid)' : 'Stripe Layout';
+    else if (rawLayout === 'randomized-row') layoutLabel = computedReplications >= 2 ? 'RCBD Pot Trial (Randomized Row)' : 'Randomized Row';
     else if (rawLayout) layoutLabel = rawLayout;
 
-    const datesList = [...new Set(this.observations.map(o => o.date || 'N/A'))];
-    const independentStatsObsCount = datesList.length * independentUnits;
     const exportTime = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
 
     const rawMetadata = [
@@ -2008,14 +2209,16 @@ export class AdvancedReportGenerator {
       ['Design Type', designLabel],
       ['Pot Layout', layoutLabel],
       ['Pot Grid Dimensions', (potRows && potCols) ? `${potRows} rows × ${potCols} columns` : ''],
+      ['Treatments', trtCount],
       ['Replications / Blocks', computedReplications],
       ['Experimental Unit', expUnit],
-      ['Independent Units Used', independentUnits],
+      ['Experimental Units', independentUnits],
+      ['Independent Units Used per ANOVA', independentUnits],
+      ['Total Plot-Date Records', this.observations.length],
       ['Total Pots', totalPots],
       ['Pots per Experimental Unit', potsPerUnit > 1 ? potsPerUnit : ''],
       ['Observation Mode', obsMode !== 'N/A' ? obsMode : ''],
       ['Methodology Note', unitText],
-      ['Independent Statistical Observations', independentStatsObsCount],
       ['Trial Start Date', this.trial.Date],
       ['Soil pH', this.soil?.ph],
       ['Soil Texture', this.soil?.texture],
@@ -2292,7 +2495,8 @@ export class AdvancedReportGenerator {
 
         // Write metadata
         ws.getCell(currentRow, 1).value = dateVal;
-        ws.getCell(currentRow, 2).value = obs.daa ?? 0;
+        const rawDaaVal = obs.daa !== undefined && obs.daa !== null && obs.daa !== '' ? Number(obs.daa) : 0;
+        ws.getCell(currentRow, 2).value = rawDaaVal < 0 ? formatDaaLabel(rawDaaVal) : rawDaaVal;
         ws.getCell(currentRow, 3).value = obs.harvestNumber || obs.harvest || 1;
         ws.getCell(currentRow, 4).value = obs.plotNumber || obs.plot || (idx + 1);
         ws.getCell(currentRow, 5).value = obs.replication || obs.rep || 1;
@@ -2310,7 +2514,7 @@ export class AdvancedReportGenerator {
           }
 
           const cell = ws.getCell(currentRow, 8 + fIdx);
-          cell.value = val !== undefined && val !== null ? val : '';
+          cell.value = (val !== undefined && val !== null && val !== '') ? val : null;
 
           // Add scientific critical deficiency highlights for tissue concentrations
           if (val !== undefined && val !== null && val !== '') {
@@ -2497,7 +2701,7 @@ export class AdvancedReportGenerator {
       else if (rawCv > 20) variabilityClass = 'Moderate';
       else if (rawCv > 10) variabilityClass = 'Good';
 
-      // Calculate treatment means to find best/worst
+      // Calculate treatment means strictly over valid numeric values (NEVER coerce missing to 0)
       const trtMeans = this.treatmentNames.map((name, idx) => {
         const trtNum = idx + 1;
         const trtVals = this.observations.filter(o => this.matchesTreatment(o, trtNum, name))
@@ -2508,10 +2712,11 @@ export class AdvancedReportGenerator {
                                            return parseFloat(o[f.key]);
                                          })
                                          .flat()
-                                         .filter(v => !isNaN(v));
-        const avg = trtVals.length ? trtVals.reduce((sum1, v1) => sum1 + v1, 0) / trtVals.length : 0;
-        return { name, mean: avg };
-      });
+                                         .filter(v => Number.isFinite(v));
+        if (!trtVals.length) return null;
+        const avg = trtVals.reduce((sum1, v1) => sum1 + v1, 0) / trtVals.length;
+        return { name, mean: avg, n: trtVals.length };
+      }).filter(Boolean);
 
       const isRed = isReductionMetric(f.key, this.category);
       const sortedTrts = [...trtMeans].sort((a, b) => isRed ? a.mean - b.mean : b.mean - a.mean);
@@ -2519,14 +2724,14 @@ export class AdvancedReportGenerator {
       const bestMeanVal = sortedTrts[0]?.mean;
       const worstMeanVal = sortedTrts[sortedTrts.length - 1]?.mean;
 
-      const bestTrts = sortedTrts.filter(t => Math.abs(t.mean - bestMeanVal) < 0.0001);
-      const worstTrts = sortedTrts.filter(t => Math.abs(t.mean - worstMeanVal) < 0.0001);
+      const bestTrts = sortedTrts.filter(t => bestMeanVal !== undefined && Math.abs(t.mean - bestMeanVal) < 0.0001);
+      const worstTrts = sortedTrts.filter(t => worstMeanVal !== undefined && Math.abs(t.mean - worstMeanVal) < 0.0001);
 
       const bestTrtsName = bestTrts.length > 1 ? `Tie (${bestTrts.map(t => t.name).join(', ')})` : (bestTrts[0]?.name || 'N/A');
       const worstTrtsName = worstTrts.length > 1 ? `Tie (${worstTrts.map(t => t.name).join(', ')})` : (worstTrts[0]?.name || 'N/A');
 
-      const bestMean = bestTrts[0]?.mean ?? 0;
-      const worstMean = worstTrts[0]?.mean ?? 0;
+      const bestMean = bestTrts[0]?.mean ?? null;
+      const worstMean = worstTrts[0]?.mean ?? null;
 
       const paramComp = completeness.perParameter[f.key] || {
         validCount: sampleSize,
@@ -2548,9 +2753,9 @@ export class AdvancedReportGenerator {
         `${paramComp.completenessPct.toFixed(1)}%`,
         variabilityClass,
         bestTrtsName,
-        parseFloat(bestMean.toFixed(2)),
+        bestMean !== null ? parseFloat(bestMean.toFixed(2)) : 'N/A',
         worstTrtsName,
-        parseFloat(worstMean.toFixed(2))
+        worstMean !== null ? parseFloat(worstMean.toFixed(2)) : 'N/A'
       ];
       
       // Styling the Variability Class
@@ -2569,72 +2774,127 @@ export class AdvancedReportGenerator {
       curRow++;
     });
 
-    // 3a. Beneficial Parameters (Higher is Better)
+    // 3a. Beneficial Parameters (Higher is Better) — strictly separates numerical order from ANOVA significance
     curRow += 2;
-    ws.mergeCells(`A${curRow}:J${curRow}`);
-    ws.getCell(`A${curRow}`).value = '3a. BENEFICIAL PARAMETERS (HIGHER IS BETTER)';
+    ws.mergeCells(`A${curRow}:H${curRow}`);
+    ws.getCell(`A${curRow}`).value = '3a. BENEFICIAL PARAMETERS (HIGHER IS BETTER — LATEST VALID INDEPENDENT ASSESSMENT)';
     ws.getCell(`A${curRow}`).font = { name: 'Calibri', bold: true, size: 11, color: { rgb: '2980B9' } };
     curRow++;
 
-    const rankHeaders = ['Parameter', 'Treatment', 'Mean Value', 'Rank', '% vs Control', 'Best / Worst Classification'];
+    const rankHeaders = ['Parameter', 'Analyzed Date', 'Treatment', 'n', 'Mean Value', 'Numerical Rank', '% vs Control', 'Statistical & Numerical Classification'];
     ws.getRow(curRow).values = rankHeaders;
     ws.getRow(curRow).font = { name: 'Calibri', bold: true, color: { rgb: 'FFFFFF' } };
     ws.getRow(curRow).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: '34495E' } };
     curRow++;
 
-    const beneficialFields = this.activeFields.filter(f => !isReductionMetric(f.key, this.category));
-    beneficialFields.forEach(f => {
-      const trtMeans = this.treatmentNames.map((name, idx) => {
-        const trtNum = idx + 1;
-        const trtVals = this.observations.filter(o => this.matchesTreatment(o, trtNum, name))
-                                         .map(o => {
-                                           if (f.key.toLowerCase().replace(/\s/g, '') === 'plantheight' && o.potHeights) {
-                                             return o.potHeights.map(h => parseFloat(h)).filter(v => !isNaN(v));
-                                           }
-                                           return parseFloat(o[f.key]);
-                                         })
-                                         .flat()
-                                         .filter(v => !isNaN(v));
-        const avg = trtVals.length ? trtVals.reduce((sum, v) => sum + v, 0) / trtVals.length : 0;
-        return { name, trtNum, mean: avg };
-      });
+    const summaryAnovaOpts = { trialStartDate: this.trial.Date, expectedTreatments: this.treatmentNames.length };
 
-      const sortedTrts = [...trtMeans].sort((a, b) => b.mean - a.mean);
-      const controlMean = trtMeans[0]?.mean || 1;
-
-      sortedTrts.forEach((trt, sortIdx) => {
-        const rank = sortIdx + 1;
-        const pctDiff = controlMean > 0 ? ((trt.mean - controlMean) / controlMean) * 100 : 0;
-        const diffStr = trt.trtNum === 1 ? 'Control (Ref)' : `${pctDiff > 0 ? '+' : ''}${pctDiff.toFixed(2)}%`;
-
-        let classification = 'Intermediate';
-        if (sortIdx === 0) classification = 'Best Performer';
-        else if (sortIdx === sortedTrts.length - 1) classification = 'Lowest Performer';
-
-        ws.getRow(curRow).values = [
-          f.label,
-          trt.name,
-          parseFloat(trt.mean.toFixed(2)),
-          rank,
-          diffStr,
-          classification
-        ];
-
-        if (classification === 'Best Performer') {
-          ws.getCell(curRow, 6).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'E2EFDA' } };
-          ws.getCell(curRow, 6).font = { name: 'Calibri', color: { rgb: '375623' }, bold: true };
-        } else if (classification === 'Lowest Performer') {
-          ws.getCell(curRow, 6).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'FFF2CC' } };
+    const renderRankingRows = (fieldsList, isAdverse) => {
+      fieldsList.forEach(f => {
+        const anova = calculateAnovaRCB(this.observations, f.key, this.category, this.design, summaryAnovaOpts);
+        if (anova.error) {
+          ws.getRow(curRow).values = [
+            f.label,
+            anova.analyzedDate || 'N/A',
+            '—',
+            anova.nIndependentUnits || 0,
+            '—',
+            '—',
+            '—',
+            anova.error
+          ];
+          ws.getCell(curRow, 8).font = { name: 'Calibri', color: { rgb: '7F8C8D' }, italic: true };
+          curRow++;
+          return;
         }
 
-        curRow++;
+        const isStatSig = anova.p_value < 0.05;
+        const trtMeans = Object.entries(anova.treatmentMeans).map(([trtNumStr, st]) => {
+          const trtNum = parseInt(trtNumStr, 10);
+          return {
+            name: this.treatmentNames[trtNum - 1] || `Treatment ${trtNum}`,
+            trtNum,
+            n: st.n || 0,
+            mean: st.mean,
+            group: st.group || 'a'
+          };
+        });
+
+        const sortedTrts = [...trtMeans].sort((a, b) => isAdverse ? a.mean - b.mean : b.mean - a.mean);
+        const controlEntry = trtMeans.find(t => t.trtNum === 1);
+        const controlMean = controlEntry ? controlEntry.mean : null;
+
+        sortedTrts.forEach((trt, sortIdx) => {
+          const rank = sortIdx + 1;
+          let diffStr;
+          if (trt.trtNum === 1) {
+            diffStr = 'Control (Ref)';
+          } else if (controlMean === null || controlMean <= 0) {
+            diffStr = 'N/A – Control baseline is zero';
+          } else {
+            const pctDiff = isAdverse
+              ? ((controlMean - trt.mean) / controlMean) * 100
+              : ((trt.mean - controlMean) / controlMean) * 100;
+            diffStr = `${pctDiff > 0 ? '+' : ''}${pctDiff.toFixed(2)}%`;
+          }
+
+          let classification;
+          if (!isStatSig) {
+            if (sortIdx === 0) {
+              classification = isAdverse
+                ? 'Lowest numerical mean (No statistically significant difference)'
+                : 'Highest numerical mean (No statistically significant difference)';
+            } else if (sortIdx === sortedTrts.length - 1) {
+              classification = isAdverse
+                ? 'Highest numerical mean (No statistically significant difference)'
+                : 'Lowest numerical mean (No statistically significant difference)';
+            } else {
+              classification = 'Intermediate (No statistically significant difference)';
+            }
+          } else {
+            if (sortIdx === 0) {
+              classification = isAdverse
+                ? `Lowest numerical mean (Statistically significant, Group '${trt.group}')`
+                : `Highest numerical mean (Statistically significant, Group '${trt.group}')`;
+            } else if (sortIdx === sortedTrts.length - 1) {
+              classification = isAdverse
+                ? `Highest numerical mean (Group '${trt.group}')`
+                : `Lowest numerical mean (Group '${trt.group}')`;
+            } else {
+              classification = `Intermediate (Group '${trt.group}')`;
+            }
+          }
+
+          ws.getRow(curRow).values = [
+            f.label,
+            anova.analyzedDate || 'N/A',
+            trt.name,
+            trt.n,
+            parseFloat(trt.mean.toFixed(2)),
+            rank,
+            diffStr,
+            classification
+          ];
+
+          if (isStatSig && sortIdx === 0) {
+            ws.getCell(curRow, 8).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'E2EFDA' } };
+            ws.getCell(curRow, 8).font = { name: 'Calibri', color: { rgb: '375623' }, bold: true };
+          } else if (!isStatSig) {
+            ws.getCell(curRow, 8).font = { name: 'Calibri', color: { rgb: '566573' }, italic: true };
+          }
+
+          curRow++;
+        });
       });
-    });
+    };
+
+    const beneficialFields = this.activeFields.filter(f => !isReductionMetric(f.key, this.category));
+    renderRankingRows(beneficialFields, false);
 
     // 3b. Stress / Adverse Parameters (Lower is Better)
     curRow += 2;
-    ws.mergeCells(`A${curRow}:J${curRow}`);
-    ws.getCell(`A${curRow}`).value = '3b. STRESS / ADVERSE PARAMETERS (LOWER IS BETTER)';
+    ws.mergeCells(`A${curRow}:H${curRow}`);
+    ws.getCell(`A${curRow}`).value = '3b. STRESS / ADVERSE PARAMETERS (LOWER IS BETTER — LATEST VALID INDEPENDENT ASSESSMENT)';
     ws.getCell(`A${curRow}`).font = { name: 'Calibri', bold: true, size: 11, color: { rgb: '2980B9' } };
     curRow++;
 
@@ -2644,98 +2904,85 @@ export class AdvancedReportGenerator {
     curRow++;
 
     const stressFields = this.activeFields.filter(f => isReductionMetric(f.key, this.category));
-    stressFields.forEach(f => {
-      const trtMeans = this.treatmentNames.map((name, idx) => {
-        const trtNum = idx + 1;
-        const trtVals = this.observations.filter(o => this.matchesTreatment(o, trtNum, name))
-                                         .map(o => {
-                                           if (f.key.toLowerCase().replace(/\s/g, '') === 'plantheight' && o.potHeights) {
-                                             return o.potHeights.map(h => parseFloat(h)).filter(v => !isNaN(v));
-                                           }
-                                           return parseFloat(o[f.key]);
-                                         })
-                                         .flat()
-                                         .filter(v => !isNaN(v));
-        const avg = trtVals.length ? trtVals.reduce((sum, v) => sum + v, 0) / trtVals.length : 0;
-        return { name, trtNum, mean: avg };
-      });
+    renderRankingRows(stressFields, true);
 
-      const sortedTrts = [...trtMeans].sort((a, b) => a.mean - b.mean);
-      const controlMean = trtMeans[0]?.mean || 1;
-
-      sortedTrts.forEach((trt, sortIdx) => {
-        const rank = sortIdx + 1;
-        const pctDiff = controlMean > 0 ? ((controlMean - trt.mean) / controlMean) * 100 : 0;
-        const diffStr = trt.trtNum === 1 ? 'Control (Ref)' : `${pctDiff > 0 ? '+' : ''}${pctDiff.toFixed(2)}%`;
-
-        let classification = 'Intermediate';
-        if (sortIdx === 0) classification = 'Best Performer';
-        else if (sortIdx === sortedTrts.length - 1) classification = 'Lowest Performer';
-
-        ws.getRow(curRow).values = [
-          f.label,
-          trt.name,
-          parseFloat(trt.mean.toFixed(2)),
-          rank,
-          diffStr,
-          classification
-        ];
-
-        if (classification === 'Best Performer') {
-          ws.getCell(curRow, 6).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'E2EFDA' } };
-          ws.getCell(curRow, 6).font = { name: 'Calibri', color: { rgb: '375623' }, bold: true };
-        } else if (classification === 'Lowest Performer') {
-          ws.getCell(curRow, 6).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'FFF2CC' } };
-        }
-
-        curRow++;
-      });
-    });
-
-    // 4. DAA Trends Analysis
+    // 4. DAA Trends Analysis — compares ONLY dates that actually contain valid observations for each parameter!
     curRow += 2;
-    ws.mergeCells(`A${curRow}:F${curRow}`);
-    ws.getCell(`A${curRow}`).value = '4. DAA-WISE DEVELOPMENTAL TRENDS';
+    ws.mergeCells(`A${curRow}:G${curRow}`);
+    ws.getCell(`A${curRow}`).value = '4. DAA-WISE DEVELOPMENTAL TRENDS (VALID MEASUREMENTS ONLY — NO ZERO COERCION)';
     ws.getCell(`A${curRow}`).font = { name: 'Calibri', bold: true, size: 11, color: { rgb: '2980B9' } };
     curRow++;
 
-    ws.getRow(curRow).values = ['Parameter', 'Initial Mean (DAA Min)', 'Final Mean (DAA Max)', 'Net Change', 'Trend Classification'];
+    ws.getRow(curRow).values = [
+      'Parameter',
+      'Initial Valid Date (DAA)',
+      'Initial Mean',
+      'Latest Valid Date (DAA)',
+      'Final Mean',
+      'Net Change',
+      'Trend Classification'
+    ];
     ws.getRow(curRow).font = { name: 'Calibri', bold: true, color: { rgb: 'FFFFFF' } };
     ws.getRow(curRow).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: '34495E' } };
     curRow++;
 
     this.activeFields.forEach(f => {
-      const daaList = [...new Set(this.observations.map(o => o.daa ?? 0))].sort((a,b)=>a-b);
-      if (daaList.length < 2) return;
-
-      const firstDaa = daaList[0];
-      const lastDaa = daaList[daaList.length - 1];
-
-      const firstVals = this.observations.filter(o => (o.daa ?? 0) === firstDaa).map(o => {
-        if (f.key.toLowerCase().replace(/\s/g, '') === 'plantheight' && o.potHeights) {
-          return o.potHeights.map(h => parseFloat(h)).filter(v => !isNaN(v));
+      // Group strictly by dates where THIS parameter actually has valid finite values
+      const bucketMap = new Map();
+      this.observations.forEach(o => {
+        const val = extractNumericMetricValue(o, f.key);
+        if (!Number.isFinite(val)) return;
+        const normDate = normalizeReportDateKey(o.date);
+        const daaNum = o.daa !== undefined && o.daa !== null && o.daa !== '' ? Number(o.daa) : null;
+        const key = normDate || (daaNum !== null && !isNaN(daaNum) ? `DAA:${daaNum}` : 'SINGLE');
+        if (!bucketMap.has(key)) {
+          bucketMap.set(key, { key, normDate, displayDate: o.date || normDate || 'N/A', daa: daaNum, vals: [] });
         }
-        return parseFloat(o[f.key]);
-      }).flat().filter(v => !isNaN(v));
+        const entry = bucketMap.get(key);
+        entry.vals.push(val);
+        if (entry.daa === null && daaNum !== null && !isNaN(daaNum)) entry.daa = daaNum;
+      });
 
-      const lastVals = this.observations.filter(o => (o.daa ?? 0) === lastDaa).map(o => {
-        if (f.key.toLowerCase().replace(/\s/g, '') === 'plantheight' && o.potHeights) {
-          return o.potHeights.map(h => parseFloat(h)).filter(v => !isNaN(v));
-        }
-        return parseFloat(o[f.key]);
-      }).flat().filter(v => !isNaN(v));
+      const validBuckets = Array.from(bucketMap.values()).sort((a, b) => {
+        if (a.normDate && b.normDate && a.normDate !== b.normDate) return a.normDate.localeCompare(b.normDate);
+        return (a.daa ?? -999) - (b.daa ?? -999);
+      });
 
-      const firstMean = firstVals.length ? firstVals.reduce((sum, v) => sum + v, 0) / firstVals.length : 0;
-      const lastMean = lastVals.length ? lastVals.reduce((sum, v) => sum + v, 0) / lastVals.length : 0;
+      if (validBuckets.length === 0) return;
+
+      const firstB = validBuckets[0];
+      const firstMean = firstB.vals.reduce((s, v) => s + v, 0) / firstB.vals.length;
+      const firstLabel = `${firstB.displayDate} (DAA ${formatDaaLabel(firstB.daa)})`;
+
+      if (validBuckets.length < 2) {
+        ws.getRow(curRow).values = [
+          f.label,
+          firstLabel,
+          parseFloat(firstMean.toFixed(2)),
+          '—',
+          'N/A',
+          'N/A',
+          'Single valid assessment date only (No temporal trend)'
+        ];
+        curRow++;
+        return;
+      }
+
+      const lastB = validBuckets[validBuckets.length - 1];
+      const lastMean = lastB.vals.reduce((s, v) => s + v, 0) / lastB.vals.length;
+      const lastLabel = `${lastB.displayDate} (DAA ${formatDaaLabel(lastB.daa)})`;
       const netChange = lastMean - firstMean;
 
       let trend = 'Stable';
-      if (netChange > (firstMean * 0.05)) trend = '↑ Increased';
-      else if (netChange < -(firstMean * 0.05)) trend = '↓ Decreased';
+      const threshold = Math.abs(firstMean) > 0 ? Math.abs(firstMean) * 0.05 : 0.05;
+      if (netChange > threshold) trend = '↑ Increased';
+      else if (netChange < -threshold) trend = '↓ Decreased';
 
       ws.getRow(curRow).values = [
         f.label,
+        firstLabel,
         parseFloat(firstMean.toFixed(2)),
+        lastLabel,
         parseFloat(lastMean.toFixed(2)),
         parseFloat(netChange.toFixed(2)),
         trend
@@ -2798,13 +3045,18 @@ export class AdvancedReportGenerator {
             return parseFloat(o[f.key]);
           }).flat().filter(v => !isNaN(v));
 
-          const meanVal = vals.length > 0 ? parseFloat((vals.reduce((s, v) => s + v, 0) / vals.length).toFixed(2)) : 0;
+          // Missing values MUST remain null/blank — NEVER coerce to 0!
+          const meanVal = vals.length > 0 ? parseFloat((vals.reduce((s, v) => s + v, 0) / vals.length).toFixed(2)) : null;
           trtMeansByDate[date][trtIdx] = meanVal;
 
-          ws.getCell(`${cLetter}${r + trtNum}`).value = {
-            formula: `IFERROR(AVERAGEIFS('Assessment Data Summary'!${fieldCol}:${fieldCol}, 'Assessment Data Summary'!F:F, "${escapedTrt}", 'Assessment Data Summary'!A:A, "${date}"), ${meanVal})`,
-            result: meanVal
-          };
+          if (meanVal === null) {
+            ws.getCell(`${cLetter}${r + trtNum}`).value = null;
+          } else {
+            ws.getCell(`${cLetter}${r + trtNum}`).value = {
+              formula: `IFERROR(AVERAGEIFS('Assessment Data Summary'!${fieldCol}:${fieldCol}, 'Assessment Data Summary'!F:F, "${escapedTrt}", 'Assessment Data Summary'!A:A, "${date}"), "")`,
+              result: meanVal
+            };
+          }
         });
       });
 
@@ -2819,19 +3071,27 @@ export class AdvancedReportGenerator {
 
         dates.forEach((date, colIdx) => {
           const cLetter = getColumnLetter(2 + colIdx);
-          const controlMean = trtMeansByDate[date]?.[0] || 0;
-          const trtMean = trtMeansByDate[date]?.[i] || 0;
-          let calculatedEff = 0;
-          if (controlMean > 0) {
-            calculatedEff = isRed
-              ? parseFloat(((controlMean - trtMean) / controlMean * 100).toFixed(2))
-              : parseFloat(((trtMean - controlMean) / controlMean * 100).toFixed(2));
+          const controlMean = trtMeansByDate[date]?.[0] ?? null;
+          const trtMean = trtMeansByDate[date]?.[i] ?? null;
+
+          if (controlMean === null || trtMean === null) {
+            ws.getCell(`${cLetter}${r + offset + i}`).value = null;
+            return;
           }
+
+          if (controlMean <= 0) {
+            ws.getCell(`${cLetter}${r + offset + i}`).value = 'N/A – Control baseline is zero';
+            return;
+          }
+
+          const calculatedEff = isRed
+            ? parseFloat(((controlMean - trtMean) / controlMean * 100).toFixed(2))
+            : parseFloat(((trtMean - controlMean) / controlMean * 100).toFixed(2));
 
           ws.getCell(`${cLetter}${r + offset + i}`).value = {
             formula: isRed
-              ? `IF(${cLetter}${r + 1} > 0, (${cLetter}${r + 1} - ${cLetter}${r + trtNum}) / ${cLetter}${r + 1} * 100, ${calculatedEff})`
-              : `IF(${cLetter}${r + 1} > 0, (${cLetter}${r + trtNum} - ${cLetter}${r + 1}) / ${cLetter}${r + 1} * 100, ${calculatedEff})`,
+              ? `IF(OR(${cLetter}${r + 1}="",${cLetter}${r + trtNum}=""),"",IF(${cLetter}${r + 1}>0,(${cLetter}${r + 1}-${cLetter}${r + trtNum})/${cLetter}${r + 1}*100,"N/A – Control baseline is zero"))`
+              : `IF(OR(${cLetter}${r + 1}="",${cLetter}${r + trtNum}=""),"",IF(${cLetter}${r + 1}>0,(${cLetter}${r + trtNum}-${cLetter}${r + 1})/${cLetter}${r + 1}*100,"N/A – Control baseline is zero"))`,
             result: calculatedEff
           };
         });
@@ -3057,11 +3317,13 @@ export class AdvancedReportGenerator {
 
     let currentObs = this.observations;
     let r = 1;
+    const aovOpts = { trialStartDate: this.trial.Date, expectedTreatments: this.treatmentNames.length };
 
     this.activeFields.forEach(f => {
-      const anova = calculateAnovaRCB(currentObs, f.key, this.category, this.design);
+      const anova = calculateAnovaRCB(currentObs, f.key, this.category, this.design, aovOpts);
       if (anova.error) {
         ws.getCell(`A${r}`).value = `ANOVA for ${f.label}: ${anova.error}`;
+        ws.getCell(`A${r}`).font = { italic: true, color: { rgb: '7F8C8D' } };
         r += 2;
         return;
       }
@@ -3069,12 +3331,12 @@ export class AdvancedReportGenerator {
       const designTitle = this.design === 'CRD' 
         ? 'Completely Randomized Design (CRD)' 
         : this.design === 'PotTrial' 
-          ? 'Randomized Complete Block Pot Trial (RCBD Pot Trial)' 
+          ? 'RCBD Pot Trial' 
           : 'Randomized Complete Block Design (RCBD)';
 
-      ws.mergeCells(`A${r}:G${r}`);
+      ws.mergeCells(`A${r}:H${r}`);
       const sliceBadge = anova.analyzedDate
-        ? ` — Latest Valid Assessment: ${anova.analyzedDate} (DAA ${anova.analyzedDaa ?? 'N/A'}, n = ${anova.nIndependentUnits} independent units)`
+        ? ` — Latest Valid Post-App Assessment: ${anova.analyzedDate} (DAA ${formatDaaLabel(anova.analyzedDaa)}, n = ${anova.nIndependentUnits} independent units)`
         : ` (n = ${anova.nIndependentUnits} independent units)`;
       ws.getCell(`A${r}`).value = `ANOVA: ${f.label} (${designTitle}${sliceBadge})`;
       ws.getCell(`A${r}`).font = { bold: true, color: { rgb: 'FFFFFF' } };
@@ -3133,7 +3395,7 @@ export class AdvancedReportGenerator {
       ws.getCell(`A${r}`).font = { bold: true };
       r++;
 
-      ws.getRow(r).values = ['Treatment', 'Mean', 'LSD Group', 'Std Dev', 'SE', '95% CI Lower', '95% CI Upper'];
+      ws.getRow(r).values = ['Treatment', 'n (Units)', 'Mean', 'LSD Group', 'Std Dev', 'SE', '95% CI Lower', '95% CI Upper'];
       ws.getRow(r).font = { bold: true };
       r++;
 
@@ -3147,6 +3409,7 @@ export class AdvancedReportGenerator {
 
         ws.getRow(r).values = [
           trtName,
+          trtStats.n || 0,
           parseFloat(trtStats.mean.toFixed(2)),
           trtStats.group || 'a',
           sdVal,
@@ -3157,6 +3420,16 @@ export class AdvancedReportGenerator {
         r++;
       });
 
+      // Explicit Grand Mean row (reconciles directly with ANOVA Summary even when treatment n differs)
+      ws.getRow(r).values = [
+        'Grand Mean (All Analyzed Independent Units)',
+        anova.nIndependentUnits,
+        parseFloat(anova.grandMean.toFixed(4)),
+        '', '', '', '', ''
+      ];
+      ws.getRow(r).font = { bold: true, italic: true };
+      r++;
+
       // Efficacy row for each non-control treatment compared to control (Trt 1)
       for (let i = 1; i < this.treatmentNames.length; i++) {
         const trtNum = i + 1;
@@ -3164,17 +3437,24 @@ export class AdvancedReportGenerator {
         const cStats = anova.treatmentMeans[1];
         if (trtStats && cStats) {
           const diffVal = trtStats.mean - cStats.mean;
-          const pctVal = cStats.mean > 0 ? (isReductionMetric(f.key, this.category) ? ((cStats.mean - trtStats.mean) / cStats.mean) * 100 : ((trtStats.mean - cStats.mean) / cStats.mean) * 100) : 0;
-          
           const isSameGroup = (trtStats.group || 'a') === (cStats.group || 'a');
-          const significanceNote = isSameGroup ? ' (Not statistically significant)' : '';
-          const pctDisplay = `${pctVal > 0 ? '+' : ''}${pctVal.toFixed(1)}%${significanceNote}`;
+          const significanceNote = isSameGroup ? ' (No statistically significant difference)' : '';
+          let pctDisplay;
+          if (cStats.mean <= 0) {
+            pctDisplay = 'N/A – Control baseline is zero';
+          } else {
+            const pctVal = isReductionMetric(f.key, this.category)
+              ? ((cStats.mean - trtStats.mean) / cStats.mean) * 100
+              : ((trtStats.mean - cStats.mean) / cStats.mean) * 100;
+            pctDisplay = `${pctVal > 0 ? '+' : ''}${pctVal.toFixed(1)}%${significanceNote}`;
+          }
 
           ws.getRow(r).values = [
             `Difference from Control (${this.treatmentNames[i]})`,
+            '',
             parseFloat(diffVal.toFixed(2)),
             '',
-            '', '', '', 
+            '', '', '',
             pctDisplay
           ];
           r++;
@@ -3246,7 +3526,9 @@ export class AdvancedReportGenerator {
         const trtData = [];
         dates.forEach(d => {
           const tObs = this.observations.filter(o => (o.date || this.trial.Date || 'N/A') === d && this.matchesTreatment(o, trtNum, trtName));
-          const tAvg = tObs.length ? tObs.reduce((a, b) => a + parseFloat(b[f.key] || 0), 0) / tObs.length : 0;
+          const validVals = tObs.map(o => extractNumericMetricValue(o, f.key)).filter(v => Number.isFinite(v));
+          // Push null (gap) when parameter was NOT measured on this date — NEVER coerce missing to 0!
+          const tAvg = validVals.length > 0 ? parseFloat((validVals.reduce((a, b) => a + b, 0) / validVals.length).toFixed(2)) : null;
           trtData.push(tAvg);
         });
         
@@ -3254,7 +3536,8 @@ export class AdvancedReportGenerator {
         return {
           label: `${trtName} (Trt ${trtNum})`,
           data: trtData,
-          backgroundColor: colors[trtIdx % colors.length]
+          backgroundColor: colors[trtIdx % colors.length],
+          spanGaps: false
         };
       });
 
@@ -3310,70 +3593,62 @@ export class AdvancedReportGenerator {
     }
   }
 
-  // 9. Post-Harvest Quality Charts Sheet
+  // 9. Post-Harvest Quality Charts Sheet (ONLY renders from genuine recorded harvest pickings — NEVER fabricated curves)
   async createChartsSheet() {
+    if (!this.harvestPickings || this.harvestPickings.length === 0) {
+      return;
+    }
+
+    const pickingLabels = [...new Set(this.harvestPickings.map((p, i) => `Picking ${p.pickingNumber || (i + 1)}`))];
+    if (pickingLabels.length === 0) return;
+
     const ws = this.workbook.addWorksheet('Charts');
     ws.views = [{ showGridLines: true }];
 
-    ws.getCell('A1').value = 'POST-HARVEST QUALITY & RETENTION CHARTS';
+    ws.getCell('A1').value = 'POST-HARVEST MARKETABLE YIELD BY PICKING';
     ws.getCell('A1').font = { bold: true, size: 14, color: { rgb: 'FFFFFF' } };
     ws.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: this.config.color.hex.replace('#', '') } };
     ws.mergeCells('A1:J1');
     ws.getRow(1).height = 30;
 
-    // Post-harvest storage days
-    const storageDays = ['Day 0', 'Day 2', 'Day 4', 'Day 6', 'Day 8'];
     const colors = ['#95A5A6', '#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316'];
-
-    const datasetsWeight = this.treatmentNames.map((trtName, trtIdx) => {
+    const datasetsYield = this.treatmentNames.map((trtName, trtIdx) => {
       const trtNum = trtIdx + 1;
-      const factor = trtNum === 1 ? 0.92 : 0.88;
-      const data = storageDays.map((_, i) => parseFloat((250 - (i * 7.5 * factor)).toFixed(1)));
+      const data = pickingLabels.map((label, pIdx) => {
+        const matching = this.harvestPickings.filter((p, idx) =>
+          `Picking ${p.pickingNumber || (idx + 1)}` === label &&
+          ((p.treatmentName && String(p.treatmentName).trim().toLowerCase() === String(trtName).trim().toLowerCase()) ||
+           Number(p.treatmentNumber) === trtNum)
+        );
+        const vals = matching
+          .map(p => parseFloat(p.actualMarketableWeight ?? p.marketableWeight))
+          .filter(v => Number.isFinite(v));
+        return vals.length > 0 ? parseFloat((vals.reduce((s, v) => s + v, 0) / vals.length).toFixed(2)) : null;
+      });
       return {
         label: `${trtName} (Trt ${trtNum})`,
-        data: data,
+        data,
         borderColor: colors[trtIdx % colors.length],
-        backgroundColor: 'transparent',
+        backgroundColor: colors[trtIdx % colors.length],
         borderWidth: 2,
-        tension: 0.1
-      };
-    });
-
-    const datasetsQuality = this.treatmentNames.map((trtName, trtIdx) => {
-      const trtNum = trtIdx + 1;
-      const factor = trtNum === 1 ? 1.25 : 0.75;
-      const data = [8, 8, 7, 6, 5].map((val, i) => Math.max(1, Math.round(8 - (i * factor))));
-      return {
-        label: `${trtName} (Trt ${trtNum})`,
-        data: data,
-        borderColor: colors[trtIdx % colors.length],
-        backgroundColor: 'transparent',
-        borderWidth: 2,
-        tension: 0.1
+        spanGaps: false
       };
     });
 
     if (typeof document !== 'undefined') {
       try {
-        // Chart 1: Weight Loss Over Storage Period (Line Chart)
         const canvas1 = document.createElement('canvas');
         canvas1.width = 500;
         canvas1.height = 300;
         const ctx1 = canvas1.getContext('2d');
         const chart1 = new Chart(ctx1, {
-          type: 'line',
-          data: {
-            labels: storageDays,
-            datasets: datasetsWeight
-          },
+          type: 'bar',
+          data: { labels: pickingLabels, datasets: datasetsYield },
           options: {
             animation: false,
             responsive: false,
             plugins: {
-              title: {
-                display: true,
-                text: 'Weight Loss Over Storage Period (g)'
-              }
+              title: { display: true, text: 'Recorded Marketable Yield per Picking (kg)' }
             }
           }
         });
@@ -3381,36 +3656,8 @@ export class AdvancedReportGenerator {
         chart1.destroy();
         const imgId1 = this.workbook.addImage({ base64: img1, extension: 'png' });
         ws.addImage(imgId1, 'A3:H17');
-
-        // Chart 2: Quality Rating Degradation (Bar / Line / Area)
-        const canvas2 = document.createElement('canvas');
-        canvas2.width = 500;
-        canvas2.height = 300;
-        const ctx2 = canvas2.getContext('2d');
-        const chart2 = new Chart(ctx2, {
-          type: 'line',
-          data: {
-            labels: storageDays,
-            datasets: datasetsQuality
-          },
-          options: {
-            animation: false,
-            responsive: false,
-            plugins: {
-              title: {
-                display: true,
-                text: 'Quality Rating Retention (0-10)'
-              }
-            }
-          }
-        });
-        const img2 = canvas2.toDataURL('image/png');
-        chart2.destroy();
-        const imgId2 = this.workbook.addImage({ base64: img2, extension: 'png' });
-        ws.addImage(imgId2, 'A19:H33');
-
       } catch (e) {
-        console.error('Failed to render post-harvest quality charts:', e);
+        console.error('Failed to render post-harvest yield chart:', e);
       }
     }
   }
@@ -3589,23 +3836,23 @@ export class AdvancedReportGenerator {
     ws.getRow(5).fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'ECF0F1' } };
 
     let r = 6;
+    const summaryAnovaOpts = { trialStartDate: this.trial.Date, expectedTreatments: this.treatmentNames.length };
     this.activeFields.forEach(f => {
       if (f.key === 'nue') return;
-      const anova = calculateAnovaRCB(this.observations, f.key, this.category, this.design);
+      const anova = calculateAnovaRCB(this.observations, f.key, this.category, this.design, summaryAnovaOpts);
       if (anova.error) {
-        if (anova.error.includes('No variability detected')) {
-          const firstVal = parseFloat(this.observations[0]?.[f.key] || 0);
-          ws.getRow(r).values = [
-            f.label,
-            'N/A',
-            this.design === 'PotTrial' ? 'RCBD Pot Trial' : this.design,
-            'N/A', '0.00', '0.00', '1.000', 'ns', '0.00', '0.00', '0.0%',
-            firstVal,
-            'All Treatments: a',
-            anova.error
-          ];
-          r++;
-        }
+        // NEVER emit fake 0.00 / F=0 / P=1.000 / LSD=0 / CV=0% / All Treatments: a for ineligible or constant parameters!
+        ws.getRow(r).values = [
+          f.label,
+          anova.analyzedDate ? `${anova.analyzedDate}${anova.analyzedDaa !== null && anova.analyzedDaa !== undefined ? ` (DAA ${formatDaaLabel(anova.analyzedDaa)})` : ''}` : 'N/A',
+          'NOT ANALYSED',
+          '—', '—', '—', '—', '—', '—', '—', '—',
+          '—',
+          '—',
+          anova.error
+        ];
+        ws.getRow(r).font = { italic: true, color: { rgb: '7F8C8D' } };
+        r++;
         return;
       }
 
@@ -3695,17 +3942,11 @@ export class AdvancedReportGenerator {
 
     this.activeFields.forEach(f => {
       if (f.key === 'nue') return;
-      const anova = calculateAnovaRCB(this.observations, f.key, this.category, this.design);
+      const anova = calculateAnovaRCB(this.observations, f.key, this.category, this.design, summaryAnovaOpts);
       if (anova.error) {
-        if (anova.error.includes('No variability detected')) {
-          const firstVal = parseFloat(this.observations[0]?.[f.key] || 0);
-          const rowVals = [f.label, parseFloat(firstVal.toFixed(4))];
-          this.treatmentNames.slice(1).forEach(() => {
-            rowVals.push(parseFloat(firstVal.toFixed(4)), '0.00%');
-          });
-          ws.getRow(r).values = rowVals;
-          r++;
-        }
+        ws.getRow(r).values = [f.label, anova.error];
+        ws.getRow(r).font = { italic: true, color: { rgb: '7F8C8D' } };
+        r++;
         return;
       }
 
@@ -3718,14 +3959,17 @@ export class AdvancedReportGenerator {
         const trtMean = anova.treatmentMeans[trtNum]?.mean ?? 0;
         const trtLetter = anova.treatmentMeans[trtNum]?.group || 'a';
         
-        let pctEff = 0;
-        if (controlMean > 0) {
-          pctEff = isReductionMetric(f.key, this.category)
+        let pctDisplay;
+        if (controlMean <= 0) {
+          pctDisplay = 'N/A – Control baseline is zero';
+        } else {
+          const pctEff = isReductionMetric(f.key, this.category)
             ? ((controlMean - trtMean) / controlMean) * 100
             : ((trtMean - controlMean) / controlMean) * 100;
+          pctDisplay = `${pctEff > 0 ? '+' : ''}${pctEff.toFixed(2)}%`;
         }
 
-        rowVals.push(`${trtMean.toFixed(2)} ${trtLetter}`, `${pctEff.toFixed(2)}%`);
+        rowVals.push(`${trtMean.toFixed(2)} ${trtLetter}`, pctDisplay);
       });
 
       ws.getRow(r).values = rowVals;
@@ -3754,7 +3998,10 @@ export class AdvancedReportGenerator {
       uniqueDateKeys.forEach(dateKey => {
         this.activeFields.forEach(f => {
           if (f.key === 'nue') return;
-          const dateAnova = calculateAnovaRCB(this.observations, f.key, this.category, this.design, { targetDateKey: dateKey });
+          const dateAnova = calculateAnovaRCB(this.observations, f.key, this.category, this.design, {
+            targetDateKey: dateKey,
+            expectedTreatments: this.treatmentNames.length
+          });
           if (dateAnova.error) return;
           const sig = dateAnova.p_value < 0.01 ? '**' : dateAnova.p_value < 0.05 ? '*' : 'ns';
           const dfStr = dateAnova.modelType === 'CRD'

@@ -3021,9 +3021,8 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       const eff = safeJsonParse(t.EfficacyDataJSON, []);
       const recalculated = eff.map(obs => {
         if (!obs.date) return obs;
-        const obsDate = new Date(obs.date);
-        const daa = Math.round((obsDate - appDate) / (1000 * 60 * 60 * 24));
-        return { ...obs, daa: Math.max(0, daa) };
+        const daa = calculateDAA(obs.date, t.Date);
+        return { ...obs, daa };
       });
       const changed = JSON.stringify(recalculated) !== JSON.stringify(eff);
       if (changed) updated++;
@@ -5455,6 +5454,8 @@ Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
       let metricCell = '—';
       if (utcName && g.name === utcName) {
         metricCell = 'Control (Ref)';
+      } else if (utcName && utcMean <= 0) {
+        metricCell = 'N/A – Control baseline is zero';
       } else if (utcMean > 0) {
         const diffPct = calculateEfficacy(projectCategory, mean, utcMean);
         if (projectCategory === 'nutrition' || projectCategory === 'biostimulant') {
@@ -5546,10 +5547,10 @@ ${currentAnalysis.anova?.dfBlock > 0 ? `<tr><td style="padding:6px 10px;border:1
 <body><h1>${ctx.designLabel} Regulatory Report: ${activeProject.Name}</h1>
 <div class="meta">
   <div>Trial / Project ID: <span>${activeProject.ID || 'N/A'}</span></div><div>Design: <span>${ctx.designLabel}</span></div>
-  <div>Location: <span>${activeProject.Location || 'N/A'}</span></div><div>Investigator: <span>${activeProject.Investigator || 'N/A'}</span></div>
+  <div>Location: <span>${ctx.location || 'Not specified'}</span></div><div>Investigator: <span>${activeProject.Investigator || 'N/A'}</span></div>
   <div>Crop: <span>${activeProject.Crop || 'N/A'}</span></div><div>Analyzed Parameter: <span>${ctx.analyzedMetricLabel}</span></div>
   <div>Treatments: <span>${ctx.treatmentCount}</span></div><div>Replications / Blocks: <span>${ctx.effectiveBlocks}</span></div>
-  <div>Experimental Units (Plots/Pots): <span>${ctx.experimentalUnits}</span></div><div>Yield Data Status: <span>${ctx.hasYield ? 'Recorded' : 'Not yet harvested'}</span></div>
+  <div>Independent Units: <span>${ctx.independentUnits} (${ctx.plotDateRecords} plot-date records)</span></div><div>Yield Data Status: <span>${ctx.hasYield ? 'Recorded' : 'Not yet harvested'}</span></div>
   <div>Start Date: <span>${formatDateTime(activeProject.StartDate) !== 'N/A' ? formatDateTime(activeProject.StartDate) : (formatDate(activeProject.StartDate) || 'N/A')}</span></div><div>Generated: <span>${formatDateTime(new Date())}</span></div>
 </div>
 ${yieldStatusBanner}

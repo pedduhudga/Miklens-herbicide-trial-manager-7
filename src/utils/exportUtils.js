@@ -292,9 +292,10 @@ export async function exportRegulatoryReportAsDOC(project, state, options = {}) 
             <h2>2. Trial Design & Methodology</h2>
             <table class="meta-table">
                 <tr><td><strong>Trial / Project ID:</strong></td><td>${project.ID || 'N/A'}</td></tr>
+                <tr><td><strong>Location:</strong></td><td>${ctx.location || 'Not specified'}</td></tr>
                 <tr><td><strong>Design:</strong></td><td>${ctx.designLabel}</td></tr>
                 <tr><td><strong>Replications / Blocks:</strong></td><td>${ctx.effectiveBlocks}</td></tr>
-                <tr><td><strong>Experimental Units:</strong></td><td>${ctx.experimentalUnits}</td></tr>
+                <tr><td><strong>Experimental Units (Independent):</strong></td><td>${ctx.independentUnits} (${ctx.plotDateRecords} plot-date records)</td></tr>
                 <tr><td><strong>Treatments:</strong></td><td>${treatments.join(', ')}</td></tr>
                 <tr><td><strong>Analyzed Parameter:</strong></td><td>${ctx.analyzedMetricLabel}</td></tr>
                 <tr><td><strong>Yield Status:</strong></td><td>${ctx.hasYield ? 'Recorded' : 'Not yet harvested'}</td></tr>

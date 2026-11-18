@@ -111,6 +111,8 @@ export function toDateKey (value) {
 
 /**
  * Calculate DAA (Days After Application) using normalized calendar dates only.
+ * Preserves negative values for pre-application baseline dates (e.g. 12-Nov vs 13-Nov -> -1)
+ * instead of silently clamping them to 0.
  */
 export function calculateDAA (photoDate, trialDate) {
     try {
@@ -128,11 +130,17 @@ export function calculateDAA (photoDate, trialDate) {
         const pUTC = Date.UTC(py, pm - 1, pd);
         const tUTC = Date.UTC(ty, tm - 1, td);
 
-        const daa = Math.floor((pUTC - tUTC) / (1000 * 60 * 60 * 24));
-        return Math.max(0, daa);
+        return Math.round((pUTC - tUTC) / (1000 * 60 * 60 * 24));
     } catch (e) {
         return 0;
     }
+}
+
+export function formatDaaLabel(daa) {
+    const n = Number(daa);
+    if (!Number.isFinite(n)) return 'N/A';
+    if (n < 0) return `${n} (Pre-App Baseline)`;
+    return `${n}`;
 }
 
 export function hasTimeComponent(str) {

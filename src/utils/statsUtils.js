@@ -184,7 +184,16 @@ function computeAnovaInternal(treatments, design) {
  * Returns complete ANOVA table and significance test
  */
 export function performANOVA(trials, options = {}) {
-  const { metric = 'controlPct', daa = null, species = null, design = 'RCBD', excludeOutliers = false, activeCategory = null } = options;
+  const {
+    metric = 'controlPct',
+    daa = null,
+    species = null,
+    design = 'RCBD',
+    excludeOutliers = false,
+    activeCategory = null,
+    trialStartDate = null,
+    includeBaseline = false
+  } = options;
   
   // Category validation: Ensure all trials belong to the same category when activeCategory is specified
   if (activeCategory) {
@@ -258,14 +267,48 @@ export function performANOVA(trials, options = {}) {
 
     const category = trial.Category || 'herbicide';
     const efficacy = safeJsonParse(trial.EfficacyDataJSON, []);
-    const observations = daa !== null && daa !== undefined && daa !== ''
+    const toDateKeyLocal = (v) => {
+      if (!v) return '';
+      const s = String(v).trim();
+      const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+      const dmy = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+      if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+      const p = new Date(s);
+      if (!isNaN(p.getTime())) {
+        return `${p.getFullYear()}-${String(p.getMonth() + 1).padStart(2, '0')}-${String(p.getDate()).padStart(2, '0')}`;
+      }
+      return '';
+    };
+    const startKey = toDateKeyLocal(trialStartDate || trial.Date);
+    const isBaselineObs = (o) => {
+      if (!o) return false;
+      const dNum = parseFloat(o.daa);
+      if (!isNaN(dNum) && dNum < 0) return true;
+      if (startKey && o.date) {
+        const ok = toDateKeyLocal(o.date);
+        if (ok && ok < startKey) return true;
+      }
+      return false;
+    };
+
+    const sortedAll = daa !== null && daa !== undefined && daa !== ''
       ? efficacy.filter(e => Number(e.daa) === Number(daa) || Number(e.daysAfterApplication) === Number(daa))
       : efficacy.slice().sort((a, b) => {
+          const ka = toDateKeyLocal(a?.date);
+          const kb = toDateKeyLocal(b?.date);
+          if (ka && kb && ka !== kb) return kb.localeCompare(ka);
           const dA = parseFloat(a?.daa);
           const dB = parseFloat(b?.daa);
           if (!isNaN(dA) && !isNaN(dB) && dA !== dB) return dB - dA;
-          return String(b?.date || '').localeCompare(String(a?.date || ''));
+          return 0;
         });
+
+    // Separate pre-application baseline from post-application treatment-effect analysis
+    const postAppObs = (!includeBaseline && (daa === null || daa === undefined || daa === ''))
+      ? sortedAll.filter(o => !isBaselineObs(o))
+      : sortedAll;
+    const observations = postAppObs.length > 0 ? postAppObs : sortedAll;
 
     let value = null;
     for (const obs of observations) {
@@ -297,15 +340,62 @@ export function performANOVA(trials, options = {}) {
     }
   });
 
-  const treatmentNames = Object.keys(treatments);
+  // Strict statistical eligibility validation before computing ANOVA
+  const expectedTreatmentCount = Object.keys(treatments).length;
+  const populatedTreatments = {};
+  Object.keys(treatments).forEach(trt => {
+    const trtVals = Object.values(treatments[trt]).flat();
+    if (trtVals.length > 0) {
+      populatedTreatments[trt] = treatments[trt];
+    }
+  });
+
+  const treatmentNames = Object.keys(populatedTreatments);
   if (treatmentNames.length < 2) {
-    return { error: 'Need at least 2 treatments for ANOVA', fStatistic: null, pValue: null };
+    return {
+      error: 'NOT ANALYSED – Insufficient valid observations',
+      ineligible: true,
+      ineligibleReason: 'insufficient',
+      fStatistic: null,
+      pValue: null
+    };
+  }
+
+  // If the trial has >= 2 treatments defined and one or more treatments have < 2 valid observations
+  const trtCounts = treatmentNames.map(trt => Object.values(populatedTreatments[trt]).flat().length);
+  const minRepsPerTrt = Math.min(...trtCounts);
+  if (treatmentNames.length < expectedTreatmentCount || minRepsPerTrt < 2) {
+    return {
+      error: 'NOT ANALYSED – Insufficient valid observations',
+      ineligible: true,
+      ineligibleReason: 'insufficient',
+      fStatistic: null,
+      pValue: null
+    };
   }
 
   // First pass ANOVA to find residuals and run Studentized Residuals outlier detection
-  const firstPass = computeAnovaInternal(treatments, design);
-  if (firstPass.N === 0) {
-    return { error: 'No observations found for ANOVA.', fStatistic: null, pValue: null };
+  const firstPass = computeAnovaInternal(populatedTreatments, design);
+  if (firstPass.N === 0 || (design !== 'CRD' && firstPass.b < 2)) {
+    return {
+      error: 'NOT ANALYSED – Insufficient valid observations',
+      ineligible: true,
+      ineligibleReason: 'insufficient',
+      fStatistic: null,
+      pValue: null
+    };
+  }
+
+  // Constant / zero-variance guard (e.g. all zeros across every plot)
+  const allIdentical = firstPass.grandSum.every(v => v === firstPass.grandSum[0]);
+  if (allIdentical) {
+    return {
+      error: 'NOT ANALYSED – Constant values across all experimental units (zero variance)',
+      ineligible: true,
+      ineligibleReason: 'constant',
+      fStatistic: null,
+      pValue: null
+    };
   }
 
   const detectedOutliers = [];
@@ -313,8 +403,8 @@ export function performANOVA(trials, options = {}) {
 
   if (firstPass.N > 2 && firstPass.msError > 0) {
     treatmentNames.forEach(trt => {
-      Object.keys(treatments[trt]).forEach(blockId => {
-        const vals = treatments[trt][blockId];
+      Object.keys(populatedTreatments[trt]).forEach(blockId => {
+        const vals = populatedTreatments[trt][blockId];
         const newVals = vals.filter(v => {
           const meanT = firstPass.treatmentMeans[trt];
           const meanB = firstPass.blockMeans[blockId] || firstPass.grandMean;
@@ -338,14 +428,14 @@ export function performANOVA(trials, options = {}) {
           }
           return true;
         });
-        treatments[trt][blockId] = newVals;
+        populatedTreatments[trt][blockId] = newVals;
       });
     });
   }
 
   // Second pass (if outliers excluded) or use first pass results
   const finalPass = (outliersFound && excludeOutliers)
-    ? computeAnovaInternal(treatments, design)
+    ? computeAnovaInternal(populatedTreatments, design)
     : firstPass;
 
   if (finalPass.N === 0) {

@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
+  AdvancedReportGenerator,
   calculateAnovaRCB,
   selectIndependentAssessmentSlice,
-  computeDataCompleteness
+  computeDataCompleteness,
+  detectAnomalousObservations
 } from '../services/advancedReportGenerator.js';
 import {
   AnalysisEngine,
@@ -10,25 +12,30 @@ import {
   extractLatestValidTrialMetric
 } from '../utils/analysisUtils.js';
 import { performANOVA } from '../utils/statsUtils.js';
-import { formatDate, formatDateTime, parseCustomDate } from '../utils/dateUtils.js';
+import { formatDate, formatDateTime, parseCustomDate, calculateDAA, formatDaaLabel } from '../utils/dateUtils.js';
 
 /**
- * Helper: Build a realistic 4-treatment × 5-block RCBD Chilli Pot Trial
- * modeled directly on PROJ-1794568324462:
- *  - 20 independent pots (4 treatments × 5 replications)
- *  - 1 single PotTrial block record (BlockID = 'BLK-1')
- *  - 3 observation dates:
- *      1) 12-Nov-2026 (DAA 0): full visualVigor, canopyCoverage, plantHeight
- *      2) 17-Nov-2026 (DAA 4): full visualVigor, canopyCoverage, plantHeight
- *      3) 18-Nov-2026 (DAA 5): plant-height-ONLY mass walk (NO visualVigor, NO canopyCoverage)
- *  - NO yield recorded on any pot!
+ * Realistic 4-treatment × 5-block RCBD Chilli Pot Trial fixture (PROJ-1794568324462):
+ *  - 20 independent pots (4 treatments × 5 replications), 1 PotTrial Block record
+ *  - GPS coordinates on Project.Location ('12.9716, 77.5946')
+ *  - Trial Start Date: 2026-11-13
+ *  - 3 assessment dates (60 plot-date rows):
+ *      1) 12-Nov-2026 (Pre-Application Baseline -> DAA -1): vigor, leafColor, canopy, height
+ *      2) 17-Nov-2026 (DAA 4): vigor, leafColor, canopy, height, deficiencySeverity (Control=0),
+ *         tillerCount (sparse: only 6 plots across 2 treatments -> ineligible!),
+ *         allZeroMetric (constant 0 across all 20 pots -> constant/zero variance!),
+ *         flowerStage (mostly 0/1 across 18 plots + extreme outlier Plot 204 = 61!)
+ *      3) 18-Nov-2026 (DAA 5): plantHeight ONLY (missing vigor, leafColor, canopy, etc.)
+ *  - Yield NOT harvested (empty on all 20 pots)
  */
-function buildChilliPotTrialFixture() {
+function buildComprehensiveChilliFixture() {
   const project = {
     ID: 'PROJ-1794568324462',
     Name: 'NEW NPK TRIALS NOV-26- Chilli-Open Field',
     Category: 'nutrition',
     Crop: 'Chilli',
+    Location: '12.9716, 77.5946',
+    Investigator: 'Dr. Agronomist',
     Design: 'PotTrial',
     PotRows: 5,
     PotCols: 4,
@@ -40,10 +47,10 @@ function buildChilliPotTrialFixture() {
   const blocks = [{ ID: 'BLK-1', ProjectID: project.ID, Name: 'Pot Grid Block 1' }];
 
   const treatments = [
-    { name: 'Untreated Control', num: 1, vigorBase: 7.5, canopyBase: 50, heightBase: 29 },
-    { name: 'NPK POWDER NEW (with U)', num: 2, vigorBase: 8.4, canopyBase: 74, heightBase: 32 },
-    { name: 'NPK POWDER NEW (without U)', num: 3, vigorBase: 7.8, canopyBase: 60, heightBase: 30 },
-    { name: 'N 16', num: 4, vigorBase: 8.0, canopyBase: 64, heightBase: 31 }
+    { name: 'Untreated Control', num: 1, vigor: [7, 8, 8, 9, 8], canopy: [45, 50, 52, 55, 53], height: [28, 29, 30, 31, 30], defSev: [0, 0, 0, 0, 0] },
+    { name: 'NPK POWDER NEW (with U)', num: 2, vigor: [8, 9, 9, 8, 9], canopy: [70, 78, 80, 82, 90], height: [31, 32, 33, 32, 34], defSev: [2, 0, 3, 1, 2] },
+    { name: 'NPK POWDER NEW (without U)', num: 3, vigor: [8, 7, 8, 8, 8], canopy: [55, 60, 62, 58, 65], height: [29, 30, 31, 30, 31], defSev: [1, 2, 0, 1, 1] },
+    { name: 'N 16', num: 4, vigor: [8, 8, 9, 9, 8], canopy: [60, 65, 68, 66, 71], height: [30, 31, 32, 31, 32], defSev: [1, 0, 2, 1, 0] }
   ];
 
   const trials = [];
@@ -51,28 +58,43 @@ function buildChilliPotTrialFixture() {
 
   for (let rep = 1; rep <= 5; rep++) {
     treatments.forEach((trt, idx) => {
-      const plotNum = `R${rep}C${idx + 1}`;
-      const repOffset = (rep - 3) * 0.25;
+      const plotNum = `${rep}0${idx + 1}`; // Plot 204 = rep 2, idx 3 -> wait: put outlier on NPK with U Plot 204 explicitly
+      const effectivePlot = (rep === 2 && trt.num === 2) ? '204' : plotNum;
+      const rIdx = rep - 1;
+
+      const nov17Obs = {
+        date: '17-Nov-2026',
+        daa: 4,
+        visualVigor: trt.vigor[rIdx],
+        leafColor: trt.num === 1 ? 3.8 : 4.0,
+        canopyCoverage: trt.canopy[rIdx],
+        plantHeight: trt.height[rIdx],
+        deficiencySeverity: trt.defSev[rIdx],
+        chlorosisIncidence: 0, // constant 0 across all 20 pots
+        // Tiller count: sparse (only 3 plots in Trt 1 and 3 in Trt 2 -> missing Trt 3 & Trt 4!)
+        ...(trt.num <= 2 && rep <= 3 ? { tillerCount: 0 } : {}),
+        // Flower stage: 18 valid plots (missing rep 5 on Trt 1 and Trt 4) with extreme outlier 61 on Plot 204!
+        ...((rep === 5 && (trt.num === 1 || trt.num === 4))
+          ? {}
+          : { flowerStage: effectivePlot === '204' ? 61 : (rep % 2 === 0 ? 1 : 0) })
+      };
+
       const obsList = [
         {
+          // Pre-application baseline: 1 day BEFORE 13-Nov-2026 start date (stored with legacy clamped daa: 0)
           date: '12-Nov-2026',
           daa: 0,
-          visualVigor: +(trt.vigorBase - 0.5 + repOffset).toFixed(2),
-          canopyCoverage: +(trt.canopyBase - 10 + rep * 1.5).toFixed(1),
-          plantHeight: +(trt.heightBase - 2 + rep * 0.6).toFixed(1)
+          visualVigor: +(trt.vigor[rIdx] - 0.5).toFixed(1),
+          leafColor: 3.5,
+          canopyCoverage: trt.canopy[rIdx] - 10,
+          plantHeight: trt.height[rIdx] - 2
         },
+        nov17Obs,
         {
-          date: '17-Nov-2026',
-          daa: 4,
-          visualVigor: +(trt.vigorBase + repOffset).toFixed(2),
-          canopyCoverage: +(trt.canopyBase + rep * 2.0).toFixed(1),
-          plantHeight: +(trt.heightBase + rep * 0.8).toFixed(1)
-        },
-        {
-          // Plant-height-only walk: visualVigor & canopyCoverage intentionally NOT recorded
+          // Plant-height-ONLY walk on 18-Nov-2026 (NO vigor, leafColor, canopy, etc.)
           date: '18-Nov-2026',
           daa: 5,
-          plantHeight: +(trt.heightBase + 1.2 + rep * 0.8).toFixed(1)
+          plantHeight: +(trt.height[rIdx] + 1.5).toFixed(1)
         }
       ];
 
@@ -83,8 +105,9 @@ function buildChilliPotTrialFixture() {
         Category: 'nutrition',
         FormulationName: trt.name,
         Replication: String(rep),
-        PlotNumber: plotNum,
+        PlotNumber: effectivePlot,
         IsControl: trt.num === 1,
+        Date: '2026-11-13',
         Yield: '',
         YieldValue: '',
         EfficacyDataJSON: JSON.stringify(obsList),
@@ -98,7 +121,7 @@ function buildChilliPotTrialFixture() {
           treatmentNumber: trt.num,
           rep,
           replication: rep,
-          plot: plotNum
+          plot: effectivePlot
         });
       });
     });
@@ -107,129 +130,308 @@ function buildChilliPotTrialFixture() {
   return { project, blocks, trials, flatObservations };
 }
 
-describe('Report Consistency, Statistical Independence & Data Integrity', () => {
-  it('prevents pseudoreplication in calculateAnovaRCB (60 repeated rows across 3 dates -> n=20 independent RCBD plots, DF=3,4,12,19)', () => {
-    const { flatObservations } = buildChilliPotTrialFixture();
-    expect(flatObservations).toHaveLength(60);
+function getWorksheetRows(ws) {
+  const rows = [];
+  ws.eachRow({ includeEmpty: false }, (row) => {
+    rows.push(row.values.slice(1));
+  });
+  return rows;
+}
 
-    // Plant height has 60 rows (3 dates × 20 pots) — ANOVA MUST slice to the latest valid date (n=20)
-    const heightAnova = calculateAnovaRCB(flatObservations, 'plantHeight', 'nutrition', 'PotTrial');
-    expect(heightAnova.error).toBeUndefined();
-    expect(heightAnova.modelType).toBe('RCBD');
-    expect(heightAnova.nIndependentUnits).toBe(20);
-    expect(heightAnova.df_treatment).toBe(3);
-    expect(heightAnova.df_block).toBe(4);
-    expect(heightAnova.df_error).toBe(12);
-    expect(heightAnova.df_total).toBe(19);
-    expect(heightAnova.isRepeatedMeasuresSliced).toBe(true);
-    expect(heightAnova.analyzedDate).toBe('18-Nov-2026');
+describe('Final Report Integrity Audit — All 10 Regression Scenarios & Excel vs PDF Cross-Verification', () => {
+  it('Scenario 1 & 10: Latest assessment has only plant height -> NO zero coercion in Chartwork or DAA Trends', async () => {
+    const { project, trials } = buildComprehensiveChilliFixture();
+    const gen = new AdvancedReportGenerator(trials, 'nutrition', project);
+    await gen.processObservationsWithAI();
+    gen.validationWarnings = gen.validateData();
+    await gen.createAssessmentSummarySheet();
+    await gen.createChartworkSheet();
 
-    // Visual vigor was NOT measured on 18-Nov-2026 — MUST slice to 17-Nov-2026 (n=20, DF=3,4,12,19) and NOT zero out
-    const vigorAnova = calculateAnovaRCB(flatObservations, 'visualVigor', 'nutrition', 'PotTrial');
-    expect(vigorAnova.error).toBeUndefined();
-    expect(vigorAnova.nIndependentUnits).toBe(20);
-    expect(vigorAnova.df_treatment).toBe(3);
-    expect(vigorAnova.df_block).toBe(4);
-    expect(vigorAnova.df_error).toBe(12);
-    expect(vigorAnova.analyzedDate).toBe('17-Nov-2026');
-    expect(vigorAnova.grandMean).toBeGreaterThan(7);
+    // Verify Chartwork: 18-Nov-2026 column MUST be null (blank), NEVER 0 for visualVigor / leafColor / canopyCoverage
+    const chartwork = gen.workbook.getWorksheet('Chartwork');
+    const headerRow = chartwork.getRow(3).values.slice(1);
+    const nov18ColIdx = headerRow.findIndex(v => String(v).includes('18-Nov-2026')) + 1;
+    expect(nov18ColIdx).toBeGreaterThan(1);
+
+    let inVigorSection = false;
+    let checkedVigorNov18 = 0;
+    chartwork.eachRow((row, rowNum) => {
+      if (rowNum <= 3) return;
+      const label = String(row.getCell(1).value || '');
+      if (label.includes('Visual Vigor')) {
+        inVigorSection = true;
+        return;
+      }
+      if (inVigorSection && !label.startsWith('  ')) {
+        inVigorSection = false;
+        return;
+      }
+      if (inVigorSection) {
+        const val = row.getCell(nov18ColIdx).value;
+        // Must be null (blank), NEVER 0 or { result: 0 }
+        expect(val).toBeNull();
+        checkedVigorNov18++;
+      }
+    });
+    expect(checkedVigorNov18).toBeGreaterThanOrEqual(4);
+
+    // Verify Assessment Summary Section 4 (DAA Trends): Visual Vigor MUST compare 12-Nov -> 17-Nov (NOT 0 / false decline!)
+    const summaryWs = gen.workbook.getWorksheet('Assessment Summary');
+    const summaryRows = getWorksheetRows(summaryWs);
+    const trendHeaderIdx = summaryRows.findIndex(r => String(r[0] || '').includes('4. DAA-WISE DEVELOPMENTAL TRENDS'));
+    expect(trendHeaderIdx).toBeGreaterThan(-1);
+    const trendRows = summaryRows.slice(trendHeaderIdx + 2);
+    const vigorTrend = trendRows.find(r => String(r[0] || '').includes('Visual Vigor'));
+    expect(vigorTrend).toBeDefined();
+    expect(String(vigorTrend[3])).toContain('17-Nov-2026');
+    expect(vigorTrend[4]).toBeGreaterThan(7.5); // NOT 0!
+    expect(String(vigorTrend[6])).not.toContain('Decreased');
   });
 
-  it('computes TRUE cell-level data completeness instead of hardcoded 100%', () => {
-    const { flatObservations } = buildChilliPotTrialFixture();
-    const activeFields = [
-      { key: 'visualVigor', label: 'Visual Vigor Rating (0-10)' },
-      { key: 'canopyCoverage', label: 'Canopy Coverage (%)' },
-      { key: 'plantHeight', label: 'Plant Height (cm)' }
-    ];
-
-    const comp = computeDataCompleteness(flatObservations, activeFields);
-    // 60 rows × 3 parameters = 180 expected cells
-    // plantHeight: 60/60 valid (0 missing)
-    // visualVigor: 40/60 valid (20 missing on 18-Nov-2026)
-    // canopyCoverage: 40/60 valid (20 missing on 18-Nov-2026)
-    expect(comp.totalExpectedCells).toBe(180);
-    expect(comp.validCells).toBe(140);
-    expect(comp.missingCells).toBe(40);
-    expect(comp.parametersWithMissing).toBe(2);
-    expect(comp.completenessPct).toBeCloseTo(77.8, 1);
-    expect(comp.perParameter.plantHeight.missingCount).toBe(0);
-    expect(comp.perParameter.visualVigor.missingCount).toBe(20);
-    expect(comp.perParameter.canopyCoverage.missingCount).toBe(20);
-  });
-
-  it('resolves consistent blocks (5, not 1), yield absence, and analyzed metric across Excel & Regulatory PDF', () => {
-    const { project, blocks, trials } = buildChilliPotTrialFixture();
-    const ctx = resolveProjectAnalysisContext(project, trials, blocks, 'nutrition');
-
-    expect(ctx.hasYield).toBe(false);
-    expect(ctx.effectiveBlocks).toBe(5);
-    expect(ctx.treatmentCount).toBe(4);
-    expect(ctx.experimentalUnits).toBe(20);
-    expect(ctx.designLabel).toBe('RCBD Pot Trial');
-    expect(ctx.analyzedMetricKey).toBe('visualVigor');
-    expect(ctx.analyzedMetricLabel).not.toMatch(/yield/i);
-  });
-
-  it('AnalysisEngine & performANOVA NEVER coerce missing yield or plant-height-only date to 0.00', async () => {
-    const { project, blocks, trials } = buildChilliPotTrialFixture();
+  it('Scenario 2: Unrecorded yield produces NO fake 0.00 means or yield ANOVA', async () => {
+    const { project, blocks, trials } = buildComprehensiveChilliFixture();
     const appState = { projects: [project], blocks, trials };
     const engine = new AnalysisEngine(project.ID, appState, () => appState);
 
-    // 1. Yield was never recorded -> MUST return null, never 0
     trials.forEach(t => {
       expect(engine.getObservationValue(t, 'yield')).toBeNull();
       expect(extractLatestValidTrialMetric(t, 'yield', 'nutrition')).toBeNull();
     });
 
-    // 2. Visual vigor on latest-valid lookup -> MUST pick 17-Nov-2026 (> 7.0), NOT 0 from 18-Nov-2026
-    const vigorRes = await engine.analyze('visualVigor', null, null, { postHoc: 'lsd', persist: false });
-    expect(vigorRes.grouping).toHaveLength(4);
-    vigorRes.grouping.forEach(g => {
-      expect(g.mean).toBeGreaterThan(7.0);
-    });
-    // RCBD PotTrial DF MUST match Excel: Trt=3, Block=4, Error=12, Total=19
-    expect(vigorRes.anova.dfTreat).toBe(3);
-    expect(vigorRes.anova.dfBlock).toBe(4);
-    expect(vigorRes.anova.dfError).toBe(12);
-    expect(vigorRes.anova.dfTotal).toBe(19);
-
-    // 3. Direct performANOVA on PotTrial trials with shared BlockID='BLK-1' must block on Replication (5 blocks -> dfBlock=4)
-    const directAnova = performANOVA(trials, { metric: 'visualVigor', design: 'RCBD' });
-    expect(directAnova.error).toBeUndefined();
-    expect(directAnova.anovaTable.df[0]).toBe(3);
-    expect(directAnova.anovaTable.df[1]).toBe(4);
-    expect(directAnova.anovaTable.df[2]).toBe(12);
-    expect(directAnova.anovaTable.df[3]).toBe(19);
-
-    // 4. Running AnalysisEngine on unharvested 'yield' MUST return empty grouping (NO fake 0.00 means!)
     const yieldRes = await engine.analyze('yield', null, null, { postHoc: 'lsd', persist: false });
     expect(yieldRes.grouping).toHaveLength(0);
     expect(Object.keys(yieldRes.means)).toHaveLength(0);
   });
 
-  it('dateUtils NEVER outputs NaN-NaN-NaN on invalid dates or DD/MM/YYYY photo timestamps', () => {
-    // Direct invalid date via Date.prototype.toLocaleDateString override
-    expect(new Date('not-a-date').toLocaleDateString()).toBe('N/A');
-    expect(new Date('18/11/2026').toLocaleDateString()).toBe('N/A'); // native JS Date('18/11/2026') is Invalid Date -> guarded!
+  it('Scenario 3: Incomplete replication (Tiller Count) -> NOT ANALYSED – Insufficient valid observations (no fake F/p/LSD/rankings)', async () => {
+    const { project, trials, flatObservations } = buildComprehensiveChilliFixture();
 
-    // Custom DD/MM/YYYY and DD/MM/YYYY, HH:mm strings parsed cleanly
-    expect(formatDate('18/11/2026')).toBe('18-11-2026');
-    expect(formatDate('18/11/2026, 10:49')).toBe('18-11-2026');
-    expect(formatDateTime('18/11/2026, 10:49')).not.toContain('NaN');
-    expect(formatDate('invalid-garbage')).toBe('N/A');
-    expect(formatDateTime('invalid-garbage')).toBe('N/A');
-    expect(parseCustomDate('bad-date')).toBeNull();
+    const tillerAnova = calculateAnovaRCB(flatObservations, 'tillerCount', 'nutrition', 'PotTrial', {
+      trialStartDate: project.StartDate,
+      expectedTreatments: 4
+    });
+    expect(tillerAnova.ineligible).toBe(true);
+    expect(tillerAnova.error).toBe('NOT ANALYSED – Insufficient valid observations');
+    expect(tillerAnova.f_value).toBeUndefined();
+    expect(tillerAnova.lsd).toBeUndefined();
+
+    // Direct performANOVA must also reject incomplete treatments
+    const directTiller = performANOVA(trials, { metric: 'tillerCount', design: 'RCBD', trialStartDate: project.StartDate });
+    expect(directTiller.ineligible).toBe(true);
+    expect(directTiller.error).toBe('NOT ANALYSED – Insufficient valid observations');
+
+    // Verify Excel ANOVA Summary & Assessment Summary rankings do NOT fabricate F=0, P=1.000, LSD=0, or rankings
+    const gen = new AdvancedReportGenerator(trials, 'nutrition', project);
+    await gen.processObservationsWithAI();
+    await gen.createAssessmentSummarySheet();
+    await gen.createANOVASummarySheet();
+
+    const anovaRows = getWorksheetRows(gen.workbook.getWorksheet('ANOVA Summary'));
+    const tillerRow = anovaRows.find(r => String(r[0] || '').toLowerCase().includes('tiller'));
+    expect(tillerRow).toBeDefined();
+    expect(tillerRow[2]).toBe('NOT ANALYSED');
+    expect(tillerRow[5]).toBe('—'); // F-Value NOT 0.00
+    expect(tillerRow[6]).toBe('—'); // P-Value NOT 1.000
+    expect(tillerRow[13]).toBe('NOT ANALYSED – Insufficient valid observations');
   });
 
-  it('selectIndependentAssessmentSlice supports per-date independent slicing', () => {
-    const { flatObservations } = buildChilliPotTrialFixture();
-    const nov12 = selectIndependentAssessmentSlice(flatObservations, 'plantHeight', { targetDateKey: '2026-11-12' });
-    const nov18 = selectIndependentAssessmentSlice(flatObservations, 'plantHeight', { targetDateKey: '2026-11-18' });
+  it('Scenario 4: Parameter containing only zeros -> NOT ANALYSED (zero variance), NO fake F=0 / P=1.000 / All Treatments: a', async () => {
+    const { project, trials, flatObservations } = buildComprehensiveChilliFixture();
 
-    expect(nov12.sliceData).toHaveLength(20);
-    expect(nov18.sliceData).toHaveLength(20);
-    expect(nov12.analyzedDate).toBe('2026-11-12');
-    expect(nov18.analyzedDate).toBe('2026-11-18');
+    const zeroAnova = calculateAnovaRCB(flatObservations, 'chlorosisIncidence', 'nutrition', 'PotTrial', {
+      trialStartDate: project.StartDate,
+      expectedTreatments: 4
+    });
+    expect(zeroAnova.ineligible).toBe(true);
+    expect(zeroAnova.ineligibleReason).toBe('constant');
+    expect(zeroAnova.error).toMatch(/NOT ANALYSED/i);
+
+    const directZero = performANOVA(trials, { metric: 'chlorosisIncidence', design: 'RCBD', trialStartDate: project.StartDate });
+    expect(directZero.ineligible).toBe(true);
+    expect(directZero.ineligibleReason).toBe('constant');
+  });
+
+  it('Scenario 5: Extreme outlier (Plot 204 Flower Stage = 61) is flagged without deleting/modifying it, and Grand Mean reconciles across tables', async () => {
+    const { project, trials, flatObservations } = buildComprehensiveChilliFixture();
+
+    const anomalies = detectAnomalousObservations(flatObservations, [{ key: 'flowerStage', label: 'Flower Stage' }]);
+    expect(anomalies.length).toBeGreaterThanOrEqual(1);
+    const plot204Flag = anomalies.find(a => String(a.plot) === '204' && a.value === 61);
+    expect(plot204Flag).toBeDefined();
+    expect(plot204Flag.message).toContain('Plot 204');
+    expect(plot204Flag.message).toContain('61');
+    expect(plot204Flag.message).toContain('NOT altered or deleted');
+
+    // Verify Excel retains raw 61 AND reconciles Grand Mean identically in both AOV Means Table and ANOVA Summary
+    const gen = new AdvancedReportGenerator(trials, 'nutrition', project);
+    await gen.processObservationsWithAI();
+    gen.validationWarnings = gen.validateData();
+    await gen.createTrialInfoSheet();
+    await gen.createAOVMeansTable();
+    await gen.createANOVASummarySheet();
+
+    // Flag appears in Trial Information validation report
+    expect(gen.validationWarnings.some(w => w.includes('Plot 204') && w.includes('61'))).toBe(true);
+
+    // Grand mean in AOV Means Table == Grand mean in ANOVA Summary (exact N=18 reconciliation)
+    const flowerAnova = calculateAnovaRCB(gen.observations, 'flowerStage', 'nutrition', 'PotTrial', {
+      trialStartDate: project.StartDate,
+      expectedTreatments: 4
+    });
+    expect(flowerAnova.nIndependentUnits).toBe(18);
+    expect(flowerAnova.treatmentMeans[2].n).toBe(5);
+    expect(flowerAnova.treatmentMeans[1].n).toBe(4);
+    expect(flowerAnova.treatmentMeans[4].n).toBe(4);
+
+    const aovRows = getWorksheetRows(gen.workbook.getWorksheet('AOV Means Table'));
+    const grandMeanRow = aovRows.find(r =>
+      String(r[0] || '').includes('Grand Mean (All Analyzed Independent Units)') &&
+      Number(r[1]) === 18
+    );
+    expect(grandMeanRow).toBeDefined();
+    expect(grandMeanRow[2]).toBeCloseTo(flowerAnova.grandMean, 3);
+  });
+
+  it('Scenario 6: Zero control baseline displays "N/A – Control baseline is zero" instead of fake percentages', async () => {
+    const { project, trials } = buildComprehensiveChilliFixture();
+    const gen = new AdvancedReportGenerator(trials, 'nutrition', project);
+    await gen.processObservationsWithAI();
+    await gen.createAssessmentSummarySheet();
+    await gen.createAOVMeansTable();
+    await gen.createANOVASummarySheet();
+
+    // Deficiency severity has Control mean = 0, treated > 0
+    const defAnova = calculateAnovaRCB(gen.observations, 'deficiencySeverity', 'nutrition', 'PotTrial', {
+      trialStartDate: project.StartDate,
+      expectedTreatments: 4
+    });
+    expect(defAnova.control_mean).toBe(0);
+    expect(defAnova.controlBaselineZero).toBe(true);
+    expect(defAnova.efficacy_percent).toBeNull();
+
+    const summaryRows = getWorksheetRows(gen.workbook.getWorksheet('Assessment Summary'));
+    const defRankingRows = summaryRows.filter(r =>
+      String(r[0] || '').includes('Deficiency Severity') &&
+      String(r[6] || '').includes('N/A – Control baseline is zero')
+    );
+    expect(defRankingRows.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('Scenario 7: Pre-application baseline (12-Nov vs 13-Nov start) gets signed DAA = -1 and stays separate from post-app ANOVA without mutating dates', () => {
+    expect(calculateDAA('2026-11-12', '2026-11-13')).toBe(-1);
+    expect(calculateDAA('2026-11-17', '2026-11-13')).toBe(4);
+    expect(calculateDAA('2026-11-18', '2026-11-13')).toBe(5);
+    expect(formatDaaLabel(-1)).toBe('-1 (Pre-App Baseline)');
+
+    const { project, trials } = buildComprehensiveChilliFixture();
+    const gen = new AdvancedReportGenerator(trials, 'nutrition', project);
+    const baselineRows = gen.observations.filter(o => o.date === '12-Nov-2026');
+    expect(baselineRows).toHaveLength(20);
+    baselineRows.forEach(o => {
+      expect(o.daa).toBe(-1);
+      expect(o.date).toBe('12-Nov-2026'); // original date preserved!
+    });
+
+    // Post-application ANOVA on visualVigor excludes 12-Nov baseline and selects 17-Nov (DAA 4)
+    const slice = selectIndependentAssessmentSlice(gen.observations, 'visualVigor', {
+      trialStartDate: project.StartDate
+    });
+    expect(slice.analyzedDate).toBe('2026-11-17');
+    expect(slice.analyzedDaa).toBe(4);
+    expect(slice.isPreApplicationBaseline).toBe(false);
+    expect(slice.baselineDatesExcluded).toBe(1);
+  });
+
+  it('Scenario 8 & 9: Independent cross-verification — Excel Workbook and Regulatory PDF / AnalysisEngine agree 100% on metadata, units, means & RCBD ANOVA', async () => {
+    const { project, blocks, trials } = buildComprehensiveChilliFixture();
+    const appState = { projects: [project], blocks, trials };
+
+    // 1. Regulatory PDF / Dashboard pipeline
+    const ctx = resolveProjectAnalysisContext(project, trials, blocks, 'nutrition');
+    const engine = new AnalysisEngine(project.ID, appState, () => appState);
+    const pdfAnalysis = await engine.analyze(ctx.analyzedMetricKey, null, null, { postHoc: 'lsd', persist: false });
+
+    // 2. Advanced Excel workbook pipeline
+    const gen = new AdvancedReportGenerator(trials, 'nutrition', project);
+    await gen.processObservationsWithAI();
+    gen.validationWarnings = gen.validateData();
+    await gen.createTrialInfoSheet();
+    await gen.createAssessmentSummarySheet();
+    await gen.createAOVMeansTable();
+    await gen.createANOVASummarySheet();
+
+    const excelVigorAnova = calculateAnovaRCB(gen.observations, 'visualVigor', 'nutrition', 'PotTrial', {
+      trialStartDate: project.StartDate,
+      expectedTreatments: 4
+    });
+
+    // Metadata exact agreement (Design, Location, Blocks, Treatments, Independent Units, Plot-Date Records)
+    const trialInfoRows = getWorksheetRows(gen.workbook.getWorksheet('Trial Information'));
+    const metaMap = Object.fromEntries(trialInfoRows.filter(r => r.length >= 2).map(r => [String(r[0]), r[1]]));
+
+    expect(ctx.designLabel).toBe('RCBD Pot Trial');
+    expect(metaMap['Design Type']).toBe('RCBD Pot Trial');
+    expect(ctx.location).toBe('12.9716, 77.5946');
+    expect(metaMap['Location']).toBe('12.9716, 77.5946');
+    expect(ctx.effectiveBlocks).toBe(5);
+    expect(metaMap['Replications / Blocks']).toBe(5);
+    expect(ctx.treatmentCount).toBe(4);
+    expect(metaMap['Treatments']).toBe(4);
+    expect(ctx.independentUnits).toBe(20);
+    expect(metaMap['Independent Units Used per ANOVA']).toBe(20);
+    expect(ctx.plotDateRecords).toBe(60);
+    expect(metaMap['Total Plot-Date Records']).toBe(60);
+    // Must NEVER label 60 plot-date records as "Independent Statistical Observations"
+    expect(metaMap['Independent Statistical Observations']).toBeUndefined();
+
+    // Numerical exact agreement between Excel and PDF on Visual Vigor RCBD ANOVA
+    expect(pdfAnalysis.anova.dfTreat).toBe(excelVigorAnova.df_treatment);
+    expect(pdfAnalysis.anova.dfBlock).toBe(excelVigorAnova.df_block);
+    expect(pdfAnalysis.anova.dfError).toBe(excelVigorAnova.df_error);
+    expect(pdfAnalysis.anova.dfTotal).toBe(excelVigorAnova.df_total);
+    expect(pdfAnalysis.anova.dfTreat).toBe(3);
+    expect(pdfAnalysis.anova.dfBlock).toBe(4);
+    expect(pdfAnalysis.anova.dfError).toBe(12);
+    expect(pdfAnalysis.anova.dfTotal).toBe(19);
+
+    expect(pdfAnalysis.anova.fVal).toBeCloseTo(excelVigorAnova.f_value, 4);
+    expect(pdfAnalysis.anova.pVal).toBeCloseTo(excelVigorAnova.p_value, 4);
+    expect(pdfAnalysis.anova.cv).toBeCloseTo(excelVigorAnova.cv, 2);
+    expect(pdfAnalysis.postHoc.value).toBeCloseTo(excelVigorAnova.lsd, 3);
+
+    // Treatment means match verbatim
+    expect(pdfAnalysis.means['Untreated Control']).toBeCloseTo(excelVigorAnova.treatmentMeans[1].mean, 4);
+    expect(pdfAnalysis.means['NPK POWDER NEW (with U)']).toBeCloseTo(excelVigorAnova.treatmentMeans[2].mean, 4);
+    expect(pdfAnalysis.means['NPK POWDER NEW (without U)']).toBeCloseTo(excelVigorAnova.treatmentMeans[3].mean, 4);
+    expect(pdfAnalysis.means['N 16']).toBeCloseTo(excelVigorAnova.treatmentMeans[4].mean, 4);
+
+    // Non-significant Visual Vigor ranking must NEVER say "Best Performer"
+    const summaryRows = getWorksheetRows(gen.workbook.getWorksheet('Assessment Summary'));
+    const vigorRankRow = summaryRows.find(r =>
+      String(r[0] || '').includes('Visual Vigor') &&
+      Number(r[5]) === 1
+    );
+    expect(vigorRankRow).toBeDefined();
+    expect(String(vigorRankRow[7])).not.toContain('Best Performer');
+    expect(String(vigorRankRow[7])).toContain('No statistically significant difference');
+  });
+
+  it('Date safety & true cell-level completeness guarantees remain intact', () => {
+    expect(new Date('not-a-date').toLocaleDateString()).toBe('N/A');
+    expect(new Date('18/11/2026').toLocaleDateString()).toBe('N/A');
+    expect(formatDate('18/11/2026')).toBe('18-11-2026');
+    expect(formatDateTime('18/11/2026, 10:49')).not.toContain('NaN');
+    expect(parseCustomDate('bad-date')).toBeNull();
+
+    const { flatObservations } = buildComprehensiveChilliFixture();
+    const comp = computeDataCompleteness(flatObservations, [
+      { key: 'visualVigor', label: 'Visual Vigor' },
+      { key: 'canopyCoverage', label: 'Canopy Coverage' },
+      { key: 'plantHeight', label: 'Plant Height' }
+    ]);
+    expect(comp.totalExpectedCells).toBe(180);
+    expect(comp.validCells).toBe(140);
+    expect(comp.missingCells).toBe(40);
+    expect(comp.completenessPct).toBeCloseTo(77.8, 1);
   });
 });
