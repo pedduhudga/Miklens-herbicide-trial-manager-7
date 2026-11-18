@@ -1082,54 +1082,44 @@ const TrialCard = memo(function TrialCard({
             onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}
           >
-            {/* Smooth Hardware-Accelerated Sliding Track */}
+            {/* Smooth Hardware-Accelerated Sliding Track (virtualized ±1 slides, no permanent will-change VRAM hog) */}
             <div
-              className="flex h-full w-full transition-transform duration-350 ease-[cubic-bezier(0.25,1,0.5,1)] will-change-transform"
+              className="flex h-full w-full transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)]"
               style={{
                 transform: `translateX(-${(activePhotoIdx % allCardPhotos.length) * 100}%)`,
               }}
             >
               {allCardPhotos.map((p, pIdx) => {
-                const resolvedSrc = p.src || getPhotoThumbnailSrc(p.rawItem, 400) || resolvePhotoSrc(p.rawItem, 400);
+                const curIdx = activePhotoIdx % allCardPhotos.length;
+                const dist = Math.abs(pIdx - curIdx);
+                const isNearby = allCardPhotos.length <= 3 || dist <= 1 || (curIdx === 0 && pIdx === allCardPhotos.length - 1) || (curIdx === allCardPhotos.length - 1 && pIdx === 0);
+                const resolvedSrc = isNearby ? (p.src || getPhotoThumbnailSrc(p.rawItem, 400) || resolvePhotoSrc(p.rawItem, 400)) : null;
                 return (
-                  <div key={p.id || pIdx} className="w-full h-full shrink-0 relative overflow-hidden bg-slate-900/10">
+                  <div key={p.id || pIdx} className={`w-full h-full shrink-0 relative overflow-hidden ${photoFitMode === 'contain' ? 'bg-slate-900' : 'bg-slate-900/10'}`}>
                     {resolvedSrc ? (
-                      <>
-                        {/* Blurred Backdrop Ambience for Uncropped 'contain' mode */}
-                        {photoFitMode === 'contain' && (
-                          <img
-                            src={resolvedSrc}
-                            alt=""
-                            aria-hidden="true"
-                            loading="lazy"
-                            decoding="async"
-                            className="absolute inset-0 w-full h-full object-cover blur-sm opacity-35 scale-110 pointer-events-none"
-                          />
-                        )}
-                        <img
-                          src={resolvedSrc}
-                          alt={p.label || 'Trial photo'}
-                          className={`relative z-1 w-full h-full ${photoFitMode === 'contain' ? 'object-contain' : 'object-cover'} transition-transform duration-300`}
-                          loading="lazy"
-                          decoding="async"
-                          draggable={false}
-                          onError={(e) => {
-                            const driveId = getDriveFileId(resolvedSrc) || getDriveFileId(p.rawItem);
-                            if (!driveId) return;
-                            const step = e.currentTarget.dataset.fallbackStep || '0';
-                            if (step === '0') {
-                              e.currentTarget.dataset.fallbackStep = '1';
-                              e.currentTarget.src = `https://drive.google.com/thumbnail?id=${driveId}&sz=w400`;
-                            } else if (step === '1') {
-                              e.currentTarget.dataset.fallbackStep = '2';
-                              e.currentTarget.src = `https://images.weserv.nl/?url=${encodeURIComponent(`https://drive.google.com/thumbnail?id=${driveId}&sz=w400`)}&output=webp`;
-                            } else if (step === '2') {
-                              e.currentTarget.dataset.fallbackStep = '3';
-                              e.currentTarget.src = `https://lh3.googleusercontent.com/d/${driveId}`;
-                            }
-                          }}
-                        />
-                      </>
+                      <img
+                        src={resolvedSrc}
+                        alt={p.label || 'Trial photo'}
+                        className={`relative z-1 w-full h-full ${photoFitMode === 'contain' ? 'object-contain' : 'object-cover'}`}
+                        loading="lazy"
+                        decoding="async"
+                        draggable={false}
+                        onError={(e) => {
+                          const driveId = getDriveFileId(resolvedSrc) || getDriveFileId(p.rawItem);
+                          if (!driveId) return;
+                          const step = e.currentTarget.dataset.fallbackStep || '0';
+                          if (step === '0') {
+                            e.currentTarget.dataset.fallbackStep = '1';
+                            e.currentTarget.src = `https://drive.google.com/thumbnail?id=${driveId}&sz=w400`;
+                          } else if (step === '1') {
+                            e.currentTarget.dataset.fallbackStep = '2';
+                            e.currentTarget.src = `https://images.weserv.nl/?url=${encodeURIComponent(`https://drive.google.com/thumbnail?id=${driveId}&sz=w400`)}&output=webp`;
+                          } else if (step === '2') {
+                            e.currentTarget.dataset.fallbackStep = '3';
+                            e.currentTarget.src = `https://lh3.googleusercontent.com/d/${driveId}`;
+                          }
+                        }}
+                      />
                     ) : (
                       <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 bg-slate-100">
                         <ImageIcon className="w-5 h-5 mb-1 opacity-50" />
@@ -1141,12 +1131,12 @@ const TrialCard = memo(function TrialCard({
               })}
             </div>
 
-            {/* Top Overlay Bar: DAA Tag, Fit/Fill Toggle, Expand Fullscreen, Photo Counter */}
+            {/* Top Overlay Bar: DAA Tag, Fit/Fill Toggle, Expand Fullscreen, Photo Counter (solid pills, zero backdrop-blur GPU lag) */}
             <div className="absolute top-1.5 left-1.5 right-1.5 flex items-center justify-between z-10 pointer-events-none">
               <div>
                 {allCardPhotos[activePhotoIdx % allCardPhotos.length]?.daa !== null &&
                 allCardPhotos[activePhotoIdx % allCardPhotos.length]?.daa !== undefined ? (
-                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-md bg-emerald-600/90 text-white backdrop-blur-md shadow-xs border border-white/20">
+                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-md bg-emerald-700/95 text-white shadow-xs border border-white/20">
                     DAA {allCardPhotos[activePhotoIdx % allCardPhotos.length].daa}
                   </span>
                 ) : <span />}
@@ -1158,7 +1148,7 @@ const TrialCard = memo(function TrialCard({
                   <button
                     type="button"
                     onClick={handleOpenComparison}
-                    className="pointer-events-auto px-2 py-0.5 rounded-md bg-indigo-600/85 hover:bg-indigo-600 text-white text-[9px] font-bold backdrop-blur-md transition shadow-xs border border-white/20 flex items-center gap-1 active:scale-95"
+                    className="pointer-events-auto px-2 py-0.5 rounded-md bg-indigo-600/95 hover:bg-indigo-600 text-white text-[9px] font-bold transition shadow-xs border border-white/20 flex items-center gap-1 active:scale-95"
                     title="Compare Baseline vs Observation Photos with Interactive Split Slider"
                   >
                     <ArrowLeftRight className="w-2.5 h-2.5" />
@@ -1173,7 +1163,7 @@ const TrialCard = memo(function TrialCard({
                     e.stopPropagation();
                     setPhotoFitMode(m => m === 'contain' ? 'cover' : 'contain');
                   }}
-                  className="pointer-events-auto px-2 py-0.5 rounded-md bg-black/55 hover:bg-black/80 text-white text-[9px] font-semibold backdrop-blur-md transition shadow-xs border border-white/15 flex items-center gap-0.5 active:scale-95"
+                  className="pointer-events-auto px-2 py-0.5 rounded-md bg-slate-950/75 hover:bg-black/90 text-white text-[9px] font-semibold transition shadow-xs border border-white/15 flex items-center gap-0.5 active:scale-95"
                   title={photoFitMode === 'contain' ? 'Currently: Full Uncropped photo. Click to Fill frame.' : 'Currently: Fill frame. Click to view Full Uncropped photo.'}
                 >
                   {photoFitMode === 'contain' ? 'Fit' : 'Fill'}
@@ -1186,7 +1176,7 @@ const TrialCard = memo(function TrialCard({
                     e.stopPropagation();
                     setLightboxPhoto(allCardPhotos[activePhotoIdx % allCardPhotos.length]);
                   }}
-                  className="pointer-events-auto w-6 h-6 rounded-md bg-black/55 hover:bg-black/80 text-white flex items-center justify-center backdrop-blur-md transition shadow-xs border border-white/15 active:scale-95"
+                  className="pointer-events-auto w-6 h-6 rounded-md bg-slate-950/75 hover:bg-black/90 text-white flex items-center justify-center transition shadow-xs border border-white/15 active:scale-95"
                   title="Expand to Fullscreen Photo Lightbox"
                 >
                   <Maximize2 className="w-3 h-3" />
@@ -1194,7 +1184,7 @@ const TrialCard = memo(function TrialCard({
 
                 {/* Photo Counter Badge */}
                 {allCardPhotos.length > 1 && (
-                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-md bg-black/55 text-white backdrop-blur-md shadow-xs border border-white/15">
+                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-md bg-slate-950/75 text-white shadow-xs border border-white/15">
                     {(activePhotoIdx % allCardPhotos.length) + 1}/{allCardPhotos.length}
                   </span>
                 )}
@@ -1207,7 +1197,7 @@ const TrialCard = memo(function TrialCard({
                 <button
                   type="button"
                   onClick={handlePrevPhoto}
-                  className="absolute left-1.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-black/45 hover:bg-black/75 text-white shadow-md backdrop-blur-md border border-white/20 flex items-center justify-center opacity-90 sm:opacity-0 sm:group-hover:opacity-100 transition-all duration-200 z-10 active:scale-95"
+                  className="absolute left-1.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-slate-950/70 hover:bg-black/90 text-white shadow-md border border-white/20 flex items-center justify-center opacity-90 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity duration-200 z-10 active:scale-95"
                   title="Previous photo"
                 >
                   <ChevronLeft className="w-4 h-4" />
@@ -1215,7 +1205,7 @@ const TrialCard = memo(function TrialCard({
                 <button
                   type="button"
                   onClick={handleNextPhoto}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-black/45 hover:bg-black/75 text-white shadow-md backdrop-blur-md border border-white/20 flex items-center justify-center opacity-90 sm:opacity-0 sm:group-hover:opacity-100 transition-all duration-200 z-10 active:scale-95"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-slate-950/70 hover:bg-black/90 text-white shadow-md border border-white/20 flex items-center justify-center opacity-90 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity duration-200 z-10 active:scale-95"
                   title="Next photo"
                 >
                   <ChevronRight className="w-4 h-4" />
@@ -1223,7 +1213,7 @@ const TrialCard = memo(function TrialCard({
 
                 {/* Clickable Interactive Dot Indicators */}
                 <div className="absolute bottom-1.5 left-0 right-0 flex items-center justify-center z-10 pointer-events-none">
-                  <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/40 backdrop-blur-md border border-white/15 pointer-events-auto shadow-xs">
+                  <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-950/65 border border-white/15 pointer-events-auto shadow-xs">
                     {allCardPhotos.slice(0, 7).map((_, dotIdx) => (
                       <button
                         key={dotIdx}

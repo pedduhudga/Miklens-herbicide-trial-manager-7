@@ -14,6 +14,7 @@ import { getFirebaseAuth } from '../services/firebase.js';
 import { signInWithEmailAndPassword, updatePassword } from 'firebase/auth';
 import { fbUpdateUserProfile } from '../services/firebaseAuth.js';
 import { triggerHaptic } from '../utils/nativeCapabilities.js';
+import { prefetchRoute } from '../utils/routePrefetch.js';
 
 const ICON_MAP = {
   Leaf, Shield, Bug, Beaker, Sprout,
@@ -290,6 +291,8 @@ export default function Sidebar({ isOpen, onClose }) {
               <NavLink
                 key={item.to}
                 to={item.to}
+                onMouseEnter={() => prefetchRoute(item.to)}
+                onTouchStart={() => prefetchRoute(item.to)}
                 onClick={() => window.innerWidth < 768 && onClose()}
                 className={({ isActive }) =>
                   `flex items-center gap-3 px-4 py-2.5 rounded-xl font-medium transition-all duration-200 ${
@@ -309,6 +312,8 @@ export default function Sidebar({ isOpen, onClose }) {
                 <NavLink
                   key={item.to}
                   to={item.to}
+                  onMouseEnter={() => prefetchRoute(item.to)}
+                  onTouchStart={() => prefetchRoute(item.to)}
                   onClick={() => window.innerWidth < 768 && onClose()}
                   className={({ isActive }) =>
                     `flex items-center gap-3 px-4 py-2.5 rounded-xl font-medium transition-all duration-200 ${

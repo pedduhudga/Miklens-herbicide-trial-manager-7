@@ -647,3 +647,13 @@ body.hide-bottom-nav [role="navigation"] {
   pointer-events: none !important;
   opacity: 0 !important;
 }
+
+/* Thermal & Battery Protection: pause ALL hidden CSS animations behind fullscreen camera */
+body.camera-active *:not(.fullscreen-overlay):not(.fullscreen-overlay *) {
+  animation-play-state: paused !important;
+}
+
+/* Native-app scroll ergonomics: prevent accidental pull-to-refresh inside scrollable sheets & lists */
+.overflow-y-auto {
+  overscroll-behavior-y: contain;
+}

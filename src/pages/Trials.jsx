@@ -5609,6 +5609,9 @@ export default function Trials({ onMenuClick }) {
 
   useEffect(() => {
     const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && (document.hidden || document.body.classList.contains('camera-active'))) {
+        return;
+      }
       if (!isAutoHealingRef.current && navigator.onLine) {
         const candidates = findPhotosNeedingObservation();
         if (candidates.length > 0 && runAutoPhotoHealerRef.current) {
@@ -5694,6 +5697,9 @@ export default function Trials({ onMenuClick }) {
     }, 2000);
 
     const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && (document.hidden || document.body.classList.contains('camera-active'))) {
+        return;
+      }
       if (navigator.onLine) {
         reconcileUnuploadedPhotos();
       }
@@ -9728,13 +9734,6 @@ If none are present, write "None".`;
                 type="datetime-local"
                 value={duplicateDate}
                 onChange={e => setDuplicateDate(e.target.value)}
-                className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Dosage</label>
-              <input
-                type="text"
                 value={duplicateDosage}
                 onChange={e => setDuplicateDosage(e.target.value)}
                 placeholder={`Leave blank to copy (${duplicateModal.Dosage || 'N/A'})`}

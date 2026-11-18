@@ -75,9 +75,12 @@ export function useSync() {
     }
   }, [isOnline, runSync, getAppState]);
 
-  // Periodic sync check — avoids dependency on syncQueue array reference
+  // Periodic sync check — skips when tab is hidden or camera is actively open (battery & thermal protection)
   useEffect(() => {
     const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && (document.hidden || document.body.classList.contains('camera-active'))) {
+        return;
+      }
       const appState = getAppState();
       if (navigator.onLine) {
         const pending = (appState.syncQueue || []).filter(s => s.status === 'pending' || s.status === 'failed').length;

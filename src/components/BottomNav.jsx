@@ -5,6 +5,7 @@ import { useAppState } from '../hooks/useAppState.jsx';
 import { getCategoryConfig } from '../utils/categoryConfig.js';
 
 import { triggerHaptic } from '../utils/nativeCapabilities.js';
+import { prefetchRoute } from '../utils/routePrefetch.js';
 
 export default function BottomNav({ onMoreClick }) {
   const { state } = useAppState();
@@ -77,7 +78,7 @@ export default function BottomNav({ onMoreClick }) {
 
   return (
     <nav 
-      className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200/90 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] z-50 select-none"
+      className="md:hidden fixed bottom-0 left-0 right-0 bg-white/98 border-t border-slate-200/90 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] z-50 select-none"
       role="navigation" 
       aria-label="Mobile Navigation"
       style={{ 
@@ -90,6 +91,8 @@ export default function BottomNav({ onMoreClick }) {
         <NavLink
           to="/"
           aria-label="Home"
+          onTouchStart={() => prefetchRoute('/')}
+          onMouseEnter={() => prefetchRoute('/')}
           onClick={() => triggerHaptic('light')}
           className={({ isActive }) =>
             `flex flex-col items-center justify-center h-full rounded-xl transition-all duration-150 active:scale-95 touch-manipulation ${
@@ -116,6 +119,8 @@ export default function BottomNav({ onMoreClick }) {
         <NavLink
           to="/formulations"
           aria-label="Products"
+          onTouchStart={() => prefetchRoute('/formulations')}
+          onMouseEnter={() => prefetchRoute('/formulations')}
           onClick={() => triggerHaptic('light')}
           className={({ isActive }) =>
             `flex flex-col items-center justify-center h-full rounded-xl transition-all duration-150 active:scale-95 touch-manipulation ${
@@ -143,6 +148,8 @@ export default function BottomNav({ onMoreClick }) {
           <NavLink
             to="/scanner"
             aria-label="Scan Plot QR Code"
+            onTouchStart={() => prefetchRoute('/scanner')}
+            onMouseEnter={() => prefetchRoute('/scanner')}
             onClick={() => triggerHaptic('medium')}
             className={({ isActive }) =>
               `relative -top-3 flex flex-col items-center justify-center transition-transform duration-150 active:scale-90 touch-manipulation`
@@ -171,6 +178,8 @@ export default function BottomNav({ onMoreClick }) {
         <NavLink
           to="/trials"
           aria-label="Trials"
+          onTouchStart={() => prefetchRoute('/trials')}
+          onMouseEnter={() => prefetchRoute('/trials')}
           onClick={() => triggerHaptic('light')}
           className={({ isActive }) =>
             `flex flex-col items-center justify-center h-full rounded-xl transition-all duration-150 active:scale-95 touch-manipulation ${
