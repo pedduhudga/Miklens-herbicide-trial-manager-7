@@ -44,6 +44,8 @@ import TrialKanbanBoard from '../components/trials/TrialKanbanBoard.jsx';
 import PhotoComparisonModal from '../components/PhotoComparisonModal.jsx';
 import ProjectRapidEntryTable from '../components/trials/ProjectRapidEntryTable.jsx';
 import ProjectBatchObservationModal from '../components/trials/ProjectBatchObservationModal.jsx';
+import ProjectDataHealthModal from '../components/projects/ProjectDataHealthModal.jsx';
+import { applyDataCorrection } from '../utils/dataQualityDoctor.js';
 import { mergePlotObservationForDate, buildMassObservationPayload } from '../utils/massObservationUtils.js';
 import BatchApplicationModal from '../components/trials/BatchApplicationModal.jsx';
 import TrialRepCompareModal from '../components/trials/TrialRepCompareModal.jsx';
@@ -281,6 +283,7 @@ export default function Trials({ onMenuClick }) {
   const [projectPlotsSortMode, setProjectPlotsSortMode] = useState({}); // { [pid]: 'column' | 'row' }
   const [projectDesignTab, setProjectDesignTab] = useState('all');
   const [batchObsModalProject, setBatchObsModalProject] = useState(null);
+  const [dataHealthModalData, setDataHealthModalData] = useState(null);
   const [batchAppModalData, setBatchAppModalData] = useState(null); // { trials: [], project: null }
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -1476,6 +1479,48 @@ export default function Trials({ onMenuClick }) {
       detail: { msg: `✓ Saved batch observations for ${date} across ${updatedList.length} plot(s)!`, type: 'success' }
     }));
   }, [activeCategory, state.trials, updateState, getAppState, batchObsModalProject]);
+
+  const handleSaveDataHealthCorrection = useCallback(async ({
+    trialId,
+    date,
+    metricKey,
+    newValue,
+    action,
+    auditReason,
+    author
+  }) => {
+    try {
+      const allTrials = getAppState().trials || state.trials || [];
+      const { updatedTrial, updatedTrialsList } = applyDataCorrection({
+        projectTrials: allTrials,
+        trialId,
+        date,
+        metricKey,
+        newValue,
+        action,
+        auditReason,
+        author: author || user?.displayName || user?.email || 'Agronomist'
+      });
+
+      updateState({ trials: updatedTrialsList });
+
+      await updateTrial({
+        ID: updatedTrial.ID,
+        EfficacyDataJSON: updatedTrial.EfficacyDataJSON,
+        UpdatedAt: updatedTrial.UpdatedAt
+      }, getAppState);
+
+      window.dispatchEvent(new CustomEvent('app:toast', {
+        detail: { msg: `✓ Data correction saved for Plot ${updatedTrial.PlotNumber || updatedTrial.Plot || trialId}!`, type: 'success' }
+      }));
+    } catch (err) {
+      console.error('Failed to save data health correction:', err);
+      window.dispatchEvent(new CustomEvent('app:toast', {
+        detail: { msg: `Failed to save correction: ${err.message}`, type: 'error' }
+      }));
+      throw err;
+    }
+  }, [getAppState, state.trials, updateState, user]);
 
   const handleSaveBatchApplication = useCallback(async (applicationData, targetTrialIds) => {
     if (!targetTrialIds || targetTrialIds.length === 0) return;
@@ -8367,6 +8412,16 @@ If none are present, write "None".`;
                                   <span>Mass Obs & Height</span>
                                 </button>
 
+                                <button
+                                  type="button"
+                                  onClick={() => setDataHealthModalData({ project: proj, trials: trialsList })}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 dark:bg-slate-800 dark:text-slate-200 rounded-xl transition shadow-xs"
+                                  title="Scan data quality and correct anomalies or missing observations"
+                                >
+                                  <Activity className="w-3.5 h-3.5 text-emerald-600" />
+                                  <span>Data Doctor</span>
+                                </button>
+
                                 {/* 🌱 Batch Application Button */}
                                 <button
                                   type="button"
@@ -8927,6 +8982,16 @@ If none are present, write "None".`;
                                 <span className="hidden sm:inline">Mass Obs & Height</span>
                                 <span className="sm:hidden">Height</span>
                               </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => setDataHealthModalData({ project: proj, trials: trialsList })}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 dark:bg-slate-800 dark:text-slate-200 rounded-xl transition shadow-xs"
+                                  title="Scan data quality and correct anomalies or missing observations"
+                                >
+                                  <Activity className="w-3.5 h-3.5 text-emerald-600" />
+                                  <span>Data Doctor</span>
+                                </button>
 
                               {/* Batch Input Button */}
                               <button
@@ -14909,6 +14974,25 @@ If none are present, write "None".`;
             catConfig={catConfig}
             onSaveBatch={handleSaveBatchObservation}
             getAppState={getAppState}
+          />
+        );
+      })()}
+
+      {/* ── Trial Data Quality Doctor Modal ── */}
+      {dataHealthModalData && (() => {
+        const modalProj = dataHealthModalData.project;
+        const modalProjId = modalProj?.ID;
+        const liveProjTrials = (state.trials || []).filter(t => String(t.ProjectID) === String(modalProjId));
+        const modalCat = modalProj?.Category || activeCategory;
+        return (
+          <ProjectDataHealthModal
+            isOpen={!!dataHealthModalData}
+            onClose={() => setDataHealthModalData(null)}
+            project={modalProj}
+            trialsList={liveProjTrials.length > 0 ? liveProjTrials : (dataHealthModalData.trials || [])}
+            catConfig={getCategoryConfig(modalCat)}
+            onSaveCorrection={handleSaveDataHealthCorrection}
+            currentUserName={user?.displayName || user?.email || 'Agronomist'}
           />
         );
       })()}

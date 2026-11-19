@@ -28,6 +28,8 @@ import CategoryValidationAlert, { showCategoryValidationToast } from '../compone
 import ProjectAgronomicInputModal from '../components/projects/ProjectAgronomicInputModal.jsx';
 import ProjectBatchHarvestModal from '../components/projects/ProjectBatchHarvestModal.jsx';
 import ProjectBatchObservationModal from '../components/trials/ProjectBatchObservationModal.jsx';
+import ProjectDataHealthModal from '../components/projects/ProjectDataHealthModal.jsx';
+import { scanProjectDataHealth, applyDataCorrection } from '../utils/dataQualityDoctor.js';
 import { mergePlotObservationForDate, buildMassObservationPayload } from '../utils/massObservationUtils.js';
 import { SOFTWARE_BUILD_ID } from '../utils/version.js';
 import {
@@ -742,6 +744,9 @@ export default function Projects({ onMenuClick }) {
   const [isSavingBatchHarvest, setIsSavingBatchHarvest] = useState(false);
   // Project Batch Observation & Mass Plant Height Entry state
   const [batchObsModalProject, setBatchObsModalProject] = useState(null);
+  // Trial Data Quality & Interactive Correction Doctor state
+  const [isDataHealthModalOpen, setIsDataHealthModalOpen] = useState(false);
+  const [dataHealthProject, setDataHealthProject] = useState(null);
   const [selectedControlTrialId, setSelectedControlTrialId] = useState('');
   const [selectedTreatedTrialId, setSelectedTreatedTrialId] = useState('');
   const [selectedDaa, setSelectedDaa] = useState(0);
@@ -1008,6 +1013,11 @@ export default function Projects({ onMenuClick }) {
   const projectCategory = activeProject?.Category || activeCategory;
   const projectConfig = getCategoryConfig(projectCategory);
   const projectTheme = getThemeClasses(projectConfig.color?.accent || 'emerald');
+
+  const projectHealthReport = useMemo(() => {
+    if (!activeProject || !projectTrials.length) return null;
+    return scanProjectDataHealth(projectTrials, activeProject, projectConfig);
+  }, [activeProject, projectTrials, projectConfig]);
 
   const meansChartData = useMemo(() => {
     if (!analysisResults?.grouping) return [];
@@ -1904,6 +1914,52 @@ export default function Projects({ onMenuClick }) {
     } catch (err) {
       console.error('Failed to save mass batch observation:', err);
       toast('Failed to save mass batch observations: ' + err.message, 'error');
+    }
+  };
+
+  // ── Trial Data Quality Doctor Correction Handler ───────────────────────────
+  const handleSaveDataHealthCorrection = async ({
+    trialId,
+    date,
+    metricKey,
+    newValue,
+    action,
+    auditReason,
+    author
+  }) => {
+    try {
+      const allTrials = getAppState().trials || state.trials || [];
+      const { updatedTrial, updatedTrialsList } = applyDataCorrection({
+        projectTrials: allTrials,
+        trialId,
+        date,
+        metricKey,
+        newValue,
+        action,
+        auditReason,
+        author: author || user?.displayName || user?.email || 'Agronomist'
+      });
+
+      // Update in-memory state
+      updateState({ trials: updatedTrialsList });
+
+      // Persist to Dexie and Firebase via updateTrial
+      await updateTrial({
+        ID: updatedTrial.ID,
+        EfficacyDataJSON: updatedTrial.EfficacyDataJSON,
+        UpdatedAt: updatedTrial.UpdatedAt
+      }, getAppState);
+
+      toast(`Data correction saved for Plot ${updatedTrial.PlotNumber || updatedTrial.Plot || trialId}!`, 'success');
+
+      // Re-run statistical analysis so updated numbers take effect immediately
+      if (activeProjectId) {
+        runAnalysis(postHocMethod);
+      }
+    } catch (err) {
+      console.error('Failed to save data health correction:', err);
+      toast(`Failed to save data correction: ${err.message}`, 'error');
+      throw err;
     }
   };
 
@@ -6936,6 +6992,34 @@ ${photosHtml}
                   <span>Mass Obs & Height</span>
                 </button>
                 <button
+                  onClick={() => {
+                    setDataHealthProject(activeProject);
+                    setIsDataHealthModalOpen(true);
+                  }}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-xs transition shrink-0 ${
+                    projectHealthReport?.totalIssuesCount > 0
+                      ? 'bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-700 hover:to-red-700 text-white'
+                      : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                  }`}
+                  title="Automated Data Quality Doctor: detect outliers, scale mismatches, and add missing data"
+                >
+                  {projectHealthReport?.totalIssuesCount > 0 ? (
+                    <ShieldAlert className="w-4 h-4" />
+                  ) : (
+                    <CheckCircle2 className="w-4 h-4" />
+                  )}
+                  <span>Data Doctor</span>
+                  {projectHealthReport?.totalIssuesCount > 0 ? (
+                    <span className="px-1.5 py-0.2 rounded-full text-xs font-black bg-white text-red-700">
+                      {projectHealthReport.totalIssuesCount}
+                    </span>
+                  ) : (
+                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-white/20 text-white">
+                      Clean
+                    </span>
+                  )}
+                </button>
+                <button
                   onClick={() => setShowMap(true)}
                   className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition shrink-0"
                 >
@@ -7006,6 +7090,21 @@ ${photosHtml}
                 >
                   <FileText className="w-3.5 h-3.5" />
                   Scientific Report
+                </button>
+                <button
+                  onClick={() => {
+                    setDataHealthProject(activeProject);
+                    setIsDataHealthModalOpen(true);
+                  }}
+                  className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-100 transition shrink-0"
+                >
+                  <Activity className="w-3.5 h-3.5 text-emerald-600" />
+                  Data Doctor & Audit
+                  {projectHealthReport?.totalIssuesCount > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700 border border-rose-200">
+                      {projectHealthReport.totalIssuesCount}
+                    </span>
+                  )}
                 </button>
               </div>
             </div>
@@ -7837,6 +7936,19 @@ ${photosHtml}
                     >
                       <Ruler className="w-3 h-3" />
                       <span>Mass Obs</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDataHealthProject(p);
+                        setIsDataHealthModalOpen(true);
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg shadow-2xs transition"
+                      title="Inspect data quality and correct anomalies or missing observations"
+                    >
+                      <Activity className="w-3 h-3 text-emerald-600" />
+                      <span>Data Doctor</span>
                     </button>
                     <span className={`${theme.text} font-bold text-xs flex items-center gap-1`}>View Dashboard <ChevronRight className={`h-3.5 w-3.5`} /></span>
                   </div>
@@ -8856,6 +8968,28 @@ ${photosHtml}
             catConfig={getCategoryConfig(modalCategory)}
             onSaveBatch={handleSaveBatchObservation}
             getAppState={getAppState}
+          />
+        );
+      })()}
+
+      {/* ── Trial Data Quality & Interactive Correction Doctor Modal ── */}
+      {isDataHealthModalOpen && (() => {
+        const targetProj = dataHealthProject || activeProject;
+        const targetProjId = targetProj?.ID;
+        const liveProjTrials = (state.trials || []).filter(t => String(t.ProjectID) === String(targetProjId));
+        const modalCat = targetProj?.Category || activeCategory;
+        return (
+          <ProjectDataHealthModal
+            isOpen={isDataHealthModalOpen}
+            onClose={() => {
+              setIsDataHealthModalOpen(false);
+              setDataHealthProject(null);
+            }}
+            project={targetProj}
+            trialsList={liveProjTrials}
+            catConfig={getCategoryConfig(modalCat)}
+            onSaveCorrection={handleSaveDataHealthCorrection}
+            currentUserName={user?.displayName || user?.email || 'Agronomist'}
           />
         );
       })()}
