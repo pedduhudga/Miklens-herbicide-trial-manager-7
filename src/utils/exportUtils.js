@@ -5,6 +5,7 @@ import { getCategoryConfig, getPrimaryObservationField, getObservationPrimaryVal
 import { formatDate, formatDateTime } from './dateUtils.js';
 import { resolveProjectAnalysisContext } from './analysisUtils.js';
 import { resolvePhotoSrc } from './photoUtils.js';
+import { SOFTWARE_BUILD_ID } from './version.js';
 
 // Helper utilities for DOCX exports
 async function toBase64(url, maxWidth = 600) {
@@ -280,7 +281,7 @@ export async function exportRegulatoryReportAsDOC(project, state, options = {}) 
         let contentHtml = `
             <h1>REGULATORY COMPLIANCE REPORT</h1>
             <p class="center"><strong>${project.Name || 'Untitled Project'}</strong></p>
-            <p class="center">Trial / Project ID: ${project.ID || 'N/A'} | Generated: ${formatDateTime(new Date())}</p>
+            <p class="center">Trial / Project ID: ${project.ID || 'N/A'} | Generated: ${formatDateTime(new Date())} | Software Version: ${SOFTWARE_BUILD_ID}</p>
             <hr/>
 
             <h2>1. Executive Summary</h2>

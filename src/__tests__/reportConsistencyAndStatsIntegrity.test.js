@@ -6,8 +6,11 @@ import {
   computeDataCompleteness,
   detectAnomalousObservations,
   validateMeasurementScale,
-  isOrdinalOrStageField
+  isOrdinalOrStageField,
+  isValidNarrativeConclusion,
+  compileAgronomicInterpretation
 } from '../services/advancedReportGenerator.js';
+import { SOFTWARE_BUILD_ID } from '../utils/version.js';
 import {
   AnalysisEngine,
   resolveProjectAnalysisContext,
@@ -314,11 +317,25 @@ describe('Final Report Integrity Audit — All 10 Regression Scenarios & Excel v
     expect(spadDescRow).toBeDefined();
     expect(spadDescRow[6]).toBe('N/A – Insufficient observations');
     expect(spadDescRow[11]).toBe('N/A – Insufficient observations');
+    // Prevent invalid descriptive treatment rankings on SPAD (n=1) & Tiller Count (constant 0s)
+    expect(spadDescRow[12]).toBe('NOT RANKED – Insufficient valid observations');
+    expect(spadDescRow[13]).toBe('—');
+    expect(spadDescRow[14]).toBe('NOT RANKED – Insufficient valid observations');
+    expect(spadDescRow[15]).toBe('—');
 
     const tillerDescRow = summaryRows.find(r => String(r[0] || '').includes('Tiller Count'));
     expect(tillerDescRow).toBeDefined();
     expect(tillerDescRow[6]).toBe('N/A – Constant observations');
     expect(tillerDescRow[11]).toBe('N/A – Constant observations');
+    expect(tillerDescRow[12]).toBe('NOT RANKED – Constant observations');
+    expect(tillerDescRow[13]).toBe('—');
+    expect(tillerDescRow[14]).toBe('NOT RANKED – Constant observations');
+    expect(tillerDescRow[15]).toBe('—');
+
+    // (c2) Flagged unverified observation (Plant Height Plot 104 = 0 cm): Raw row + Validated benchmark row + Footnote
+    expect(summaryRows.some(r => String(r[0] || '').includes('Plant Height') && String(r[0] || '').includes('Raw Recorded — includes unverified readings'))).toBe(true);
+    expect(summaryRows.some(r => String(r[0] || '').includes('Plant Height') && String(r[0] || '').includes('Validated Benchmark'))).toBe(true);
+    expect(summaryRows.some(r => String(r[0] || '').includes('* Data Quality Note: Plant Height') && String(r[0] || '').includes('unverified observation'))).toBe(true);
 
     // (d) Incomplete longitudinal trends: Tiller Count (n=2 vs n=6) & Leaf Gloss (n=1 vs n=20) NOT classified as Stable!
     const trendStart = summaryRows.findIndex(r => String(r[0] || '').includes('4. DAA-WISE DEVELOPMENTAL TRENDS'));
@@ -345,11 +362,35 @@ describe('Final Report Integrity Audit — All 10 Regression Scenarios & Excel v
     const nov17VigorRows = breakdownRows.filter(r => r[0] === '17-Nov-2026' && String(r[1] || '').includes('Visual Vigor'));
     expect(nov17VigorRows).toHaveLength(1);
 
+    // Baseline ANOVA breakdown (12-Nov-2026, DAA -1) is explicitly labelled PRE-APPLICATION BASELINE COMPARABILITY
+    const baselineRow = breakdownRows.find(r => String(r[0] || '').includes('12-Nov-2026'));
+    expect(baselineRow).toBeDefined();
+    expect(baselineRow[0]).toContain('DAA -1 (Pre-App Baseline) — Baseline Comparability');
+    expect(String(baselineRow[10])).toContain('PRE-APPLICATION BASELINE UNIFORMITY');
+
     // Post-Harvest regex check: leafGlossScore MUST NOT match post-harvest loss!
     const postHarvestRe = /harvest|yield|storage|firmness|\bloss\b|weightLoss|postHarvest/i;
     expect(postHarvestRe.test('leafGlossScore')).toBe(false);
     expect(postHarvestRe.test('weightLoss')).toBe(true);
     expect(postHarvestRe.test('yield')).toBe(true);
+
+    // Flower Stage agronomic interpretation: Stage 0 is most frequent; mixed coding stated neutrally
+    const flowerInterp = compileAgronomicInterpretation(
+      flatObservations,
+      [{ key: 'flowerStage', label: 'Flower Stage' }],
+      ['Untreated Control', 'NPK POWDER NEW (with U)', 'NPK POWDER NEW (without U)', 'N 16'],
+      'nutrition',
+      'PotTrial',
+      project.StartDate
+    );
+    expect(flowerInterp).toContain('Stage 0 is the most frequent value');
+    expect(flowerInterp).toContain('mixed coding scale');
+    expect(flowerInterp).not.toContain("dominant stage '1'");
+
+    // AI Narrative completion validator: rejects truncated text e.g. "Based on the statistical"
+    expect(isValidNarrativeConclusion('Based on the statistical')).toBe(false);
+    expect(isValidNarrativeConclusion('In conclusion, the')).toBe(false);
+    expect(isValidNarrativeConclusion('Based on the statistical analysis, all treatment groups demonstrated equivalent vegetative vigor without significant phytotoxicity.')).toBe(true);
   });
 
   it('Scenario 6: Zero control baseline displays "N/A – Control baseline is zero" instead of fake percentages', async () => {
@@ -443,6 +484,10 @@ describe('Final Report Integrity Audit — All 10 Regression Scenarios & Excel v
     expect(metaMap['Total Plot-Date Records']).toBe(60);
     // Must NEVER label 60 plot-date records as "Independent Statistical Observations"
     expect(metaMap['Independent Statistical Observations']).toBeUndefined();
+    // Build/Commit identifier and dynamic worksheets documented
+    expect(metaMap['Software Version']).toBe(SOFTWARE_BUILD_ID);
+    expect(metaMap['Software Version']).toContain('df8fdfb');
+    expect(metaMap['Worksheets Included']).toContain('Worksheets dynamically tailored');
 
     // Numerical exact agreement between Excel and PDF on Visual Vigor RCBD ANOVA
     expect(pdfAnalysis.anova.dfTreat).toBe(excelVigorAnova.df_treatment);
