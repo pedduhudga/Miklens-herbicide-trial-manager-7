@@ -486,7 +486,7 @@ describe('Final Report Integrity Audit — All 10 Regression Scenarios & Excel v
     expect(metaMap['Independent Statistical Observations']).toBeUndefined();
     // Build/Commit identifier and dynamic worksheets documented
     expect(metaMap['Software Version']).toBe(SOFTWARE_BUILD_ID);
-    expect(metaMap['Software Version']).toContain('df8fdfb');
+    expect(metaMap['Software Version']).toContain('8597166');
     expect(metaMap['Worksheets Included']).toContain('Worksheets dynamically tailored');
 
     // Numerical exact agreement between Excel and PDF on Visual Vigor RCBD ANOVA
