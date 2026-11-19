@@ -2988,7 +2988,7 @@ SCIENTIFIC OBJECTIVITY & ZERO BIAS GUIDELINES:
 - Report findings purely based on the observed data, actual analyzed parameter (${ctx.analyzedMetricLabel}), and statistical letters.
 - NEVER fabricate or infer yield conclusions if yield was not recorded.
 - Do NOT assume experimental treatments must outperform untreated controls. In agricultural research, untreated controls may equal or outperform treatments (e.g. if treatments cause phytotoxicity, stress, osmotic burn, or yield penalty). If the Untreated Control performs better than or equal to experimental treatments, state this clearly without bias.
-- If treatment differences are not statistically significant (p >= 0.05), clearly declare that no significant treatment effect was detected for ${ctx.analyzedMetricLabel}.
+- If treatment differences are not statistically significant (p >= 0.05), clearly declare that no significant treatment effect was detected for ${ctx.analyzedMetricLabel}. Do NOT claim treatments performed equivalently (statistical non-significance fails to reject the null hypothesis of no difference, but does not establish equivalence). Always format p-values with a leading zero (e.g. p = 0.6181, never 6181).
 Write a 3-paragraph Narrative covering Methodology, Results and Conclusions.`;
 
       const text = await generateTextWithAI(prompt, 'Act as an objective agricultural scientist.');

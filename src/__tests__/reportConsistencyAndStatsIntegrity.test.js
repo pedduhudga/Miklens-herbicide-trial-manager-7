@@ -8,7 +8,8 @@ import {
   validateMeasurementScale,
   isOrdinalOrStageField,
   isValidNarrativeConclusion,
-  compileAgronomicInterpretation
+  compileAgronomicInterpretation,
+  sanitizeExcelNarrativeText
 } from '../services/advancedReportGenerator.js';
 import { SOFTWARE_BUILD_ID } from '../utils/version.js';
 import {
@@ -63,8 +64,8 @@ function buildComprehensiveChilliFixture() {
 
   for (let rep = 1; rep <= 5; rep++) {
     treatments.forEach((trt, idx) => {
-      const plotNum = `${rep}0${idx + 1}`; // Plot 204 = rep 2, idx 3 -> wait: put outlier on NPK with U Plot 204 explicitly
-      const effectivePlot = (rep === 2 && trt.num === 2) ? '204' : plotNum;
+      const plotNum = `${rep}0${idx + 1}`;
+      const effectivePlot = (rep === 2 && trt.num === 2) ? '204' : (rep === 1 && trt.num === 4) ? '103' : plotNum;
       const rIdx = rep - 1;
 
       const nov17Obs = {
@@ -538,5 +539,82 @@ describe('Final Report Integrity Audit — All 10 Regression Scenarios & Excel v
     expect(comp.validCells).toBe(140);
     expect(comp.missingCells).toBe(40);
     expect(comp.completenessPct).toBeCloseTo(77.8, 1);
+    expect(comp.trueZeroCells).toBe(1); // Plot 103 = 0 cm plant height
+    expect(comp.measuredNonZeroCells).toBe(139);
+  });
+
+  it('Scenario 11: Scientific audit verification — p-value typo sanitization, no "equivalent performance" bias, Chartwork mixed stage suppression, and granular data completeness', async () => {
+    // 1. P-value typo sanitization
+    expect(sanitizeExcelNarrativeText('Leaf Color Score p = 6181')).toBe('Leaf Color Score p = 0.6181');
+    expect(sanitizeExcelNarrativeText('Deficiency severity (p = 4262)')).toBe('Deficiency severity (p = 0.4262)');
+    expect(sanitizeExcelNarrativeText('Plant Height p = .6375')).toBe('Plant Height p = 0.6375');
+    expect(sanitizeExcelNarrativeText('Significant treatment effect with p < 001')).toBe('Significant treatment effect with p < 0.001');
+
+    // 2. Regulatory standard wording on equivalence
+    const biasText = 'Statistical analysis showed no significant difference (p > 0.05), suggesting equivalent performance or higher replication variability under field conditions.';
+    const sanitized = sanitizeExcelNarrativeText(biasText);
+    expect(sanitized).not.toContain('equivalent performance');
+    expect(sanitized).not.toContain('suggesting equivalence');
+    expect(sanitized).toContain('indicating that no statistically significant treatment differences were detected');
+
+    // 3. Generate complete workbook for inspection
+    const { project, trials, flatObservations } = buildComprehensiveChilliFixture();
+    const gen = new AdvancedReportGenerator(trials, 'nutrition', project);
+    await gen.processObservationsWithAI();
+    gen.validationWarnings = gen.validateData();
+    await gen.createNarrativeSheet();
+    await gen.createTrialInfoSheet();
+    await gen.createAssessmentSummarySheet();
+    await gen.createChartworkSheet();
+
+    // 4. Chartwork: Flower stage must NEVER show ratio mean 12.60
+    const chartworkWs = gen.workbook.getWorksheet('Chartwork');
+    expect(chartworkWs).toBeDefined();
+    const chartRows = getWorksheetRows(chartworkWs);
+    const flowerTrtRows = chartRows.filter(r =>
+      String(r[0] || '').includes('NPK POWDER NEW (with U) (Trt 2)')
+    );
+    expect(flowerTrtRows.length).toBeGreaterThan(0);
+    chartRows.forEach(r => {
+      // Check that no cell in Chartwork has the value 12.6 or 12.60 for flower stage
+      r.forEach(cellVal => {
+        if (typeof cellVal === 'number') {
+          expect(cellVal).not.toBeCloseTo(12.6, 2);
+        }
+      });
+    });
+
+    // 5. Assessment Summary: Granular data completeness breakdown
+    const summaryWs = gen.workbook.getWorksheet('Assessment Summary');
+    const summaryRows = getWorksheetRows(summaryWs);
+    const totalMatrixRow = summaryRows.find(r => String(r[0] || '').includes('Total Matrix Cells Evaluated'));
+    const validObsRow = summaryRows.find(r => String(r[0] || '').includes('Valid Recorded Observations'));
+    const genuineZeroRow = summaryRows.find(r => String(r[0] || '').includes('Genuine Zero Measurements'));
+    const unmeasuredRow = summaryRows.find(r => String(r[0] || '').includes('Unmeasured / Missing Cells'));
+    const definitionRow = summaryRows.find(r => String(r[0] || '').includes('Data Completeness Definition'));
+
+    expect(totalMatrixRow).toBeDefined();
+    expect(validObsRow).toBeDefined();
+    expect(genuineZeroRow).toBeDefined();
+    expect(unmeasuredRow).toBeDefined();
+    expect(definitionRow).toBeDefined();
+
+    // 6. Narrative: Observation timeline & zero "equivalent performance"
+    const narrativeWs = gen.workbook.getWorksheet('Narrative');
+    const narrativeRows = getWorksheetRows(narrativeWs);
+    const timelineRow = narrativeRows.find(r => String(r[0] || '').includes('Observation Timeline'));
+    expect(timelineRow).toBeDefined();
+    expect(String(timelineRow[1])).toContain('DAA -1');
+    expect(String(timelineRow[1])).toContain('DAA 5');
+
+    const keyFindingsCell = narrativeWs.getCell('A6').value;
+    expect(typeof keyFindingsCell === 'string' ? keyFindingsCell : '').not.toContain('equivalent performance');
+
+    // 7. Anomaly detection audit trail
+    const anomalies = detectAnomalousObservations(flatObservations, [{ key: 'plantHeight', label: 'Plant Height (cm)' }]);
+    const plot103Anomaly = anomalies.find(a => a.fieldKey === 'plantHeight' && String(a.plot) === '103');
+    expect(plot103Anomaly).toBeDefined();
+    expect(plot103Anomaly.message).toContain('Anomalous Value Flag (Audit Trail Preserved)');
+    expect(plot103Anomaly.message).toContain('Value is preserved in the raw dataset without alteration');
   });
 });

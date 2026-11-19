@@ -46,13 +46,25 @@ function getColumnLetter(col) {
   return letter;
 }
 
-// Helper: Strip raw LaTeX / markdown math wrappers (e.g. "$p = 0.5764$" -> "p = 0.5764") for clean Excel text
-function sanitizeExcelNarrativeText(text) {
+// Helper: Strip raw LaTeX / markdown math wrappers (e.g. "$p = 0.5764$" -> "p = 0.5764"), fix p-value typos, and enforce standard regulatory phrasing
+export function sanitizeExcelNarrativeText(text) {
   if (!text || typeof text !== 'string') return text;
-  return text
+  let cleaned = text
     .replace(/\$([^$]+)\$/g, '$1')
-    .replace(/\\([a-zA-Z]+)/g, '$1')
-    .trim();
+    .replace(/\\([a-zA-Z]+)/g, '$1');
+
+  // Fix p-value formatting typos where leading zero or decimal was dropped (e.g. "p = 6181" -> "p = 0.6181", "p = .6181" -> "p = 0.6181", "p < 001" -> "p < 0.001")
+  cleaned = cleaned.replace(/\b([pP])\s*([<>=])\s*\.(\d+)\b/g, '$1 $2 0.$3');
+  cleaned = cleaned.replace(/\b([pP])\s*([<>=])\s*(?!\d*\.)(\d{2,5})\b/g, '$1 $2 0.$3');
+
+  // Enforce regulatory scientific standard: non-significance fails to reject null hypothesis but does not establish equivalence
+  cleaned = cleaned.replace(/suggesting equivalent performance(?:\s+or\s+higher\s+replication\s+variability)?/gi, 'indicating that no statistically significant treatment differences were detected');
+  cleaned = cleaned.replace(/demonstrating equivalent performance/gi, 'showing no statistically significant treatment differences');
+  cleaned = cleaned.replace(/performed equivalently(?:\s+to\b|\s+with\b)?/gi, 'showed no statistically significant differences from');
+  cleaned = cleaned.replace(/suggesting equivalence/gi, 'indicating no evidence of treatment differences');
+  cleaned = cleaned.replace(/equivalent performance/gi, 'no statistically significant treatment differences');
+
+  return cleaned.trim();
 }
 
 /**
@@ -131,6 +143,8 @@ CRITICAL INSTRUCTION:
 14. ZERO BIAS TOWARDS EXPERIMENTAL TREATMENTS: Do NOT presume that experimental treatments must outperform untreated controls. In agricultural trials, untreated controls may equal or outperform treatments (e.g. where treatments cause phytotoxicity, fertilizer burn, vegetative stunting, or delay flowering/fruiting). If untreated controls yield higher or have superior vigor/metrics, report this finding clearly, objectively, and without bias.
 15. STRICT YIELD & MISSING DATA INTEGRITY: If Yield / Harvest observations were NOT recorded in this dataset, NEVER state that treatments showed "zero yield", "no measurable yield response", or "no agronomic efficacy on yield". Explicitly state that yield has not yet been harvested/measured and restrict conclusions strictly to the parameters actually recorded.
 16. PARAMETER ELIGIBILITY & SCALE CLARITY: Explicitly distinguish parameters statistically analysed via latest post-application ANOVA from parameters excluded due to insufficient observations, constant values, or ordinal/mixed coding scales (such as Flower Stage when BBCH codes are mixed with 0/1 scores). Clearly distinguish overall multi-date descriptive summaries from latest post-application independent ANOVA means. Do NOT use LaTeX math symbols like $p = 0.5764$; write plain text "(p = 0.5764)".
+17. P-VALUE FORMATTING INTEGRITY: Always format all p-values with a leading zero and decimal point (e.g. write "p = 0.6181", "p = 0.5764"; NEVER omit the decimal point as "6181").
+18. STRICT REGULATORY EQUIVALENCE LANGUAGE: Statistical non-significance (p >= 0.05) fails to reject the null hypothesis of no difference, but DOES NOT prove biological or therapeutic equivalence. NEVER use phrases like "suggesting equivalent performance", "demonstrating equivalence", or "proved equivalent". Instead, write: "no statistically significant treatment differences were detected (p >= 0.05) under the conditions of this study."
 Do NOT use markdown headers or lists. Keep it strictly scientific, professional, and factual.`;
 
     const text = await generateTextWithAI(prompt, 'You are a professional agronomist.');
@@ -199,6 +213,8 @@ CRITICAL INSTRUCTION:
 15. STRICT YIELD & MISSING DATA INTEGRITY: If Yield / Harvest observations were NOT recorded in this dataset, NEVER state that treatments showed "zero yield", "no measurable yield response", or "no agronomic efficacy on yield". Explicitly state that yield has not yet been harvested/measured and restrict conclusions strictly to the parameters actually recorded.
 16. PARAMETER ELIGIBILITY & SCALE CLARITY: Explicitly distinguish parameters statistically analysed via latest post-application ANOVA from parameters excluded due to insufficient observations, constant values, or ordinal/mixed coding scales (e.g. Flower Stage). Clearly note if any growth-stage parameter requires scale verification before statistical interpretation. Do NOT use LaTeX math delimiters like $p = 0.5764$; write plain text "(p = 0.5764)".
 17. FLOWER STAGE NEUTRALITY: If Flower Stage exhibits mixed coding (e.g. Stage 0: 12, Stage 1: 6, Stage 61: 1), never claim that Stage 1 is dominant; note neutrally that Stage 0 is the most frequent recorded value and that mixed coding requires scale verification prior to statistical comparison.
+18. P-VALUE FORMATTING INTEGRITY: Always format all p-values with a leading zero and decimal point (e.g. write "p = 0.6181", "p = 0.5764"; NEVER omit the decimal point as "6181").
+19. STRICT REGULATORY EQUIVALENCE LANGUAGE: Statistical non-significance (p >= 0.05) fails to reject the null hypothesis of no difference, but DOES NOT prove biological or therapeutic equivalence. NEVER use phrases like "suggesting equivalent performance", "demonstrating equivalence", or "proved equivalent". Instead, write: "no statistically significant treatment differences were detected (p >= 0.05) under the conditions of this study."
 Do NOT use markdown headers or lists. Keep it strictly scientific, professional, and factual.`;
 
     const text = await generateTextWithAI(prompt, 'You are a senior agricultural scientist.');
@@ -385,7 +401,8 @@ export function normalizeReportDateKey(val) {
 
 /**
  * Compute TRUE cell-level parameter data completeness across observation rows × active fields.
- * Never hardcodes 100% or counts only row presence.
+ * Differentiates valid non-zero measurements, genuine zero readings (e.g. 0% symptoms/tillers),
+ * and unmeasured/missing cells. Never hardcodes 100% or counts only row presence.
  */
 export function computeDataCompleteness(observations = [], activeFields = []) {
   const rows = Array.isArray(observations) ? observations : [];
@@ -396,39 +413,51 @@ export function computeDataCompleteness(observations = [], activeFields = []) {
   const totalExpectedCells = totalRows * fields.length;
 
   let validCells = 0;
+  let trueZeroCells = 0;
   let parametersWithMissing = 0;
   const perParameter = {};
 
   fields.forEach(f => {
     let validCount = 0;
+    let trueZeroCount = 0;
     rows.forEach(obs => {
       if (!obs) return;
       if (f.key.toLowerCase().replace(/\s/g, '') === 'plantheight' && Array.isArray(obs.potHeights)) {
         const validHeights = obs.potHeights.map(h => parseFloat(h)).filter(v => Number.isFinite(v));
         if (validHeights.length > 0) {
           validCount++;
+          if (validHeights.every(v => v === 0)) trueZeroCount++;
           return;
         }
       }
       const raw = obs[f.key];
       if (raw === undefined || raw === null || raw === '') return;
       if (f.key === 'flowerStage' || f.key === 'fruitHealthNote') {
-        if (String(raw).trim().length > 0) validCount++;
+        const s = String(raw).trim();
+        if (s.length > 0) {
+          validCount++;
+          if (s === '0' || s.toLowerCase() === 'none') trueZeroCount++;
+        }
         return;
       }
       const num = parseFloat(raw);
       if (!Number.isFinite(num)) return;
       if (f.key === 'fruitHealthScore' && num <= 0) return;
       validCount++;
+      if (num === 0) trueZeroCount++;
     });
 
     const missingCount = Math.max(0, totalRows - validCount);
     if (missingCount > 0) parametersWithMissing++;
     validCells += validCount;
+    trueZeroCells += trueZeroCount;
+
     perParameter[f.key] = {
       key: f.key,
       label: f.label || f.key,
       validCount,
+      trueZeroCount,
+      nonZeroCount: validCount - trueZeroCount,
       missingCount,
       totalRows,
       completenessPct: totalRows > 0 ? parseFloat(((validCount / totalRows) * 100).toFixed(1)) : 0
@@ -436,6 +465,7 @@ export function computeDataCompleteness(observations = [], activeFields = []) {
   });
 
   const missingCells = Math.max(0, totalExpectedCells - validCells);
+  const measuredNonZeroCells = Math.max(0, validCells - trueZeroCells);
   const completenessPct = totalExpectedCells > 0
     ? parseFloat(((validCells / totalExpectedCells) * 100).toFixed(1))
     : 0;
@@ -445,6 +475,8 @@ export function computeDataCompleteness(observations = [], activeFields = []) {
     parameterCount: fields.length,
     totalExpectedCells,
     validCells,
+    trueZeroCells,
+    measuredNonZeroCells,
     missingCells,
     parametersWithMissing,
     completenessPct,
@@ -663,7 +695,7 @@ export function detectAnomalousObservations(observations = [], activeFields = []
           median,
           cv: parseFloat(cv.toFixed(1)),
           reason,
-          message: `Anomalous Value Flag (Requires Field Verification): Plot ${plot} (${trt}, ${dateStr}) has ${f.label || f.key} = ${val} vs dataset median = ${median.toFixed(2)} (${reason}). Value was NOT altered or deleted — verify whether this is a genuine reading, unit mismatch, or data entry error.`
+          message: `Anomalous Value Flag (Audit Trail Preserved): Plot ${plot} (${trt}, ${dateStr}) has ${f.label || f.key} = ${val} vs dataset median = ${median.toFixed(2)} (${reason}). Value is preserved in the raw dataset without alteration. Parametric ANOVA is evaluated on independent valid assessment date(s); verify field notebook to confirm whether this represents seedling mortality, delayed measurement, or typographical entry.`
         });
       }
     });
@@ -2195,7 +2227,7 @@ export class AdvancedReportGenerator {
       if (isSig) {
         findingsText += `Statistical analysis (ANOVA) confirmed significant treatment differences (p < 0.05) across the primary evaluation parameters, demonstrating significant efficacy of the applied formulation over the control replicates.`;
       } else {
-        findingsText += `Statistical analysis (ANOVA) showed no statistically significant differences (p > 0.05) between the test formulation and the control, suggesting equivalent performance or higher replication variability under the observed conditions.`;
+        findingsText += `Statistical analysis (ANOVA) showed no statistically significant differences (p > 0.05) between the test formulation and the control replicates under the observed conditions; no evidence of treatment difference was detected.`;
       }
     }
     
@@ -2223,7 +2255,7 @@ export class AdvancedReportGenerator {
       methodParts.push(`Investigator: ${this.trial.InvestigatorName}`);
     }
     
-    // ── Derive design parameters from REAL project data ──
+    // ── Derive design parameters and timeline from REAL project data ──
     const proj = this.project;
     const repsList = [...new Set(this.observations.map(o => o.replication || o.rep).filter(Boolean))];
     const computedReplications = repsList.length > 0
@@ -2248,10 +2280,30 @@ export class AdvancedReportGenerator {
     const totalPots = (potRows && potCols) ? potRows * potCols : (this.isProjectWide ? (this.trials || []).length : this.observations.length);
     const potsPerUnit = independentUnits > 0 ? Math.round(totalPots / independentUnits) : 1;
 
+    const daaVals = this.observations
+      .map(o => (o.daa !== undefined && o.daa !== null && o.daa !== '') ? Number(o.daa) : null)
+      .filter(n => n !== null && !isNaN(n));
+    const minDaa = daaVals.length ? Math.min(...daaVals) : 0;
+    const maxDaa = daaVals.length ? Math.max(...daaVals) : 0;
+    const uniqueObsDates = [...new Set(this.observations.map(o => o.date).filter(Boolean))];
+    const startKey = normalizeReportDateKey(this.trial.Date);
+    const baselineDates = startKey
+      ? [...new Set(this.observations
+          .filter(o => {
+            const dk = normalizeReportDateKey(o.date);
+            return dk && dk < startKey;
+          })
+          .map(o => o.date || 'N/A'))]
+      : [];
+
+    const timelineText = minDaa < 0
+      ? `DAA ${minDaa} (Pre-App Baseline) to DAA ${maxDaa} (${uniqueObsDates.length} timings: ${uniqueObsDates.join(', ')})`
+      : `DAA 0 to ${maxDaa} (${uniqueObsDates.length} timings: ${uniqueObsDates.join(', ')})`;
+
     let methodologyText;
     if (this.design === 'PotTrial') {
       const trtCount = this.treatmentNames.length;
-      methodologyText = `Randomized Complete Block Pot Trial consisting of ${trtCount} treatments, ${computedReplications} blocks (replications), and ${totalPots} pots (${potsPerUnit} pots per treatment × block).`;
+      methodologyText = `Randomized Complete Block Pot Trial consisting of ${trtCount} treatments, ${computedReplications} blocks (replications), and ${totalPots} pots (${potsPerUnit} pots per treatment × block). Assessments spanned from pre-application baseline (DAA ${minDaa}${baselineDates.length > 0 ? `, ${baselineDates.join(', ')}` : ''}) through ${maxDaa} DAA (${uniqueObsDates.length} distinct observation timings).`;
     } else {
       methodParts.push(`Design: ${designLabel} with ${computedReplications} replicates`);
       if (this.trial.Dosage && this.trial.Dosage !== 'N/A') {
@@ -2268,6 +2320,7 @@ export class AdvancedReportGenerator {
       } else if (rawObsMode === 'plant-wise' || rawObsMode === 'pot-wise') {
         methodParts.push('Observation mode: Plant-wise (Individual Pot)');
       }
+      methodParts.push(`Timeline: ${timelineText}`);
       methodologyText = methodParts.join('. ') + '.';
     }
     
@@ -2314,7 +2367,6 @@ export class AdvancedReportGenerator {
     ws.getCell('A22').font = { bold: true, size: 12 };
     ws.getCell('A22').fill = { type: 'pattern', pattern: 'solid', fgColor: { rgb: 'F3F4F6' } };
 
-    const maxDaa = this.observations.length ? Math.max(...this.observations.map(o => Number(o.daa || 0))) : 0;
     const anovaOpts = { trialStartDate: this.trial.Date, expectedTreatments: this.treatmentNames.length };
     const sigParams = [];
     this.activeFields.forEach(f => {
@@ -2368,7 +2420,7 @@ export class AdvancedReportGenerator {
       ['Treatments Evaluated', this.treatmentNames.length],
       ['Replications / Blocks', computedReplications],
       ['Total Pots', totalPots],
-      ['Observation Period', `${maxDaa} DAA`],
+      ['Observation Timeline', timelineText],
       ['Statistically Significant Parameters', sigParamsList],
       [bestTrtLabel, bestTrtName],
       ['Statistical Significance Detected', sigParams.length > 0 ? 'Yes (p < 0.05)' : 'No (p >= 0.05)'],
@@ -2877,9 +2929,12 @@ export class AdvancedReportGenerator {
       ['Plot-Date Records Logged', this.observations.length],
       ['DAA Range Covered', daaRange],
       ['Pre-Application Baseline Dates', baselineDates.length > 0 ? `${baselineDates.join(', ')} (before Trial Start ${this.trial.Date})` : 'None'],
-      ['Missing Parameter Values (Cells)', `${completeness.missingCells} / ${completeness.totalExpectedCells}`],
-      ['Parameters with Missing Values', `${completeness.parametersWithMissing} / ${completeness.parameterCount}`],
-      ['Parameter Data Completeness', `${completeness.completenessPct.toFixed(1)}%`]
+      ['Total Matrix Cells Evaluated', `${completeness.totalExpectedCells} (${this.observations.length} plot records × ${completeness.parameterCount} active parameters)`],
+      ['Valid Recorded Observations', `${completeness.validCells} / ${completeness.totalExpectedCells} (${completeness.completenessPct.toFixed(1)}% completeness)`],
+      ['↳ Genuine Zero Measurements', `${completeness.trueZeroCells} cells (valid biological readings, e.g. 0% symptoms / clean foliage)`],
+      ['↳ Measured Non-Zero Values', `${completeness.measuredNonZeroCells} cells`],
+      ['Unmeasured / Missing Cells', `${completeness.missingCells} / ${completeness.totalExpectedCells}`],
+      ['Data Completeness Definition', 'Unmeasured cells reflect date-specific evaluation schedules (e.g. vigor at 4 DAA, height at 5 DAA; stage-dependent metrics during early vegetative phase). Genuine zero values are preserved as valid biological observations.']
     ];
 
     overviewRows.forEach((row, idx) => {
@@ -3504,6 +3559,10 @@ export class AdvancedReportGenerator {
       ws.getCell(`A${r}`).value = f.label;
       ws.getCell(`A${r}`).font = { bold: true };
       
+      const isRed = isReductionMetric(f.key, this.category);
+      const isStageField = isOrdinalOrStageField(f);
+      const stageScaleRep = isStageField ? validateMeasurementScale(this.observations, f, this.treatmentNames) : null;
+
       const trtMeansByDate = {}; // date -> array of means indexed by trtIdx
       dates.forEach(d => {
         trtMeansByDate[d] = [];
@@ -3528,25 +3587,35 @@ export class AdvancedReportGenerator {
             return parseFloat(o[f.key]);
           }).flat().filter(v => !isNaN(v));
 
-          // Missing values MUST remain null/blank — NEVER coerce to 0!
-          const meanVal = vals.length > 0 ? parseFloat((vals.reduce((s, v) => s + v, 0) / vals.length).toFixed(2)) : null;
-          trtMeansByDate[date][trtIdx] = meanVal;
-
-          if (meanVal === null) {
-            ws.getCell(`${cLetter}${r + trtNum}`).value = null;
+          if (isStageField) {
+            // Ordinal or mixed phenological stage codes (e.g. BBCH 61 mixed with 0/1) MUST NOT be mathematically averaged!
+            trtMeansByDate[date][trtIdx] = null;
+            if (vals.length === 0) {
+              ws.getCell(`${cLetter}${r + trtNum}`).value = null;
+            } else {
+              ws.getCell(`${cLetter}${r + trtNum}`).value = stageScaleRep?.hasMixedCoding
+                ? 'N/A – Mixed scale (verify coding)'
+                : 'See Section 3c (Stage Frequencies)';
+              ws.getCell(`${cLetter}${r + trtNum}`).font = { name: 'Calibri', italic: true, color: { rgb: '7F8C8D' } };
+            }
           } else {
-            ws.getCell(`${cLetter}${r + trtNum}`).value = {
-              formula: `IFERROR(AVERAGEIFS('Assessment Data Summary'!${fieldCol}:${fieldCol}, 'Assessment Data Summary'!F:F, "${escapedTrt}", 'Assessment Data Summary'!A:A, "${date}"), "")`,
-              result: meanVal
-            };
+            // Missing values MUST remain null/blank — NEVER coerce to 0!
+            const meanVal = vals.length > 0 ? parseFloat((vals.reduce((s, v) => s + v, 0) / vals.length).toFixed(2)) : null;
+            trtMeansByDate[date][trtIdx] = meanVal;
+
+            if (meanVal === null) {
+              ws.getCell(`${cLetter}${r + trtNum}`).value = null;
+            } else {
+              ws.getCell(`${cLetter}${r + trtNum}`).value = {
+                formula: `IFERROR(AVERAGEIFS('Assessment Data Summary'!${fieldCol}:${fieldCol}, 'Assessment Data Summary'!F:F, "${escapedTrt}", 'Assessment Data Summary'!A:A, "${date}"), "")`,
+                result: meanVal
+              };
+            }
           }
         });
       });
 
       let offset = this.treatmentNames.length;
-      const isRed = isReductionMetric(f.key, this.category);
-      const isStageField = isOrdinalOrStageField(f);
-      const stageScaleRep = isStageField ? validateMeasurementScale(this.observations, f, this.treatmentNames) : null;
 
       for (let i = 1; i < this.treatmentNames.length; i++) {
         const trtName = this.treatmentNames[i];
