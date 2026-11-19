@@ -9,7 +9,8 @@ import {
   isOrdinalOrStageField,
   isValidNarrativeConclusion,
   compileAgronomicInterpretation,
-  sanitizeExcelNarrativeText
+  sanitizeExcelNarrativeText,
+  runReportQualityControlAudit
 } from '../services/advancedReportGenerator.js';
 import { SOFTWARE_BUILD_ID } from '../utils/version.js';
 import {
@@ -487,7 +488,7 @@ describe('Final Report Integrity Audit — All 10 Regression Scenarios & Excel v
     expect(metaMap['Independent Statistical Observations']).toBeUndefined();
     // Build/Commit identifier and dynamic worksheets documented
     expect(metaMap['Software Version']).toBe(SOFTWARE_BUILD_ID);
-    expect(metaMap['Software Version']).toContain('8597166');
+    expect(metaMap['Software Version']).toMatch(/build/);
     expect(metaMap['Worksheets Included']).toContain('Worksheets dynamically tailored');
 
     // Numerical exact agreement between Excel and PDF on Visual Vigor RCBD ANOVA
@@ -616,5 +617,70 @@ describe('Final Report Integrity Audit — All 10 Regression Scenarios & Excel v
     expect(plot103Anomaly).toBeDefined();
     expect(plot103Anomaly.message).toContain('Anomalous Value Flag (Audit Trail Preserved)');
     expect(plot103Anomaly.message).toContain('Value is preserved in the raw dataset without alteration');
+  });
+
+  it('Scenario 12: Automated Quality Control Suite (8/8 Rules) & Low-Mean CV qualification', async () => {
+    const { project, trials, flatObservations } = buildComprehensiveChilliFixture();
+    const gen = new AdvancedReportGenerator(trials, 'nutrition', project);
+    await gen.processObservationsWithAI();
+    gen.validationWarnings = gen.validateData();
+    await gen.createNarrativeSheet();
+    await gen.createTrialInfoSheet();
+    await gen.createAssessmentSummarySheet();
+    await gen.createChartworkSheet();
+    await gen.createAOVMeansTable();
+    await gen.createANOVASummarySheet();
+
+    // 1. Programmatic Quality Control Audit Suite (8/8 Rules)
+    const qcAudit = runReportQualityControlAudit(
+      gen.observations,
+      gen.activeFields,
+      gen.treatmentNames,
+      gen.design,
+      gen.primaryAnovaResults,
+      gen.trial
+    );
+    expect(qcAudit.allPassed).toBe(true);
+    expect(qcAudit.score).toBe('8/8');
+    expect(qcAudit.rules).toHaveLength(8);
+
+    // 2. Trial Information sheet renders the 8-rule QC Audit Table
+    const infoWs = gen.workbook.getWorksheet('Trial Information');
+    const infoRows = getWorksheetRows(infoWs);
+    const qcHeaderRow = infoRows.find(r => String(r[0] || '').includes('AUTOMATED REPORT QUALITY CONTROL & REGULATORY AUDIT'));
+    expect(qcHeaderRow).toBeDefined();
+    expect(String(qcHeaderRow[0])).toContain('8/8 PASSED');
+
+    const rule1Row = infoRows.find(r => String(r[0] || '').includes('Rule 1: P-Value Concordance'));
+    const rule8Row = infoRows.find(r => String(r[0] || '').includes('Rule 8: Low-Mean CV Safeguard'));
+    expect(rule1Row).toBeDefined();
+    expect(rule8Row).toBeDefined();
+    expect(String(rule1Row[1])).toContain('PASS');
+    expect(String(rule8Row[1])).toContain('PASS');
+
+    // 3. Low-Mean CV qualification in per-assessment-date ANOVA breakdown
+    const anovaWs = gen.workbook.getWorksheet('ANOVA Summary');
+    const anovaRows = getWorksheetRows(anovaWs);
+    const chlorosisDateRows = anovaRows.filter(r =>
+      String(r[1] || '').includes('Chlorosis')
+    );
+    chlorosisDateRows.forEach(r => {
+      const cvCell = String(r[8] || '');
+      expect(cvCell).not.toContain('210.82%');
+      if (Number(r[9] || 0) < 5.0) {
+        expect(cvCell).toContain('CV not meaningful due to low mean');
+      }
+    });
+
+    // 4. Assessment Summary sheet qualifies near-zero mean CVs
+    const summaryWs = gen.workbook.getWorksheet('Assessment Summary');
+    const summaryRows = getWorksheetRows(summaryWs);
+    const chlorosisSummaryRow = summaryRows.find(r =>
+      String(r[0] || '').includes('Chlorosis Incidence')
+    );
+    if (chlorosisSummaryRow) {
+      expect(String(chlorosisSummaryRow[6])).toContain('CV not meaningful due to low mean');
+      expect(String(chlorosisSummaryRow[11])).toContain('Low incidence / near-zero mean');
+    }
   });
 });
